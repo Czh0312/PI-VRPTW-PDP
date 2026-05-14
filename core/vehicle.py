@@ -2,16 +2,20 @@
 from typing import Dict, Optional
 
 class FleetConfig:
-    """管理 E1 和 E2 的车队全局配置"""
+    """管理全局基础参数（车队配置 + pickup 单位值）"""
     def __init__(self, config_dict: Dict[str, float]):
         self.e1_count = int(config_dict.get("E1_vehicle_count", 20))
         self.e1_weight_cap = float(config_dict.get("E1_Qk", 500.0))
         self.e1_volume_cap = float(config_dict.get("E1_Ck", 30.0))
-        
+
         # E2 配置
         self.e2_per_sat_count = int(config_dict.get("vehicles_per_satellite", 30))
         self.e2_weight_cap = float(config_dict.get("E2_Qv", 300.0))
         self.e2_volume_cap = float(config_dict.get("E2_Cv", 5.0))
+
+        # 容器参数（配送时加容器重量，回收时只有容器）
+        self.container_weight = float(config_dict.get("container_weight", 0.0))
+        self.container_volume = float(config_dict.get("container_volume", 1.0))
 
 class Vehicle:
     """表示具体的单个车辆实体（为后续扩展多车型预留）"""

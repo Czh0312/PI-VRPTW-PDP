@@ -44,16 +44,7 @@ def parse_dataset(filepath: str) -> Tuple[Dict[str, Node], Dict]:
                         float(row.get("pickup_due", 99999.0)),
                     ),
                     assigned_sat=assigned_sat,
-                    weight_pick=float(row.get("pickup_demand", 0.0)),
                 )
-                # =========================================================
-                #  修复: 体积与重量是独立的物理量, 不应混用
-                #
-                #  方案 A: CSV 中有 delivery_volume / pickup_volume 列 → 读它
-                #  方案 B: CSV 中没有 → 用默认值 1.0 (每件占 1 个体积单位)
-                # =========================================================
-                customer.vol_del = float(row.get("delivery_volume", 1.0))
-                customer.vol_pick = float(row.get("pickup_volume", 1.0))
 
                 nodes[node_id] = customer
 

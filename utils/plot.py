@@ -60,9 +60,8 @@ def plot_vrp_solution(problem: ProblemInstance, e1_routes: list, e2_routes_by_sa
             color = 'black' # 兜底颜色
             
         for route in routes:
-            # 判断 route 是对象(ALNS)还是字符串列表(Exact)
-            route_list = [t.cust for t in route.tasks] if hasattr(route, 'tasks') else list(route)
-            
+            route_list = list(route)
+
             # 补齐首尾前置仓 (如果还没的话)
             if not route_list or route_list[0] != sat_id:
                 route_list.insert(0, sat_id)

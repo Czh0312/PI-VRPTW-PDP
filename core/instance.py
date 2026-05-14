@@ -60,13 +60,18 @@ class ProblemInstance:
 
     def aggregate_demands_from_pre_assignment(self):
         """
-        核心逻辑：根据 E2 层的客户分配情况，聚合计算 E1 层卫星仓的各项需求指标。
-        
-        修正点提示：
-        - delivery_weight/volume: 对应模型约束中 E1 需运送至卫星仓的载荷总量。
-        - e1_delivery_due_date: 决定了 E1 必须在此时间前到达，否则影响后续 E2 配送。
+        根据客户分配情况，聚合计算 E1 层卫星仓的各项需求指标。
+
+        - delivery_weight: 物品重量 + 容器重量（每个顾客一个容器）
+        - delivery_volume: 顾客数 × 容器体积
+        - pickup_weight: 顾客数 × 容器重量（只回收空容器）
+        - pickup_volume: 顾客数 × 容器体积
         """
         sat_map = {s.id: s for s in self.satellites}
+        sat_cust_count = {s.id: 0 for s in self.satellites}
+
+        cw = self.fleet.container_weight
+        cv = self.fleet.container_volume
 
         # 重置卫星仓状态
         for sat in self.satellites:
@@ -75,28 +80,30 @@ class ProblemInstance:
             sat.pickup_weight = 0.0
             sat.pickup_volume = 0.0
             sat.e1_delivery_due_date = float('inf')
-            sat.e1_pickup_ready_time = 0.0 
+            sat.e1_pickup_ready_time = 0.0
 
         for cust in self.customers:
             assignment = cust.assigned_sat
             if assignment and assignment in sat_map:
                 sat = sat_map[assignment]
+                sat_cust_count[assignment] += 1
 
-                # --- 需求量聚合 ---
-                sat.delivery_weight += cust.weight_del
-                sat.delivery_volume += cust.vol_del
-                sat.pickup_weight += cust.weight_pick
-                sat.pickup_volume += cust.vol_pick
+                # 配送重量 = 物品重量 + 容器重量
+                sat.delivery_weight += cust.weight_del + cw
 
-                # --- 时间窗逻辑 (反推 E1 约束) ---
-                
-                # 配送：E1 必须在客户最晚时间窗前到达卫星仓（此处可根据需要减去 sat->cust 的行驶时间）
+                # 时间窗逻辑
                 if cust.tw_del[1] < sat.e1_delivery_due_date:
                     sat.e1_delivery_due_date = cust.tw_del[1]
 
-                # 回收：E1 只有在所有回收任务（E2）回到卫星仓后才能开始回收作业
-                if cust.weight_pick > 0 and cust.tw_pick[1] > sat.e1_pickup_ready_time:
+                if cw > 0 and cust.tw_pick[1] > sat.e1_pickup_ready_time:
                     sat.e1_pickup_ready_time = cust.tw_pick[1]
+
+        # 体积和回收：顾客数 × 容器参数
+        for sat in self.satellites:
+            count = sat_cust_count[sat.id]
+            sat.delivery_volume = count * cv
+            sat.pickup_weight = count * cw
+            sat.pickup_volume = count * cv
 
     def _build_matrices(self):
         """

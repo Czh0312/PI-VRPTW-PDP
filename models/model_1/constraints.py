@@ -78,7 +78,9 @@ def add_all_constraints(m: gp.Model, problem, e1_tasks, e2_tasks_by_sat, vars_di
                     dist_ij = problem.distance(get_phys(i), get_phys(j))
                     m.addConstr(A_e2[j, v_key] >= A_e2[i, v_key] + get_st(i) + dist_ij - M * (1 - z[i, j, v_key]))
                     
-                    t_j = next(t for t in tasks_f if t.id == j)
+                    t_j = next((t for t in tasks_f if t.id == j), None)
+                    if t_j is None:
+                        continue
                     m.addConstr(L_e2[j, v_key] <= L_e2[i, v_key] - t_j.w + M * (1 - z[i, j, v_key]))
                     m.addConstr(W_e2[j, v_key] <= W_e2[i, v_key] - t_j.v + M * (1 - z[i, j, v_key]))
             
