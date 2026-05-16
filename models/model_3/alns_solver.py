@@ -388,93 +388,163 @@ def build_initial_solution(problem, e1_tasks, e2_tasks_by_sat, evaluator):
 
 
 # =====================================================================
-#  中转优化算子
+#  中转优化算子（主动搜索版）
 # =====================================================================
 
 def optimize_transshipment(sol, evaluator):
-    """后处理：识别并应用同卫星车辆之间的中转机会。
+    """主动搜索中转机会：A 车配送途中有空余空间时，顺路帮 B 车带容器。
 
-    逻辑：
-    1. 对每个卫星，找出所有 E2 路线
-    2. 找到两两路线之间的共同物理顾客节点
-    3. 计算该节点处的 pickup 余量和容量空间
-    4. 如果车辆 A pickup 满载但还有路线未完，可将部分 pickup 转给 B
-    5. 选择使总成本降低最多的中转方案
+    每次只应用最优的一个方案，防止重复插入同一节点。
     """
-    improved = False
+    cw = evaluator.problem.fleet.container_weight
+    cv = evaluator.problem.fleet.container_volume
+    if cw < 1e-9:
+        return False
+
+    # 清理不一致的中转记录（ALNS destroy-repair 可能已经移动了节点）
+    stale_keys = []
+    for (sat_id, a_idx, b_idx, pick_node) in sol.transshipments:
+        routes = sol.e2_routes.get(sat_id, [])
+        if a_idx >= len(routes) or b_idx >= len(routes):
+            stale_keys.append((sat_id, a_idx, b_idx, pick_node))
+            continue
+        ra = routes[a_idx]
+        if pick_node not in ra.nodes:
+            stale_keys.append((sat_id, a_idx, b_idx, pick_node))
+    for k in stale_keys:
+        del sol.transshipments[k]
+
+    best_plan = None  # (sat_id, a_idx, b_idx, pick_node, insert_pos, saving)
+
+    # 收集所有已有中转涉及的 (sat_id, pick_node) 防止重复
+    active_trans = {(k[0], k[3]) for k in sol.transshipments}
 
     for sat_id, routes in sol.e2_routes.items():
         if len(routes) < 2:
             continue
 
-        # 对每对路线搜索共同物理节点
-        for i in range(len(routes)):
-            for j in range(i + 1, len(routes)):
-                ri, rj = routes[i], routes[j]
-                phys_i = {evaluator.phys(n): n for n in ri.nodes}
-                phys_j = {evaluator.phys(n): n for n in rj.nodes}
-                common_phys = set(phys_i.keys()) & set(phys_j.keys())
+        for a_idx in range(len(routes)):
+            ra = routes[a_idx]
+            if not ra.nodes:
+                continue
 
-                for phys_n in common_phys:
-                    # ri 在该节点的 Q 载量 (转出方可提供的)
-                    load_i = _compute_load_at_node(ri, phys_i[phys_n], evaluator)
-                    # rj 的剩余容量 (接收方可接受的)
-                    spare_j = _compute_spare_capacity_at_node(rj, phys_j[phys_n], evaluator)
+            # A 路线中已有的节点 ID 集合（防止重复插入同名节点）
+            a_node_set = set(ra.nodes)
 
-                    transfer_w = min(load_i * 0.5, spare_j)  # 最多转移一半载量
-                    transfer_v = min(transfer_w, spare_j)    # 体积按重量比例
+            for b_idx in range(len(routes)):
+                if b_idx == a_idx:
+                    continue
+                rb = routes[b_idx]
+                if not rb.nodes:
+                    continue
 
-                    if transfer_w > 0.01:
-                        # 尝试应用中转并检查可行性
-                        old_cost = evaluator.route_distance(ri) + evaluator.route_distance(rj)
+                b_pick_tasks = [n for n in rb.nodes
+                                if evaluator.e2_task_map.get(n) and
+                                evaluator.e2_task_map[n].kind == 'p']
+                if not b_pick_tasks:
+                    continue
 
-                        # 记录中转
-                        sol.transshipments[(sat_id, i, j, phys_i[phys_n])] = (
-                            transfer_w, transfer_v)
+                for pick_node in b_pick_tasks:
+                    # 防止重复：A 路线中已有同名节点 或 已有活跃中转
+                    if pick_node in a_node_set:
+                        continue
+                    if (sat_id, pick_node) in active_trans:
+                        continue
 
-                        # 检查可行性
-                        r_trans = evaluator._build_transshipment_maps(sol, sat_id)
-                        ti = r_trans['in'].get(i, {})
-                        to_i = r_trans['out'].get(i, {})
-                        tj = r_trans['in'].get(j, {})
-                        to_j = r_trans['out'].get(j, {})
+                    pick_phys = evaluator.phys(pick_node)
+                    # A 已访问该物理位置（delivery），跳过
+                    if pick_phys in {evaluator.phys(n) for n in ra.nodes}:
+                        continue
 
-                        feasible = (
-                            evaluator.check_e2_route_feasible(ri, sat_id, ti, to_i) and
-                            evaluator.check_e2_route_feasible(rj, sat_id, tj, to_j)
-                        )
+                    b_saving = _removal_saving(rb, pick_node, evaluator, sat_id)
 
-                        if feasible:
-                            new_cost = evaluator.total_cost(sol)
-                            if new_cost < sol.cost:
-                                sol.cost = new_cost
-                                improved = True
-                            else:
-                                del sol.transshipments[(sat_id, i, j, phys_i[phys_n])]
-                        else:
-                            del sol.transshipments[(sat_id, i, j, phys_i[phys_n])]
+                    for pos in range(len(ra.nodes) + 1):
+                        old_nodes = ra.nodes[:]
+                        ra.nodes.insert(pos, pick_node)
 
-    return improved
+                        if evaluator.check_e2_route_feasible(ra, sat_id):
+                            a_new_dist = evaluator.route_distance(ra)
+                            a_old_dist = evaluator.route_distance(Route(ra.base, old_nodes))
+                            net_saving = b_saving - (a_new_dist - a_old_dist)
+
+                            if best_plan is None or net_saving > best_plan[5]:
+                                best_plan = (sat_id, a_idx, b_idx, pick_node, pos, net_saving)
+
+                        ra.nodes = old_nodes
+
+    if best_plan and best_plan[5] > 0.01:
+        sat_id, a_idx, b_idx, pick_node, insert_pos, saving = best_plan
+        ra = sol.e2_routes[sat_id][a_idx]
+        rb = sol.e2_routes[sat_id][b_idx]
+
+        # 在 A 路线插入 pickup 节点
+        ra.nodes.insert(insert_pos, pick_node)
+
+        # 从 B 路线移除 pickup 节点
+        rb.nodes.remove(pick_node)
+
+        # 记录中转
+        sol.transshipments[(sat_id, a_idx, b_idx, pick_node)] = (cw, cv)
+        sol.cost = evaluator.total_cost(sol)
+        return True
+
+    return False
 
 
-def _compute_load_at_node(route, node_id, evaluator):
-    """计算车辆在 node_id 处的统一 Q 载量"""
-    Q_load = sum(evaluator.e2_task_map[n].w
-                 for n in route.nodes if evaluator.e2_task_map.get(n) and
-                 evaluator.e2_task_map[n].kind == 'd')
-    for nid in route.nodes:
-        t = evaluator.e2_task_map.get(nid)
-        if t:
-            Q_load -= evaluator.signed_demand(t)
-        if nid == node_id:
+def _removal_saving(route, node_id, evaluator, sat_id):
+    """计算从路线中移除 node_id 后节省的距离"""
+    path = route.full_path()
+    # 在 full_path 中找 node_id 的位置
+    node_pos_in_full = None
+    for idx in range(1, len(path) - 1):
+        if path[idx] == node_id:
+            node_pos_in_full = idx
             break
-    return Q_load
+    if node_pos_in_full is None:
+        return 0.0
+
+    prev_n = path[node_pos_in_full - 1]
+    next_n = path[node_pos_in_full + 1]
+    return (evaluator.dist(prev_n, node_id) + evaluator.dist(node_id, next_n)
+            - evaluator.dist(prev_n, next_n))
 
 
-def _compute_spare_capacity_at_node(route, node_id, evaluator):
-    """计算车辆在 node_id 处的剩余容量"""
-    Q_load = _compute_load_at_node(route, node_id, evaluator)
-    return max(0.0, evaluator.problem.e2_weight_cap - Q_load)
+def transshipment_destroy(sol, evaluator, num_remove=1):
+    """撤销已有的中转操作，让 ALNS 重新探索。
+
+    将 A 帮 B 带的 pickup 节点从 A 的路线中移除，归还给 B 的路线。
+    """
+    if not sol.transshipments:
+        return []
+
+    keys = list(sol.transshipments.keys())
+    random.shuffle(keys)
+    undone = 0
+
+    for key in keys:
+        if undone >= num_remove:
+            break
+        sat_id, a_idx, b_idx, pick_node = key
+
+        routes = sol.e2_routes.get(sat_id, [])
+        if a_idx >= len(routes) or b_idx >= len(routes):
+            del sol.transshipments[key]
+            continue
+
+        ra = routes[a_idx]
+        rb = routes[b_idx]
+
+        # 从 A 路线移除中转节点（只有确实存在时才归还给 B，防止重复）
+        if pick_node in ra.nodes:
+            ra.nodes.remove(pick_node)
+            # 归还给 B（只在确实从 A 移除了才加）
+            if pick_node not in rb.nodes:
+                rb.nodes.append(pick_node)
+
+        del sol.transshipments[key]
+        undone += 1
+
+    return []
 
 
 # =====================================================================
@@ -832,7 +902,7 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         print(f"中转操作数: {n_trans}")
 
     # ---- 算子与权重 ----
-    destroy_ops = [random_removal, worst_removal, shaw_removal]
+    destroy_ops = [random_removal, worst_removal, shaw_removal, transshipment_destroy]
     repair_ops = [greedy_insertion, regret_insertion]
     n_d, n_r = len(destroy_ops), len(repair_ops)
 
@@ -879,14 +949,21 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         num_remove = random.randint(1, max(1, max_remove))
 
         candidate = sol.copy()
-        removed = destroy_ops[d_idx](candidate, evaluator, num_remove, echelon)
 
-        if r_idx == 1:
-            repair_ops[r_idx](candidate, removed, evaluator, echelon, k=2)
+        if d_idx == 3:
+            # transshipment_destroy: 撤销中转，不需要常规 repair
+            destroy_ops[d_idx](candidate, evaluator, num_remove=1)
+            clean_empty_routes(candidate)
         else:
-            repair_ops[r_idx](candidate, removed, evaluator, echelon)
+            removed = destroy_ops[d_idx](candidate, evaluator, num_remove, echelon)
 
-        clean_empty_routes(candidate)
+            if r_idx == 1:
+                repair_ops[r_idx](candidate, removed, evaluator, echelon, k=2)
+            else:
+                repair_ops[r_idx](candidate, removed, evaluator, echelon)
+
+            clean_empty_routes(candidate)
+
         candidate.cost = evaluator.total_cost(candidate)
 
         # 中转优化
