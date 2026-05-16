@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 import sys
 import os
+import json
 import time
 from pathlib import Path
 
@@ -15,6 +16,13 @@ from utils.data_loader import parse_dataset
 from models.model_3.solver import solve_exact
 from models.model_3.alns_solver import solve_alns
 
+CONFIG_DIR = Path(project_root) / "config"
+
+
+def load_fleet_config():
+    with open(CONFIG_DIR / "fleet_config.json", "r", encoding="utf-8") as f:
+        return json.load(f)
+
 
 def run_experiment(data_file: str, solver: str = "exact"):
     print(f"[{time.strftime('%H:%M:%S')}] 开始测试 Model 3 "
@@ -22,8 +30,8 @@ def run_experiment(data_file: str, solver: str = "exact"):
     print(f"数据集: {data_file}")
     print(f"求解器: {solver}")
 
-    nodes_dict, fleet_config = parse_dataset(data_file)
-    fleet_config["vehicles_per_satellite"] = 2
+    nodes_dict, _ = parse_dataset(data_file)
+    fleet_config = load_fleet_config()
 
     problem = ProblemInstance(nodes_dict, fleet_config)
     problem.aggregate_demands_from_pre_assignment()
