@@ -34,10 +34,6 @@ def add_all_constraints(m: gp.Model, problem, e1_tasks, e2_tasks_by_sat,
     A_start = vars_dict['A_start']
     A_return = vars_dict['A_return']
 
-    y_trans = vars_dict['y_trans']
-    dq_trans = vars_dict['dq_trans']
-    dw_trans = vars_dict['dw_trans']
-
     # ---------- 解包上下文 ----------
     depot_id = ctx['depot_id']
     F = ctx['F']
@@ -66,7 +62,6 @@ def add_all_constraints(m: gp.Model, problem, e1_tasks, e2_tasks_by_sat,
     M_weight_e2 = ctx['M_weight_e2']
     M_vol_e1 = ctx['M_vol_e1']
     M_vol_e2 = ctx['M_vol_e2']
-    S_TRANS = ctx['S_TRANS']
 
     # ===================================================================
     #  第一阶段约束 (文档3 §4)
@@ -196,7 +191,7 @@ def add_all_constraints(m: gp.Model, problem, e1_tasks, e2_tasks_by_sat,
     #  第二阶段约束 (文档3 §5)
     # ===================================================================
 
-    # (19) 每个 C2 任务至少被服务一次, T 节点允许两辆车
+    # (19) 每个 C2 任务恰好被服务一次
     for j in C2:
         sat_j = e2_task_to_sat_map.get(j)
         if not sat_j:
@@ -207,11 +202,7 @@ def add_all_constraints(m: gp.Model, problem, e1_tasks, e2_tasks_by_sat,
             z[i, j, v] for v in vehs
             for i in valid_src
             if i != j and (i, j, v) in z)
-        if j in T_nodes:
-            m.addConstr(visit_sum >= 1, f"E2_Visit_lo_{j}")
-            m.addConstr(visit_sum <= 2, f"E2_Visit_hi_{j}")
-        else:
-            m.addConstr(visit_sum == 1, f"E2_Visit_{j}")
+        m.addConstr(visit_sum == 1, f"E2_Visit_{j}")
 
     for sat_id in F:
         vehs = V_by_sat[sat_id]
@@ -331,7 +322,7 @@ def add_all_constraints(m: gp.Model, problem, e1_tasks, e2_tasks_by_sat,
                     Vol_r[sat_id, v] <= problem.e2_volume_cap * vehicle_used,
                     f"E2_InitVU_{sat_id}_{v}")
 
-    # E2 载重/体积双侧 Big-M (送减取增 + 中转)
+    # E2 载重/体积双侧 Big-M (送减取增)
     for sat_id in F:
         tasks_in_sat = e2_tasks_by_sat.get(sat_id, [])
         t_ids = [t.id for t in tasks_in_sat]
@@ -345,141 +336,22 @@ def add_all_constraints(m: gp.Model, problem, e1_tasks, e2_tasks_by_sat,
                     q_j = _signed_q(t_j)
                     v_j = _signed_v(t_j)
 
-                    # 中转净流量: 在节点 i 中转会影响移动到 j 时的载量
-                    net_q = (
-                        - gp.quicksum(
-                            dq_trans[i, v, u]
-                            for u in V_by_sat[sat_id]
-                            if u != v and (i, v, u) in dq_trans)
-                        + gp.quicksum(
-                            dq_trans[i, u, v]
-                            for u in V_by_sat[sat_id]
-                            if u != v and (i, u, v) in dq_trans)
-                    )
-                    net_v = (
-                        - gp.quicksum(
-                            dw_trans[i, v, u]
-                            for u in V_by_sat[sat_id]
-                            if u != v and (i, v, u) in dw_trans)
-                        + gp.quicksum(
-                            dw_trans[i, u, v]
-                            for u in V_by_sat[sat_id]
-                            if u != v and (i, u, v) in dw_trans)
-                    )
-
                     m.addConstr(
-                        Q_r[j, v] <= Q_r[i, v] - q_j + net_q
+                        Q_r[j, v] <= Q_r[i, v] - q_j
                         + M_weight_e2 * (1 - z[i, j, v]),
                         f"E2_Q_up_{i}_{j}_{v}")
                     m.addConstr(
-                        Q_r[j, v] >= Q_r[i, v] - q_j + net_q
+                        Q_r[j, v] >= Q_r[i, v] - q_j
                         - M_weight_e2 * (1 - z[i, j, v]),
                         f"E2_Q_lo_{i}_{j}_{v}")
                     m.addConstr(
-                        Vol_r[j, v] <= Vol_r[i, v] - v_j + net_v
+                        Vol_r[j, v] <= Vol_r[i, v] - v_j
                         + M_vol_e2 * (1 - z[i, j, v]),
                         f"E2_V_up_{i}_{j}_{v}")
                     m.addConstr(
-                        Vol_r[j, v] >= Vol_r[i, v] - v_j + net_v
+                        Vol_r[j, v] >= Vol_r[i, v] - v_j
                         - M_vol_e2 * (1 - z[i, j, v]),
                         f"E2_V_lo_{i}_{j}_{v}")
-
-    # ===================================================================
-    #  横向中转约束 (文档3 §8)
-    # ===================================================================
-
-    for i in T_nodes:
-        sat_i = e2_task_to_sat_map.get(i)
-        if sat_i is None:
-            continue
-        vehs_i = V_by_sat.get(sat_i, [])
-        valid_nodes_i = [sat_i] + [t.id for t in e2_tasks_by_sat.get(sat_i, [])]
-
-        for v in vehs_i:
-            for u in vehs_i:
-                if v == u or (i, v, u) not in y_trans:
-                    continue
-
-                # (New-1) y ≤ Σ_j z_ji^v
-                sum_in_v = gp.quicksum(
-                    z[j, i, v] for j in valid_nodes_i
-                    if j != i and (j, i, v) in z)
-                m.addConstr(y_trans[i, v, u] <= sum_in_v,
-                            f"Trans_Visit_{i}_{v}_{u}_v")
-
-                # (New-2) y ≤ Σ_j z_ji^u
-                sum_in_u = gp.quicksum(
-                    z[j, i, u] for j in valid_nodes_i
-                    if j != i and (j, i, u) in z)
-                m.addConstr(y_trans[i, v, u] <= sum_in_u,
-                            f"Trans_Visit_{i}_{v}_{u}_u")
-
-                # (New-3) 时间同步
-                m.addConstr(
-                    A_e2[i, u] >= A_e2[i, v] + S_TRANS
-                    - M_time * (1 - y_trans[i, v, u]),
-                    f"Trans_Time_{i}_{v}_{u}")
-
-                # (New-4)(New-5) Big-M
-                m.addConstr(
-                    dq_trans[i, v, u] <= M_weight_e2 * y_trans[i, v, u],
-                    f"Trans_BigM_W_{i}_{v}_{u}")
-                m.addConstr(
-                    dw_trans[i, v, u] <= M_vol_e2 * y_trans[i, v, u],
-                    f"Trans_BigM_V_{i}_{v}_{u}")
-
-    # (New-6) 回收量守恒
-    for sat_id in F:
-        vehs = V_by_sat[sat_id]
-        tasks_in_sat = e2_tasks_by_sat.get(sat_id, [])
-        t_ids = [t.id for t in tasks_in_sat]
-        valid_nodes = [sat_id] + t_ids
-        for v in vehs:
-            if (sat_id, v) not in Q_r:
-                continue
-            total_picked_w = gp.quicksum(
-                t.w * gp.quicksum(
-                    z[i, t.id, v]
-                    for i in valid_nodes
-                    if i != t.id and (i, t.id, v) in z
-                ) for t in tasks_in_sat if t.kind == 'p')
-            net_trans_w = (
-                gp.quicksum(dq_trans[i, v, u]
-                            for i in T_nodes for u in vehs
-                            if u != v and (i, v, u) in dq_trans)
-                - gp.quicksum(dq_trans[i, u, v]
-                              for i in T_nodes for u in vehs
-                              if u != v and (i, u, v) in dq_trans)
-            )
-            for i in t_ids:
-                if (i, sat_id, v) not in z:
-                    continue
-                m.addConstr(
-                    Q_r[i, v] >= total_picked_w - net_trans_w
-                    - M_weight_e2 * (1 - z[i, sat_id, v]),
-                    f"Trans_ConservW_{sat_id}_{v}_{i}")
-
-            total_picked_v = gp.quicksum(
-                t.v * gp.quicksum(
-                    z[i, t.id, v]
-                    for i in valid_nodes
-                    if i != t.id and (i, t.id, v) in z
-                ) for t in tasks_in_sat if t.kind == 'p')
-            net_trans_v = (
-                gp.quicksum(dw_trans[i, v, u]
-                            for i in T_nodes for u in vehs
-                            if u != v and (i, v, u) in dw_trans)
-                - gp.quicksum(dw_trans[i, u, v]
-                              for i in T_nodes for u in vehs
-                              if u != v and (i, u, v) in dw_trans)
-            )
-            for i in t_ids:
-                if (i, sat_id, v) not in z:
-                    continue
-                m.addConstr(
-                    Vol_r[i, v] >= total_picked_v - net_trans_v
-                    - M_vol_e2 * (1 - z[i, sat_id, v]),
-                    f"Trans_ConservV_{sat_id}_{v}_{i}")
 
     # ===================================================================
     #  一二阶段衔接约束 (文档3 §7)

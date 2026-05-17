@@ -1,8 +1,7 @@
 # models/model_3/solver.py
 # -*- coding: utf-8 -*-
 """
-统一 Q/V 变量: Q_k/Vol_k (E1), Q_r/Vol_r (E2)
-A_start/A_return (衔接), y_trans/dq_trans/dw_trans (中转)
+Model 3 精确求解：MIP（无中转）+ 后处理搬运中转
 """
 from gurobipy import GRB
 
@@ -10,7 +9,7 @@ from .model import build_transshipment_model
 
 
 def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
-                transship_nodes=None, verbose=True):
+                verbose=True):
     total_w_d = sum(t.w for t in e1_tasks if t.kind == 'd')
     total_w_p = sum(t.w for t in e1_tasks if t.kind == 'p')
     total_v_d = sum(t.v for t in e1_tasks if t.kind == 'd')
@@ -41,8 +40,7 @@ def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
             print(f"    {t.id}: kind={t.kind}, w={t.w}, v={t.v}")
 
     m, vars_dict, ctx = build_transshipment_model(
-        problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
-        transship_nodes=transship_nodes
+        problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite
     )
     if not verbose:
         m.setParam("OutputFlag", 0)
@@ -52,11 +50,17 @@ def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
     m.optimize()
 
     if m.status == GRB.OPTIMAL:
-        return _print_solution(m, vars_dict, ctx, e2_tasks_by_sat, problem)
+        e1_routes, e2_routes = _print_solution(m, vars_dict, ctx,
+                                                e2_tasks_by_sat)
+        _postprocess_transport(e2_routes, e2_tasks_by_sat, problem)
+        return e1_routes, e2_routes
 
     if m.status == GRB.TIME_LIMIT and m.SolCount > 0:
         print(f"\n达到时间限制, 当前最优解: {m.ObjVal:.2f}  (Gap: {m.MIPGap:.2%})")
-        return _print_solution(m, vars_dict, ctx, e2_tasks_by_sat, problem)
+        e1_routes, e2_routes = _print_solution(m, vars_dict, ctx,
+                                                e2_tasks_by_sat)
+        _postprocess_transport(e2_routes, e2_tasks_by_sat, problem)
+        return e1_routes, e2_routes
 
     if m.status == GRB.INFEASIBLE:
         print("\n模型不可行，正在计算 IIS...")
@@ -68,7 +72,7 @@ def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
     return None, None
 
 
-def _print_solution(m, vars_dict, ctx, e2_tasks_by_sat, problem):
+def _print_solution(m, vars_dict, ctx, e2_tasks_by_sat):
     print("\n" + "=" * 60)
     print(f"求解完成!  目标值: {m.ObjVal:.2f}")
     print("=" * 60)
@@ -126,19 +130,6 @@ def _print_solution(m, vars_dict, ctx, e2_tasks_by_sat, problem):
         for v_key, route in zip(used_v, routes):
             print(f"    车辆{v_key[1]}: {' -> '.join(route)}")
         _print_e2_loads(vars_dict, used_v, routes)
-
-    # ============ 中转诊断 ============
-    if vars_dict["y_trans"]:
-        print("\n[DEBUG] 中转活动:")
-        any_trans = False
-        for (i, v1, v2), y_var in vars_dict["y_trans"].items():
-            if y_var.X > 0.5:
-                dq = vars_dict["dq_trans"].get((i, v1, v2))
-                dw = vars_dict["dw_trans"].get((i, v1, v2))
-                print(f"  y[{i}, {v1}->{v2}]: Δq={dq.X:.1f}, Δw={dw.X:.1f}")
-                any_trans = True
-        if not any_trans:
-            print("  (无中转活动)")
 
     # ============ 衔接时间 ============
     A_start = vars_dict["A_start"]
@@ -253,3 +244,197 @@ def _extract_routes_e2(sol, sat_id, tasks, vehicles):
         if len(route) > 2:
             routes.append(route)
     return routes
+
+
+# =====================================================================
+#  后处理：搬运中转搜索
+# =====================================================================
+
+def _postprocess_transport(e2_routes, e2_tasks_by_sat, problem, verbose=True):
+    """后处理：搜索搬运中转机会（搬运车取放 + 取货车改位置）"""
+    task_to_phys = {}
+    e2_task_map = {}
+    for sat_id, tasks in e2_tasks_by_sat.items():
+        for t in tasks:
+            task_to_phys[t.id] = t.cust
+            e2_task_map[t.id] = t
+
+    if verbose:
+        print(f"\n--- 后处理搬运中转搜索 ---")
+
+    transshipments = {}
+    improved = True
+    iteration = 0
+
+    while improved:
+        improved = False
+        iteration += 1
+        best_plan = None
+
+        relocated = {k[2] for k in transshipments}
+
+        for sat_id, routes in e2_routes.items():
+            all_tasks = e2_tasks_by_sat.get(sat_id, [])
+            all_phys = list(set(t.cust for t in all_tasks))
+
+            for ben_idx, route in enumerate(routes):
+                for pick_node in route:
+                    if pick_node == sat_id:
+                        continue
+                    t = e2_task_map.get(pick_node)
+                    if not t or t.kind != 'p':
+                        continue
+                    if pick_node in relocated:
+                        continue
+
+                    old_phys = task_to_phys[pick_node]
+                    old_ben_dist = _route_distance(
+                        route, task_to_phys, problem)
+
+                    for new_phys in all_phys:
+                        if new_phys == old_phys:
+                            continue
+
+                        task_to_phys[pick_node] = new_phys
+                        if _check_route_feasible(
+                                route, sat_id, task_to_phys,
+                                e2_task_map, problem):
+                            new_ben_dist = _route_distance(
+                                route, task_to_phys, problem)
+                            v2_saving = old_ben_dist - new_ben_dist
+
+                            if v2_saving > 0.01:
+                                for ci, carrier in enumerate(routes):
+                                    if ci == ben_idx:
+                                        continue
+
+                                    n = len(carrier)
+                                    for pp in range(1, n):
+                                        for dp in range(pp + 1, n + 1):
+                                            new_carrier = carrier[:]
+                                            new_carrier.insert(pp, old_phys)
+                                            new_carrier.insert(dp, new_phys)
+
+                                            if _check_route_feasible(
+                                                    new_carrier, sat_id,
+                                                    task_to_phys,
+                                                    e2_task_map, problem,
+                                                    extra_load=(
+                                                        t.w, t.v, pp, dp)):
+                                                old_cd = _route_distance(
+                                                    carrier, task_to_phys,
+                                                    problem)
+                                                new_cd = _route_distance(
+                                                    new_carrier, task_to_phys,
+                                                    problem)
+                                                detour = new_cd - old_cd
+                                                net = v2_saving - detour
+
+                                                if (best_plan is None
+                                                        or net > best_plan[0]):
+                                                    best_plan = (
+                                                        net, sat_id,
+                                                        ben_idx, pick_node,
+                                                        new_phys,
+                                                        ci, pp, dp)
+
+                        task_to_phys[pick_node] = old_phys
+
+        if best_plan and best_plan[0] > 0.01:
+            (net, sat_id, ben_idx, pick_node, new_phys,
+             carrier_idx, pick_pos, drop_pos) = best_plan
+            old_phys = task_to_phys[pick_node]
+
+            task_to_phys[pick_node] = new_phys
+
+            carrier = e2_routes[sat_id][carrier_idx]
+            carrier.insert(pick_pos, old_phys)
+            carrier.insert(drop_pos, new_phys)
+
+            t = e2_task_map[pick_node]
+            transshipments[(sat_id, ben_idx, pick_node, new_phys)] = (
+                old_phys, carrier_idx, t.w, t.v)
+            improved = True
+
+            if verbose:
+                print(f"  迭代{iteration}: 搬运车{carrier_idx} "
+                      f"取@{old_phys}→放@{new_phys}, "
+                      f"取货车{ben_idx} {pick_node} "
+                      f"{old_phys}→{new_phys}, net={net:.2f}")
+
+    if transshipments and verbose:
+        print(f"  共 {len(transshipments)} 个搬运中转")
+
+    return transshipments
+
+
+def _route_distance(route, task_to_phys, problem):
+    total = 0.0
+    for i in range(len(route) - 1):
+        a = task_to_phys.get(route[i], route[i])
+        b = task_to_phys.get(route[i + 1], route[i + 1])
+        total += problem.distance(a, b)
+    return total
+
+
+def _check_route_feasible(route, sat_id, task_to_phys, e2_task_map,
+                           problem, extra_load=None):
+    """检查路线可行性。extra_load=(w,v,pick_pos,drop_pos)"""
+    init_w = 0.0
+    init_v = 0.0
+    for nid in route:
+        if nid == sat_id:
+            continue
+        t = e2_task_map.get(nid)
+        if t and t.kind == 'd':
+            init_w += t.w
+            init_v += t.v
+
+    if init_w > problem.e2_weight_cap + 1e-6:
+        return False
+    if init_v > problem.e2_volume_cap + 1e-6:
+        return False
+
+    Q_load, V_load = init_w, init_v
+    current_time = 0.0
+
+    for i in range(len(route) - 1):
+        a = task_to_phys.get(route[i], route[i])
+        b = task_to_phys.get(route[i + 1], route[i + 1])
+        current_time += problem.travel_time(a, b)
+        nid = route[i + 1]
+        if nid == sat_id:
+            continue
+
+        if extra_load:
+            ew, ev, ep, ed = extra_load
+            pos_in_new = i + 1
+            if pos_in_new >= ep:
+                Q_load += ew
+                V_load += ev
+            if pos_in_new >= ed:
+                Q_load -= ew
+                V_load -= ev
+
+        t = e2_task_map.get(nid)
+        if t:
+            if current_time < t.tw[0]:
+                current_time = t.tw[0]
+            if current_time > t.tw[1] + 1e-6:
+                return False
+            q = t.w if t.kind == 'd' else -t.w
+            v = t.v if t.kind == 'd' else -t.v
+            Q_load -= q
+            V_load -= v
+
+        if Q_load < -1e-6 or Q_load > problem.e2_weight_cap + 1e-6:
+            return False
+        if V_load < -1e-6 or V_load > problem.e2_volume_cap + 1e-6:
+            return False
+
+        phys = task_to_phys.get(nid, nid)
+        node_obj = problem.nodes.get(phys)
+        svc = getattr(node_obj, 'service_time', 0.0) if node_obj else 0.0
+        current_time += svc
+
+    return True

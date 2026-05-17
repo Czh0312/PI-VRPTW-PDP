@@ -21,7 +21,7 @@ def build_tasks_for_model(problem: ProblemInstance, model_type: int):
                 e2_tasks_by_sat[c.assigned_sat].append(
                     Task(f"{c.id}d", c.id, "d", c.demand + cw, cv, c.tw_del)
                 )
-    elif model_type in (2, 3):
+    elif model_type in (2, 3, 4):
         for s in problem.satellites:
             if s.delivery_weight > 1e-9:
                 e1_tasks.append(

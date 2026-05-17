@@ -12,9 +12,11 @@ from core.instance import ProblemInstance
 from models.model_1.solver import solve_exact as solve_m1
 from models.model_2.solver import solve_exact as solve_m2
 from models.model_3.solver import solve_exact as solve_m3
+from models.model_4.solver import solve_exact as solve_m4
 from models.model_1.alns_solver import solve_alns as alns_m1
 from models.model_2.alns_solver import solve_alns as alns_m2
 from models.model_3.alns_solver import solve_alns as alns_m3
+from models.model_4.alns_solver import solve_alns as alns_m4
 from utils.data_loader import parse_dataset
 from utils.task_builder import build_tasks_for_model
 from utils.plot import plot_vrp_solution
@@ -71,9 +73,13 @@ def main():
             e1_routes, e2_routes_by_sat_res = solve_m2(
                 problem, e1_tasks, e2_tasks_by_sat, problem.fleet.e2_per_sat_count, TFp=9999.0, verbose=True
             )
-        else:
+        elif model == 3:
             e1_routes, e2_routes_by_sat_res = solve_m3(
                 problem, e1_tasks, e2_tasks_by_sat, problem.fleet.e2_per_sat_count, verbose=True
+            )
+        else:
+            e1_routes, e2_routes_by_sat_res = solve_m4(
+                problem, e1_tasks, e2_tasks_by_sat, problem.fleet.e2_per_sat_count, TFp=9999.0, verbose=True
             )
     else:
         if model == 1:
@@ -86,10 +92,15 @@ def main():
                 problem, e1_tasks, e2_tasks_by_sat, problem.fleet.e2_per_sat_count,
                 TFp=9999.0, max_iterations=alns_iter, max_time=alns_time, seed=seed
             )
-        else:
+        elif model == 3:
             e1_routes, e2_routes_by_sat_res = alns_m3(
                 problem, e1_tasks, e2_tasks_by_sat, problem.fleet.e2_per_sat_count,
                 max_iterations=alns_iter, max_time=alns_time, seed=seed
+            )
+        else:
+            e1_routes, e2_routes_by_sat_res = alns_m4(
+                problem, e1_tasks, e2_tasks_by_sat, problem.fleet.e2_per_sat_count,
+                TFp=9999.0, max_iterations=alns_iter, max_time=alns_time, seed=seed
             )
 
     run_time = time.time() - start_time

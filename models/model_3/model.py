@@ -13,8 +13,8 @@ from .constraints import add_all_constraints
 
 
 def build_transshipment_model(problem, e1_tasks, e2_tasks_by_sat,
-                               vehicles_per_satellite, transship_nodes=None):
-    """构建带横向中转的 2E-VRP-PDP-TR 数学模型 (文档3, 统一变量)"""
+                               vehicles_per_satellite):
+    """构建 2E-VRP-PDP 数学模型 (无中转变量，中转由后处理完成)"""
     depot_id = problem.depot.id
     F = [s.id for s in problem.satellites]
 
@@ -51,8 +51,8 @@ def build_transshipment_model(problem, e1_tasks, e2_tasks_by_sat,
             else:
                 CP_nodes.append(t.id)
 
-    # 中转节点集合 T: E2 客户任务节点
-    T_nodes = transship_nodes if transship_nodes is not None else list(e2_task_nodes)
+    # T_nodes 不再使用（中转由后处理完成）
+    T_nodes = list(e2_task_nodes)
 
     # ==========================================
     # 模块 2：距离与时间矩阵
@@ -138,7 +138,6 @@ def build_transshipment_model(problem, e1_tasks, e2_tasks_by_sat,
         'M_weight_e2': 2 * problem.e2_weight_cap + 1000.0,
         'M_vol_e1': 2 * problem.e1_volume_cap + 1000.0,
         'M_vol_e2': 2 * problem.e2_volume_cap + 1000.0,
-        'S_TRANS': 5.0,
     }
 
     # ==========================================
@@ -185,31 +184,10 @@ def build_transshipment_model(problem, e1_tasks, e2_tasks_by_sat,
     A_return = m.addVars(F, range(vehicles_per_satellite),
                           vtype=GRB.CONTINUOUS, lb=0.0, name="A_return")
 
-    # --- 横向中转变量 ---
-    y_trans = {}
-    dq_trans = {}
-    dw_trans = {}
-    for i in T_nodes:
-        sat_i = e2_task_to_sat_map.get(i)
-        if sat_i is None:
-            continue
-        vehs_i = V_by_sat_dict.get(sat_i, [])
-        for v1 in vehs_i:
-            for v2 in vehs_i:
-                if v1 == v2:
-                    continue
-                y_trans[i, v1, v2] = m.addVar(
-                    vtype=GRB.BINARY, name=f"y_{i}_{v1}_{v2}")
-                dq_trans[i, v1, v2] = m.addVar(
-                    lb=0.0, name=f"dq_{i}_{v1}_{v2}")
-                dw_trans[i, v1, v2] = m.addVar(
-                    lb=0.0, name=f"dw_{i}_{v1}_{v2}")
-
     vars_dict = {
         'x': x, 'A_e1': A_e1, 'Q_k': Q_k, 'Vol_k': Vol_k,
         'z': z, 'A_e2': A_e2, 'Q_r': Q_r, 'Vol_r': Vol_r,
         'A_start': A_start, 'A_return': A_return,
-        'y_trans': y_trans, 'dq_trans': dq_trans, 'dw_trans': dw_trans,
     }
 
     set_objective(m, vars_dict, ctx)
