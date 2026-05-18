@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 import sys
 import os
+import json
 import time
 from pathlib import Path
 
@@ -10,45 +11,30 @@ if project_root not in sys.path:
     sys.path.append(project_root)
 
 from core.instance import ProblemInstance
-from core.node import Task
 from utils.data_loader import parse_dataset
+from utils.task_builder import build_tasks_for_model
 from models.model_2.solver import solve_exact
+
+CONFIG_DIR = Path(project_root) / "config"
+
+
+def load_fleet_config():
+    with open(CONFIG_DIR / "fleet_config.json", "r", encoding="utf-8") as f:
+        return json.load(f)
+
 
 def run_experiment(data_file: str):
     print(f"[{time.strftime('%H:%M:%S')}] 开始测试 Model 2 (统一取送货 - 2E-VRP-PDP)")
     print(f"数据集: {data_file}")
-    
-    nodes_dict, fleet_config = parse_dataset(data_file)
-    fleet_config["vehicles_per_satellite"] = 6
-    
+
+    nodes_dict, _ = parse_dataset(data_file)
+    fleet_config = load_fleet_config()
+
     problem = ProblemInstance(nodes_dict, fleet_config)
     problem.aggregate_demands_from_pre_assignment()
-    
-    # 2. 构建 E1 取送货任务
-    e1_tasks = []
-    for s in problem.satellites:
-        if s.delivery_volume > 1e-9:
-            e1_tasks.append(Task(f"{s.id}d", s.id, 'd', s.delivery_weight, s.delivery_volume, (0.0, s.e1_delivery_due_date)))
-        if s.pickup_volume > 1e-9 or s.pickup_weight > 1e-9:
-            e1_tasks.append(Task(f"{s.id}p", s.id, 'p', max(s.pickup_weight, 0.0), max(s.pickup_volume, 0.0), (s.e1_pickup_ready_time, float('inf'))))
 
-    # 3. 构建 E2 取送货任务
-    e2_tasks_by_sat = {s.id: [] for s in problem.satellites}
-    cw = problem.fleet.container_weight
-    cv = problem.fleet.container_volume
-    for c in problem.customers:
-        if not c.assigned_sat: continue
+    e1_tasks, e2_tasks_by_sat = build_tasks_for_model(problem, 2)
 
-        if c.demand > 1e-9:
-            e2_tasks_by_sat[c.assigned_sat].append(
-                Task(f"{c.id}d", c.id, 'd', c.demand + cw, cv, c.tw_del)
-            )
-        if cw > 1e-9:
-            e2_tasks_by_sat[c.assigned_sat].append(
-                Task(f"{c.id}p", c.id, 'p', cw, cv, c.tw_pick)
-            )
-            
-    # 4. 调用求解器
     start_time = time.time()
 
     e1_routes, e2_routes = solve_exact(

@@ -2,58 +2,19 @@
 # -*- coding: utf-8 -*-
 """
 Model 2 (取送货) 的 ALNS 求解器
-在 Model 1 基础上扩展：
-  - E1: satellite 拆成 delivery + pickup 虚拟节点，禁止 p→d 弧
-  - E2: 客户拆成 delivery + pickup 两个任务节点
-  - 载重双向变化（送货减少、收货增加）
-  - pickup 节点有 TFp 最早时间约束
-
-用法：
-    from models.model_2.alns_solver import solve_alns
-    e1_routes, e2_routes = solve_alns(problem, e1_tasks, e2_tasks_by_sat,
-                                       vehicles_per_satellite, TFp=9999.0)
 """
 import math
 import random
-import copy
 import time
 
-
-# =====================================================================
-#  数据结构（同 Model 1）
-# =====================================================================
-
-class Route:
-    def __init__(self, base_id, nodes=None):
-        self.base = base_id
-        self.nodes = nodes or []
-
-    def full_path(self):
-        return [self.base] + self.nodes + [self.base]
-
-    def copy(self):
-        return Route(self.base, list(self.nodes))
-
-
-class Solution:
-    def __init__(self):
-        self.e1_routes = []
-        self.e2_routes = {}
-        self.cost = float('inf')
-
-    def copy(self):
-        s = Solution()
-        s.e1_routes = [r.copy() for r in self.e1_routes]
-        s.e2_routes = {
-            sat: [r.copy() for r in routes]
-            for sat, routes in self.e2_routes.items()
-        }
-        s.cost = self.cost
-        return s
+from models.alns_base import (
+    Route, Solution, _roulette, clean_empty_routes, FEAS_TOL,
+    is_tfp_active,
+)
 
 
 # =====================================================================
-#  评估器（Model 2 扩展版）
+#  评估器
 # =====================================================================
 
 class Evaluator:
@@ -77,11 +38,9 @@ class Evaluator:
             for t in tasks:
                 self.task_to_phys[t.id] = t.cust
 
-        # E1: 区分 delivery 和 pickup 节点
         self.e1_del_nodes = [t.id for t in e1_tasks if t.kind == 'd']
         self.e1_pick_nodes = [t.id for t in e1_tasks if t.kind == 'p']
 
-        # 构建 forbidden edges：同前置仓的 p→d
         self.forbidden_e1 = set()
         sat_ids = [s.id for s in problem.satellites]
         for s_id in sat_ids:
@@ -95,26 +54,28 @@ class Evaluator:
     def dist(self, a, b):
         return self.problem.distance(self.phys(a), self.phys(b))
 
+    def travel(self, a, b):
+        return self.problem.travel_time(self.phys(a), self.phys(b))
+
     def service_time(self, node_id):
         phys_id = self.phys(node_id)
         node_obj = self.problem.nodes.get(phys_id)
         return getattr(node_obj, 'service_time', 0.0) if node_obj else 0.0
 
     def signed_demand(self, task):
-        """配送为正，回收为负"""
         return task.w if task.kind == 'd' else -task.w
 
     def signed_volume(self, task):
         return task.v if task.kind == 'd' else -task.v
 
-    def route_distance(self, route: Route):
+    def route_distance(self, route):
         path = route.full_path()
         total = 0.0
         for i in range(len(path) - 1):
             total += self.dist(path[i], path[i + 1])
         return total
 
-    def total_cost(self, sol: Solution):
+    def total_cost(self, sol):
         cost = 0.0
         for r in sol.e1_routes:
             cost += self.route_distance(r)
@@ -123,67 +84,52 @@ class Evaluator:
                 cost += self.route_distance(r)
         return cost
 
-    def check_e1_route_feasible(self, route: Route):
-        """E1 路径可行性：
-        - 容量上界（任何位置 Q ∈ [0, cap]）
-        - 禁止 p→d 弧
-        - 时间窗（delivery 截止时间）
-        - pickup 节点时间 >= TFp
-        """
-        # 检查 forbidden edges
+    def check_e1_route_feasible(self, route):
         path = route.full_path()
         for i in range(len(path) - 1):
             if (path[i], path[i + 1]) in self.forbidden_e1:
                 return False
 
-        # 模拟载重变化
-        cur_w = 0.0
-        cur_v = 0.0
-        # 初始装载 = 路径上所有 delivery 的总需求
+        init_w = 0.0
+        init_v = 0.0
         for nid in route.nodes:
             t = self.e1_task_map.get(nid)
             if t and t.kind == 'd':
-                cur_w += t.w
-                cur_v += t.v
-        # 检查初始装载
-        if cur_w > self.problem.e1_weight_cap + 1e-6:
+                init_w += t.w
+                init_v += t.v
+        if init_w > self.problem.e1_weight_cap + FEAS_TOL:
             return False
-        if cur_v > self.problem.e1_volume_cap + 1e-6:
+        if init_v > self.problem.e1_volume_cap + FEAS_TOL:
             return False
 
-        # 沿路径模拟载重和时间
-        load_w = cur_w
-        load_v = cur_v
+        Q_load, V_load = init_w, init_v
         current_time = 0.0
         prev = route.base
+
         for nid in route.nodes:
-            travel = self.dist(prev, nid)
+            travel = self.travel(prev, nid)
             current_time += travel
             t = self.e1_task_map.get(nid)
             if t:
-                # 时间窗检查
                 if current_time < t.tw[0]:
                     current_time = t.tw[0]
-                if current_time > t.tw[1] + 1e-6:
+                if current_time > t.tw[1] + FEAS_TOL:
                     return False
-                # TFp 约束: pickup 必须晚于 TFp (TFp ≥ 9000 表示无限制)
-                if t.kind == 'p' and self.TFp < 9000.0 and current_time < self.TFp - 1e-6:
+                if t.kind == 'p' and is_tfp_active(self.TFp) and current_time < self.TFp - FEAS_TOL:
                     return False
 
-                load_w -= self.signed_demand(t)
-                load_v -= self.signed_volume(t)
-                if load_w < -1e-6 or load_w > self.problem.e1_weight_cap + 1e-6:
+                Q_load -= self.signed_demand(t)
+                V_load -= self.signed_volume(t)
+                if Q_load < -FEAS_TOL or Q_load > self.problem.e1_weight_cap + FEAS_TOL:
                     return False
-                if load_v < -1e-6 or load_v > self.problem.e1_volume_cap + 1e-6:
+                if V_load < -FEAS_TOL or V_load > self.problem.e1_volume_cap + FEAS_TOL:
                     return False
 
                 current_time += self.service_time(nid)
             prev = nid
         return True
 
-    def check_e2_route_feasible(self, route: Route, sat_id):
-        """E2 路径可行性：容量双向变化 + 时间窗"""
-        # 初始装载 = 路径上所有 delivery 任务的总需求
+    def check_e2_route_feasible(self, route, sat_id):
         init_w = 0.0
         init_v = 0.0
         for nid in route.nodes:
@@ -191,42 +137,37 @@ class Evaluator:
             if t and t.kind == 'd':
                 init_w += t.w
                 init_v += t.v
-        if init_w > self.problem.e2_weight_cap + 1e-6:
+        if init_w > self.problem.e2_weight_cap + FEAS_TOL:
             return False
-        if init_v > self.problem.e2_volume_cap + 1e-6:
+        if init_v > self.problem.e2_volume_cap + FEAS_TOL:
             return False
 
-        # 沿路径模拟载重和时间
-        load_w = init_w
-        load_v = init_v
+        Q_load, V_load = init_w, init_v
         current_time = 0.0
         prev = sat_id
 
         for nid in route.nodes:
-            travel = self.dist(prev, nid)
+            travel = self.travel(prev, nid)
             current_time += travel
             t = self.e2_task_map.get(nid)
             if t:
-                # 等待时间窗
                 if current_time < t.tw[0]:
                     current_time = t.tw[0]
-                if current_time > t.tw[1] + 1e-6:
+                if current_time > t.tw[1] + FEAS_TOL:
                     return False
 
-                # 更新载重
-                load_w -= self.signed_demand(t)
-                load_v -= self.signed_volume(t)
-                if load_w < -1e-6 or load_w > self.problem.e2_weight_cap + 1e-6:
+                Q_load -= self.signed_demand(t)
+                V_load -= self.signed_volume(t)
+                if Q_load < -FEAS_TOL or Q_load > self.problem.e2_weight_cap + FEAS_TOL:
                     return False
-                if load_v < -1e-6 or load_v > self.problem.e2_volume_cap + 1e-6:
+                if V_load < -FEAS_TOL or V_load > self.problem.e2_volume_cap + FEAS_TOL:
                     return False
 
                 current_time += self.service_time(nid)
             prev = nid
-
         return True
 
-    def is_feasible(self, sol: Solution):
+    def is_feasible(self, sol):
         visited_e1 = set()
         for r in sol.e1_routes:
             if not self.check_e1_route_feasible(r):
@@ -257,19 +198,14 @@ def build_initial_solution(problem, e1_tasks, e2_tasks_by_sat, evaluator):
     depot_id = problem.depot.id
     sat_ids = [s.id for s in problem.satellites]
 
-    # ---- E1 ----
-    # 策略：先放所有 delivery 节点，再放 pickup 节点
     del_tasks = [t for t in e1_tasks if t.kind == 'd']
     pick_tasks = [t for t in e1_tasks if t.kind == 'p']
 
-    # 尝试把所有 E1 任务放到一辆车上
     all_nodes = [t.id for t in del_tasks] + [t.id for t in pick_tasks]
     single_route = Route(depot_id, all_nodes)
     if evaluator.check_e1_route_feasible(single_route):
         sol.e1_routes = [single_route]
     else:
-        # 分多辆车
-        # 先给 delivery 分车
         remaining_del = list(del_tasks)
         remaining_del.sort(key=lambda t: evaluator.dist(depot_id, t.cust))
         routes = []
@@ -289,11 +225,9 @@ def build_initial_solution(problem, e1_tasks, e2_tasks_by_sat, evaluator):
             if route.nodes:
                 routes.append(route)
             elif remaining_del:
-                # 防止死循环：单个任务超过容量时强制单独开路径
                 forced = remaining_del.pop(0)
                 routes.append(Route(depot_id, [forced.id]))
 
-        # pickup 节点追加到最后一辆车（或新开一辆）
         for t in pick_tasks:
             inserted = False
             for r in routes:
@@ -306,22 +240,17 @@ def build_initial_solution(problem, e1_tasks, e2_tasks_by_sat, evaluator):
                 routes.append(Route(depot_id, [t.id]))
         sol.e1_routes = routes
 
-    # ---- E2 ----
     for sat_id in sat_ids:
-        tasks = list(e2_tasks_by_sat.get(sat_id, []))
+        tasks = list(evaluator.e2_tasks_by_sat.get(sat_id, []))
         if not tasks:
             sol.e2_routes[sat_id] = []
             continue
 
-        # 分成 delivery 和 pickup
         del_t = [t for t in tasks if t.kind == 'd']
         pick_t = [t for t in tasks if t.kind == 'p']
-
-        # 按时间窗排序
         del_t.sort(key=lambda t: t.tw[0])
         pick_t.sort(key=lambda t: t.tw[0])
 
-        # 贪心构造：先服务 delivery，再服务 pickup
         all_sorted = del_t + pick_t
         routes = []
         unassigned = list(all_sorted)
@@ -331,7 +260,6 @@ def build_initial_solution(problem, e1_tasks, e2_tasks_by_sat, evaluator):
             assigned_this_route = []
 
             for t in unassigned:
-                # 试着把 t 加到当前路径末尾
                 test_route = Route(sat_id, route.nodes + [t.id])
                 if evaluator.check_e2_route_feasible(test_route, sat_id):
                     route.nodes.append(t.id)
@@ -443,7 +371,6 @@ def shaw_removal(sol, evaluator, num_remove, echelon='e2'):
                 continue
             dist_sim = evaluator.dist(seed_nid, nid)
             tw_sim = abs(seed_task.tw[0] - t.tw[0])
-            # 额外考虑是否同类型（delivery/pickup）
             type_sim = 0.0 if seed_task.kind == t.kind else 50.0
             score = dist_sim + 0.1 * tw_sim + type_sim
             similarities.append((score, sat_id, r, nid))
@@ -600,8 +527,8 @@ def regret_insertion(sol, removed, evaluator, echelon='e2', k=2):
 
             if best_nid is None:
                 break
-
-            assert best_route_info is not None
+            if best_route_info is None:
+                break
             pending.remove(best_nid)
             _, route, pos = best_route_info
             if route is not None:
@@ -638,43 +565,18 @@ def regret_insertion(sol, removed, evaluator, echelon='e2', k=2):
 
 
 # =====================================================================
-#  清理 + ALNS 主循环
+#  ALNS 主循环
 # =====================================================================
-
-def clean_empty_routes(sol):
-    sol.e1_routes = [r for r in sol.e1_routes if r.nodes]
-    for sat_id in sol.e2_routes:
-        sol.e2_routes[sat_id] = [
-            r for r in sol.e2_routes[sat_id] if r.nodes
-        ]
-
-
-def _roulette(weights):
-    total = sum(weights)
-    if total < 1e-10:
-        return random.randint(0, len(weights) - 1)
-    r = random.random() * total
-    cumsum = 0.0
-    for i, w in enumerate(weights):
-        cumsum += w
-        if cumsum >= r:
-            return i
-    return len(weights) - 1
-
 
 def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
                TFp=9999.0, max_iterations=5000, max_time=120,
                seed=42, verbose=True):
-    """
-    ALNS 求解 Model 2 (取送货)
-    """
     random.seed(seed)
     start_time = time.time()
 
     evaluator = Evaluator(problem, e1_tasks, e2_tasks_by_sat, TFp,
                           vehicles_per_satellite=vehicles_per_satellite)
 
-    # ---- 初始解 ----
     sol = build_initial_solution(problem, e1_tasks, e2_tasks_by_sat, evaluator)
     sol.cost = evaluator.total_cost(sol)
     best_sol = sol.copy()
@@ -690,7 +592,6 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         e2_count = sum(len(v) for v in sol.e2_routes.values())
         print(f"E2 路径数: {e2_count}")
 
-    # ---- 算子与权重 ----
     destroy_ops = [random_removal, worst_removal, shaw_removal]
     repair_ops = [greedy_insertion, regret_insertion]
     n_d, n_r = len(destroy_ops), len(repair_ops)
@@ -726,7 +627,6 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         d_counts[d_idx] += 1
         r_counts[r_idx] += 1
 
-        # E1 vs E2
         if random.random() < 0.8 and total_e2 > 0:
             echelon = 'e2'
             n_tasks = total_e2
@@ -748,11 +648,10 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         clean_empty_routes(candidate)
         candidate.cost = evaluator.total_cost(candidate)
 
-        # 接受准则
         delta = candidate.cost - sol.cost
-        if delta < -1e-6:
+        if delta < -FEAS_TOL:
             sol = candidate
-            if sol.cost < best_cost - 1e-6:
+            if sol.cost < best_cost - FEAS_TOL:
                 best_sol = sol.copy()
                 best_cost = sol.cost
                 d_scores[d_idx] += sigma1
@@ -771,7 +670,6 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
 
         T *= cooling_rate
 
-        # 自适应权重更新
         if (iteration + 1) % segment_size == 0:
             for i in range(n_d):
                 if d_counts[i] > 0:
@@ -797,18 +695,21 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         print(f"总耗时: {elapsed:.2f} 秒")
         print(f"{'=' * 60}")
 
-    # 转换输出格式
     e1_routes_out = [r.full_path() for r in best_sol.e1_routes]
     e2_routes_out = {}
     for sat_id, routes in best_sol.e2_routes.items():
         e2_routes_out[sat_id] = [r.full_path() for r in routes]
 
-    _print_solution(best_sol, evaluator)
+    if verbose:
+        _print_solution(best_sol, evaluator)
     return e1_routes_out, e2_routes_out
 
 
+# =====================================================================
+#  载量模拟和打印
+# =====================================================================
+
 def _simulate_e1_load_m2(route, evaluator):
-    """模拟 Model 2 E1 路线载重变化, 返回 [(node, Q, V), ...]"""
     init_w = sum(evaluator.e1_task_map[n].w
                  for n in route.nodes if evaluator.e1_task_map.get(n) and
                  evaluator.e1_task_map[n].kind == 'd')
@@ -823,12 +724,11 @@ def _simulate_e1_load_m2(route, evaluator):
             Q_load -= evaluator.signed_demand(t)
             V_load -= evaluator.signed_volume(t)
         result.append((nid, Q_load, V_load))
-    result.append((route.base, Q_load, V_load))  # 返回基地
+    result.append((route.base, Q_load, V_load))
     return result
 
 
 def _simulate_e2_load_m2(route, sat_id, evaluator):
-    """模拟 Model 2 E2 路线载重变化"""
     init_w = sum(evaluator.e2_task_map[n].w
                  for n in route.nodes if evaluator.e2_task_map.get(n) and
                  evaluator.e2_task_map[n].kind == 'd')
@@ -843,7 +743,7 @@ def _simulate_e2_load_m2(route, sat_id, evaluator):
             Q_load -= evaluator.signed_demand(t)
             V_load -= evaluator.signed_volume(t)
         result.append((nid, Q_load, V_load))
-    result.append((sat_id, Q_load, V_load))  # 返回前置仓
+    result.append((sat_id, Q_load, V_load))
     return result
 
 

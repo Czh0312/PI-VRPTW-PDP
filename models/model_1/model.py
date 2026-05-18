@@ -26,6 +26,20 @@ def build_pure_delivery_model(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_s
         node_obj = problem.nodes.get(phys_id)
         return getattr(node_obj, "service_time", 0.0)
 
+    # 构建时间映射表（与 Model 2/3 保持一致）
+    all_node_ids = list(set(
+        [depot_id] + f_set +
+        [t.id for t in e1_tasks] +
+        [t.id for tasks in e2_tasks_by_sat.values() for t in tasks]
+    ))
+    time_map = {}
+    for i in all_node_ids:
+        for j in all_node_ids:
+            if i == j:
+                time_map[i, j] = 0.0
+            else:
+                time_map[i, j] = problem.travel_time(get_phys(i), get_phys(j))
+
     m = gp.Model("2E_VRPTW_Pure_Delivery")
     k_set = list(range(problem.e1_vehicle_count))
     n1e = [depot_id] + f_set
@@ -40,6 +54,7 @@ def build_pure_delivery_model(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_s
         "V_by_sat": v_by_sat,
         "get_phys": get_phys,
         "get_st": get_st,
+        "time_map": time_map,
         "vehicles_per_satellite": vehicles_per_satellite,
     }
 

@@ -33,8 +33,8 @@ def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite, verb
         if m.status == GRB.INFEASIBLE:
             print("模型不可行，正在计算 IIS（可能需要几秒到几十秒）...")
             m.computeIIS()
-            m.write("test3_iis.ilp")
-            print("✓ IIS 已写入 test3_iis.ilp")
+            m.write("output/model1_iis.ilp")
+            print("✓ IIS 已写入 output/model1_iis.ilp")
         return None, None
 
 def _print_solution(m, problem, vars_dict, ctx, e2_tasks_by_sat):

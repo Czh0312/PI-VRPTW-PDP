@@ -11,8 +11,8 @@ if project_root not in sys.path:
     sys.path.append(project_root)
 
 from core.instance import ProblemInstance
-from core.node import Task
 from utils.data_loader import parse_dataset
+from utils.task_builder import build_tasks_for_model
 from models.model_3.solver import solve_exact
 from models.model_3.alns_solver import solve_alns
 
@@ -36,32 +36,7 @@ def run_experiment(data_file: str, solver: str = "exact"):
     problem = ProblemInstance(nodes_dict, fleet_config)
     problem.aggregate_demands_from_pre_assignment()
 
-    # 构建 E1 任务 (配送 + 回收)
-    e1_tasks = []
-    for s in problem.satellites:
-        if s.delivery_volume > 1e-9:
-            e1_tasks.append(Task(
-                f"{s.id}d", s.id, 'd', s.delivery_weight,
-                s.delivery_volume, (0.0, s.e1_delivery_due_date)))
-        if s.pickup_volume > 1e-9 or s.pickup_weight > 1e-9:
-            e1_tasks.append(Task(
-                f"{s.id}p", s.id, 'p', max(s.pickup_weight, 0.0),
-                max(s.pickup_volume, 0.0),
-                (s.e1_pickup_ready_time, float('inf'))))
-
-    # 构建 E2 任务 (配送 + 回收)
-    e2_tasks_by_sat = {s.id: [] for s in problem.satellites}
-    cw = problem.fleet.container_weight
-    cv = problem.fleet.container_volume
-    for c in problem.customers:
-        if not c.assigned_sat:
-            continue
-        if c.demand > 1e-9:
-            e2_tasks_by_sat[c.assigned_sat].append(
-                Task(f"{c.id}d", c.id, 'd', c.demand + cw, cv, c.tw_del))
-        if cw > 1e-9:
-            e2_tasks_by_sat[c.assigned_sat].append(
-                Task(f"{c.id}p", c.id, 'p', cw, cv, c.tw_pick))
+    e1_tasks, e2_tasks_by_sat = build_tasks_for_model(problem, 3)
 
     start_time = time.time()
 

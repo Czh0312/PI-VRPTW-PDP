@@ -6,38 +6,40 @@ Model 3 精确求解：MIP（无中转）+ 后处理搬运中转
 from gurobipy import GRB
 
 from .model import build_transshipment_model
+from ..solver_utils import extract_routes_e1, extract_routes_e2, print_e1_loads, print_e2_loads
 
 
 def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
                 verbose=True):
-    total_w_d = sum(t.w for t in e1_tasks if t.kind == 'd')
-    total_w_p = sum(t.w for t in e1_tasks if t.kind == 'p')
-    total_v_d = sum(t.v for t in e1_tasks if t.kind == 'd')
-    total_v_p = sum(t.v for t in e1_tasks if t.kind == 'p')
-    print(f"\n[DEBUG] E1 任务总览:")
-    print(f"  卡车数 K = {problem.e1_vehicle_count}")
-    print(f"  单车 weight cap = {problem.e1_weight_cap}")
-    print(f"  单车 volume cap = {problem.e1_volume_cap}")
-    print(f"  total delivery weight = {total_w_d}, volume = {total_v_d}")
-    print(f"  total pickup  weight = {total_w_p}, volume = {total_v_p}")
-    for t in e1_tasks:
-        print(f"    {t.id}: kind={t.kind}, w={t.w}, v={t.v}, tw={t.tw}")
+    if verbose:
+        total_w_d = sum(t.w for t in e1_tasks if t.kind == 'd')
+        total_w_p = sum(t.w for t in e1_tasks if t.kind == 'p')
+        total_v_d = sum(t.v for t in e1_tasks if t.kind == 'd')
+        total_v_p = sum(t.v for t in e1_tasks if t.kind == 'p')
+        print(f"\n[DEBUG] E1 任务总览:")
+        print(f"  卡车数 K = {problem.e1_vehicle_count}")
+        print(f"  单车 weight cap = {problem.e1_weight_cap}")
+        print(f"  单车 volume cap = {problem.e1_volume_cap}")
+        print(f"  total delivery weight = {total_w_d}, volume = {total_v_d}")
+        print(f"  total pickup  weight = {total_w_p}, volume = {total_v_p}")
+        for t in e1_tasks:
+            print(f"    {t.id}: kind={t.kind}, w={t.w}, v={t.v}, tw={t.tw}")
 
-    e2_total_d = sum(
-        t.w for tasks in e2_tasks_by_sat.values()
-        for t in tasks if t.kind == 'd')
-    e2_total_p = sum(
-        t.w for tasks in e2_tasks_by_sat.values()
-        for t in tasks if t.kind == 'p')
-    print(f"\n[DEBUG] E2 任务总览:")
-    print(f"  每卫星车辆数 = {vehicles_per_satellite}")
-    print(f"  单车 weight cap = {problem.e2_weight_cap}")
-    print(f"  单车 volume cap = {problem.e2_volume_cap}")
-    print(f"  total delivery weight = {e2_total_d}, pickup weight = {e2_total_p}")
-    for sat_id, tasks in e2_tasks_by_sat.items():
-        print(f"  satellite {sat_id}: {len(tasks)} tasks")
-        for t in tasks:
-            print(f"    {t.id}: kind={t.kind}, w={t.w}, v={t.v}")
+        e2_total_d = sum(
+            t.w for tasks in e2_tasks_by_sat.values()
+            for t in tasks if t.kind == 'd')
+        e2_total_p = sum(
+            t.w for tasks in e2_tasks_by_sat.values()
+            for t in tasks if t.kind == 'p')
+        print(f"\n[DEBUG] E2 任务总览:")
+        print(f"  每卫星车辆数 = {vehicles_per_satellite}")
+        print(f"  单车 weight cap = {problem.e2_weight_cap}")
+        print(f"  单车 volume cap = {problem.e2_volume_cap}")
+        print(f"  total delivery weight = {e2_total_d}, pickup weight = {e2_total_p}")
+        for sat_id, tasks in e2_tasks_by_sat.items():
+            print(f"  satellite {sat_id}: {len(tasks)} tasks")
+            for t in tasks:
+                print(f"    {t.id}: kind={t.kind}, w={t.w}, v={t.v}")
 
     m, vars_dict, ctx = build_transshipment_model(
         problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite
@@ -65,8 +67,8 @@ def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
     if m.status == GRB.INFEASIBLE:
         print("\n模型不可行，正在计算 IIS...")
         m.computeIIS()
-        m.write("test_m3_iis.ilp")
-        print("✓ IIS 已写入 test_m3_iis.ilp")
+        m.write("output/model3_iis.ilp")
+        print("✓ IIS 已写入 output/model3_iis.ilp")
 
     print("\n未找到可行解")
     return None, None
@@ -107,10 +109,10 @@ def _print_solution(m, vars_dict, ctx, e2_tasks_by_sat):
 
     # ============ E1 路线 ============
     print("\n--- E1 路线 ---")
-    e1_routes_with_k = _extract_routes_e1(sol_x, depot_id, C1, K)
+    e1_routes_with_k = extract_routes_e1(sol_x, depot_id, C1, K)
     for k, route in e1_routes_with_k:
         print(f"  卡车 {k}: {' -> '.join(route)}")
-    _print_e1_loads(vars_dict, e1_routes_with_k)
+    print_e1_loads(vars_dict, e1_routes_with_k)
 
     # ============ E2 路线 ============
     out_e2_routes = {f: [] for f in F}
@@ -125,11 +127,11 @@ def _print_solution(m, vars_dict, ctx, e2_tasks_by_sat):
         if not used_v:
             continue
         print(f"  前置仓 {sat_id}:")
-        routes = _extract_routes_e2(sol_z, sat_id, t_ids, used_v)
+        routes = extract_routes_e2(sol_z, sat_id, t_ids, used_v)
         out_e2_routes[sat_id] = routes
         for v_key, route in zip(used_v, routes):
             print(f"    车辆{v_key[1]}: {' -> '.join(route)}")
-        _print_e2_loads(vars_dict, used_v, routes)
+        print_e2_loads(vars_dict, used_v, routes)
 
     # ============ 衔接时间 ============
     A_start = vars_dict["A_start"]
@@ -144,106 +146,6 @@ def _print_solution(m, vars_dict, ctx, e2_tasks_by_sat):
 
     e1_routes = [r for _, r in e1_routes_with_k]
     return e1_routes, out_e2_routes
-
-
-def _print_e1_loads(vars_dict, e1_routes_with_k):
-    Q_k = vars_dict["Q_k"]
-    Vol_k = vars_dict["Vol_k"]
-    for k, route in e1_routes_with_k:
-        loads = []
-        for idx, node in enumerate(route):
-            is_first = (idx == 0)
-            is_last = (idx == len(route) - 1 and node == route[0])
-            if is_last:
-                prev = route[idx - 1]
-                q = Q_k[prev, k].X if (prev, k) in Q_k else 0.0
-                v = Vol_k[prev, k].X if (prev, k) in Vol_k else 0.0
-                loads.append(f"{node}_arr(Q={q:.1f},V={v:.1f})")
-            elif is_first:
-                q = Q_k[node, k].X if (node, k) in Q_k else 0.0
-                v = Vol_k[node, k].X if (node, k) in Vol_k else 0.0
-                loads.append(f"{node}(Q={q:.1f},V={v:.1f})")
-            else:
-                q = Q_k[node, k].X if (node, k) in Q_k else 0.0
-                v = Vol_k[node, k].X if (node, k) in Vol_k else 0.0
-                loads.append(f"{node}(Q={q:.1f},V={v:.1f})")
-        print(f"    载量(k={k}): {' -> '.join(loads)}")
-
-
-def _print_e2_loads(vars_dict, used_v, routes):
-    Q_r = vars_dict["Q_r"]
-    Vol_r = vars_dict["Vol_r"]
-    for v_key, route in zip(used_v, routes):
-        loads = []
-        for idx, node in enumerate(route):
-            is_first = (idx == 0)
-            is_last = (idx == len(route) - 1 and node == route[0])
-            if is_last:
-                prev = route[idx - 1]
-                q = Q_r[prev, v_key].X if (prev, v_key) in Q_r else 0.0
-                v = Vol_r[prev, v_key].X if (prev, v_key) in Vol_r else 0.0
-                loads.append(f"{node}_arr(Q={q:.1f},V={v:.1f})")
-            elif is_first:
-                q = Q_r[node, v_key].X if (node, v_key) in Q_r else 0.0
-                v = Vol_r[node, v_key].X if (node, v_key) in Vol_r else 0.0
-                loads.append(f"{node}(Q={q:.1f},V={v:.1f})")
-            else:
-                q = Q_r[node, v_key].X if (node, v_key) in Q_r else 0.0
-                v = Vol_r[node, v_key].X if (node, v_key) in Vol_r else 0.0
-                loads.append(f"{node}(Q={q:.1f},V={v:.1f})")
-        print(f"      载量: {' -> '.join(loads)}")
-
-
-def _extract_routes_e1(sol, depot, tasks, vehicles):
-    routes = []
-    nodes = [depot] + tasks
-    for k in vehicles:
-        succ = {
-            i: j
-            for i in nodes for j in nodes
-            if i != j and sol.get((i, j, k), 0) > 0.5
-        }
-        cur = succ.get(depot)
-        if not cur:
-            continue
-        route, visited = [depot], {depot}
-        while cur and cur != depot:
-            route.append(cur)
-            visited.add(cur)
-            cur = succ.get(cur)
-            if cur in visited and cur != depot:
-                break
-        if cur == depot:
-            route.append(depot)
-        if len(route) > 2:
-            routes.append((k, route))
-    return routes
-
-
-def _extract_routes_e2(sol, sat_id, tasks, vehicles):
-    routes = []
-    nodes = [sat_id] + tasks
-    for v_key in vehicles:
-        succ = {
-            i: j
-            for i in nodes for j in nodes
-            if i != j and sol.get((i, j, v_key), 0) > 0.5
-        }
-        cur = succ.get(sat_id)
-        if not cur:
-            continue
-        route, visited = [sat_id], {sat_id}
-        while cur and cur != sat_id:
-            route.append(cur)
-            visited.add(cur)
-            cur = succ.get(cur)
-            if cur in visited and cur != sat_id:
-                break
-        if cur == sat_id:
-            route.append(sat_id)
-        if len(route) > 2:
-            routes.append(route)
-    return routes
 
 
 # =====================================================================
@@ -311,16 +213,21 @@ def _postprocess_transport(e2_routes, e2_tasks_by_sat, problem, verbose=True):
                                     n = len(carrier)
                                     for pp in range(1, n):
                                         for dp in range(pp + 1, n + 1):
+                                            pick_vn = f"TRANS_PICK_{old_phys}"
+                                            drop_vn = f"TRANS_DROP_{new_phys}"
+
                                             new_carrier = carrier[:]
-                                            new_carrier.insert(pp, old_phys)
-                                            new_carrier.insert(dp, new_phys)
+                                            new_carrier.insert(pp, pick_vn)
+                                            new_carrier.insert(dp, drop_vn)
+
+                                            tloads = {pick_vn: (t.w, t.v),
+                                                      drop_vn: (t.w, t.v)}
 
                                             if _check_route_feasible(
                                                     new_carrier, sat_id,
                                                     task_to_phys,
                                                     e2_task_map, problem,
-                                                    extra_load=(
-                                                        t.w, t.v, pp, dp)):
+                                                    transport_loads=tloads):
                                                 old_cd = _route_distance(
                                                     carrier, task_to_phys,
                                                     problem)
@@ -348,8 +255,8 @@ def _postprocess_transport(e2_routes, e2_tasks_by_sat, problem, verbose=True):
             task_to_phys[pick_node] = new_phys
 
             carrier = e2_routes[sat_id][carrier_idx]
-            carrier.insert(pick_pos, old_phys)
-            carrier.insert(drop_pos, new_phys)
+            carrier.insert(pick_pos, f"TRANS_PICK_{old_phys}")
+            carrier.insert(drop_pos, f"TRANS_DROP_{new_phys}")
 
             t = e2_task_map[pick_node]
             transshipments[(sat_id, ben_idx, pick_node, new_phys)] = (
@@ -378,12 +285,13 @@ def _route_distance(route, task_to_phys, problem):
 
 
 def _check_route_feasible(route, sat_id, task_to_phys, e2_task_map,
-                           problem, extra_load=None):
-    """检查路线可行性。extra_load=(w,v,pick_pos,drop_pos)"""
+                           problem, transport_loads=None):
+    """检查路线可行性（载量 + 时间窗），支持虚拟搬运节点"""
+    transport_loads = transport_loads or {}
     init_w = 0.0
     init_v = 0.0
     for nid in route:
-        if nid == sat_id:
+        if nid == sat_id or nid.startswith("TRANS_"):
             continue
         t = e2_task_map.get(nid)
         if t and t.kind == 'd':
@@ -406,26 +314,25 @@ def _check_route_feasible(route, sat_id, task_to_phys, e2_task_map,
         if nid == sat_id:
             continue
 
-        if extra_load:
-            ew, ev, ep, ed = extra_load
-            pos_in_new = i + 1
-            if pos_in_new >= ep:
-                Q_load += ew
-                V_load += ev
-            if pos_in_new >= ed:
-                Q_load -= ew
-                V_load -= ev
-
-        t = e2_task_map.get(nid)
-        if t:
-            if current_time < t.tw[0]:
-                current_time = t.tw[0]
-            if current_time > t.tw[1] + 1e-6:
-                return False
-            q = t.w if t.kind == 'd' else -t.w
-            v = t.v if t.kind == 'd' else -t.v
-            Q_load -= q
-            V_load -= v
+        if nid.startswith("TRANS_PICK_"):
+            tw, tv = transport_loads.get(nid, (0.0, 0.0))
+            Q_load += tw
+            V_load += tv
+        elif nid.startswith("TRANS_DROP_"):
+            tw, tv = transport_loads.get(nid, (0.0, 0.0))
+            Q_load -= tw
+            V_load -= tv
+        else:
+            t = e2_task_map.get(nid)
+            if t:
+                if current_time < t.tw[0]:
+                    current_time = t.tw[0]
+                if current_time > t.tw[1] + 1e-6:
+                    return False
+                q = t.w if t.kind == 'd' else -t.w
+                v = t.v if t.kind == 'd' else -t.v
+                Q_load -= q
+                V_load -= v
 
         if Q_load < -1e-6 or Q_load > problem.e2_weight_cap + 1e-6:
             return False

@@ -78,17 +78,3 @@ class Task:
         self.w = float(w)
         self.v = float(v)
         self.tw = (float(tw[0]), float(tw[1]))
-
-
-class TransshipmentTask(Task):
-    """Model 3 横向中转虚拟任务。"""
-    def __init__(self, cust_id: str, is_dropoff: bool, amount_w: float, amount_v: float):
-        super().__init__(
-            id=f"Trans_{cust_id}_{'drop' if is_dropoff else 'pick'}",
-            cust=cust_id,
-            kind="t",
-            w=amount_w,
-            v=amount_v,
-            tw=(0.0, 99999.0),
-        )
-        self.is_dropoff = is_dropoff

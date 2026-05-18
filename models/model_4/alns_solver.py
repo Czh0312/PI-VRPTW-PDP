@@ -2,60 +2,19 @@
 # -*- coding: utf-8 -*-
 """
 Model 4 (两阶段：先规划再中转) 的 ALNS 求解器
-
-阶段一：运行 Model 2 ALNS（无中转算子），收敛到最优路线
-阶段二：对阶段一的最优解，后处理搜索中转机会
-
-结果保证：≤ Model 2 结果（只改进不恶化）
 """
 import math
 import random
 import time
 
-
-# =====================================================================
-#  数据结构
-# =====================================================================
-
-class Route:
-    def __init__(self, base_id, nodes=None):
-        self.base = base_id
-        self.nodes = nodes or []
-        # 虚拟搬运节点载量: {virtual_node_id: (w, v)}
-        self.transport_loads = {}
-
-    def full_path(self):
-        return [self.base] + self.nodes + [self.base]
-
-    def copy(self):
-        r = Route(self.base, list(self.nodes))
-        r.transport_loads = dict(self.transport_loads)
-        return r
-
-
-class Solution:
-    def __init__(self):
-        self.e1_routes = []
-        self.e2_routes = {}
-        self.cost = float('inf')
-        # {(sat_id, beneficiary_idx, pick_node, new_phys):
-        #   (old_phys, carrier_idx, container_w, container_v)}
-        self.transshipments = {}
-
-    def copy(self):
-        s = Solution()
-        s.e1_routes = [r.copy() for r in self.e1_routes]
-        s.e2_routes = {
-            sat: [r.copy() for r in routes]
-            for sat, routes in self.e2_routes.items()
-        }
-        s.cost = self.cost
-        s.transshipments = dict(self.transshipments)
-        return s
+from models.alns_base import (
+    Route, Solution, _roulette, clean_empty_routes, FEAS_TOL,
+    is_tfp_active,
+)
 
 
 # =====================================================================
-#  评估器 (同 Model 3，支持中转感知)
+#  评估器
 # =====================================================================
 
 class Evaluator:
@@ -95,24 +54,31 @@ class Evaluator:
         return task.v if task.kind == 'd' else -task.v
 
     def phys(self, node_id):
+        if node_id.startswith("TRANS_PICK_"):
+            return node_id[len("TRANS_PICK_"):]
+        if node_id.startswith("TRANS_DROP_"):
+            return node_id[len("TRANS_DROP_"):]
         return self.task_to_phys.get(node_id, node_id)
 
     def dist(self, a, b):
         return self.problem.distance(self.phys(a), self.phys(b))
+
+    def travel(self, a, b):
+        return self.problem.travel_time(self.phys(a), self.phys(b))
 
     def service_time(self, node_id):
         phys_id = self.phys(node_id)
         node_obj = self.problem.nodes.get(phys_id)
         return getattr(node_obj, 'service_time', 0.0) if node_obj else 0.0
 
-    def route_distance(self, route: Route):
+    def route_distance(self, route):
         path = route.full_path()
         total = 0.0
         for i in range(len(path) - 1):
             total += self.dist(path[i], path[i + 1])
         return total
 
-    def total_cost(self, sol: Solution):
+    def total_cost(self, sol):
         cost = 0.0
         for r in sol.e1_routes:
             cost += self.route_distance(r)
@@ -121,7 +87,7 @@ class Evaluator:
                 cost += self.route_distance(r)
         return cost
 
-    def check_e1_route_feasible(self, route: Route):
+    def check_e1_route_feasible(self, route):
         path = route.full_path()
         for i in range(len(path) - 1):
             if (path[i], path[i + 1]) in self.forbidden_e1:
@@ -135,9 +101,9 @@ class Evaluator:
                 init_w += t.w
                 init_v += t.v
 
-        if init_w > self.problem.e1_weight_cap + 1e-6:
+        if init_w > self.problem.e1_weight_cap + FEAS_TOL:
             return False
-        if init_v > self.problem.e1_volume_cap + 1e-6:
+        if init_v > self.problem.e1_volume_cap + FEAS_TOL:
             return False
 
         Q_load, V_load = init_w, init_v
@@ -145,31 +111,30 @@ class Evaluator:
         prev = route.base
 
         for nid in route.nodes:
-            travel = self.dist(prev, nid)
+            travel = self.travel(prev, nid)
             current_time += travel
             t = self.e1_task_map.get(nid)
             if t:
                 if current_time < t.tw[0]:
                     current_time = t.tw[0]
-                if current_time > t.tw[1] + 1e-6:
+                if current_time > t.tw[1] + FEAS_TOL:
                     return False
-                if t.kind == 'p' and self.TFp < 9000.0 and current_time < self.TFp - 1e-6:
+                if t.kind == 'p' and is_tfp_active(self.TFp) and current_time < self.TFp - FEAS_TOL:
                     return False
 
                 Q_load -= self.signed_demand(t)
                 V_load -= self.signed_volume(t)
 
-                if Q_load < -1e-6 or Q_load > self.problem.e1_weight_cap + 1e-6:
+                if Q_load < -FEAS_TOL or Q_load > self.problem.e1_weight_cap + FEAS_TOL:
                     return False
-                if V_load < -1e-6 or V_load > self.problem.e1_volume_cap + 1e-6:
+                if V_load < -FEAS_TOL or V_load > self.problem.e1_volume_cap + FEAS_TOL:
                     return False
 
                 current_time += self.service_time(nid)
             prev = nid
         return True
 
-    def check_e2_route_feasible(self, route: Route, sat_id):
-        """E2 可行性检查（载量 + 时间窗），支持虚拟搬运节点"""
+    def check_e2_route_feasible(self, route, sat_id):
         init_w = 0.0
         init_v = 0.0
         for nid in route.nodes:
@@ -180,9 +145,9 @@ class Evaluator:
                 init_w += t.w
                 init_v += t.v
 
-        if init_w > self.problem.e2_weight_cap + 1e-6:
+        if init_w > self.problem.e2_weight_cap + FEAS_TOL:
             return False
-        if init_v > self.problem.e2_volume_cap + 1e-6:
+        if init_v > self.problem.e2_volume_cap + FEAS_TOL:
             return False
 
         Q_load, V_load = init_w, init_v
@@ -190,25 +155,25 @@ class Evaluator:
         prev = sat_id
 
         for nid in route.nodes:
-            travel = self.dist(prev, nid)
+            travel = self.travel(prev, nid)
             current_time += travel
 
             if nid.startswith("TRANS_PICK_"):
                 tw, tv = route.transport_loads.get(nid, (0.0, 0.0))
                 Q_load += tw
                 V_load += tv
-                if Q_load > self.problem.e2_weight_cap + 1e-6:
+                if Q_load > self.problem.e2_weight_cap + FEAS_TOL:
                     return False
-                if V_load > self.problem.e2_volume_cap + 1e-6:
+                if V_load > self.problem.e2_volume_cap + FEAS_TOL:
                     return False
                 current_time += self.service_time(nid)
             elif nid.startswith("TRANS_DROP_"):
                 tw, tv = route.transport_loads.get(nid, (0.0, 0.0))
                 Q_load -= tw
                 V_load -= tv
-                if Q_load < -1e-6:
+                if Q_load < -FEAS_TOL:
                     return False
-                if V_load < -1e-6:
+                if V_load < -FEAS_TOL:
                     return False
                 current_time += self.service_time(nid)
             else:
@@ -216,24 +181,24 @@ class Evaluator:
                 if t:
                     if current_time < t.tw[0]:
                         current_time = t.tw[0]
-                    if current_time > t.tw[1] + 1e-6:
+                    if current_time > t.tw[1] + FEAS_TOL:
                         return False
-                    if t.kind == 'p' and self.TFp < 9000.0 and current_time < self.TFp - 1e-6:
+                    if t.kind == 'p' and is_tfp_active(self.TFp) and current_time < self.TFp - FEAS_TOL:
                         return False
 
                     Q_load -= self.signed_demand(t)
                     V_load -= self.signed_volume(t)
 
-                    if Q_load < -1e-6 or Q_load > self.problem.e2_weight_cap + 1e-6:
+                    if Q_load < -FEAS_TOL or Q_load > self.problem.e2_weight_cap + FEAS_TOL:
                         return False
-                    if V_load < -1e-6 or V_load > self.problem.e2_volume_cap + 1e-6:
+                    if V_load < -FEAS_TOL or V_load > self.problem.e2_volume_cap + FEAS_TOL:
                         return False
 
                     current_time += self.service_time(nid)
             prev = nid
         return True
 
-    def is_feasible(self, sol: Solution):
+    def is_feasible(self, sol):
         visited_e1 = set()
         for r in sol.e1_routes:
             if not self.check_e1_route_feasible(r):
@@ -257,7 +222,7 @@ class Evaluator:
 
 
 # =====================================================================
-#  初始解构造（同 Model 2）
+#  初始解构造
 # =====================================================================
 
 def build_initial_solution(problem, e1_tasks, e2_tasks_by_sat, evaluator):
@@ -265,7 +230,6 @@ def build_initial_solution(problem, e1_tasks, e2_tasks_by_sat, evaluator):
     depot_id = problem.depot.id
     sat_ids = [s.id for s in problem.satellites]
 
-    # ---- E1 ----
     del_tasks = [t for t in e1_tasks if t.kind == 'd']
     pick_tasks = [t for t in e1_tasks if t.kind == 'p']
 
@@ -308,7 +272,6 @@ def build_initial_solution(problem, e1_tasks, e2_tasks_by_sat, evaluator):
                 routes.append(Route(depot_id, [t.id]))
         sol.e1_routes = routes
 
-    # ---- E2 ----
     for sat_id in sat_ids:
         tasks = list(evaluator.e2_tasks_by_sat.get(sat_id, []))
         if not tasks:
@@ -324,7 +287,7 @@ def build_initial_solution(problem, e1_tasks, e2_tasks_by_sat, evaluator):
         routes = []
         unassigned = list(all_sorted)
 
-        while unassigned and len(routes) < evaluator.vehicles_per_satellite:
+        while unassigned:
             route = Route(sat_id)
             assigned = []
             for t in unassigned:
@@ -340,21 +303,6 @@ def build_initial_solution(problem, e1_tasks, e2_tasks_by_sat, evaluator):
                 forced = unassigned.pop(0)
                 routes.append(Route(sat_id, [forced.id]))
 
-        for t in unassigned:
-            best_r, best_pos, best_cost = None, 0, float('inf')
-            for r in routes:
-                for pos in range(len(r.nodes) + 1):
-                    old_nodes = r.nodes[:]
-                    r.nodes.insert(pos, t.id)
-                    c = evaluator.route_distance(r)
-                    r.nodes = old_nodes
-                    if c < best_cost:
-                        best_cost, best_r, best_pos = c, r, pos
-            if best_r:
-                best_r.nodes.insert(best_pos, t.id)
-            else:
-                routes.append(Route(sat_id, [t.id]))
-
         sol.e2_routes[sat_id] = routes
 
     sol.cost = evaluator.total_cost(sol)
@@ -362,7 +310,7 @@ def build_initial_solution(problem, e1_tasks, e2_tasks_by_sat, evaluator):
 
 
 # =====================================================================
-#  阶段一：破坏/修复算子（同 Model 2，无中转）
+#  破坏/修复算子（同 Model 2，无中转）
 # =====================================================================
 
 def random_removal(sol, evaluator, num_remove, echelon='e2'):
@@ -602,7 +550,8 @@ def regret_insertion(sol, removed, evaluator, echelon='e2', k=2):
 
             if best_nid is None:
                 break
-
+            if best_route_info is None:
+                break
             pending.remove(best_nid)
             _, route, pos = best_route_info
             if route is not None:
@@ -639,15 +588,10 @@ def regret_insertion(sol, removed, evaluator, echelon='e2', k=2):
 
 
 # =====================================================================
-#  阶段二：后处理中转优化（改变 pickup 的取货位置）
+#  阶段二：后处理中转优化
 # =====================================================================
 
 def postprocess_transshipment(sol, evaluator, verbose=True):
-    """阶段二：对阶段一的最优路线，尝试改变 pickup 节点的物理位置。
-
-    中转 = 顾客 A 的空容器可以"搬"到另一个顾客 B 的位置去取，
-    从而减少总行驶距离。每次应用最优方案，迭代直到无改进。
-    """
     iteration = 0
     while True:
         iteration += 1
@@ -663,94 +607,117 @@ def postprocess_transshipment(sol, evaluator, verbose=True):
 
 
 def _search_and_apply_relocation(sol, evaluator):
-    """搜索最优的搬运中转方案并应用。
+    if not evaluator.is_feasible(sol):
+        return False
 
-    对每个 pickup 节点 Cp_X（位置 X），找搬运车 V1 在路线中
-    插入"取容器@X"和"放容器@Y"，同时取货车 V2 的 Cp_X
-    位置从 X 改为 Y。净收益 = V2 节省 - V1 绕路代价。
-    """
-    best_plan = None  # (net_saving, sat_id, ben_idx, pick_node, new_phys,
-                      #  carrier_idx, pick_pos, drop_pos)
+    t_start = time.time()
+    time_budget = 2.0
+
+    best_plan = None
 
     relocated = {k[2] for k in sol.transshipments}
 
     for sat_id, routes in sol.e2_routes.items():
+        if time.time() - t_start > time_budget:
+            break
+
         all_tasks = evaluator.e2_tasks_by_sat.get(sat_id, [])
         all_phys = list(set(t.cust for t in all_tasks))
 
+        pickups = []
         for ben_idx, route in enumerate(routes):
             for pick_node in route.nodes:
                 if pick_node.startswith("TRANS_"):
                     continue
                 t = evaluator.e2_task_map.get(pick_node)
-                if not t or t.kind != 'p':
-                    continue
-                if pick_node in relocated:
-                    continue
+                if t and t.kind == 'p' and pick_node not in relocated:
+                    pickups.append((ben_idx, pick_node, t))
 
-                old_phys = evaluator.phys(pick_node)
-                old_ben_dist = evaluator.route_distance(route)
+        if not pickups:
+            continue
+        if len(pickups) > 5:
+            pickups = random.sample(pickups, 5)
 
-                for new_phys in all_phys:
-                    if new_phys == old_phys:
+        for ben_idx, pick_node, t in pickups:
+            if time.time() - t_start > time_budget:
+                break
+
+            old_phys = evaluator.phys(pick_node)
+            ben_route = sol.e2_routes[sat_id][ben_idx]
+            old_ben_dist = evaluator.route_distance(ben_route)
+
+            candidates = [p for p in all_phys if p != old_phys]
+            if len(candidates) > 3:
+                candidates = random.sample(candidates, 3)
+
+            for new_phys in candidates:
+                evaluator.task_to_phys[pick_node] = new_phys
+                try:
+                    if not evaluator.check_e2_route_feasible(ben_route, sat_id):
                         continue
-
-                    # 1. 计算取货车 V2 的节省
-                    evaluator.task_to_phys[pick_node] = new_phys
-                    if not evaluator.check_e2_route_feasible(route, sat_id):
-                        evaluator.task_to_phys[pick_node] = old_phys
-                        continue
-                    new_ben_dist = evaluator.route_distance(route)
+                    new_ben_dist = evaluator.route_distance(ben_route)
                     v2_saving = old_ben_dist - new_ben_dist
+                finally:
                     evaluator.task_to_phys[pick_node] = old_phys
 
-                    if v2_saving <= 0.01:
-                        continue
+                if v2_saving <= 0.01:
+                    continue
 
-                    # 2. 找最优搬运车 V1
-                    for carrier_idx, carrier_route in enumerate(routes):
-                        if carrier_idx == ben_idx:
-                            continue
+                carrier_list = [(ci, cr) for ci, cr in enumerate(routes)
+                                if ci != ben_idx]
+                if len(carrier_list) > 3:
+                    carrier_list = random.sample(carrier_list, 3)
 
-                        carrier_nodes = carrier_route.nodes
-                        pick_vnode = f"TRANS_PICK_{old_phys}"
-                        drop_vnode = f"TRANS_DROP_{new_phys}"
+                for carrier_idx, carrier_route in carrier_list:
+                    if time.time() - t_start > time_budget:
+                        break
 
-                        n = len(carrier_nodes)
-                        for pick_pos in range(n + 1):
-                            for drop_pos in range(pick_pos + 1, n + 2):
-                                old_nodes = carrier_nodes[:]
-                                old_loads = dict(carrier_route.transport_loads)
+                    old_cd = evaluator.route_distance(carrier_route)
+                    pick_vnode = f"TRANS_PICK_{old_phys}"
+                    drop_vnode = f"TRANS_DROP_{new_phys}"
 
-                                carrier_nodes.insert(pick_pos, pick_vnode)
-                                carrier_route.transport_loads[pick_vnode] = (
-                                    t.w, t.v)
+                    pick_positions = _quick_best_positions(
+                        carrier_route.nodes, carrier_route.base,
+                        pick_vnode, evaluator, top_k=3)
 
-                                carrier_nodes.insert(drop_pos, drop_vnode)
-                                carrier_route.transport_loads[drop_vnode] = (
-                                    t.w, t.v)
+                    for pp in pick_positions:
+                        if time.time() - t_start > time_budget:
+                            break
 
-                                if evaluator.check_e2_route_feasible(
-                                        carrier_route, sat_id):
-                                    old_carrier_dist = _calc_dist_without(
-                                        old_nodes, carrier_route.base,
-                                        evaluator)
-                                    new_carrier_dist = evaluator.route_distance(
-                                        carrier_route)
-                                    detour_cost = (new_carrier_dist
-                                                   - old_carrier_dist)
+                        saved_nodes = carrier_route.nodes[:]
+                        saved_loads = dict(carrier_route.transport_loads)
+                        carrier_route.nodes.insert(pp, pick_vnode)
+                        carrier_route.transport_loads[pick_vnode] = (t.w, t.v)
 
-                                    net_saving = v2_saving - detour_cost
+                        drop_positions = _quick_best_positions(
+                            carrier_route.nodes, carrier_route.base,
+                            drop_vnode, evaluator, top_k=3,
+                            start_after=pp)
 
-                                    if (best_plan is None
-                                            or net_saving > best_plan[0]):
-                                        best_plan = (
-                                            net_saving, sat_id, ben_idx,
-                                            pick_node, new_phys,
-                                            carrier_idx, pick_pos, drop_pos)
+                        for dp in drop_positions:
+                            old_nodes2 = carrier_route.nodes[:]
+                            old_loads2 = dict(carrier_route.transport_loads)
 
-                                carrier_route.nodes = old_nodes
-                                carrier_route.transport_loads = old_loads
+                            carrier_route.nodes.insert(dp, drop_vnode)
+                            carrier_route.transport_loads[drop_vnode] = (t.w, t.v)
+
+                            if evaluator.check_e2_route_feasible(
+                                    carrier_route, sat_id):
+                                new_cd = evaluator.route_distance(carrier_route)
+                                net = v2_saving - (new_cd - old_cd)
+
+                                if (best_plan is None
+                                        or net > best_plan[0]):
+                                    best_plan = (
+                                        net, sat_id, ben_idx,
+                                        pick_node, new_phys,
+                                        carrier_idx, pp, dp)
+
+                            carrier_route.nodes[:] = old_nodes2
+                            carrier_route.transport_loads = old_loads2
+
+                        carrier_route.nodes[:] = saved_nodes
+                        carrier_route.transport_loads = saved_loads
 
     if best_plan and best_plan[0] > 0.01:
         (net_saving, sat_id, ben_idx, pick_node, new_phys,
@@ -778,13 +745,22 @@ def _search_and_apply_relocation(sol, evaluator):
     return False
 
 
-def _calc_dist_without(nodes, base, evaluator):
-    """计算不含虚拟节点的路线距离"""
+def _quick_best_positions(nodes, base, vnode, evaluator, top_k=3,
+                          start_after=-1):
+    v_phys = evaluator.phys(vnode)
     path = [base] + nodes + [base]
-    total = 0.0
-    for i in range(len(path) - 1):
-        total += evaluator.dist(path[i], path[i + 1])
-    return total
+    positions = []
+
+    for pos in range(start_after + 1, len(nodes) + 1):
+        prev_phys = evaluator.phys(path[pos])
+        next_phys = evaluator.phys(path[pos + 1])
+        detour = (evaluator.problem.distance(prev_phys, v_phys)
+                  + evaluator.problem.distance(v_phys, next_phys)
+                  - evaluator.problem.distance(prev_phys, next_phys))
+        positions.append((detour, pos))
+
+    positions.sort(key=lambda x: x[0])
+    return [p for _, p in positions[:top_k]]
 
 
 def _removal_saving(route, node_id, evaluator):
@@ -804,49 +780,18 @@ def _removal_saving(route, node_id, evaluator):
 
 
 # =====================================================================
-#  辅助函数
-# =====================================================================
-
-def clean_empty_routes(sol):
-    sol.e1_routes = [r for r in sol.e1_routes if r.nodes]
-    for sat_id in sol.e2_routes:
-        sol.e2_routes[sat_id] = [
-            r for r in sol.e2_routes[sat_id] if r.nodes
-        ]
-
-
-def _roulette(weights):
-    total = sum(weights)
-    if total < 1e-10:
-        return random.randint(0, len(weights) - 1)
-    r = random.random() * total
-    cumsum = 0.0
-    for i, w in enumerate(weights):
-        cumsum += w
-        if cumsum >= r:
-            return i
-    return len(weights) - 1
-
-
-# =====================================================================
 #  主求解函数
 # =====================================================================
 
 def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
                TFp=9999.0, max_iterations=5000, max_time=120,
                seed=42, verbose=True):
-    """
-    Model 4 两阶段 ALNS：
-    阶段一：Model 2 ALNS（无中转算子）
-    阶段二：后处理中转搜索
-    """
     random.seed(seed)
     start_time = time.time()
 
     evaluator = Evaluator(problem, e1_tasks, e2_tasks_by_sat, TFp,
                           vehicles_per_satellite=vehicles_per_satellite)
 
-    # ---- 初始解 ----
     sol = build_initial_solution(problem, e1_tasks, e2_tasks_by_sat, evaluator)
     sol.cost = evaluator.total_cost(sol)
     best_sol = sol.copy()
@@ -862,9 +807,6 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         e2_count = sum(len(v) for v in sol.e2_routes.values())
         print(f"E2 路径数: {e2_count}")
 
-    # ==================================================================
-    #  阶段一：Model 2 ALNS（无中转算子）
-    # ==================================================================
     if verbose:
         print(f"\n--- 阶段一：Model 2 ALNS (无中转) ---")
 
@@ -925,9 +867,9 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         candidate.cost = evaluator.total_cost(candidate)
 
         delta = candidate.cost - sol.cost
-        if delta < -1e-6:
+        if delta < -FEAS_TOL:
             sol = candidate
-            if sol.cost < best_cost - 1e-6:
+            if sol.cost < best_cost - FEAS_TOL:
                 best_sol = sol.copy()
                 best_cost = sol.cost
                 d_scores[d_idx] += sigma1
@@ -970,9 +912,6 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         elapsed = time.time() - start_time
         print(f"\n  阶段一完成: cost={best_cost:.2f}, 耗时={elapsed:.2f}s")
 
-    # ==================================================================
-    #  阶段二：后处理中转搜索
-    # ==================================================================
     if verbose:
         print(f"\n--- 阶段二：后处理中转搜索 ---")
 
@@ -998,7 +937,8 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
     for sat_id, routes in best_sol.e2_routes.items():
         e2_routes_out[sat_id] = [r.full_path() for r in routes]
 
-    _print_solution(best_sol, evaluator)
+    if verbose:
+        _print_solution(best_sol, evaluator)
     return e1_routes_out, e2_routes_out
 
 

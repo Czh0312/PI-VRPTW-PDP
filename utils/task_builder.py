@@ -46,6 +46,6 @@ def build_tasks_for_model(problem: ProblemInstance, model_type: int):
                     Task(f"{c.id}p", c.id, "p", cw, cv, c.tw_pick)
                 )
     else:
-        raise ValueError(f"当前仅支持 model 1/2/3，收到: {model_type}")
+        raise ValueError(f"当前仅支持 model 1/2/3/4，收到: {model_type}")
 
     return e1_tasks, e2_tasks_by_sat

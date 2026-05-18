@@ -1,5 +1,5 @@
 # core/vehicle.py
-from typing import Dict, Optional
+from typing import Dict
 
 class FleetConfig:
     """管理全局基础参数（车队配置 + pickup 单位值）"""
@@ -17,12 +17,5 @@ class FleetConfig:
         self.container_weight = float(config_dict.get("container_weight", 0.0))
         self.container_volume = float(config_dict.get("container_volume", 1.0))
 
-class Vehicle:
-    """表示具体的单个车辆实体（为后续扩展多车型预留）"""
-    # 修正点：将 assigned_sat 的类型改为 Optional[str]
-    def __init__(self, v_id: str, v_type: str, weight_cap: float, vol_cap: float, assigned_sat: Optional[str] = None):
-        self.id = v_id
-        self.type = v_type # 'E1' or 'E2'
-        self.weight_cap = weight_cap
-        self.vol_cap = vol_cap
-        self.assigned_sat = assigned_sat # 针对前置仓独立车队的 E2 车辆
+        # 行驶速度（speed=1 时 travel_time == distance）
+        self.speed = float(config_dict.get("speed", 1.0))

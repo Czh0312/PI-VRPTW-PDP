@@ -7,6 +7,7 @@ Model 4 两阶段精确求解：
 """
 from models.model_2.solver import solve_exact as solve_m2_exact
 from models.model_2.alns_solver import solve_alns as solve_m2_alns
+from models.alns_base import Route, Solution
 
 
 def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
@@ -32,16 +33,14 @@ def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
 
     # 阶段一 cost（直接从路线计算）
     stage1_cost = _compute_total_distance(
-        problem, e1_tasks, e2_tasks_by_sat, e1_routes, e2_routes_by_sat)
+        problem, e1_tasks, e2_tasks_by_sat, e1_routes, e2_routes_by_sat, TFp)
 
     if verbose:
         print(f"\n  阶段一完成: cost={stage1_cost:.2f}")
         print(f"\n--- 阶段二：后处理中转搜索 ---")
 
     # 阶段二：启发式后处理中转
-    from models.model_4.alns_solver import (
-        Solution, Route, Evaluator, postprocess_transshipment
-    )
+    from models.model_4.alns_solver import Evaluator, postprocess_transshipment
 
     sol = _routes_to_solution(e1_routes, e2_routes_by_sat)
     evaluator = Evaluator(problem, e1_tasks, e2_tasks_by_sat, TFp,
@@ -71,8 +70,6 @@ def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
 
 def _routes_to_solution(e1_routes, e2_routes_by_sat):
     """将 MIP 输出的路线格式转换为 ALNS Solution 格式"""
-    from models.model_4.alns_solver import Solution, Route
-
     sol = Solution()
     for route in e1_routes:
         base = route[0]
@@ -91,10 +88,10 @@ def _routes_to_solution(e1_routes, e2_routes_by_sat):
 
 
 def _compute_total_distance(problem, e1_tasks, e2_tasks_by_sat,
-                            e1_routes, e2_routes_by_sat):
+                            e1_routes, e2_routes_by_sat, TFp=9999.0):
     """从路线计算总距离"""
-    from models.model_4.alns_solver import Evaluator, Route, Solution
+    from models.model_4.alns_solver import Evaluator
 
-    evaluator = Evaluator(problem, e1_tasks, e2_tasks_by_sat)
+    evaluator = Evaluator(problem, e1_tasks, e2_tasks_by_sat, TFp)
     sol = _routes_to_solution(e1_routes, e2_routes_by_sat)
     return evaluator.total_cost(sol)

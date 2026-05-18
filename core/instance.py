@@ -80,7 +80,6 @@ class ProblemInstance:
             sat.pickup_weight = 0.0
             sat.pickup_volume = 0.0
             sat.e1_delivery_due_date = float('inf')
-            sat.e1_pickup_ready_time = 0.0
 
         for cust in self.customers:
             assignment = cust.assigned_sat
@@ -94,9 +93,6 @@ class ProblemInstance:
                 # 时间窗逻辑
                 if cust.tw_del[1] < sat.e1_delivery_due_date:
                     sat.e1_delivery_due_date = cust.tw_del[1]
-
-                if cw > 0 and cust.tw_pick[1] > sat.e1_pickup_ready_time:
-                    sat.e1_pickup_ready_time = cust.tw_pick[1]
 
         # 体积和回收：顾客数 × 容器参数
         for sat in self.satellites:

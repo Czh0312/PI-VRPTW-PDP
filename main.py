@@ -58,7 +58,7 @@ def main():
 
     nodes_dict, _ = parse_dataset(str(data_path))
 
-    problem = ProblemInstance(nodes_dict, fleet_cfg)
+    problem = ProblemInstance(nodes_dict, fleet_cfg, speed=fleet_cfg.get("speed", 1.0))
     problem.aggregate_demands_from_pre_assignment()
     e1_tasks, e2_tasks_by_sat = build_tasks_for_model(problem, model)
 

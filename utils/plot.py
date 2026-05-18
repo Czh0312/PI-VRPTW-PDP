@@ -14,13 +14,19 @@ def plot_vrp_solution(problem: ProblemInstance, e1_routes: list, e2_routes_by_sa
     # ==========================================
     def get_node(nid):
         """将任务ID (如 'S0d', 'C1p') 安全映射回物理节点 (如 'S0', 'C1')"""
+        # 虚拟搬运节点: TRANS_PICK_X / TRANS_DROP_X → X
+        if nid.startswith("TRANS_PICK_") or nid.startswith("TRANS_DROP_"):
+            phys = nid.split("_", 2)[-1]
+            if phys in problem.nodes:
+                return problem.nodes[phys]
+
         if nid in problem.nodes:
             return problem.nodes[nid]
-        
+
         # 尝试去掉尾部的 'd' (配送) 或 'p' (回收)
         if nid.endswith(('d', 'p')) and nid[:-1] in problem.nodes:
             return problem.nodes[nid[:-1]]
-            
+
         raise KeyError(f"绘图失败: 无法将任务ID '{nid}' 映射到物理坐标点。")
 
     # 1. 画出所有节点

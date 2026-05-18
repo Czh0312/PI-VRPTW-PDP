@@ -17,7 +17,8 @@ def add_all_constraints(m: gp.Model, problem, e1_tasks, e2_tasks_by_sat, vars_di
     V_by_sat = ctx['V_by_sat']
     get_phys = ctx['get_phys']
     get_st = ctx['get_st']
-    
+    time_map = ctx['time_map']
+
     M = 100000.0  # Big-M
 
     # ================= E1 约束 =================
@@ -38,7 +39,7 @@ def add_all_constraints(m: gp.Model, problem, e1_tasks, e2_tasks_by_sat, vars_di
             for j in F:
                 if i == j: continue
                 # 时间连续性
-                m.addConstr(A_e1[j, k] >= A_e1[i, k] + get_st(i) + problem.distance(i, j) - M * (1 - x[i, j, k]))
+                m.addConstr(A_e1[j, k] >= A_e1[i, k] + get_st(i) + time_map[i, j] - M * (1 - x[i, j, k]))
                 
                 # 载重与体积单调递减
                 task_j = next((t for t in e1_tasks if t.id == f"{j}d"), None)
@@ -75,7 +76,7 @@ def add_all_constraints(m: gp.Model, problem, e1_tasks, e2_tasks_by_sat, vars_di
             for i in nodes_f:
                 for j in task_ids:
                     if i == j: continue
-                    dist_ij = problem.distance(get_phys(i), get_phys(j))
+                    dist_ij = time_map[i, j]
                     m.addConstr(A_e2[j, v_key] >= A_e2[i, v_key] + get_st(i) + dist_ij - M * (1 - z[i, j, v_key]))
                     
                     t_j = next((t for t in tasks_f if t.id == j), None)
