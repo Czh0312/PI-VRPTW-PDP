@@ -54,9 +54,9 @@ class Evaluator:
 
     def phys(self, node_id):
         if node_id.startswith("TRANS_PICK_"):
-            return node_id[len("TRANS_PICK_"):]
+            return _transport_node_phys(node_id, "TRANS_PICK_")
         if node_id.startswith("TRANS_DROP_"):
-            return node_id[len("TRANS_DROP_"):]
+            return _transport_node_phys(node_id, "TRANS_DROP_")
         return self.task_to_phys.get(node_id, node_id)
 
     def dist(self, a, b):
@@ -194,24 +194,36 @@ class Evaluator:
         return True
 
     def is_feasible(self, sol):
-        visited_e1 = set()
+        if not _transshipments_consistent(sol):
+            return False
+
+        if len(sol.e1_routes) > self.problem.e1_vehicle_count:
+            return False
+
+        visited_e1 = []
         for r in sol.e1_routes:
             if not self.check_e1_route_feasible(r):
                 return False
-            visited_e1.update(r.nodes)
-        for tid in self.e1_task_map:
-            if tid not in visited_e1:
-                return False
+            visited_e1.extend(r.nodes)
+        required_e1 = set(self.e1_task_map)
+        if set(visited_e1) != required_e1:
+            return False
+        if len(visited_e1) != len(required_e1):
+            return False
 
         for sat_id, routes in sol.e2_routes.items():
-            visited_e2 = set()
+            if len(routes) > self.vehicles_per_satellite:
+                return False
+            visited_e2 = []
             for r in routes:
                 if not self.check_e2_route_feasible(r, sat_id):
                     return False
-                visited_e2.update(n for n in r.nodes
+                visited_e2.extend(n for n in r.nodes
                                   if not n.startswith("TRANS_"))
             required = {t.id for t in self.e2_tasks_by_sat.get(sat_id, [])}
-            if visited_e2 != required:
+            if set(visited_e2) != required:
+                return False
+            if len(visited_e2) != len(required):
                 return False
         return True
 
@@ -301,6 +313,7 @@ def build_initial_solution(problem, e1_tasks, e2_tasks_by_sat, evaluator):
         sol.e2_routes[sat_id] = routes
 
     sol.cost = evaluator.total_cost(sol)
+    sol.task_to_phys = dict(evaluator.task_to_phys)
     return sol
 
 
@@ -308,12 +321,23 @@ def build_initial_solution(problem, e1_tasks, e2_tasks_by_sat, evaluator):
 #  中转优化算子
 # =====================================================================
 
-def optimize_transshipment(sol, evaluator):
+def optimize_transshipment(sol, evaluator, candidate_mode="all_sampled",
+                           max_relocation_candidates=None,
+                           time_budget=2.0, sample_pickups=5,
+                           sample_locations=3, sample_carriers=3,
+                           position_top_k=3):
     if not evaluator.is_feasible(sol):
         return False
 
     t_start = time.time()
-    time_budget = 2.0
+    mode = candidate_mode.lower()
+    if mode == "all_exhaustive":
+        sample_pickups = None
+        sample_locations = None
+        sample_carriers = None
+        position_top_k = None
+    elif mode == "nearest_k" and max_relocation_candidates is None:
+        max_relocation_candidates = 1
 
     best_plan = None
 
@@ -324,7 +348,7 @@ def optimize_transshipment(sol, evaluator):
             break
 
         all_tasks = evaluator.e2_tasks_by_sat.get(sat_id, [])
-        all_phys = list(set(t.cust for t in all_tasks))
+        all_phys = sorted({t.cust for t in all_tasks})
 
         pickups = []
         for ben_idx, route in enumerate(routes):
@@ -337,8 +361,7 @@ def optimize_transshipment(sol, evaluator):
 
         if not pickups:
             continue
-        if len(pickups) > 5:
-            pickups = random.sample(pickups, 5)
+        pickups = _limit_candidates(pickups, sample_pickups, sample=True)
 
         for ben_idx, pick_node, t in pickups:
             if time.time() - t_start > time_budget:
@@ -348,9 +371,10 @@ def optimize_transshipment(sol, evaluator):
             ben_route = sol.e2_routes[sat_id][ben_idx]
             old_ben_dist = evaluator.route_distance(ben_route)
 
-            candidates = [p for p in all_phys if p != old_phys]
-            if len(candidates) > 3:
-                candidates = random.sample(candidates, 3)
+            candidates = _select_relocation_candidates(
+                evaluator.problem, old_phys, all_phys, mode,
+                max_relocation_candidates, sample_locations,
+            )
 
             for new_phys in candidates:
                 evaluator.task_to_phys[pick_node] = new_phys
@@ -367,20 +391,20 @@ def optimize_transshipment(sol, evaluator):
 
                 carrier_list = [(ci, cr) for ci, cr in enumerate(routes)
                                 if ci != ben_idx]
-                if len(carrier_list) > 3:
-                    carrier_list = random.sample(carrier_list, 3)
+                carrier_list = _limit_candidates(
+                    carrier_list, sample_carriers, sample=True)
 
                 for carrier_idx, carrier_route in carrier_list:
                     if time.time() - t_start > time_budget:
                         break
 
                     old_cd = evaluator.route_distance(carrier_route)
-                    pick_vnode = f"TRANS_PICK_{old_phys}"
-                    drop_vnode = f"TRANS_DROP_{new_phys}"
+                    pick_vnode = _transport_pick_node(pick_node, old_phys)
+                    drop_vnode = _transport_drop_node(pick_node, new_phys)
 
                     pick_positions = _quick_best_positions(
                         carrier_route.nodes, carrier_route.base,
-                        pick_vnode, evaluator, top_k=3)
+                        pick_vnode, evaluator, top_k=position_top_k)
 
                     for pp in pick_positions:
                         if time.time() - t_start > time_budget:
@@ -393,7 +417,7 @@ def optimize_transshipment(sol, evaluator):
 
                         drop_positions = _quick_best_positions(
                             carrier_route.nodes, carrier_route.base,
-                            drop_vnode, evaluator, top_k=3,
+                            drop_vnode, evaluator, top_k=position_top_k,
                             start_after=pp)
 
                         for dp in drop_positions:
@@ -431,8 +455,8 @@ def optimize_transshipment(sol, evaluator):
         evaluator.task_to_phys[pick_node] = new_phys
 
         carrier_route = sol.e2_routes[sat_id][carrier_idx]
-        pick_vnode = f"TRANS_PICK_{old_phys}"
-        drop_vnode = f"TRANS_DROP_{new_phys}"
+        pick_vnode = _transport_pick_node(pick_node, old_phys)
+        drop_vnode = _transport_drop_node(pick_node, new_phys)
 
         carrier_route.nodes.insert(pick_pos, pick_vnode)
         carrier_route.transport_loads[pick_vnode] = (t.w, t.v)
@@ -443,10 +467,55 @@ def optimize_transshipment(sol, evaluator):
         sol.transshipments[(sat_id, ben_idx, pick_node, new_phys)] = (
             old_phys, carrier_idx, t.w, t.v)
 
+        sol.task_to_phys = dict(evaluator.task_to_phys)
         sol.cost = evaluator.total_cost(sol)
         return True
 
     return False
+
+
+def _limit_candidates(items, limit, sample=False):
+    if limit is None or len(items) <= limit:
+        return list(items)
+    if limit <= 0:
+        return []
+    if sample:
+        return random.sample(items, limit)
+    return list(items[:limit])
+
+
+def _select_relocation_candidates(problem, old_phys, all_phys, mode,
+                                  max_relocation_candidates,
+                                  sample_locations):
+    candidates = [p for p in all_phys if p != old_phys]
+    if mode == "nearest_k":
+        candidates.sort(key=lambda p: (problem.distance(old_phys, p), p))
+        return _limit_candidates(
+            candidates, max_relocation_candidates, sample=False)
+    if mode == "all_sampled":
+        return _limit_candidates(candidates, sample_locations, sample=True)
+    if mode in ("all_exhaustive", "all", "global"):
+        candidates.sort(key=lambda p: (problem.distance(old_phys, p), p))
+        return candidates
+    raise ValueError(
+        "candidate_mode must be one of: nearest_k, all_sampled, "
+        "all_exhaustive"
+    )
+
+
+def _transport_pick_node(pick_node, old_phys):
+    return f"TRANS_PICK_{pick_node}@{old_phys}"
+
+
+def _transport_drop_node(pick_node, new_phys):
+    return f"TRANS_DROP_{pick_node}@{new_phys}"
+
+
+def _transport_node_phys(node_id, prefix):
+    payload = node_id[len(prefix):]
+    if "@" in payload:
+        return payload.rsplit("@", 1)[1]
+    return payload
 
 
 def _quick_best_positions(nodes, base, vnode, evaluator, top_k=3,
@@ -464,7 +533,103 @@ def _quick_best_positions(nodes, base, vnode, evaluator, top_k=3,
         positions.append((detour, pos))
 
     positions.sort(key=lambda x: x[0])
+    if top_k is None:
+        return [p for _, p in positions]
     return [p for _, p in positions[:top_k]]
+
+
+def _path_with_relocations(route, sol, evaluator):
+    path = route.full_path()
+    out = []
+    for nid in path:
+        if nid.startswith("TRANS_"):
+            out.append(nid)
+            continue
+        phys = sol.task_to_phys.get(nid)
+        default_phys = nid[:-1] if nid.endswith(('d', 'p')) else nid
+        if phys and phys != default_phys and phys in evaluator.problem.nodes:
+            out.append(phys)
+        else:
+            out.append(nid)
+    return out
+
+
+def synchronize_transshipments(sol, evaluator):
+    evaluator.task_to_phys = dict(sol.task_to_phys)
+    refreshed = {}
+
+    for key, payload in list(sol.transshipments.items()):
+        sat_id, _old_ben_idx, pick_node, new_phys = key
+        old_phys, _old_carrier_idx, cw, cv = payload
+        routes = sol.e2_routes.get(sat_id, [])
+        pick_vnode = _transport_pick_node(pick_node, old_phys)
+        drop_vnode = _transport_drop_node(pick_node, new_phys)
+
+        ben_idx = _find_route_index(routes, lambda r: pick_node in r.nodes)
+        carrier_idx = _find_route_index(
+            routes,
+            lambda r: pick_vnode in r.nodes and drop_vnode in r.nodes,
+        )
+
+        if ben_idx is None or carrier_idx is None or ben_idx == carrier_idx:
+            _remove_transport_nodes(routes, pick_vnode, drop_vnode)
+            evaluator.task_to_phys[pick_node] = old_phys
+            continue
+
+        evaluator.task_to_phys[pick_node] = new_phys
+        refreshed[(sat_id, ben_idx, pick_node, new_phys)] = (
+            old_phys, carrier_idx, cw, cv)
+
+    sol.transshipments = refreshed
+    sol.task_to_phys = dict(evaluator.task_to_phys)
+
+
+def _find_route_index(routes, predicate):
+    for idx, route in enumerate(routes):
+        if predicate(route):
+            return idx
+    return None
+
+
+def _remove_transport_nodes(routes, pick_vnode, drop_vnode):
+    for route in routes:
+        route.nodes = [
+            nid for nid in route.nodes
+            if nid not in (pick_vnode, drop_vnode)
+        ]
+        route.transport_loads.pop(pick_vnode, None)
+        route.transport_loads.pop(drop_vnode, None)
+
+
+def _transshipments_consistent(sol):
+    for key, payload in sol.transshipments.items():
+        sat_id, ben_idx, pick_node, new_phys = key
+        old_phys, carrier_idx, cw, cv = payload
+        routes = sol.e2_routes.get(sat_id, [])
+        if ben_idx == carrier_idx:
+            return False
+        if ben_idx >= len(routes) or carrier_idx >= len(routes):
+            return False
+        if sol.task_to_phys.get(pick_node) != new_phys:
+            return False
+        if old_phys == new_phys:
+            return False
+
+        ben_route = routes[ben_idx]
+        carrier_route = routes[carrier_idx]
+        pick_vnode = _transport_pick_node(pick_node, old_phys)
+        drop_vnode = _transport_drop_node(pick_node, new_phys)
+        if pick_node not in ben_route.nodes:
+            return False
+        if pick_vnode not in carrier_route.nodes:
+            return False
+        if drop_vnode not in carrier_route.nodes:
+            return False
+        if carrier_route.transport_loads.get(pick_vnode) != (cw, cv):
+            return False
+        if carrier_route.transport_loads.get(drop_vnode) != (cw, cv):
+            return False
+    return True
 
 
 def transshipment_destroy(sol, evaluator, num_remove=1):
@@ -483,8 +648,8 @@ def transshipment_destroy(sol, evaluator, num_remove=1):
 
         evaluator.task_to_phys[pick_node] = old_phys
 
-        pick_vnode = f"TRANS_PICK_{old_phys}"
-        drop_vnode = f"TRANS_DROP_{new_phys}"
+        pick_vnode = _transport_pick_node(pick_node, old_phys)
+        drop_vnode = _transport_drop_node(pick_node, new_phys)
         carrier_route = sol.e2_routes[sat_id][carrier_idx]
 
         if pick_vnode in carrier_route.nodes:
@@ -497,6 +662,7 @@ def transshipment_destroy(sol, evaluator, num_remove=1):
         del sol.transshipments[key]
         undone += 1
 
+    sol.task_to_phys = dict(evaluator.task_to_phys)
     return []
 
 
@@ -792,7 +958,15 @@ def regret_insertion(sol, removed, evaluator, echelon='e2', k=2):
 # =====================================================================
 
 def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
-               max_iterations=5000, max_time=120, seed=42, verbose=True):
+               max_iterations=5000, max_time=120, seed=42, verbose=True,
+               transshipment_candidate_mode="all_sampled",
+               max_relocation_candidates=None,
+               transshipment_time_budget=2.0,
+               transshipment_sample_pickups=5,
+               transshipment_sample_locations=3,
+               transshipment_sample_carriers=3,
+               transshipment_position_top_k=3,
+               transshipment_interval=20):
     random.seed(seed)
     start_time = time.time()
 
@@ -813,8 +987,23 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         print(f"E1 路径数: {len(sol.e1_routes)}")
         e2_count = sum(len(v) for v in sol.e2_routes.values())
         print(f"E2 路径数: {e2_count}")
+        print("中转候选策略: "
+              f"mode={transshipment_candidate_mode}, "
+              f"max_relocation_candidates={max_relocation_candidates}, "
+              f"time_budget={transshipment_time_budget}s")
 
-    optimize_transshipment(sol, evaluator)
+    optimize_transshipment(
+        sol, evaluator,
+        candidate_mode=transshipment_candidate_mode,
+        max_relocation_candidates=max_relocation_candidates,
+        time_budget=transshipment_time_budget,
+        sample_pickups=transshipment_sample_pickups,
+        sample_locations=transshipment_sample_locations,
+        sample_carriers=transshipment_sample_carriers,
+        position_top_k=transshipment_position_top_k,
+    )
+    synchronize_transshipments(sol, evaluator)
+    sol.task_to_phys = dict(evaluator.task_to_phys)
     if sol.cost < best_cost:
         best_sol = sol.copy()
         best_cost = sol.cost
@@ -868,6 +1057,7 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         num_remove = random.randint(1, max(1, max_remove))
 
         candidate = sol.copy()
+        evaluator.task_to_phys = dict(candidate.task_to_phys)
 
         if d_idx == 3:
             destroy_ops[d_idx](candidate, evaluator, num_remove=1)
@@ -882,16 +1072,45 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
 
             clean_empty_routes(candidate)
 
+        synchronize_transshipments(candidate, evaluator)
+        clean_empty_routes(candidate)
+        synchronize_transshipments(candidate, evaluator)
+
+        if not evaluator.is_feasible(candidate):
+            evaluator.task_to_phys = dict(sol.task_to_phys)
+            T *= cooling_rate
+            continue
+
         candidate.cost = evaluator.total_cost(candidate)
 
-        trans_interval = 20
-        if candidate.cost < sol.cost - FEAS_TOL or iteration % trans_interval == 0:
-            optimize_transshipment(candidate, evaluator)
+        interval_due = (
+            transshipment_interval
+            and iteration % transshipment_interval == 0
+        )
+        if candidate.cost < sol.cost - FEAS_TOL or interval_due:
+            optimize_transshipment(
+                candidate, evaluator,
+                candidate_mode=transshipment_candidate_mode,
+                max_relocation_candidates=max_relocation_candidates,
+                time_budget=transshipment_time_budget,
+                sample_pickups=transshipment_sample_pickups,
+                sample_locations=transshipment_sample_locations,
+                sample_carriers=transshipment_sample_carriers,
+                position_top_k=transshipment_position_top_k,
+            )
+            synchronize_transshipments(candidate, evaluator)
+            candidate.task_to_phys = dict(evaluator.task_to_phys)
             candidate.cost = evaluator.total_cost(candidate)
+
+        if not evaluator.is_feasible(candidate):
+            evaluator.task_to_phys = dict(sol.task_to_phys)
+            T *= cooling_rate
+            continue
 
         delta = candidate.cost - sol.cost
         if delta < -FEAS_TOL:
             sol = candidate
+            evaluator.task_to_phys = dict(sol.task_to_phys)
             if sol.cost < best_cost - FEAS_TOL:
                 best_sol = sol.copy()
                 best_cost = sol.cost
@@ -907,6 +1126,7 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
             prob = math.exp(-delta / T)
             if random.random() < prob:
                 sol = candidate
+                evaluator.task_to_phys = dict(sol.task_to_phys)
                 d_scores[d_idx] += sigma3
                 r_scores[r_idx] += sigma3
 
@@ -941,10 +1161,20 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         print(f"总耗时: {elapsed:.2f} 秒")
         print(f"{'=' * 60}")
 
-    e1_routes_out = [r.full_path() for r in best_sol.e1_routes]
+    evaluator.task_to_phys = dict(best_sol.task_to_phys)
+    synchronize_transshipments(best_sol, evaluator)
+    clean_empty_routes(best_sol)
+    synchronize_transshipments(best_sol, evaluator)
+    e1_routes_out = [
+        _path_with_relocations(r, best_sol, evaluator)
+        for r in best_sol.e1_routes
+    ]
     e2_routes_out = {}
     for sat_id, routes in best_sol.e2_routes.items():
-        e2_routes_out[sat_id] = [r.full_path() for r in routes]
+        e2_routes_out[sat_id] = [
+            _path_with_relocations(r, best_sol, evaluator)
+            for r in routes
+        ]
 
     if verbose:
         _print_solution(best_sol, evaluator)

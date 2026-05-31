@@ -1,9 +1,9 @@
 # models/model_3/model.py
 # -*- coding: utf-8 -*-
 """
-对齐文档3 (2E-VRP-PDP-TR) — 统一载重/体积变量版
-使用 unified Q/V (同 Model 2), 共享容量由 0 ≤ Q ≤ cap 自然保证
-中转变量 Δq/Δw 直接作用于统一 Q/V
+Model 3 的基础 MIP：取送货路线优化，载重/体积使用统一 Q/V。
+当前 exact 入口在该 MIP 解的基础上做启发式中转后处理；联合中转
+变量未在 MIP 中建模。
 """
 import gurobipy as gp
 from gurobipy import GRB

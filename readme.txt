@@ -55,7 +55,11 @@
 - 中转定义：改变 pickup 节点的物理取货位置。顾客 A 的空容器可以"搬"到另一个顾客 B 的位置去取，车直接在 B 处取，从而减少总行驶距离
 - pickup 节点留在原来的路线上，只改变其物理位置（task_to_phys 映射）
 - ALNS 中：中转在迭代过程中搜索，配合 transshipment_destroy 算子撤销，与路线优化协同进行
-- 精确解（Gurobi MIP）：一次性建模，同时决定路线和中转变量
+- Model 3 ALNS 的中转候选策略可配置：
+  - nearest_k：每个 pickup 只看最近 k 个候选点，便于和精确求解做同范围对比
+  - all_sampled：候选点来自同卫星全客户点，但每轮抽样，默认模式，适合大规模
+  - all_exhaustive：同卫星全客户点尽量枚举，适合小规模测试潜力上限
+- 精确解入口：使用候选剪枝联合 MIP，同时决定 E2 路线、pickup 物理位置和搬运取放节点；默认每个 pickup 只考虑原位置 + 最近 1 个中转候选，主要适合 5/10 客户验证
 - 求解方式：Gurobi MIP + ALNS（含 transshipment_destroy 算子）
 
 ### Model 4：取送货 + 中转（两阶段：先规划再中转）
@@ -63,7 +67,7 @@
 - 阶段二：对阶段一的固定路线，后处理搜索中转机会（改变 pickup 物理位置）
 - 中转定义与 Model 3 完全一致：改变 pickup 的取货位置
 - 结果保证：≤ Model 2 结果（只改进不恶化）
-- 求解方式：Model 2 ALNS + 后处理中转
+- 求解方式：exact 为 Model 2 MIP + 固定路线中转选择 MIP；ALNS 为 Model 2 ALNS + 后处理中转
 
 ### Model 3 vs Model 4 对比
 - Model 3：中转在 ALNS 迭代中搜索，路线和中转协同优化，结果可能更好
@@ -130,6 +134,12 @@
 修改 config/app_config.json 中的 model 字段（1/2/3/4）和 solver 字段（exact/alns），然后：
 ```
 python main.py
+```
+
+Model 3 ALNS 候选策略实验示例：
+```
+python experiments/test_model3.py data/5_customers/C101.csv -s alns --trans-mode nearest_k --max-reloc 1
+python experiments/test_model3.py data/5_customers/C101.csv -s alns --trans-mode all_exhaustive --trans-budget 10
 ```
 
 ---

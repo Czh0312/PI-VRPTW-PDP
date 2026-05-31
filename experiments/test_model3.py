@@ -24,7 +24,11 @@ def load_fleet_config():
         return json.load(f)
 
 
-def run_experiment(data_file: str, solver: str = "exact"):
+def run_experiment(data_file: str, solver: str = "exact",
+                   transshipment_candidate_mode: str = "all_sampled",
+                   max_relocation_candidates=None,
+                   transshipment_time_budget: float = 2.0,
+                   transshipment_interval: int = 20):
     print(f"[{time.strftime('%H:%M:%S')}] 开始测试 Model 3 "
           f"(取送货+横向中转 - 2E-VRP-PDP-TR)")
     print(f"数据集: {data_file}")
@@ -54,7 +58,11 @@ def run_experiment(data_file: str, solver: str = "exact"):
             e1_tasks=e1_tasks,
             e2_tasks_by_sat=e2_tasks_by_sat,
             vehicles_per_satellite=problem.fleet.e2_per_sat_count,
-            max_iterations=5000, max_time=120, seed=42
+            max_iterations=5000, max_time=120, seed=42,
+            transshipment_candidate_mode=transshipment_candidate_mode,
+            max_relocation_candidates=max_relocation_candidates,
+            transshipment_time_budget=transshipment_time_budget,
+            transshipment_interval=transshipment_interval,
         )
 
     run_time = time.time() - start_time
@@ -69,9 +77,24 @@ if __name__ == "__main__":
                         default=os.path.join(project_root, "data", "small", "test2.csv"))
     parser.add_argument("--solver", "-s", type=str, choices=["exact", "alns"],
                         default="exact")
+    parser.add_argument("--trans-mode", type=str,
+                        choices=["nearest_k", "all_sampled", "all_exhaustive"],
+                        default="all_sampled")
+    parser.add_argument("--max-reloc", type=int, default=None,
+                        help="nearest_k 模式下每个 pickup 的候选中转点数量")
+    parser.add_argument("--trans-budget", type=float, default=2.0,
+                        help="每次中转搜索的时间预算，单位秒")
+    parser.add_argument("--trans-interval", type=int, default=20,
+                        help="ALNS 每隔多少轮主动触发一次中转搜索")
     args = parser.parse_args()
 
     if os.path.exists(args.data):
-        run_experiment(args.data, args.solver)
+        run_experiment(
+            args.data, args.solver,
+            transshipment_candidate_mode=args.trans_mode,
+            max_relocation_candidates=args.max_reloc,
+            transshipment_time_budget=args.trans_budget,
+            transshipment_interval=args.trans_interval,
+        )
     else:
         print(f"[错误] 找不到测试文件: {args.data}")

@@ -44,6 +44,9 @@ class Solution:
         self.e1_routes = []
         self.e2_routes = {}
         self.cost = float('inf')
+        # Per-solution physical location overrides for transshipment models.
+        # Plain PDP models leave this empty and use the evaluator defaults.
+        self.task_to_phys = {}
         # 中转记录: {(sat_id, beneficiary_idx, pick_node, new_phys):
         #   (old_phys, carrier_idx, container_w, container_v)}
         self.transshipments = {}
@@ -56,6 +59,7 @@ class Solution:
             for sat, routes in self.e2_routes.items()
         }
         s.cost = self.cost
+        s.task_to_phys = dict(self.task_to_phys)
         s.transshipments = dict(self.transshipments)
         return s
 

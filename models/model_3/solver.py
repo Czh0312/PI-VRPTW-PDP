@@ -1,16 +1,23 @@
 # models/model_3/solver.py
 # -*- coding: utf-8 -*-
 """
-Model 3 精确求解：MIP（无中转）+ 后处理搬运中转
+Model 3 精确求解：路线与中转联合 MIP。
 """
 from gurobipy import GRB
 
 from .model import build_transshipment_model
+from .exact_joint import (
+    apply_route_warm_start,
+    build_model3_joint_exact,
+    extract_solution,
+)
+from models.model_2.solver import solve_exact as solve_m2_exact
 from ..solver_utils import extract_routes_e1, extract_routes_e2, print_e1_loads, print_e2_loads
 
 
 def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
-                verbose=True):
+                verbose=True, max_relocation_candidates=1,
+                warm_start_with_m2=True):
     if verbose:
         total_w_d = sum(t.w for t in e1_tasks if t.kind == 'd')
         total_w_p = sum(t.w for t in e1_tasks if t.kind == 'p')
@@ -41,37 +48,88 @@ def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
             for t in tasks:
                 print(f"    {t.id}: kind={t.kind}, w={t.w}, v={t.v}")
 
-    m, vars_dict, ctx = build_transshipment_model(
-        problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite
+    m, vars_dict, ctx = build_model3_joint_exact(
+        problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
+        max_relocation_candidates=max_relocation_candidates,
     )
+    if warm_start_with_m2:
+        try:
+            if verbose:
+                print("\n[INFO] 使用 Model 2 exact 解作为 Model 3 联合 MIP warm start")
+            m2_e1, m2_e2 = solve_m2_exact(
+                problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
+                TFp=9999.0, verbose=False,
+            )
+            if m2_e1 and m2_e2:
+                apply_route_warm_start(vars_dict, ctx, m2_e1, m2_e2)
+        except Exception as exc:
+            if verbose:
+                print(f"[WARN] Model 2 warm start 构造失败，继续使用默认初始解: {exc}")
     if not verbose:
         m.setParam("OutputFlag", 0)
 
     m.setParam("MIPGap", 0.0)
     m.setParam("TimeLimit", 300)
+    m.setParam("MIPFocus", 1)
+    m.setParam("Heuristics", 0.5)
     m.optimize()
 
     if m.status == GRB.OPTIMAL:
-        e1_routes, e2_routes = _print_solution(m, vars_dict, ctx,
-                                                e2_tasks_by_sat)
-        _postprocess_transport(e2_routes, e2_tasks_by_sat, problem)
+        e1_routes, e2_routes, transshipments = _print_joint_solution(
+            m, vars_dict, ctx
+        )
+        if verbose:
+            _print_joint_routes(e1_routes, e2_routes, transshipments)
         return e1_routes, e2_routes
 
     if m.status == GRB.TIME_LIMIT and m.SolCount > 0:
         print(f"\n达到时间限制, 当前最优解: {m.ObjVal:.2f}  (Gap: {m.MIPGap:.2%})")
-        e1_routes, e2_routes = _print_solution(m, vars_dict, ctx,
-                                                e2_tasks_by_sat)
-        _postprocess_transport(e2_routes, e2_tasks_by_sat, problem)
+        e1_routes, e2_routes, transshipments = _print_joint_solution(
+            m, vars_dict, ctx
+        )
+        if verbose:
+            _print_joint_routes(e1_routes, e2_routes, transshipments)
         return e1_routes, e2_routes
 
     if m.status == GRB.INFEASIBLE:
         print("\n模型不可行，正在计算 IIS...")
         m.computeIIS()
-        m.write("output/model3_iis.ilp")
-        print("✓ IIS 已写入 output/model3_iis.ilp")
+        from pathlib import Path
+        iis_dir = Path(__file__).resolve().parent.parent.parent / "output" / "model3_exact"
+        iis_dir.mkdir(parents=True, exist_ok=True)
+        iis_path = iis_dir / "model3_iis.ilp"
+        m.write(str(iis_path))
+        print(f"✓ IIS 已写入 {iis_path}")
 
     print("\n未找到可行解")
     return None, None
+
+
+def _print_joint_solution(m, vars_dict, ctx):
+    print("\n" + "=" * 60)
+    print(f"Model 3 联合 MIP 求解完成!  目标值: {m.ObjVal:.2f}")
+    print("=" * 60)
+    return extract_solution(m, vars_dict, ctx)
+
+
+def _print_joint_routes(e1_routes, e2_routes, transshipments):
+    print("\n--- E1 路线 ---")
+    for idx, route in enumerate(e1_routes):
+        print(f"  卡车 {idx}: {' -> '.join(route)}")
+
+    print("\n--- E2 路线 ---")
+    for sat_id, routes in e2_routes.items():
+        if not routes:
+            continue
+        print(f"  前置仓 {sat_id}:")
+        for idx, route in enumerate(routes):
+            print(f"    车辆 {idx}: {' -> '.join(route)}")
+
+    print("\n--- 联合中转决策 ---")
+    if not transshipments:
+        print("  无中转")
+    for pick_task, old_phys, new_phys in transshipments:
+        print(f"  {pick_task}: {old_phys} -> {new_phys}")
 
 
 def _print_solution(m, vars_dict, ctx, e2_tasks_by_sat):
@@ -272,16 +330,30 @@ def _postprocess_transport(e2_routes, e2_tasks_by_sat, problem, verbose=True):
     if transshipments and verbose:
         print(f"  共 {len(transshipments)} 个搬运中转")
 
+    for (sat_id, ben_idx, pick_node, new_phys) in transshipments:
+        route = e2_routes.get(sat_id, [])[ben_idx]
+        for idx, node_id in enumerate(route):
+            if node_id == pick_node:
+                route[idx] = new_phys
+
     return transshipments
 
 
 def _route_distance(route, task_to_phys, problem):
     total = 0.0
     for i in range(len(route) - 1):
-        a = task_to_phys.get(route[i], route[i])
-        b = task_to_phys.get(route[i + 1], route[i + 1])
+        a = _phys(route[i], task_to_phys)
+        b = _phys(route[i + 1], task_to_phys)
         total += problem.distance(a, b)
     return total
+
+
+def _phys(node_id, task_to_phys):
+    if node_id.startswith("TRANS_PICK_"):
+        return node_id[len("TRANS_PICK_"):]
+    if node_id.startswith("TRANS_DROP_"):
+        return node_id[len("TRANS_DROP_"):]
+    return task_to_phys.get(node_id, node_id)
 
 
 def _check_route_feasible(route, sat_id, task_to_phys, e2_task_map,
@@ -307,8 +379,8 @@ def _check_route_feasible(route, sat_id, task_to_phys, e2_task_map,
     current_time = 0.0
 
     for i in range(len(route) - 1):
-        a = task_to_phys.get(route[i], route[i])
-        b = task_to_phys.get(route[i + 1], route[i + 1])
+        a = _phys(route[i], task_to_phys)
+        b = _phys(route[i + 1], task_to_phys)
         current_time += problem.travel_time(a, b)
         nid = route[i + 1]
         if nid == sat_id:
@@ -339,7 +411,7 @@ def _check_route_feasible(route, sat_id, task_to_phys, e2_task_map,
         if V_load < -1e-6 or V_load > problem.e2_volume_cap + 1e-6:
             return False
 
-        phys = task_to_phys.get(nid, nid)
+        phys = _phys(nid, task_to_phys)
         node_obj = problem.nodes.get(phys)
         svc = getattr(node_obj, 'service_time', 0.0) if node_obj else 0.0
         current_time += svc

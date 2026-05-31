@@ -9,7 +9,13 @@ from .objective import set_objective
 
 def build_pure_delivery_model(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite):
     depot_id = problem.depot.id
-    f_set = [s.id for s in problem.satellites]
+    # Model 1 只应访问有配送需求的卫星；否则 exact 会为零需求卫星
+    # 强制生成无意义访问。
+    active_sats = {t.cust for t in e1_tasks}
+    active_sats.update(
+        sat_id for sat_id, tasks in e2_tasks_by_sat.items() if tasks
+    )
+    f_set = [s.id for s in problem.satellites if s.id in active_sats]
 
     task_to_phys = {t.id: t.cust for t in e1_tasks}
     for sat_id, tasks in e2_tasks_by_sat.items():

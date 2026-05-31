@@ -199,24 +199,33 @@ class Evaluator:
         return True
 
     def is_feasible(self, sol):
-        visited_e1 = set()
+        if len(sol.e1_routes) > self.problem.e1_vehicle_count:
+            return False
+
+        visited_e1 = []
         for r in sol.e1_routes:
             if not self.check_e1_route_feasible(r):
                 return False
-            visited_e1.update(r.nodes)
-        for tid in self.e1_task_map:
-            if tid not in visited_e1:
-                return False
+            visited_e1.extend(r.nodes)
+        required_e1 = set(self.e1_task_map)
+        if set(visited_e1) != required_e1:
+            return False
+        if len(visited_e1) != len(required_e1):
+            return False
 
         for sat_id, routes in sol.e2_routes.items():
-            visited_e2 = set()
+            if len(routes) > self.vehicles_per_satellite:
+                return False
+            visited_e2 = []
             for r in routes:
                 if not self.check_e2_route_feasible(r, sat_id):
                     return False
-                visited_e2.update(n for n in r.nodes
+                visited_e2.extend(n for n in r.nodes
                                   if not n.startswith("TRANS_"))
             required = {t.id for t in self.e2_tasks_by_sat.get(sat_id, [])}
-            if visited_e2 != required:
+            if set(visited_e2) != required:
+                return False
+            if len(visited_e2) != len(required):
                 return False
         return True
 
@@ -306,6 +315,7 @@ def build_initial_solution(problem, e1_tasks, e2_tasks_by_sat, evaluator):
         sol.e2_routes[sat_id] = routes
 
     sol.cost = evaluator.total_cost(sol)
+    sol.task_to_phys = dict(evaluator.task_to_phys)
     return sol
 
 
@@ -595,6 +605,7 @@ def postprocess_transshipment(sol, evaluator, verbose=True):
     iteration = 0
     while True:
         iteration += 1
+        evaluator.task_to_phys = dict(sol.task_to_phys)
         improved = _search_and_apply_relocation(sol, evaluator)
         if not improved:
             break
@@ -604,6 +615,7 @@ def postprocess_transshipment(sol, evaluator, verbose=True):
                   f"中转数={len(sol.transshipments)}")
 
     sol.cost = evaluator.total_cost(sol)
+    sol.task_to_phys = dict(evaluator.task_to_phys)
 
 
 def _search_and_apply_relocation(sol, evaluator):
@@ -740,6 +752,7 @@ def _search_and_apply_relocation(sol, evaluator):
 
         sol.transshipments[(sat_id, ben_idx, pick_node, new_phys)] = (
             old_phys, carrier_idx, t.w, t.v)
+        sol.task_to_phys = dict(evaluator.task_to_phys)
         return True
 
     return False
@@ -761,6 +774,22 @@ def _quick_best_positions(nodes, base, vnode, evaluator, top_k=3,
 
     positions.sort(key=lambda x: x[0])
     return [p for _, p in positions[:top_k]]
+
+
+def _path_with_relocations(route, sol, evaluator):
+    path = route.full_path()
+    out = []
+    for nid in path:
+        if nid.startswith("TRANS_"):
+            out.append(nid)
+            continue
+        phys = sol.task_to_phys.get(nid)
+        default_phys = nid[:-1] if nid.endswith(('d', 'p')) else nid
+        if phys and phys != default_phys and phys in evaluator.problem.nodes:
+            out.append(phys)
+        else:
+            out.append(nid)
+    return out
 
 
 def _removal_saving(route, node_id, evaluator):
@@ -864,6 +893,9 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
             repair_ops[r_idx](candidate, removed, evaluator, echelon)
 
         clean_empty_routes(candidate)
+        if not evaluator.is_feasible(candidate):
+            T *= cooling_rate
+            continue
         candidate.cost = evaluator.total_cost(candidate)
 
         delta = candidate.cost - sol.cost
@@ -915,6 +947,7 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
     if verbose:
         print(f"\n--- 阶段二：后处理中转搜索 ---")
 
+    evaluator.task_to_phys = dict(best_sol.task_to_phys)
     postprocess_transshipment(best_sol, evaluator, verbose=verbose)
 
     if verbose:
@@ -932,10 +965,17 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         print(f"总耗时: {elapsed:.2f} 秒")
         print(f"{'=' * 60}")
 
-    e1_routes_out = [r.full_path() for r in best_sol.e1_routes]
+    evaluator.task_to_phys = dict(best_sol.task_to_phys)
+    e1_routes_out = [
+        _path_with_relocations(r, best_sol, evaluator)
+        for r in best_sol.e1_routes
+    ]
     e2_routes_out = {}
     for sat_id, routes in best_sol.e2_routes.items():
-        e2_routes_out[sat_id] = [r.full_path() for r in routes]
+        e2_routes_out[sat_id] = [
+            _path_with_relocations(r, best_sol, evaluator)
+            for r in routes
+        ]
 
     if verbose:
         _print_solution(best_sol, evaluator)

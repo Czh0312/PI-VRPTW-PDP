@@ -168,23 +168,32 @@ class Evaluator:
         return True
 
     def is_feasible(self, sol):
-        visited_e1 = set()
+        if len(sol.e1_routes) > self.problem.e1_vehicle_count:
+            return False
+
+        visited_e1 = []
         for r in sol.e1_routes:
             if not self.check_e1_route_feasible(r):
                 return False
-            visited_e1.update(r.nodes)
-        for tid in self.e1_task_map:
-            if tid not in visited_e1:
-                return False
+            visited_e1.extend(r.nodes)
+        required_e1 = set(self.e1_task_map)
+        if set(visited_e1) != required_e1:
+            return False
+        if len(visited_e1) != len(required_e1):
+            return False
 
         for sat_id, routes in sol.e2_routes.items():
-            visited_e2 = set()
+            if len(routes) > self.vehicles_per_satellite:
+                return False
+            visited_e2 = []
             for r in routes:
                 if not self.check_e2_route_feasible(r, sat_id):
                     return False
-                visited_e2.update(r.nodes)
+                visited_e2.extend(r.nodes)
             required = {t.id for t in self.e2_tasks_by_sat.get(sat_id, [])}
-            if visited_e2 != required:
+            if set(visited_e2) != required:
+                return False
+            if len(visited_e2) != len(required):
                 return False
         return True
 
@@ -646,6 +655,9 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
             repair_ops[r_idx](candidate, removed, evaluator, echelon)
 
         clean_empty_routes(candidate)
+        if not evaluator.is_feasible(candidate):
+            T *= cooling_rate
+            continue
         candidate.cost = evaluator.total_cost(candidate)
 
         delta = candidate.cost - sol.cost

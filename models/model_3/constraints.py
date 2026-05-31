@@ -1,9 +1,8 @@
 # models/model_3/constraints.py
 # -*- coding: utf-8 -*-
 """
-对齐文档3 (2E-VRP-PDP-TR) — 统一载重/体积变量
-Q/V 送减取增, 共享容量由 ub 自然保证
-中转 Δq/Δw 作用于统一 Q/V
+Model 3 基础 MIP 约束：Q/V 送减取增，共享容量由变量上界保证。
+中转搜索在 ALNS 迭代或 exact 求解后的启发式后处理里完成。
 """
 import gurobipy as gp
 

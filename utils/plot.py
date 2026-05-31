@@ -1,12 +1,32 @@
 # utils/plot.py
 # -*- coding: utf-8 -*-
+import os
+from pathlib import Path
 import matplotlib.pyplot as plt
 from core.instance import ProblemInstance
 
-def plot_vrp_solution(problem: ProblemInstance, e1_routes: list, e2_routes_by_sat: dict, title="2E-VRP Solution"):
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+OUTPUT_DIR = PROJECT_ROOT / "output"
+
+
+def plot_vrp_solution(
+    problem: ProblemInstance,
+    e1_routes: list,
+    e2_routes_by_sat: dict,
+    title="2E-VRP Solution",
+    save_dir: str = None,
+    filename: str = "solution.png",
+):
     """
-    可视化 2E-VRP 求解结果
+    可视化 2E-VRP 求解结果，并保存到 output/ 对应子目录
     """
+    # 确定保存目录
+    if save_dir:
+        out_path = OUTPUT_DIR / save_dir
+    else:
+        out_path = OUTPUT_DIR
+    os.makedirs(out_path, exist_ok=True)
+
     plt.figure(figsize=(12, 8))
     
     # ==========================================
@@ -16,7 +36,7 @@ def plot_vrp_solution(problem: ProblemInstance, e1_routes: list, e2_routes_by_sa
         """将任务ID (如 'S0d', 'C1p') 安全映射回物理节点 (如 'S0', 'C1')"""
         # 虚拟搬运节点: TRANS_PICK_X / TRANS_DROP_X → X
         if nid.startswith("TRANS_PICK_") or nid.startswith("TRANS_DROP_"):
-            phys = nid.split("_", 2)[-1]
+            phys = nid.split("_", 2)[-1].rsplit("@", 1)[-1]
             if phys in problem.nodes:
                 return problem.nodes[phys]
 
@@ -84,4 +104,7 @@ def plot_vrp_solution(problem: ProblemInstance, e1_routes: list, e2_routes_by_sa
     plt.legend(loc='upper right')
     plt.grid(True, linestyle=':', alpha=0.6)
     plt.tight_layout()
-    plt.show()
+    save_file = out_path / filename
+    plt.savefig(save_file, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"✓ 路径图已保存至: {save_file}")

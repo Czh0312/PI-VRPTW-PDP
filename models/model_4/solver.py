@@ -3,7 +3,7 @@
 """
 Model 4 两阶段精确求解：
   阶段一：调用 Model 2 的 MIP 求解（无中转）
-  阶段二：对固定路线，后处理搜索中转机会（启发式）
+  阶段二：对固定路线，用 0-1 MIP 精确选择中转方案
 """
 from models.model_2.solver import solve_exact as solve_m2_exact
 from models.model_2.alns_solver import solve_alns as solve_m2_alns
@@ -14,7 +14,7 @@ def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
                 TFp=9999.0, verbose=True):
     """
     Model 4 两阶段精确求解
-    阶段一用 Model 2 的 MIP，阶段二用启发式后处理
+    阶段一用 Model 2 的 MIP，阶段二用固定路线中转选择 MIP
     """
     if verbose:
         print(f"\n{'=' * 60}")
@@ -37,17 +37,19 @@ def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
 
     if verbose:
         print(f"\n  阶段一完成: cost={stage1_cost:.2f}")
-        print(f"\n--- 阶段二：后处理中转搜索 ---")
+        print(f"\n--- 阶段二：固定路线中转选择 MIP ---")
 
-    # 阶段二：启发式后处理中转
-    from models.model_4.alns_solver import Evaluator, postprocess_transshipment
+    # 阶段二：固定路线上的精确中转选择
+    from models.model_4.alns_solver import Evaluator, _path_with_relocations
+    from models.model_4.transshipment_mip import solve_stage2_transshipment_mip
 
     sol = _routes_to_solution(e1_routes, e2_routes_by_sat)
     evaluator = Evaluator(problem, e1_tasks, e2_tasks_by_sat, TFp,
                           vehicles_per_satellite=vehicles_per_satellite)
+    sol.task_to_phys = dict(evaluator.task_to_phys)
     sol.cost = evaluator.total_cost(sol)
 
-    postprocess_transshipment(sol, evaluator, verbose=verbose)
+    solve_stage2_transshipment_mip(sol, evaluator, verbose=verbose)
 
     stage2_cost = evaluator.total_cost(sol)
     if verbose:
@@ -60,10 +62,17 @@ def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         print(f"阶段二(中转后): {stage2_cost:.2f}")
         print(f"{'=' * 60}")
 
-    e1_routes_out = [r.full_path() for r in sol.e1_routes]
+    evaluator.task_to_phys = dict(sol.task_to_phys)
+    e1_routes_out = [
+        _path_with_relocations(r, sol, evaluator)
+        for r in sol.e1_routes
+    ]
     e2_routes_out = {}
     for sat_id, routes in sol.e2_routes.items():
-        e2_routes_out[sat_id] = [r.full_path() for r in routes]
+        e2_routes_out[sat_id] = [
+            _path_with_relocations(r, sol, evaluator)
+            for r in routes
+        ]
 
     return e1_routes_out, e2_routes_out
 
