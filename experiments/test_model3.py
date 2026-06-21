@@ -17,6 +17,7 @@ from models.model_3.solver import solve_exact
 from models.model_3.alns_solver import solve_alns
 
 CONFIG_DIR = Path(project_root) / "config"
+DEFAULT_TEST_DATA = os.path.join(project_root, "data", "5_customers", "C101.csv")
 
 
 def load_fleet_config():
@@ -24,11 +25,19 @@ def load_fleet_config():
         return json.load(f)
 
 
+def load_app_config():
+    with open(CONFIG_DIR / "app_config.json", "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
 def run_experiment(data_file: str, solver: str = "exact",
                    transshipment_candidate_mode: str = "all_sampled",
                    max_relocation_candidates=None,
                    transshipment_time_budget: float = 2.0,
-                   transshipment_interval: int = 20):
+                   transshipment_interval: int = 20,
+                   alns_iter=None,
+                   alns_time=None,
+                   seed=None):
     print(f"[{time.strftime('%H:%M:%S')}] 开始测试 Model 3 "
           f"(取送货+横向中转 - 2E-VRP-PDP-TR)")
     print(f"数据集: {data_file}")
@@ -36,8 +45,16 @@ def run_experiment(data_file: str, solver: str = "exact",
 
     nodes_dict, _ = parse_dataset(data_file)
     fleet_config = load_fleet_config()
+    app_config = load_app_config()
+    alns_iter = app_config.get("alns_iter", 1000) if alns_iter is None else alns_iter
+    alns_time = app_config.get("alns_time", 30) if alns_time is None else alns_time
+    seed = app_config.get("seed", 42) if seed is None else seed
 
-    problem = ProblemInstance(nodes_dict, fleet_config)
+    problem = ProblemInstance(
+        nodes_dict,
+        fleet_config,
+        speed=fleet_config.get("speed", 1.0),
+    )
     problem.aggregate_demands_from_pre_assignment()
 
     e1_tasks, e2_tasks_by_sat = build_tasks_for_model(problem, 3)
@@ -58,7 +75,9 @@ def run_experiment(data_file: str, solver: str = "exact",
             e1_tasks=e1_tasks,
             e2_tasks_by_sat=e2_tasks_by_sat,
             vehicles_per_satellite=problem.fleet.e2_per_sat_count,
-            max_iterations=5000, max_time=120, seed=42,
+            max_iterations=alns_iter,
+            max_time=alns_time,
+            seed=seed,
             transshipment_candidate_mode=transshipment_candidate_mode,
             max_relocation_candidates=max_relocation_candidates,
             transshipment_time_budget=transshipment_time_budget,
@@ -74,7 +93,7 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Model 3 实验")
     parser.add_argument("data", nargs="?", type=str,
-                        default=os.path.join(project_root, "data", "small", "test2.csv"))
+                        default=DEFAULT_TEST_DATA)
     parser.add_argument("--solver", "-s", type=str, choices=["exact", "alns"],
                         default="exact")
     parser.add_argument("--trans-mode", type=str,

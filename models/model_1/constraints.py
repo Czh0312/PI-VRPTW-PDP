@@ -20,8 +20,19 @@ def add_all_constraints(m: gp.Model, problem, e1_tasks, e2_tasks_by_sat, vars_di
     time_map = ctx['time_map']
 
     M = 100000.0  # Big-M
+    e1_task_by_sat = {t.cust: t for t in e1_tasks}
+    e2_task_map = {
+        t.id: t
+        for tasks in e2_tasks_by_sat.values()
+        for t in tasks
+    }
 
     # ================= E1 约束 =================
+    for k in K:
+        for i in N1E:
+            m.addConstr(x[i, i, k] == 0, f"E1_NoSelf_{i}_{k}")
+        m.addConstr(A_e1[depot_id, k] == 0, f"E1_DepotTime_{k}")
+
     for j in F:
         m.addConstr(gp.quicksum(x[i, j, k] for i in N1E for k in K if i != j) == 1, f"E1_Visit_{j}")
     
@@ -40,12 +51,26 @@ def add_all_constraints(m: gp.Model, problem, e1_tasks, e2_tasks_by_sat, vars_di
                 if i == j: continue
                 # 时间连续性
                 m.addConstr(A_e1[j, k] >= A_e1[i, k] + get_st(i) + time_map[i, j] - M * (1 - x[i, j, k]))
-                
-                # 载重与体积单调递减
-                task_j = next((t for t in e1_tasks if t.id == f"{j}d"), None)
+
+                task_j = e1_task_by_sat.get(j)
                 q_j, w_j = (task_j.w, task_j.v) if task_j else (0, 0)
+
+                # 载重与体积状态转移。激活弧上精确等于“到达 j 后剩余载量”。
                 m.addConstr(L_e1[j, k] <= L_e1[i, k] - q_j + M * (1 - x[i, j, k]))
+                m.addConstr(L_e1[j, k] >= L_e1[i, k] - q_j - M * (1 - x[i, j, k]))
                 m.addConstr(W_e1[j, k] <= W_e1[i, k] - w_j + M * (1 - x[i, j, k]))
+                m.addConstr(W_e1[j, k] >= W_e1[i, k] - w_j - M * (1 - x[i, j, k]))
+
+        for j in F:
+            task_j = e1_task_by_sat.get(j)
+            if not task_j:
+                continue
+            visits_jk = gp.quicksum(x[i, j, k] for i in N1E if i != j)
+            m.addConstr(A_e1[j, k] >= task_j.tw[0] - M * (1 - visits_jk),
+                        f"E1_TW_lo_{j}_{k}")
+            if task_j.tw[1] < float('inf'):
+                m.addConstr(A_e1[j, k] <= task_j.tw[1] + M * (1 - visits_jk),
+                            f"E1_TW_hi_{j}_{k}")
         
         # E1 容量约束
         m.addConstr(L_e1[depot_id, k] <= problem.e1_weight_cap * gp.quicksum(x[depot_id, j, k] for j in F))
@@ -62,6 +87,7 @@ def add_all_constraints(m: gp.Model, problem, e1_tasks, e2_tasks_by_sat, vars_di
             m.addConstr(gp.quicksum(z[i, j_id, v_key] for v_key in V_by_sat[f] for i in nodes_f if i != j_id) == 1)
         
         for v_key in V_by_sat[f]:
+            m.addConstr(A_e2[f, v_key] == 0, f"E2_SatTime_{f}_{v_key}")
             # 起点终点必须是所属前置仓
             m.addConstr(gp.quicksum(z[f, j, v_key] for j in task_ids) == gp.quicksum(z[i, f, v_key] for i in task_ids))
             m.addConstr(gp.quicksum(z[f, j, v_key] for j in task_ids) <= 1)
@@ -79,11 +105,13 @@ def add_all_constraints(m: gp.Model, problem, e1_tasks, e2_tasks_by_sat, vars_di
                     dist_ij = time_map[i, j]
                     m.addConstr(A_e2[j, v_key] >= A_e2[i, v_key] + get_st(i) + dist_ij - M * (1 - z[i, j, v_key]))
                     
-                    t_j = next((t for t in tasks_f if t.id == j), None)
+                    t_j = e2_task_map.get(j)
                     if t_j is None:
                         continue
                     m.addConstr(L_e2[j, v_key] <= L_e2[i, v_key] - t_j.w + M * (1 - z[i, j, v_key]))
+                    m.addConstr(L_e2[j, v_key] >= L_e2[i, v_key] - t_j.w - M * (1 - z[i, j, v_key]))
                     m.addConstr(W_e2[j, v_key] <= W_e2[i, v_key] - t_j.v + M * (1 - z[i, j, v_key]))
+                    m.addConstr(W_e2[j, v_key] >= W_e2[i, v_key] - t_j.v - M * (1 - z[i, j, v_key]))
             
             # E2 容量约束
             m.addConstr(L_e2[f, v_key] <= problem.e2_weight_cap * gp.quicksum(z[f, j, v_key] for j in task_ids))

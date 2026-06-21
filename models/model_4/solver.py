@@ -6,7 +6,6 @@ Model 4 两阶段精确求解：
   阶段二：对固定路线，用 0-1 MIP 精确选择中转方案
 """
 from models.model_2.solver import solve_exact as solve_m2_exact
-from models.model_2.alns_solver import solve_alns as solve_m2_alns
 from models.alns_base import Route, Solution
 
 

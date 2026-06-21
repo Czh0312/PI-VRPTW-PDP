@@ -243,7 +243,7 @@ def _build_e2_nodes(problem, e2_tasks_by_sat, max_relocation_candidates):
                     e2_info[tp_id] = E2NodeInfo(
                         id=tp_id, sat_id=sat_id, kind="tp",
                         phys=task.cust, w=task.w, v=task.v,
-                        tw=(0.0, float("inf")),
+                        tw=task.tw,
                         original_task=task.id, original_phys=task.cust,
                         relocated_to=phys_id,
                     )
@@ -567,7 +567,7 @@ def _add_linking_constraints(m, vars_dict, ctx, e2_tasks_by_sat):
                 is_served = _incoming(z, node_id, veh, valid_nodes)
                 abs_arrival = A_start[sat_id, v_idx] + A2[node_id, veh]
 
-                if info.kind in ("d", "p"):
+                if info.kind in ("d", "p", "tp"):
                     m.addConstr(
                         abs_arrival >= info.tw[0] - M_time * (1 - is_served)
                     )
@@ -593,6 +593,46 @@ def _add_linking_constraints(m, vars_dict, ctx, e2_tasks_by_sat):
                     + M_time * (1 - z[i, sat_id, veh])
                 )
 
+        # Same original customer: delivery must precede pickup, even if served
+        # by different E2 vehicles or if the pickup is relocated.
+        for pick_info in e2_info.values():
+            if pick_info.sat_id != sat_id or pick_info.kind != "p":
+                continue
+            del_id = f"{pick_info.original_phys}d"
+            if del_id not in e2_info:
+                continue
+            service_d = service_time(del_id)
+            for d_idx, d_veh in enumerate(V_by_sat[sat_id]):
+                u_del = _incoming(z, del_id, d_veh, valid_nodes)
+                abs_del = A_start[sat_id, d_idx] + A2[del_id, d_veh]
+                for p_idx, p_veh in enumerate(V_by_sat[sat_id]):
+                    u_pick = _incoming(z, pick_info.id, p_veh, valid_nodes)
+                    abs_pick = A_start[sat_id, p_idx] + A2[pick_info.id, p_veh]
+                    m.addConstr(
+                        abs_pick >= abs_del + service_d
+                        - M_time * (2 - u_del - u_pick)
+                    )
+
+        # A carrier can pick up a container for transshipment only after that
+        # customer's delivery has been completed at the original location.
+        for tp_info in e2_info.values():
+            if tp_info.sat_id != sat_id or tp_info.kind != "tp":
+                continue
+            del_id = f"{tp_info.original_phys}d"
+            if del_id not in e2_info:
+                continue
+            service_d = service_time(del_id)
+            for d_idx, d_veh in enumerate(V_by_sat[sat_id]):
+                u_del = _incoming(z, del_id, d_veh, valid_nodes)
+                abs_del = A_start[sat_id, d_idx] + A2[del_id, d_veh]
+                for tp_idx, tp_veh in enumerate(V_by_sat[sat_id]):
+                    u_tp = _incoming(z, tp_info.id, tp_veh, valid_nodes)
+                    abs_tp = A_start[sat_id, tp_idx] + A2[tp_info.id, tp_veh]
+                    m.addConstr(
+                        abs_tp >= abs_del + service_d
+                        - M_time * (2 - u_del - u_tp)
+                    )
+
         # Transport drop must happen before the relocated pickup is collected.
         for info in e2_info.values():
             if info.sat_id != sat_id or info.kind != "tp":
@@ -610,8 +650,19 @@ def _add_linking_constraints(m, vars_dict, ctx, e2_tasks_by_sat):
                         - M_time * (2 - u_drop - u_pick)
                     )
 
-        # Per current model scope, E1 pickup is controlled by its own time
-        # window only. We do not force it to wait for every E2 route return.
+        # E1 pickup must wait until every used E2 route has returned to the
+        # satellite, because the E1 pickup node aggregates all returned
+        # containers for that satellite.
+        if e1_pick in e1_task_map:
+            for v_idx, _veh in enumerate(V_by_sat[sat_id]):
+                for k in K:
+                    e1_pick_visits = gp.quicksum(
+                        x[i, e1_pick, k] for i in N1E if i != e1_pick
+                    )
+                    m.addConstr(
+                        A1[e1_pick, k] >= A_return[sat_id, v_idx]
+                        - M_time * (1 - e1_pick_visits)
+                    )
 
 
 def _apply_no_trans_warm_start(m, vars_dict, ctx, problem, e1_tasks,

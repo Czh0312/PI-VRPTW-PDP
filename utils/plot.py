@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 from core.instance import ProblemInstance
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -27,7 +28,7 @@ def plot_vrp_solution(
         out_path = OUTPUT_DIR
     os.makedirs(out_path, exist_ok=True)
 
-    plt.figure(figsize=(12, 8))
+    fig, ax = plt.subplots(figsize=(12, 8))
     
     # ==========================================
     # 核心修正：任务 ID 转 物理节点 ID 解析器
@@ -50,42 +51,44 @@ def plot_vrp_solution(
         raise KeyError(f"绘图失败: 无法将任务ID '{nid}' 映射到物理坐标点。")
 
     # 1. 画出所有节点
-    # 客户点 (灰色小点)
     cx, cy = [c.x for c in problem.customers], [c.y for c in problem.customers]
-    plt.scatter(cx, cy, c='gray', marker='.', s=50, zorder=3, label='Customers')
-    
-    # 【新增】: 遍历所有顾客，标上顾客 ID
-    for c in problem.customers:
-        # x和y加上0.5的偏移量，防止文字和点重叠
-        plt.text(c.x + 0.5, c.y + 0.5, c.id, fontsize=8, color='dimgray', zorder=4)
-    
-    # 前置仓 (蓝色三角形)
+    ax.scatter(cx, cy, c="#6E6E6E", marker="o", s=34, zorder=4,
+               linewidths=0.4, edgecolors="white", label="Customers")
+
+    # 大规模算例不强制标所有客户，避免标签互相覆盖。
+    if len(problem.customers) <= 30:
+        for c in problem.customers:
+            ax.text(c.x + 0.45, c.y + 0.45, c.id, fontsize=8,
+                    color="#555555", zorder=6)
+
     sx, sy = [s.x for s in problem.satellites], [s.y for s in problem.satellites]
-    plt.scatter(sx, sy, c='blue', marker='^', s=150, edgecolors='black', zorder=5, label='Satellites')
+    ax.scatter(sx, sy, c="#2563EB", marker="^", s=170,
+               edgecolors="black", linewidths=0.8, zorder=7, label="Satellites")
     for s in problem.satellites:
-        plt.text(s.x + 1, s.y + 1, s.id, fontsize=10, fontweight='bold', color='blue', zorder=6)
-        
-    # 总仓库 (红色正方形)
-    plt.scatter(problem.depot.x, problem.depot.y, c='red', marker='s', s=200, edgecolors='black', zorder=6, label='Depot')
-    plt.text(problem.depot.x + 1.5, problem.depot.y + 1.5, problem.depot.id, fontsize=12, fontweight='bold', color='red', zorder=7)
+        ax.text(s.x + 1, s.y + 1, s.id, fontsize=10, fontweight="bold",
+                color="#1D4ED8", zorder=8)
+
+    ax.scatter(problem.depot.x, problem.depot.y, c="#DC2626", marker="s", s=210,
+               edgecolors="black", linewidths=0.8, zorder=8, label="Depot")
+    ax.text(problem.depot.x + 1.5, problem.depot.y + 1.5, problem.depot.id,
+            fontsize=12, fontweight="bold", color="#DC2626", zorder=9)
 
     # 2. 画出 E1 路线 (红色粗线)
     for idx, route in enumerate(e1_routes):
         rx = [get_node(node_id).x for node_id in route]
         ry = [get_node(node_id).y for node_id in route]
-        plt.plot(rx, ry, color='red', linewidth=2.5, linestyle='-', alpha=0.7, zorder=1)
+        ax.plot(rx, ry, color="#DC2626", linewidth=2.8, linestyle="-",
+                alpha=0.72, zorder=2)
 
-    # 3. 画出 E2 路线 (各前置仓用不同颜色)
-    colors = ['green', 'purple', 'orange', 'cyan', 'magenta', 'brown']
+    # 3. 画出 E2 路线：每辆车单独配色，避免同仓多车路线难以区分。
+    cmap = plt.get_cmap("tab20")
     sat_ids = [s.id for s in problem.satellites]
+    route_counter = 0
     
     for sat_id, routes in e2_routes_by_sat.items():
-        if sat_id in sat_ids:
-            color = colors[sat_ids.index(sat_id) % len(colors)]
-        else:
-            color = 'black' # 兜底颜色
-            
-        for route in routes:
+        sat_offset = sat_ids.index(sat_id) if sat_id in sat_ids else 0
+        for local_idx, route in enumerate(routes):
+            color = cmap((route_counter + sat_offset * 3) % cmap.N)
             route_list = list(route)
 
             # 补齐首尾前置仓 (如果还没的话)
@@ -96,15 +99,37 @@ def plot_vrp_solution(
                 
             rx = [get_node(node_id).x for node_id in route_list]
             ry = [get_node(node_id).y for node_id in route_list]
-            plt.plot(rx, ry, color=color, linewidth=1.2, linestyle='--', alpha=0.8, zorder=2)
+            ax.plot(rx, ry, color=color, linewidth=1.6, linestyle="--",
+                    alpha=0.82, zorder=3)
+            if len(problem.customers) <= 30 and len(routes) <= 8:
+                mid = len(rx) // 2
+                ax.text(rx[mid], ry[mid], f"{sat_id}-V{local_idx}", fontsize=7,
+                        color=color, zorder=7,
+                        bbox=dict(facecolor="white", edgecolor="none",
+                                  alpha=0.72, pad=1.2))
+            route_counter += 1
 
-    plt.title(title, fontsize=14, fontweight='bold')
-    plt.xlabel('X Coordinate')
-    plt.ylabel('Y Coordinate')
-    plt.legend(loc='upper right')
-    plt.grid(True, linestyle=':', alpha=0.6)
-    plt.tight_layout()
+    legend_handles = [
+        Line2D([0], [0], marker="o", color="w", label="Customers",
+               markerfacecolor="#6E6E6E", markeredgecolor="white", markersize=7),
+        Line2D([0], [0], marker="^", color="w", label="Satellites",
+               markerfacecolor="#2563EB", markeredgecolor="black", markersize=9),
+        Line2D([0], [0], marker="s", color="w", label="Depot",
+               markerfacecolor="#DC2626", markeredgecolor="black", markersize=9),
+        Line2D([0], [0], color="#DC2626", linewidth=2.8, label="E1 truck route"),
+        Line2D([0], [0], color="#4C78A8", linewidth=1.8,
+               linestyle="--", label="E2 vehicle route"),
+    ]
+
+    ax.set_title(title, fontsize=15, fontweight="bold", pad=10)
+    ax.set_xlabel("X Coordinate")
+    ax.set_ylabel("Y Coordinate")
+    ax.legend(handles=legend_handles, loc="upper right", frameon=True,
+              framealpha=0.92, fontsize=9)
+    ax.grid(True, linestyle=":", alpha=0.45)
+    ax.set_aspect("equal", adjustable="box")
+    fig.tight_layout()
     save_file = out_path / filename
-    plt.savefig(save_file, dpi=150, bbox_inches="tight")
-    plt.close()
+    fig.savefig(save_file, dpi=220, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
     print(f"✓ 路径图已保存至: {save_file}")

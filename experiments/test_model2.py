@@ -16,6 +16,7 @@ from utils.task_builder import build_tasks_for_model
 from models.model_2.solver import solve_exact
 
 CONFIG_DIR = Path(project_root) / "config"
+DEFAULT_TEST_DATA = os.path.join(project_root, "data", "5_customers", "C101.csv")
 
 
 def load_fleet_config():
@@ -30,7 +31,11 @@ def run_experiment(data_file: str):
     nodes_dict, _ = parse_dataset(data_file)
     fleet_config = load_fleet_config()
 
-    problem = ProblemInstance(nodes_dict, fleet_config)
+    problem = ProblemInstance(
+        nodes_dict,
+        fleet_config,
+        speed=fleet_config.get("speed", 1.0),
+    )
     problem.aggregate_demands_from_pre_assignment()
 
     e1_tasks, e2_tasks_by_sat = build_tasks_for_model(problem, 2)
@@ -50,7 +55,7 @@ def run_experiment(data_file: str):
     print(f"\n[{time.strftime('%H:%M:%S')}] 测试完成 | 耗时: {run_time:.2f}s | {msg}")
 
 if __name__ == "__main__":
-    test_data = sys.argv[1] if len(sys.argv) > 1 else os.path.join(project_root, "data", "small", "test2.csv")
+    test_data = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_TEST_DATA
     if os.path.exists(test_data):
         run_experiment(test_data)
     else:

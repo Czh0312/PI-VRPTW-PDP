@@ -21,7 +21,7 @@ def build_tasks_for_model(problem: ProblemInstance, model_type: int):
                 e2_tasks_by_sat[c.assigned_sat].append(
                     Task(f"{c.id}d", c.id, "d", c.demand + cw, cv, c.tw_del)
                 )
-    elif model_type in (2, 3, 4):
+    elif model_type in (2, 3, 4, 5):
         for s in problem.satellites:
             if s.delivery_weight > 1e-9:
                 e1_tasks.append(
@@ -46,6 +46,6 @@ def build_tasks_for_model(problem: ProblemInstance, model_type: int):
                     Task(f"{c.id}p", c.id, "p", cw, cv, c.tw_pick)
                 )
     else:
-        raise ValueError(f"当前仅支持 model 1/2/3/4，收到: {model_type}")
+        raise ValueError(f"当前仅支持 model 1/2/3/4/5，收到: {model_type}")
 
     return e1_tasks, e2_tasks_by_sat

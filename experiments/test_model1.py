@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 import sys
 import os
+import json
 import time
 from pathlib import Path
 
@@ -14,14 +15,27 @@ from utils.data_loader import parse_dataset
 from utils.task_builder import build_tasks_for_model
 from models.model_1.solver import solve_exact
 
+CONFIG_DIR = Path(project_root) / "config"
+DEFAULT_TEST_DATA = os.path.join(project_root, "data", "5_customers", "C101.csv")
+
+
+def load_fleet_config():
+    with open(CONFIG_DIR / "fleet_config.json", "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
 def run_experiment(data_file: str):
     print(f"[{time.strftime('%H:%M:%S')}] 开始测试 Model 1 (纯配送 - 2E-VRP)")
     print(f"数据集: {data_file}")
 
-    nodes_dict, fleet_config = parse_dataset(data_file)
-    fleet_config["vehicles_per_satellite"] = fleet_config.get("vehicles_per_satellite", 6)
+    nodes_dict, _ = parse_dataset(data_file)
+    fleet_config = load_fleet_config()
 
-    problem = ProblemInstance(nodes_dict, fleet_config)
+    problem = ProblemInstance(
+        nodes_dict,
+        fleet_config,
+        speed=fleet_config.get("speed", 1.0),
+    )
     problem.aggregate_demands_from_pre_assignment()
 
     e1_tasks, e2_tasks_by_sat = build_tasks_for_model(problem, 1)
@@ -44,7 +58,7 @@ if __name__ == "__main__":
     test_data = (
         sys.argv[1]
         if len(sys.argv) > 1
-        else os.path.join(project_root, "data", "small", "test2.csv")
+        else DEFAULT_TEST_DATA
     )
     if os.path.exists(test_data):
         run_experiment(test_data)

@@ -31,6 +31,7 @@ def add_all_constraints(m: gp.Model, problem, e1_tasks, e2_tasks_by_sat,
     A_e1 = vars_dict['A_e1']
     A_e2 = vars_dict['A_e2']
     A_start = vars_dict['A_start']
+    A_return = vars_dict['A_return']
     Q_k = vars_dict['Q_k']
     Vol_k = vars_dict['Vol_k']
     Q_r = vars_dict['Q_r']
@@ -119,6 +120,7 @@ def add_all_constraints(m: gp.Model, problem, e1_tasks, e2_tasks_by_sat,
     for s_id in F:
         pid, did = f"{s_id}p", f"{s_id}d"
         if pid in e1_task_map and did in e1_task_map:
+            forbidden_edges.add((pid, did))
             for k in K:
                m.addConstr(x[pid, did, k] == 0, f"E1_ForbidArc_{s_id}_{k}")
 
@@ -402,26 +404,31 @@ def add_all_constraints(m: gp.Model, problem, e1_tasks, e2_tasks_by_sat,
 
         # E1 送货虚拟节点 (Sxd)
         e1_del_node = f"{f}d"
-        if e1_del_node not in e1_task_map:
-            continue
-
-        # satellite 的卸货服务时间
-        s_f = e1_service_time_map.get(e1_del_node, 0.0)
+        has_e1_delivery = e1_del_node in e1_task_map
+        if has_e1_delivery:
+            s_f = e1_service_time_map.get(e1_del_node, 0.0)
+        else:
+            s_f = 0.0
 
         valid_nodes_f = [f] + [t.id for t in tasks_in_f]
 
         # --- (37) E1-E2 时间衔接: E2 发车时间 >= E1 到达 Sxd + 卸货时间 ---
-        for v_idx in range(vehicles_per_satellite):
-            for k in K:
-                # k 是否访问了 e1_del_node
-                e1_visits_k = gp.quicksum(
-                    x[i, e1_del_node, k] for i in N1E if i != e1_del_node
-                )
-                m.addConstr(
-                    A_start[f, v_idx]
-                    >= A_e1[e1_del_node, k] + s_f
-                    - M_time * (1 - e1_visits_k),
-                    f"Link_Start_{f}_{v_idx}_{k}")
+        if has_e1_delivery:
+            for v_idx in range(vehicles_per_satellite):
+                for k in K:
+                    # k 是否访问了 e1_del_node
+                    e1_visits_k = gp.quicksum(
+                        x[i, e1_del_node, k] for i in N1E if i != e1_del_node
+                    )
+                    m.addConstr(
+                        A_start[f, v_idx]
+                        >= A_e1[e1_del_node, k] + s_f
+                        - M_time * (1 - e1_visits_k),
+                        f"Link_Start_{f}_{v_idx}_{k}")
+        else:
+            for v_idx in range(vehicles_per_satellite):
+                m.addConstr(A_start[f, v_idx] == 0,
+                            f"Link_StartAnchor_{f}_{v_idx}")
 
         # --- (35)(36) 客户绝对时间窗: 用 is_served 松弛 ---
         for v_idx in range(vehicles_per_satellite):
@@ -442,3 +449,66 @@ def add_all_constraints(m: gp.Model, problem, e1_tasks, e2_tasks_by_sat,
                     m.addConstr(
                         abs_arrival <= l_j + M_time * (1 - is_served),
                         f"Link_TW_hi_{f}_{v_idx}_{j_task.id}")
+
+        # 同一客户必须先配送后回收，即使两个任务由不同 E2 车辆服务。
+        customer_ids = sorted({t.cust for t in tasks_in_f})
+        for cust_id in customer_ids:
+            d_id = f"{cust_id}d"
+            p_id = f"{cust_id}p"
+            if d_id not in e2_task_map or p_id not in e2_task_map:
+                continue
+            service_d = e2_service_time_map.get(d_id, 0.0)
+            for d_idx in range(vehicles_per_satellite):
+                vd = (f, d_idx)
+                served_d = gp.quicksum(
+                    z[i, d_id, vd]
+                    for i in valid_nodes_f
+                    if i != d_id and (i, d_id, vd) in z
+                )
+                abs_d = A_start[f, d_idx] + A_e2[d_id, vd]
+                for p_idx in range(vehicles_per_satellite):
+                    vp = (f, p_idx)
+                    served_p = gp.quicksum(
+                        z[i, p_id, vp]
+                        for i in valid_nodes_f
+                        if i != p_id and (i, p_id, vp) in z
+                    )
+                    abs_p = A_start[f, p_idx] + A_e2[p_id, vp]
+                    m.addConstr(
+                        abs_p >= abs_d + service_d
+                        - M_time * (2 - served_d - served_p),
+                        f"Link_CustPrec_{f}_{cust_id}_{d_idx}_{p_idx}")
+
+        # E2 返回时刻
+        for v_idx in range(vehicles_per_satellite):
+            v = (f, v_idx)
+            for i in [t.id for t in tasks_in_f]:
+                if (i, f, v) not in z:
+                    continue
+                s_i = e2_service_time_map.get(i, 0.0)
+                m.addConstr(
+                    A_return[f, v_idx]
+                    >= A_start[f, v_idx] + A_e2[i, v] + s_i + time_map[i, f]
+                    - M_time * (1 - z[i, f, v]),
+                    f"Link_Ret_lo_{f}_{v_idx}_{i}")
+                m.addConstr(
+                    A_return[f, v_idx]
+                    <= A_start[f, v_idx] + A_e2[i, v] + s_i + time_map[i, f]
+                    + M_time * (1 - z[i, f, v]),
+                    f"Link_Ret_hi_{f}_{v_idx}_{i}")
+
+        # E1 回收必须等该 satellite 的所有 E2 车辆返回。
+        e1_pick_node = f"{f}p"
+        if e1_pick_node in e1_task_map:
+            for v_idx in range(vehicles_per_satellite):
+                for k in K:
+                    e1_pick_visits = gp.quicksum(
+                        x[i, e1_pick_node, k]
+                        for i in N1E
+                        if i != e1_pick_node
+                    )
+                    m.addConstr(
+                        A_e1[e1_pick_node, k]
+                        >= A_return[f, v_idx]
+                        - M_time * (1 - e1_pick_visits),
+                        f"Link_Pickup_{f}_{v_idx}_{k}")

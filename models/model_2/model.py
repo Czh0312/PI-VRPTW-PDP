@@ -159,14 +159,16 @@ def build_unified_pdp_model(problem, e1_tasks, e2_tasks_by_sat,
                         z[i, j, v] = m.addVar(
                             vtype=GRB.BINARY, name=f"z_{i}_{j}_{v}")
 
-    # --- E2 发车时刻（衔接用，同 model 1 的 A_start） ---
+    # --- E2 发车/返回时刻（衔接用） ---
     A_start = m.addVars(F, range(vehicles_per_satellite),
                         vtype=GRB.CONTINUOUS, lb=0.0, name="A_start")
+    A_return = m.addVars(F, range(vehicles_per_satellite),
+                         vtype=GRB.CONTINUOUS, lb=0.0, name="A_return")
 
     vars_dict = {
         'x': x, 'A_e1': A_e1, 'Q_k': Q_k, 'Vol_k': Vol_k,
         'z': z, 'A_e2': A_e2, 'Q_r': Q_r, 'Vol_r': Vol_r,
-        'A_start': A_start,
+        'A_start': A_start, 'A_return': A_return,
     }
 
     set_objective(m, vars_dict, ctx)

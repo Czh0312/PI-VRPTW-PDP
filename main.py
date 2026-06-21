@@ -19,6 +19,7 @@ from models.model_1.alns_solver import solve_alns as alns_m1
 from models.model_2.alns_solver import solve_alns as alns_m2
 from models.model_3.alns_solver import solve_alns as alns_m3
 from models.model_4.alns_solver import solve_alns as alns_m4
+from models.model_5.alns_solver import solve_alns as alns_m5
 from utils.data_loader import parse_dataset
 from utils.task_builder import build_tasks_for_model
 from utils.plot import plot_vrp_solution
@@ -37,9 +38,15 @@ def load_config():
 
 
 def _run_solver(model, solver, problem, e1_tasks, e2_tasks_by_sat,
-                alns_iter, alns_time, seed, TFp=9999.0):
+                alns_iter, alns_time, seed, TFp=9999.0,
+                stage1_time_ratio=0.95,
+                transshipment_min_net_saving=0.01,
+                transshipment_max_total=None,
+                transshipment_max_per_satellite=None):
     if solver == "exact":
         solvers = {1: solve_m1, 2: solve_m2, 3: solve_m3, 4: solve_m4}
+        if model == 5:
+            raise ValueError("Model 5 当前仅实现 ALNS 求解")
         kwargs = dict(
             problem=problem,
             e1_tasks=e1_tasks,
@@ -51,7 +58,8 @@ def _run_solver(model, solver, problem, e1_tasks, e2_tasks_by_sat,
             kwargs["TFp"] = TFp
         return solvers[model](**kwargs)
     else:
-        alns_solvers = {1: alns_m1, 2: alns_m2, 3: alns_m3, 4: alns_m4}
+        alns_solvers = {1: alns_m1, 2: alns_m2, 3: alns_m3, 4: alns_m4,
+                        5: alns_m5}
         kwargs = dict(
             problem=problem,
             e1_tasks=e1_tasks,
@@ -63,6 +71,12 @@ def _run_solver(model, solver, problem, e1_tasks, e2_tasks_by_sat,
         )
         if model in (2, 4):
             kwargs["TFp"] = TFp
+        if model in (3, 4, 5):
+            kwargs["transshipment_min_net_saving"] = transshipment_min_net_saving
+            kwargs["transshipment_max_total"] = transshipment_max_total
+            kwargs["transshipment_max_per_satellite"] = transshipment_max_per_satellite
+        if model == 4:
+            kwargs["stage1_time_ratio"] = stage1_time_ratio
         return alns_solvers[model](**kwargs)
 
 
@@ -75,19 +89,30 @@ def main():
     alns_iter = app_cfg.get("alns_iter", 5000)
     alns_time = app_cfg.get("alns_time", 120)
     seed = app_cfg.get("seed", 42)
+    stage1_time_ratio = app_cfg.get("stage1_time_ratio", 0.95)
+    transshipment_min_net_saving = app_cfg.get(
+        "transshipment_min_net_saving", 0.01)
+    transshipment_max_total = app_cfg.get("transshipment_max_total")
+    transshipment_max_per_satellite = app_cfg.get(
+        "transshipment_max_per_satellite")
 
     data_path = Path(data_file)
     if not data_path.exists():
         print(f"[错误] 找不到数据文件: {data_path.absolute()}")
         return
 
-    # 输出子目录: output/model{X}_{solver}/
-    sub_dir = OUTPUT_DIR / f"model{model}_{solver}"
-    sub_dir.mkdir(parents=True, exist_ok=True)
-
     data_stem = data_path.stem
-    log_path = sub_dir / f"{data_stem}_m{model}_{solver}_routes.txt"
-    img_path = sub_dir / f"{data_stem}_m{model}_{solver}_solution.png"
+    # Organized single-run output:
+    # output/single_runs/model4_alns/C101/{routes,figures}/...
+    sub_dir = OUTPUT_DIR / "single_runs" / f"model{model}_{solver}" / data_stem
+    routes_dir = sub_dir / "routes"
+    figures_dir = sub_dir / "figures"
+    routes_dir.mkdir(parents=True, exist_ok=True)
+    figures_dir.mkdir(parents=True, exist_ok=True)
+
+    run_prefix = f"run_model{model:02d}_{solver}_{data_stem}"
+    log_path = routes_dir / f"{run_prefix}_routes_detail.txt"
+    img_path = figures_dir / f"{run_prefix}_solution_route_map.png"
 
     print("=" * 60)
     print("启动 2E-VRP 求解引擎")
@@ -111,6 +136,10 @@ def main():
         e1_routes, e2_routes_by_sat_res = _run_solver(
             model, solver, problem, e1_tasks, e2_tasks_by_sat,
             alns_iter, alns_time, seed,
+            stage1_time_ratio=stage1_time_ratio,
+            transshipment_min_net_saving=transshipment_min_net_saving,
+            transshipment_max_total=transshipment_max_total,
+            transshipment_max_per_satellite=transshipment_max_per_satellite,
         )
     run_time = time.time() - start_time
 
@@ -138,7 +167,7 @@ def main():
             e1_routes=e1_routes,
             e2_routes_by_sat=e2_routes_by_sat_res,
             title=f"2E-VRP Solution - Model {model} ({solver.upper()}) - {data_stem}",
-            save_dir=f"model{model}_{solver}",
+            save_dir=f"single_runs/model{model}_{solver}/{data_stem}/figures",
             filename=img_path.name,
         )
     else:

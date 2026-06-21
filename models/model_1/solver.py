@@ -34,9 +34,9 @@ def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite, verb
             print("模型不可行，正在计算 IIS（可能需要几秒到几十秒）...")
             m.computeIIS()
             from pathlib import Path
-            iis_dir = Path(__file__).resolve().parent.parent.parent / "output" / "model1_exact"
+            iis_dir = Path(__file__).resolve().parent.parent.parent / "output" / "debug_iis" / "model1_exact"
             iis_dir.mkdir(parents=True, exist_ok=True)
-            iis_path = iis_dir / "model1_iis.ilp"
+            iis_path = iis_dir / "debug_iis_model01_exact_infeasible.ilp"
             m.write(str(iis_path))
             print(f"✓ IIS 已写入 {iis_path}")
         return None, None

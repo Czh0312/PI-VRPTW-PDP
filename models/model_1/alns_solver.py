@@ -3,13 +3,13 @@
 """
 Model 1 (纯配送) 的 ALNS 求解器
 """
-import math
 import random
 import time
 
 from models.alns_base import (
-    Route, Solution, _roulette, clean_empty_routes, FEAS_TOL,
+    Route, Solution, FEAS_TOL,
 )
+from models.alns_engine import ALNSConfig, run_alns_search
 
 
 # =====================================================================
@@ -27,10 +27,12 @@ class Evaluator:
         )
         self.e1_task_map = {t.id: t for t in e1_tasks}
         self.e2_task_map = {}
+        self.e2_task_sat = {}
         self.e2_tasks_by_sat = e2_tasks_by_sat
         for sat_id, tasks in e2_tasks_by_sat.items():
             for t in tasks:
                 self.e2_task_map[t.id] = t
+                self.e2_task_sat[t.id] = sat_id
 
         self.task_to_phys = {}
         for t in e1_tasks:
@@ -38,6 +40,12 @@ class Evaluator:
         for tasks in e2_tasks_by_sat.values():
             for t in tasks:
                 self.task_to_phys[t.id] = t.cust
+
+    def e2_task_satellite(self, task_id):
+        return self.e2_task_sat.get(task_id)
+
+    def e2_start_times(self, sol):
+        return self.e1_delivery_departure_times(sol) or {}
 
     def phys(self, node_id):
         return self.task_to_phys.get(node_id, node_id)
@@ -96,7 +104,25 @@ class Evaluator:
             prev = nid
         return True
 
-    def check_e2_route_feasible(self, route, sat_id):
+    def e1_delivery_departure_times(self, sol):
+        departure = {}
+        for route in sol.e1_routes:
+            current_time = 0.0
+            prev = route.base
+            for nid in route.nodes:
+                current_time += self.travel(prev, nid)
+                task = self.e1_task_map.get(nid)
+                if task:
+                    if current_time < task.tw[0]:
+                        current_time = task.tw[0]
+                    if current_time > task.tw[1] + FEAS_TOL:
+                        return None
+                    current_time += self.service_time(nid)
+                    departure[task.cust] = current_time
+                prev = nid
+        return departure
+
+    def check_e2_route_feasible(self, route, sat_id, start_time):
         total_w, total_v = 0.0, 0.0
         for nid in route.nodes:
             t = self.e2_task_map.get(nid)
@@ -113,11 +139,13 @@ class Evaluator:
         for nid in route.nodes:
             travel = self.travel(prev, nid)
             current_time += travel
+            abs_arrival = start_time + current_time
             t = self.e2_task_map.get(nid)
             if t:
-                if current_time < t.tw[0]:
-                    current_time = t.tw[0]
-                if current_time > t.tw[1] + FEAS_TOL:
+                if abs_arrival < t.tw[0]:
+                    current_time = t.tw[0] - start_time
+                    abs_arrival = t.tw[0]
+                if abs_arrival > t.tw[1] + FEAS_TOL:
                     return False
                 current_time += self.service_time(nid)
             prev = nid
@@ -138,12 +166,19 @@ class Evaluator:
         if len(visited_e1) != len(required_e1):
             return False
 
+        e2_start_by_sat = self.e1_delivery_departure_times(sol)
+        if e2_start_by_sat is None:
+            return False
+
         for sat_id, routes in sol.e2_routes.items():
             if len(routes) > self.vehicles_per_satellite:
                 return False
+            if routes and sat_id not in e2_start_by_sat:
+                return False
+            start_time = e2_start_by_sat.get(sat_id, 0.0)
             visited_e2 = []
             for r in routes:
-                if not self.check_e2_route_feasible(r, sat_id):
+                if not self.check_e2_route_feasible(r, sat_id, start_time):
                     return False
                 visited_e2.extend(r.nodes)
             required = {t.id for t in self.e2_tasks_by_sat.get(sat_id, [])}
@@ -185,6 +220,8 @@ def build_initial_solution(problem, e1_tasks, e2_tasks_by_sat, evaluator):
             forced = remaining.pop(0)
             sol.e1_routes.append(Route(depot_id, [forced.id]))
 
+    e2_start_by_sat = evaluator.e1_delivery_departure_times(sol) or {}
+
     for sat_id in sat_ids:
         tasks = list(e2_tasks_by_sat.get(sat_id, []))
         if not tasks:
@@ -199,6 +236,7 @@ def build_initial_solution(problem, e1_tasks, e2_tasks_by_sat, evaluator):
             route = Route(sat_id)
             cur_w, cur_v = 0.0, 0.0
             cur_time = 0.0
+            start_time = e2_start_by_sat.get(sat_id, 0.0)
             prev = sat_id
             assigned_this_route = []
 
@@ -208,15 +246,17 @@ def build_initial_solution(problem, e1_tasks, e2_tasks_by_sat, evaluator):
                 if cur_v + t.v > problem.e2_volume_cap:
                     continue
                 travel = evaluator.travel(prev, t.id)
-                arr = cur_time + travel
+                rel_arr = cur_time + travel
+                arr = start_time + rel_arr
                 if arr < t.tw[0]:
+                    rel_arr = t.tw[0] - start_time
                     arr = t.tw[0]
                 if arr > t.tw[1] + FEAS_TOL:
                     continue
                 route.nodes.append(t.id)
                 cur_w += t.w
                 cur_v += t.v
-                cur_time = arr + evaluator.service_time(t.id)
+                cur_time = rel_arr + evaluator.service_time(t.id)
                 prev = t.id
                 assigned_this_route.append(t)
 
@@ -349,17 +389,15 @@ def shaw_removal(sol, evaluator, num_remove, echelon='e2'):
 
 def greedy_insertion(sol, removed, evaluator, echelon='e2'):
     if echelon == 'e2':
+        e2_start_by_sat = evaluator.e2_start_times(sol)
         for nid in removed:
             task = evaluator.e2_task_map.get(nid)
             if not task:
                 continue
-            sat_id = None
-            for s, tasks in evaluator.e2_tasks_by_sat.items():
-                if any(t.id == nid for t in tasks):
-                    sat_id = s
-                    break
+            sat_id = evaluator.e2_task_satellite(nid)
             if not sat_id:
                 continue
+            start_time = e2_start_by_sat.get(sat_id, 0.0)
 
             best_cost = float('inf')
             best_route = None
@@ -370,7 +408,7 @@ def greedy_insertion(sol, removed, evaluator, echelon='e2'):
                 for pos in range(len(r.nodes) + 1):
                     old_nodes = r.nodes[:]
                     r.nodes.insert(pos, nid)
-                    if evaluator.check_e2_route_feasible(r, sat_id):
+                    if evaluator.check_e2_route_feasible(r, sat_id, start_time):
                         insert_cost = evaluator.route_distance(r)
                         if insert_cost < best_cost:
                             best_cost = insert_cost
@@ -418,6 +456,7 @@ def greedy_insertion(sol, removed, evaluator, echelon='e2'):
 
 def regret_insertion(sol, removed, evaluator, echelon='e2', k=2):
     if echelon == 'e2':
+        e2_start_by_sat = evaluator.e2_start_times(sol)
         pending = list(removed)
         while pending:
             best_regret = -float('inf')
@@ -430,14 +469,11 @@ def regret_insertion(sol, removed, evaluator, echelon='e2', k=2):
                     pending.remove(nid)
                     continue
 
-                sat_id = None
-                for s, tasks in evaluator.e2_tasks_by_sat.items():
-                    if any(t.id == nid for t in tasks):
-                        sat_id = s
-                        break
+                sat_id = evaluator.e2_task_satellite(nid)
                 if not sat_id:
                     pending.remove(nid)
                     continue
+                start_time = e2_start_by_sat.get(sat_id, 0.0)
 
                 insertion_costs = []
                 routes = sol.e2_routes.get(sat_id, [])
@@ -445,7 +481,8 @@ def regret_insertion(sol, removed, evaluator, echelon='e2', k=2):
                     for pos in range(len(r.nodes) + 1):
                         old_nodes = r.nodes[:]
                         r.nodes.insert(pos, nid)
-                        if evaluator.check_e2_route_feasible(r, sat_id):
+                        if evaluator.check_e2_route_feasible(r, sat_id,
+                                                             start_time):
                             c = evaluator.route_distance(r)
                             insertion_costs.append((c, r, pos))
                         r.nodes = old_nodes
@@ -476,11 +513,7 @@ def regret_insertion(sol, removed, evaluator, echelon='e2', k=2):
             if route is not None:
                 route.nodes.insert(pos, best_nid)
             else:
-                sat_id = None
-                for s, tasks in evaluator.e2_tasks_by_sat.items():
-                    if any(t.id == best_nid for t in tasks):
-                        sat_id = s
-                        break
+                sat_id = evaluator.e2_task_satellite(best_nid)
                 if sat_id:
                     new_route = Route(sat_id, [best_nid])
                     if sat_id not in sol.e2_routes:
@@ -504,6 +537,11 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
                           vehicles_per_satellite=vehicles_per_satellite)
 
     sol = build_initial_solution(problem, e1_tasks, e2_tasks_by_sat, evaluator)
+    if not evaluator.is_feasible(sol):
+        if verbose:
+            print("\n[WARN] Model 1 ALNS 初始解不满足全局时间/容量约束")
+        return None, None
+
     sol.cost = evaluator.total_cost(sol)
     best_sol = sol.copy()
     best_cost = sol.cost
@@ -517,121 +555,24 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         e2_count = sum(len(v) for v in sol.e2_routes.values())
         print(f"E2 路径数: {e2_count}")
 
-    destroy_ops = [random_removal, worst_removal, shaw_removal]
-    repair_ops = [greedy_insertion, regret_insertion]
-    n_destroy = len(destroy_ops)
-    n_repair = len(repair_ops)
-
-    destroy_weights = [1.0] * n_destroy
-    repair_weights = [1.0] * n_repair
-    destroy_scores = [0.0] * n_destroy
-    repair_scores = [0.0] * n_repair
-    destroy_counts = [0] * n_destroy
-    repair_counts = [0] * n_repair
-
-    sigma1, sigma2, sigma3 = 33, 9, 3
-    decay = 0.8
-
-    T_start = max(sol.cost * 0.05, 10.0)
-    T_end = 0.01
-    T = T_start
-    cooling_rate = (T_end / T_start) ** (1.0 / max(max_iterations, 1))
-
-    total_e2_tasks = sum(len(r.nodes) for routes in sol.e2_routes.values()
-                         for r in routes)
-    total_e1_tasks = sum(len(r.nodes) for r in sol.e1_routes)
-
-    segment_size = 100
-    iteration = 0
-
-    for iteration in range(max_iterations):
-        if time.time() - start_time > max_time:
-            if verbose:
-                print(f"\n达到时间限制 {max_time}s")
-            break
-
-        d_idx = _roulette(destroy_weights)
-        r_idx = _roulette(repair_weights)
-        destroy_counts[d_idx] += 1
-        repair_counts[r_idx] += 1
-
-        if random.random() < 0.8 and total_e2_tasks > 0:
-            echelon = 'e2'
-            n_tasks = total_e2_tasks
-        else:
-            echelon = 'e1'
-            n_tasks = total_e1_tasks
-
-        max_remove = max(2, min(n_tasks // 2, 20))
-        num_remove = random.randint(1, max(1, max_remove))
-
-        candidate = sol.copy()
-        removed = destroy_ops[d_idx](candidate, evaluator, num_remove, echelon)
-
-        if r_idx == 1:
-            repair_ops[r_idx](candidate, removed, evaluator, echelon, k=2)
-        else:
-            repair_ops[r_idx](candidate, removed, evaluator, echelon)
-
-        clean_empty_routes(candidate)
-        if not evaluator.is_feasible(candidate):
-            T *= cooling_rate
-            continue
-        candidate.cost = evaluator.total_cost(candidate)
-
-        delta = candidate.cost - sol.cost
-        if delta < -FEAS_TOL:
-            sol = candidate
-            if sol.cost < best_cost - FEAS_TOL:
-                best_sol = sol.copy()
-                best_cost = sol.cost
-                destroy_scores[d_idx] += sigma1
-                repair_scores[r_idx] += sigma1
-                if verbose and iteration % 100 == 0:
-                    print(f"  [{iteration:5d}] ★ 新最优: {best_cost:.2f}")
-            else:
-                destroy_scores[d_idx] += sigma2
-                repair_scores[r_idx] += sigma2
-        elif T > 1e-10:
-            prob = math.exp(-delta / T)
-            if random.random() < prob:
-                sol = candidate
-                destroy_scores[d_idx] += sigma3
-                repair_scores[r_idx] += sigma3
-
-        T *= cooling_rate
-
-        if (iteration + 1) % segment_size == 0:
-            for i in range(n_destroy):
-                if destroy_counts[i] > 0:
-                    destroy_weights[i] = (
-                        decay * destroy_weights[i] +
-                        (1 - decay) * destroy_scores[i] / destroy_counts[i]
-                    )
-                destroy_scores[i] = 0.0
-                destroy_counts[i] = 0
-            for i in range(n_repair):
-                if repair_counts[i] > 0:
-                    repair_weights[i] = (
-                        decay * repair_weights[i] +
-                        (1 - decay) * repair_scores[i] / repair_counts[i]
-                    )
-                repair_scores[i] = 0.0
-                repair_counts[i] = 0
-
-            if verbose:
-                elapsed = time.time() - start_time
-                print(f"  [{iteration + 1:5d}] cost={sol.cost:.2f}  "
-                      f"best={best_cost:.2f}  T={T:.4f}  "
-                      f"time={elapsed:.1f}s")
-
-    elapsed = time.time() - start_time
+    result = run_alns_search(
+        initial_solution=sol,
+        evaluator=evaluator,
+        destroy_ops=[random_removal, worst_removal, shaw_removal],
+        repair_ops=[greedy_insertion, regret_insertion],
+        config=ALNSConfig(max_iterations=max_iterations, max_time=max_time),
+        verbose=verbose,
+        start_time=start_time,
+    )
+    best_sol = result.best_solution
+    best_cost = result.best_cost
+    elapsed = result.elapsed
     if verbose:
         print(f"\n{'=' * 60}")
         print(f"ALNS 求解完成")
         print(f"最优目标值: {best_cost:.2f}")
         print(f"总耗时: {elapsed:.2f} 秒")
-        print(f"迭代次数: {min(iteration + 1, max_iterations)}")
+        print(f"迭代次数: {result.iterations}")
         print(f"{'=' * 60}")
 
     e1_routes_out = [r.full_path() for r in best_sol.e1_routes]

@@ -116,10 +116,14 @@ def _enumerate_plans(sol, evaluator):
     plans = []
     base_task_to_phys = dict(sol.task_to_phys or evaluator.task_to_phys)
     evaluator.task_to_phys = dict(base_task_to_phys)
+    e2_start_by_sat, e1_pickups = evaluator.e1_schedule(sol)
+    if e2_start_by_sat is None:
+        return plans
 
     for sat_id, routes in sol.e2_routes.items():
         tasks = evaluator.e2_tasks_by_sat.get(sat_id, [])
         candidate_phys = sorted({t.cust for t in tasks})
+        start_time = e2_start_by_sat.get(sat_id, 0.0)
 
         for ben_idx, ben_route in enumerate(routes):
             for pick_node in list(ben_route.nodes):
@@ -138,10 +142,20 @@ def _enumerate_plans(sol, evaluator):
 
                     evaluator.task_to_phys[pick_node] = new_phys
                     try:
-                        if not evaluator.check_e2_route_feasible(
-                                ben_route, sat_id):
+                        ben_ok, ben_arrivals, ben_return = evaluator.simulate_e2_route(
+                                ben_route, sat_id, start_time)
+                        if not ben_ok:
                             continue
+                        if f"{sat_id}p" in evaluator.e1_task_map:
+                            if ben_return > e1_pickups.get(sat_id, -float("inf")) + FEAS_TOL:
+                                continue
                         new_ben_dist = evaluator.route_distance(ben_route)
+                        base_arrivals = {}
+                        for route in routes:
+                            ok, arrivals, _ret = evaluator.simulate_e2_route(
+                                route, sat_id, start_time)
+                            if ok:
+                                base_arrivals.update(arrivals)
                     finally:
                         evaluator.task_to_phys[pick_node] = old_phys
 
@@ -157,6 +171,8 @@ def _enumerate_plans(sol, evaluator):
                                 sat_id, ben_idx, carrier_idx,
                                 pick_node, old_phys, new_phys,
                                 task, ben_saving, carrier_route, evaluator,
+                                start_time, ben_arrivals,
+                                e1_pickups.get(sat_id), base_arrivals,
                             )
                         )
 
@@ -167,12 +183,13 @@ def _enumerate_plans(sol, evaluator):
 
 def _carrier_insertions(sat_id, ben_idx, carrier_idx, pick_node,
                         old_phys, new_phys, task, ben_saving,
-                        carrier_route, evaluator):
+                        carrier_route, evaluator, start_time, ben_arrivals,
+                        e1_pickup_time, base_arrivals):
     plans = []
     old_carrier_dist = evaluator.route_distance(carrier_route)
     n = len(carrier_route.nodes)
-    pick_vnode = f"TRANS_PICK_{old_phys}"
-    drop_vnode = f"TRANS_DROP_{new_phys}"
+    pick_vnode = _transport_pick_node(pick_node, old_phys)
+    drop_vnode = _transport_drop_node(pick_node, new_phys)
 
     for pick_pos in range(n + 1):
         with_pick = carrier_route.copy()
@@ -184,7 +201,25 @@ def _carrier_insertions(sat_id, ben_idx, carrier_idx, pick_node,
             test_route.nodes.insert(drop_pos, drop_vnode)
             test_route.transport_loads[drop_vnode] = (task.w, task.v)
 
-            if not evaluator.check_e2_route_feasible(test_route, sat_id):
+            carrier_ok, carrier_arrivals, carrier_return = evaluator.simulate_e2_route(
+                test_route, sat_id, start_time)
+            if not carrier_ok:
+                continue
+            if (ben_arrivals.get(pick_node, float("inf"))
+                    < carrier_arrivals.get(drop_vnode, float("inf")) - FEAS_TOL):
+                continue
+            d_id = f"{task.cust}d"
+            d_arrival = carrier_arrivals.get(
+                d_id, ben_arrivals.get(d_id, base_arrivals.get(d_id))
+            )
+            if d_id in evaluator.e2_task_map:
+                if d_arrival is None:
+                    continue
+                if (carrier_arrivals.get(pick_vnode, -float("inf"))
+                        < d_arrival + evaluator.service_time(d_id) - FEAS_TOL):
+                    continue
+            if (e1_pickup_time is not None
+                    and carrier_return > e1_pickup_time + FEAS_TOL):
                 continue
 
             new_carrier_dist = evaluator.route_distance(test_route)
@@ -222,8 +257,8 @@ def _apply_plans(sol, evaluator, selected):
         sol.task_to_phys[p.pick_node] = p.new_phys
 
         carrier_route = sol.e2_routes[p.sat_id][p.carrier_idx]
-        pick_vnode = f"TRANS_PICK_{p.old_phys}"
-        drop_vnode = f"TRANS_DROP_{p.new_phys}"
+        pick_vnode = _transport_pick_node(p.pick_node, p.old_phys)
+        drop_vnode = _transport_drop_node(p.pick_node, p.new_phys)
 
         carrier_route.nodes.insert(p.pick_pos, pick_vnode)
         carrier_route.transport_loads[pick_vnode] = (p.weight, p.volume)
@@ -235,3 +270,11 @@ def _apply_plans(sol, evaluator, selected):
         ] = (p.old_phys, p.carrier_idx, p.weight, p.volume)
 
     evaluator.task_to_phys = dict(sol.task_to_phys)
+
+
+def _transport_pick_node(pick_node, old_phys):
+    return f"TRANS_PICK_{pick_node}@{old_phys}"
+
+
+def _transport_drop_node(pick_node, new_phys):
+    return f"TRANS_DROP_{pick_node}@{new_phys}"
