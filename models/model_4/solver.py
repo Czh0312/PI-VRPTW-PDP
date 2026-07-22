@@ -11,7 +11,8 @@ from models.alns_base import Route, Solution
 
 def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
                 TFp=9999.0, verbose=True, time_limit=300, mip_gap=0.0,
-                return_incumbent_on_time_limit=False, return_info=False):
+                return_incumbent_on_time_limit=False, return_info=False,
+                warm_start_routes=None, gurobi_params=None):
     """
     Run the Model 4 two-stage method.
 
@@ -30,6 +31,7 @@ def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         TFp=TFp, verbose=verbose, time_limit=time_limit, mip_gap=mip_gap,
         return_incumbent_on_time_limit=return_incumbent_on_time_limit,
+        warm_start_routes=warm_start_routes, gurobi_params=gurobi_params,
         return_info=True,
     )
 

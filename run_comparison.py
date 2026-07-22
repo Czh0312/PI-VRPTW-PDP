@@ -113,16 +113,16 @@ def run_one(model, solver, data_path, fleet_cfg, alns_time=120,
         )
         if model in (2, 4):
             kwargs["TFp"] = 9999.0
-        # ALNS warm start (models 1/2 only). Without it the 50/100-customer
+        # ALNS warm start (models 1/2/3). Without it the 50/100-customer
         # arc-flow MIP finds no feasible solution within the exact time budget;
         # seeding Gurobi with an ALNS incumbent turns "no solution" into a real
         # solve (incumbent + bound), recorded as FEASIBLE_NOT_PROVEN, never as
         # proven. Gated to large instances: small ones prove optimal in seconds
-        # and only waste the ALNS budget. M3/M4 solve_exact do not yet accept
-        # warm_start_routes (separate step).
+        # and only waste the ALNS budget. (M4 exact is skipped upstream as
+        # non-global, though its solve_exact also accepts warm_start_routes.)
         n_customers = len({t.cust for sat_tasks in e2_tasks_by_sat.values()
                            for t in sat_tasks})
-        if model in (1, 2) and n_customers >= 50:
+        if model in (1, 2, 3) and n_customers >= 50:
             alns_fn = ALNS_SOLVERS[model]
             alns_kwargs = dict(
                 problem=problem, e1_tasks=e1_tasks,

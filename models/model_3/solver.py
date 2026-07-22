@@ -62,7 +62,8 @@ def _with_info(routes, info, return_info):
 def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
                 verbose=True, max_relocation_candidates=None,
                 warm_start_with_m2=True, time_limit=300, mip_gap=0.0,
-                return_incumbent_on_time_limit=False, return_info=False):
+                return_incumbent_on_time_limit=False, return_info=False,
+                warm_start_routes=None, gurobi_params=None):
     """Solve the full Model 3 MIP.
 
     ``max_relocation_candidates=None`` is deliberately the default: limiting
@@ -103,7 +104,22 @@ def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         max_relocation_candidates=max_relocation_candidates,
     )
-    if warm_start_with_m2:
+    if warm_start_routes is not None:
+        # External incumbent (e.g. ALNS routes from the comparison harness):
+        # seed the joint MIP directly and skip the internal Model 2 solve.
+        # Without this, the 100-customer joint MIP finds no feasible solution
+        # in the time budget (the same arc-flow weakness as Model 2), and the
+        # internal Model 2 warm-start solve would hit the same wall.
+        try:
+            ws_e1, ws_e2 = warm_start_routes
+            if ws_e1 and ws_e2:
+                if verbose:
+                    print("\n[INFO] 使用外部路线作为 Model 3 联合 MIP warm start")
+                apply_route_warm_start(vars_dict, ctx, ws_e1, ws_e2)
+        except Exception as exc:
+            if verbose:
+                print(f"[WARN] 外部 warm start 构造失败，继续使用默认初始解: {exc}")
+    elif warm_start_with_m2:
         try:
             if verbose:
                 print("\n[INFO] 使用 Model 2 exact 解作为 Model 3 联合 MIP warm start")
@@ -124,6 +140,9 @@ def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
     m.setParam("TimeLimit", time_limit)
     m.setParam("MIPFocus", 1)
     m.setParam("Heuristics", 0.5)
+    if gurobi_params:
+        for name, value in gurobi_params.items():
+            m.setParam(name, value)
     m.optimize()
 
     if m.status == GRB.OPTIMAL:
