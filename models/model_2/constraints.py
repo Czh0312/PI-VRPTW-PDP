@@ -12,6 +12,8 @@
 """
 import gurobipy as gp
 
+from models.alns_base import is_tfp_active
+
 
 def _signed_q(task):
     """文档2: q_i > 0 配送, q_i < 0 回收"""
@@ -54,6 +56,12 @@ def add_all_constraints(m: gp.Model, problem, e1_tasks, e2_tasks_by_sat,
     time_map = ctx['time_map']
     e1_service_time_map = ctx['e1_service_time_map']
     e2_service_time_map = ctx['e2_service_time_map']
+    e1_arc_time_m = ctx.get('e1_arc_time_m', {})
+    e2_arc_time_m = ctx.get('e2_arc_time_m', {})
+    e1_infeasible_arcs = ctx.get('e1_infeasible_arcs', set())
+    e2_infeasible_arcs = ctx.get('e2_infeasible_arcs', set())
+    e2_cost_lower_bounds = ctx.get('e2_cost_lower_bounds', {})
+    e1_cost_lower_bound = ctx.get('e1_cost_lower_bound', 0.0)
 
     TFp = ctx['TFp']
     M_time = ctx['M_time']
@@ -79,6 +87,11 @@ def add_all_constraints(m: gp.Model, problem, e1_tasks, e2_tasks_by_sat,
         m.addConstr(
             gp.quicksum(x[depot_id, j, k] for j in N_E1_Tasks) <= 1,
             f"E1_Start_{k}")
+    for idx in range(len(K) - 1):
+        m.addConstr(
+            gp.quicksum(x[depot_id, j, K[idx]] for j in N_E1_Tasks)
+            >= gp.quicksum(x[depot_id, j, K[idx + 1]] for j in N_E1_Tasks),
+            f"E1_VehicleSym_{idx}")
 
     # (4) 流量守恒
     for k in K:
@@ -113,6 +126,8 @@ def add_all_constraints(m: gp.Model, problem, e1_tasks, e2_tasks_by_sat,
 
     # 仓库时间锚定: 每辆卡车在 depot 的时间 = 0
     for k in K:
+        for i in N1E:
+            m.addConstr(x[i, i, k] == 0, f"E1_NoSelf_{i}_{k}")
         m.addConstr(A_e1[depot_id, k] == 0, f"E1_DepotTime_{k}")
 
     # 禁止同一前置仓的 p→d 边（回收后不能再配送）
@@ -124,16 +139,23 @@ def add_all_constraints(m: gp.Model, problem, e1_tasks, e2_tasks_by_sat,
             for k in K:
                m.addConstr(x[pid, did, k] == 0, f"E1_ForbidArc_{s_id}_{k}")
 
+    for i, j in sorted(e1_infeasible_arcs):
+        if (i, j) not in forbidden_edges:
+            for k in K:
+                m.addConstr(x[i, j, k] == 0, f"E1_TimeInfeasibleArc_{i}_{j}_{k}")
+
     # (9) 时间连续性 MTZ
     for i in N1E:
         s_i = e1_service_time_map.get(i, 0.0)
         for j in N_E1_Tasks:
-            if i == j or (i, j) in forbidden_edges:
+            if (i == j or (i, j) in forbidden_edges
+                    or (i, j) in e1_infeasible_arcs):
                 continue
+            M_ij = e1_arc_time_m.get((i, j), M_time)
             for k in K:
                 m.addConstr(
                     A_e1[j, k] >= (A_e1[i, k] + s_i + time_map[i, j])
-                    - M_time * (1 - x[i, j, k]),
+                    - M_ij * (1 - x[i, j, k]),
                     f"E1_Time_{i}_{j}_{k}")
 
     # 任务硬时间窗: 对每个 (j, k) 都加
@@ -149,21 +171,24 @@ def add_all_constraints(m: gp.Model, problem, e1_tasks, e2_tasks_by_sat,
                 f"E1_TW_lo_{j}_{k}")
             if l_j < float('inf'):
                 m.addConstr(
-                    A_e1[j, k] <= l_j + M_time * (1 - visits_jk),
+                    A_e1[j, k] <= l_j * visits_jk,
                     f"E1_TW_hi_{j}_{k}")
 
-    # (10) 前置仓回收节点的统一最早时间 TFp
-    for j in FP_nodes:
-        for k in K:
-            visits_jk = gp.quicksum(
-                x[i, j, k] for i in N1E if i != j
-            )
-            m.addConstr(
-                A_e1[j, k] >= TFp - M_time * (1 - visits_jk),
-                f"E1_TFp_{j}_{k}")
+    # (10) 前置仓回收节点的统一最早时间 TFp。
+    # 与 ALNS 保持一致: TFp >= 9000 表示禁用该全局硬下界。
+    # E1 pickup 仍由后续 Link_Pickup 约束等待对应 E2 车辆返回。
+    if is_tfp_active(TFp):
+        for j in FP_nodes:
+            for k in K:
+                visits_jk = gp.quicksum(
+                    x[i, j, k] for i in N1E if i != j
+                )
+                m.addConstr(
+                    A_e1[j, k] >= TFp - M_time * (1 - visits_jk),
+                    f"E1_TFp_{j}_{k}")
 
     # 注意: 旧代码里的 E1_Prec (同前置仓 p >= d) 已删除。
-    # 理由: (10) 已把所有 pickup 节点推到 TFp 之后，而 delivery 节点时间窗都在 TFp 之前。
+    # 同一前置仓的配送/回收由 E1_ForbidArc 和 Link_Pickup 保持合理顺序；
     # 两点不由同一辆车访问时，旧写法反而会错误地跨车强制顺序。
 
     # ------ 5.3 载重与容积 ------
@@ -190,6 +215,24 @@ def add_all_constraints(m: gp.Model, problem, e1_tasks, e2_tasks_by_sat,
         m.addConstr(
             Vol_k[depot_id, k] <= problem.e1_volume_cap * vehicle_used,
             f"E1_InitV_{k}")
+        m.addConstr(
+            Q_k[depot_id, k] == gp.quicksum(
+                task.w * gp.quicksum(x[i, task.id, k]
+                                     for i in N1E if i != task.id)
+                for task in e1_tasks if task.kind == 'd'),
+            f"E1_InitWExact_{k}")
+        m.addConstr(
+            Vol_k[depot_id, k] == gp.quicksum(
+                task.v * gp.quicksum(x[i, task.id, k]
+                                     for i in N1E if i != task.id)
+                for task in e1_tasks if task.kind == 'd'),
+            f"E1_InitVExact_{k}")
+    # Vehicle labels are interchangeable.  Ordering their exact initial
+    # delivery loads removes label permutations without constraining routes.
+    for idx in range(len(K) - 1):
+        m.addConstr(
+            Q_k[depot_id, K[idx]] >= Q_k[depot_id, K[idx + 1]],
+            f"E1_LoadSym_{idx}")
 
     # (11)(12) 重量双侧 Big-M:  Q_j = Q_i - q_j  （当弧激活）
     # (13)(14) 体积双侧 Big-M
@@ -200,25 +243,32 @@ def add_all_constraints(m: gp.Model, problem, e1_tasks, e2_tasks_by_sat,
             t_j = e1_task_map[j]
             q_j = _signed_q(t_j)
             v_j = _signed_v(t_j)
+            M_w_j = problem.e1_weight_cap + abs(q_j)
+            M_v_j = problem.e1_volume_cap + abs(v_j)
             for k in K:
                 m.addConstr(
                     Q_k[j, k] <= Q_k[i, k] - q_j
-                    + M_weight_e1 * (1 - x[i, j, k]),
+                    + M_w_j * (1 - x[i, j, k]),
                     f"E1_W_up_{i}_{j}_{k}")
                 m.addConstr(
                     Q_k[j, k] >= Q_k[i, k] - q_j
-                    - M_weight_e1 * (1 - x[i, j, k]),
+                    - M_w_j * (1 - x[i, j, k]),
                     f"E1_W_lo_{i}_{j}_{k}")
                 m.addConstr(
                     Vol_k[j, k] <= Vol_k[i, k] - v_j
-                    + M_vol_e1 * (1 - x[i, j, k]),
+                    + M_v_j * (1 - x[i, j, k]),
                     f"E1_V_up_{i}_{j}_{k}")
                 m.addConstr(
                     Vol_k[j, k] >= Vol_k[i, k] - v_j
-                    - M_vol_e1 * (1 - x[i, j, k]),
+                    - M_v_j * (1 - x[i, j, k]),
                     f"E1_V_lo_{i}_{j}_{k}")
 
     # (17)(18) 容量上界已通过变量 ub 实现，此处无需额外约束
+    if e1_cost_lower_bound > 1e-9:
+        m.addConstr(
+            gp.quicksum(ctx['dist_map'][i, j] * x[i, j, k]
+                        for k in K for i in N1E for j in N1E if i != j)
+            >= e1_cost_lower_bound, "E1_CostLowerBound")
 
     # ===================================================================
     #  第二阶段约束  (文档2 §7)
@@ -267,6 +317,21 @@ def add_all_constraints(m: gp.Model, problem, e1_tasks, e2_tasks_by_sat,
                                   if j != h and (h, j, v) in z) == 0,
                     f"E2_Flow_{h}_{v}")
 
+        for idx in range(len(vehs) - 1):
+            m.addConstr(
+                gp.quicksum(z[sat_id, j, vehs[idx]] for j in t_ids
+                            if (sat_id, j, vehs[idx]) in z)
+                >= gp.quicksum(z[sat_id, j, vehs[idx + 1]] for j in t_ids
+                               if (sat_id, j, vehs[idx + 1]) in z),
+                f"E2_VehicleSym_{sat_id}_{idx}")
+        satellite_lb = e2_cost_lower_bounds.get(sat_id, 0.0)
+        if satellite_lb > 1e-9:
+            m.addConstr(
+                gp.quicksum(ctx['dist_map'][i, j] * z[i, j, v]
+                            for v in vehs for i in valid_nodes for j in valid_nodes
+                            if i != j and (i, j, v) in z) >= satellite_lb,
+                f"E2_CostLowerBound_{sat_id}")
+
     # (25) 车辆只能从自己的前置仓出发 —— 通过 z 变量的定义域已隐式满足
 
     # ------ 7.2 时间约束 ------
@@ -275,6 +340,27 @@ def add_all_constraints(m: gp.Model, problem, e1_tasks, e2_tasks_by_sat,
     for f in F:
         for v in V_by_sat[f]:
             m.addConstr(A_e2[f, v] == 0, f"E2_SatAnchor_{f}_{v}")
+
+    for sat_id in F:
+        tasks_in_sat = e2_tasks_by_sat.get(sat_id, [])
+        valid_nodes = [sat_id] + [task.id for task in tasks_in_sat]
+        for v in V_by_sat[sat_id]:
+            for i in valid_nodes:
+                for j in [task.id for task in tasks_in_sat]:
+                    if (i != j and (i, j) in e2_infeasible_arcs
+                            and (i, j, v) in z):
+                        m.addConstr(z[i, j, v] == 0,
+                                    f"E2_TimeInfeasibleArc_{i}_{j}_{v}")
+
+    for sat_id in F:
+        task_ids = {task.id for task in e2_tasks_by_sat.get(sat_id, [])}
+        for customer in {task.cust for task in e2_tasks_by_sat.get(sat_id, [])}:
+            delivery_id, pickup_id = f"{customer}d", f"{customer}p"
+            if delivery_id in task_ids and pickup_id in task_ids:
+                for v in V_by_sat[sat_id]:
+                    if (pickup_id, delivery_id, v) in z:
+                        m.addConstr(z[pickup_id, delivery_id, v] == 0,
+                                    f"E2_ForbidSameCustPickBeforeDel_{customer}_{v}")
 
     # (26) 时间连续性 MTZ (按 v 展开)
     for sat_id in F:
@@ -289,10 +375,26 @@ def add_all_constraints(m: gp.Model, problem, e1_tasks, e2_tasks_by_sat,
                         continue
                     if (i, j, v) not in z:
                         continue
+                    if (i, j) in e2_infeasible_arcs:
+                        continue
+                    M_ij = e2_arc_time_m.get((i, j), M_time)
                     m.addConstr(
                         A_e2[j, v] >= (A_e2[i, v] + s_i + time_map[i, j])
-                        - M_time * (1 - z[i, j, v]),
+                        - M_ij * (1 - z[i, j, v]),
                         f"E2_Time_{i}_{j}_{v}")
+
+    for sat_id in F:
+        tasks_in_sat = e2_tasks_by_sat.get(sat_id, [])
+        valid_nodes = [sat_id] + [task.id for task in tasks_in_sat]
+        for v in V_by_sat[sat_id]:
+            for task in tasks_in_sat:
+                _earliest, latest = task.tw
+                if latest < float('inf'):
+                    served = gp.quicksum(
+                        z[i, task.id, v] for i in valid_nodes
+                        if i != task.id and (i, task.id, v) in z)
+                    m.addConstr(A_e2[task.id, v] <= latest * served,
+                                f"E2_RelTimeHi_{task.id}_{v}")
 
     # 注意: 旧代码里的 E2_Prec (同客户 p >= d + service) 已删除。
     # 若同一客户的 d 和 p 由不同车辆服务，这条约束无意义；
@@ -336,6 +438,15 @@ def add_all_constraints(m: gp.Model, problem, e1_tasks, e2_tasks_by_sat,
                 m.addConstr(Q_r[sat_id, v] == 0)
                 m.addConstr(Vol_r[sat_id, v] == 0)
 
+        # E2 vehicles belonging to one satellite are also interchangeable.
+        # Keep a single load ordering (rather than incompatible independent
+        # weight/volume orderings) to retain a representative of every orbit.
+        for idx in range(len(vehs) - 1):
+            left, right = vehs[idx], vehs[idx + 1]
+            m.addConstr(
+                Q_r[sat_id, left] >= Q_r[sat_id, right],
+                f"E2_LoadSym_{sat_id}_{idx}")
+
     # (31) 每个前置仓配送总重守恒
     for sat_id in F:
         vehs = V_by_sat[sat_id]
@@ -374,21 +485,23 @@ def add_all_constraints(m: gp.Model, problem, e1_tasks, e2_tasks_by_sat,
                     t_j = e2_task_map[j]
                     q_j = _signed_q(t_j)
                     v_j = _signed_v(t_j)
+                    M_w_j = problem.e2_weight_cap + abs(q_j)
+                    M_v_j = problem.e2_volume_cap + abs(v_j)
                     m.addConstr(
                         Q_r[j, v] <= Q_r[i, v] - q_j
-                        + M_weight_e2 * (1 - z[i, j, v]),
+                        + M_w_j * (1 - z[i, j, v]),
                         f"E2_W_up_{i}_{j}_{v}")
                     m.addConstr(
                         Q_r[j, v] >= Q_r[i, v] - q_j
-                        - M_weight_e2 * (1 - z[i, j, v]),
+                        - M_w_j * (1 - z[i, j, v]),
                         f"E2_W_lo_{i}_{j}_{v}")
                     m.addConstr(
                         Vol_r[j, v] <= Vol_r[i, v] - v_j
-                        + M_vol_e2 * (1 - z[i, j, v]),
+                        + M_v_j * (1 - z[i, j, v]),
                         f"E2_V_up_{i}_{j}_{v}")
                     m.addConstr(
                         Vol_r[j, v] >= Vol_r[i, v] - v_j
-                        - M_vol_e2 * (1 - z[i, j, v]),
+                        - M_v_j * (1 - z[i, j, v]),
                         f"E2_V_lo_{i}_{j}_{v}")
 
     # (33)(34) 容量上界已通过变量 ub 实现，无需额外约束
@@ -411,6 +524,20 @@ def add_all_constraints(m: gp.Model, problem, e1_tasks, e2_tasks_by_sat,
             s_f = 0.0
 
         valid_nodes_f = [f] + [t.id for t in tasks_in_f]
+        task_ids_f = [task.id for task in tasks_in_f]
+        e2_used = {}
+        for v_idx in range(vehicles_per_satellite):
+            v = (f, v_idx)
+            e2_used[v_idx] = gp.quicksum(
+                z[f, j, v] for j in task_ids_f if (f, j, v) in z
+            )
+            m.addConstr(A_start[f, v_idx] <= M_time * e2_used[v_idx],
+                        f"Link_StartUsed_{f}_{v_idx}")
+            m.addConstr(A_return[f, v_idx] <= M_time * e2_used[v_idx],
+                        f"Link_ReturnUsed_{f}_{v_idx}")
+            m.addConstr(A_return[f, v_idx] >= A_start[f, v_idx]
+                        - M_time * (1 - e2_used[v_idx]),
+                        f"Link_ReturnAfterStart_{f}_{v_idx}")
 
         # --- (37) E1-E2 时间衔接: E2 发车时间 >= E1 到达 Sxd + 卸货时间 ---
         if has_e1_delivery:
@@ -423,7 +550,7 @@ def add_all_constraints(m: gp.Model, problem, e1_tasks, e2_tasks_by_sat,
                     m.addConstr(
                         A_start[f, v_idx]
                         >= A_e1[e1_del_node, k] + s_f
-                        - M_time * (1 - e1_visits_k),
+                        - M_time * (2 - e1_visits_k - e2_used[v_idx]),
                         f"Link_Start_{f}_{v_idx}_{k}")
         else:
             for v_idx in range(vehicles_per_satellite):

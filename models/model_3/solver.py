@@ -13,9 +13,62 @@ from .exact_joint import (
 from models.model_2.solver import solve_exact as solve_m2_exact
 
 
+def _status_name(status_code):
+    names = {
+        GRB.OPTIMAL: "OPTIMAL", GRB.INFEASIBLE: "INFEASIBLE",
+        GRB.TIME_LIMIT: "TIME_LIMIT", GRB.INTERRUPTED: "INTERRUPTED",
+        GRB.NODE_LIMIT: "NODE_LIMIT", GRB.SUBOPTIMAL: "SUBOPTIMAL",
+        GRB.NUMERIC: "NUMERIC",
+    }
+    return names.get(status_code, str(status_code))
+
+
+def _solve_info(m, solution_type, max_relocation_candidates):
+    info = {
+        "status_code": int(m.status),
+        "status": _status_name(m.status),
+        "solution_type": solution_type,
+        # A restricted relocation neighbourhood is not the original Model 3.
+        "proven_optimal": (
+            solution_type == "proven_optimal"
+            and max_relocation_candidates is None
+        ),
+        "relocation_neighborhood": (
+            "full" if max_relocation_candidates is None
+            else f"nearest_{max_relocation_candidates}"
+        ),
+        "runtime": float(getattr(m, "Runtime", 0.0)),
+        "sol_count": int(getattr(m, "SolCount", 0)),
+        "objective": None,
+        "best_bound": None,
+        "mip_gap": None,
+    }
+    if m.SolCount:
+        info["objective"] = float(m.ObjVal)
+        info["mip_gap"] = float(m.MIPGap)
+    try:
+        info["best_bound"] = float(m.ObjBound)
+    except Exception:
+        pass
+    return info
+
+
+def _with_info(routes, info, return_info):
+    if return_info:
+        return *routes, info
+    return routes
+
+
 def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
-                verbose=True, max_relocation_candidates=1,
-                warm_start_with_m2=True):
+                verbose=True, max_relocation_candidates=None,
+                warm_start_with_m2=True, time_limit=300, mip_gap=0.0,
+                return_incumbent_on_time_limit=False, return_info=False):
+    """Solve the full Model 3 MIP.
+
+    ``max_relocation_candidates=None`` is deliberately the default: limiting
+    candidates changes the model and therefore cannot be reported as exact.
+    Use a finite value only for a clearly labelled restricted-MIP experiment.
+    """
     if verbose:
         total_w_d = sum(t.w for t in e1_tasks if t.kind == 'd')
         total_w_p = sum(t.w for t in e1_tasks if t.kind == 'p')
@@ -56,7 +109,8 @@ def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
                 print("\n[INFO] 使用 Model 2 exact 解作为 Model 3 联合 MIP warm start")
             m2_e1, m2_e2 = solve_m2_exact(
                 problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
-                TFp=9999.0, verbose=False,
+                TFp=9999.0, verbose=False, time_limit=time_limit,
+                return_incumbent_on_time_limit=True,
             )
             if m2_e1 and m2_e2:
                 apply_route_warm_start(vars_dict, ctx, m2_e1, m2_e2)
@@ -66,47 +120,78 @@ def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
     if not verbose:
         m.setParam("OutputFlag", 0)
 
-    m.setParam("MIPGap", 0.0)
-    m.setParam("TimeLimit", 300)
+    m.setParam("MIPGap", mip_gap)
+    m.setParam("TimeLimit", time_limit)
     m.setParam("MIPFocus", 1)
     m.setParam("Heuristics", 0.5)
     m.optimize()
 
     if m.status == GRB.OPTIMAL:
         e1_routes, e2_routes, transshipments = _print_joint_solution(
-            m, vars_dict, ctx
+            m, vars_dict, ctx, verbose=verbose
         )
         if verbose:
             _print_joint_routes(e1_routes, e2_routes, transshipments)
-        return e1_routes, e2_routes
+        solution_type = (
+            "proven_optimal"
+            if max_relocation_candidates is None else "restricted_optimal"
+        )
+        return _with_info(
+            (e1_routes, e2_routes),
+            _solve_info(m, solution_type, max_relocation_candidates),
+            return_info,
+        )
 
-    if m.status == GRB.TIME_LIMIT and m.SolCount > 0:
-        print(f"\n达到时间限制, 当前最优解: {m.ObjVal:.2f}  (Gap: {m.MIPGap:.2%})")
+    if m.SolCount > 0 and return_incumbent_on_time_limit:
+        if verbose:
+            print(f"\n求解未证明最优 ({_status_name(m.status)})，返回可行解: "
+                  f"{m.ObjVal:.2f}  (Gap: {m.MIPGap:.2%})")
         e1_routes, e2_routes, transshipments = _print_joint_solution(
-            m, vars_dict, ctx
+            m, vars_dict, ctx, verbose=verbose
         )
         if verbose:
             _print_joint_routes(e1_routes, e2_routes, transshipments)
-        return e1_routes, e2_routes
+        return _with_info(
+            (e1_routes, e2_routes),
+            _solve_info(m, "feasible_not_proven", max_relocation_candidates),
+            return_info,
+        )
 
     if m.status == GRB.INFEASIBLE:
-        print("\n模型不可行，正在计算 IIS...")
+        if verbose:
+            print("\n模型不可行，正在计算 IIS...")
         m.computeIIS()
         from pathlib import Path
         iis_dir = Path(__file__).resolve().parent.parent.parent / "output" / "debug_iis" / "model3_exact"
         iis_dir.mkdir(parents=True, exist_ok=True)
         iis_path = iis_dir / "debug_iis_model03_exact_infeasible.ilp"
         m.write(str(iis_path))
-        print(f"✓ IIS 已写入 {iis_path}")
+        if verbose:
+            print(f"✓ IIS 已写入 {iis_path}")
 
-    print("\n未找到可行解")
-    return None, None
+    if verbose:
+        print("\n未找到可行解")
+    return _with_info(
+        (None, None), _solve_info(m, "none", max_relocation_candidates),
+        return_info,
+    )
 
 
-def _print_joint_solution(m, vars_dict, ctx):
-    print("\n" + "=" * 60)
-    print(f"Model 3 联合 MIP 求解完成!  目标值: {m.ObjVal:.2f}")
-    print("=" * 60)
+def solve_restricted_mip(problem, e1_tasks, e2_tasks_by_sat,
+                         vehicles_per_satellite, **kwargs):
+    """Run a deliberately restricted Model 3 MIP and permit incumbents."""
+    kwargs.setdefault("max_relocation_candidates", 1)
+    kwargs["return_incumbent_on_time_limit"] = True
+    return solve_exact(
+        problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite, **kwargs
+    )
+
+
+def _print_joint_solution(m, vars_dict, ctx, *, verbose=True):
+    if verbose:
+        print("\n" + "=" * 60)
+        print(f"Model 3 联合 MIP 求解完成!  目标值: {m.ObjVal:.2f}")
+        print("=" * 60)
     return extract_solution(m, vars_dict, ctx)
 
 

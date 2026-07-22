@@ -1,7 +1,7 @@
 # run_comparison.py
 # -*- coding: utf-8 -*-
 """
-批量对比实验：4 规模 × 4 模型 × 2 求解器 (exact / ALNS)
+批量对比实验：4 规模 × 4 模型 × 2 求解器 (certified exact / ALNS)
 跑完每个规模下全部实例，按 (规模, 模型, 求解器) 聚合求均值，
 最终输出对比图 + 对比表格。
 """
@@ -68,12 +68,29 @@ def _count_e2(e2_by_sat):
 
 # ─── 单次求解 ───
 
-def run_one(model, solver, data_path, fleet_cfg, alns_time=120, seed=42):
+def run_one(model, solver, data_path, fleet_cfg, alns_time=120,
+            exact_time=300, seed=42):
     """
     运行单次实验。
     solver: "exact" | "alns"
-    返回 dict: cost / time / e1 / e2 / status
+    Exact rows are counted only when the solver has proved global optimality.
+    A time-limited MIP incumbent is retained as diagnostic data, but is never
+    folded into the Exact means, tables, or success rates.
     """
+    # Model 4 currently fixes the Model 2 routes before optimizing
+    # transshipments, so it has no global-exact implementation to benchmark.
+    # Do not spend the exact budget producing a result that cannot qualify.
+    if solver == "exact" and model == 4:
+        return dict(
+            cost=None, time=0.0, e1=0, e2=0,
+            status="UNAVAILABLE_NON_GLOBAL",
+            solver_info={
+                "solution_type": "two_stage_not_global",
+                "proven_optimal": False,
+            },
+            log="Model 4 has no global exact solver; skipped.\n",
+        )
+
     nodes_dict, _ = parse_dataset(str(data_path))
     problem = ProblemInstance(nodes_dict, fleet_cfg, speed=fleet_cfg.get("speed", 1.0))
     problem.aggregate_demands_from_pre_assignment()
@@ -85,7 +102,9 @@ def run_one(model, solver, data_path, fleet_cfg, alns_time=120, seed=42):
             problem=problem, e1_tasks=e1_tasks,
             e2_tasks_by_sat=e2_tasks_by_sat,
             vehicles_per_satellite=problem.fleet.e2_per_sat_count,
+            time_limit=exact_time,
             verbose=True,
+            return_info=True,
         )
         if model in (2, 4):
             kwargs["TFp"] = 9999.0
@@ -105,20 +124,31 @@ def run_one(model, solver, data_path, fleet_cfg, alns_time=120, seed=42):
     t0 = time.time()
     try:
         with redirect_stdout(log_buf):
-            e1_routes, e2_routes = fn(**kwargs)
+            result = fn(**kwargs)
         elapsed = time.time() - t0
+        if solver == "exact":
+            e1_routes, e2_routes, solve_info = result
+        else:
+            e1_routes, e2_routes = result
+            solve_info = None
         if e1_routes and e2_routes:
+            proven_optimal = bool(solve_info and solve_info.get("proven_optimal"))
+            status = "PROVEN_OPTIMAL" if solver == "exact" and proven_optimal else (
+                "FEASIBLE_NOT_PROVEN" if solver == "exact" else "OK"
+            )
             return dict(
                 cost=_total_cost(problem, e1_routes, e2_routes),
                 time=elapsed, e1=len(e1_routes), e2=_count_e2(e2_routes),
-                status="OK", log=log_buf.getvalue(),
+                status=status, solver_info=solve_info, log=log_buf.getvalue(),
             )
-        return dict(cost=None, time=elapsed, e1=0, e2=0,
-                    status="INFEASIBLE", log=log_buf.getvalue())
+        status = "NO_PROOF" if solver == "exact" else "INFEASIBLE"
+        return dict(cost=None, time=elapsed, e1=0, e2=0, status=status,
+                    solver_info=solve_info, log=log_buf.getvalue())
     except Exception as e:
         elapsed = time.time() - t0
         return dict(cost=None, time=elapsed, e1=0, e2=0,
-                    status=f"ERROR: {e}", log=log_buf.getvalue())
+                    status=f"ERROR: {e}", solver_info=None,
+                    log=log_buf.getvalue())
 
 
 # ─── 绘图 ───
@@ -169,7 +199,7 @@ def write_comparison_readme(output_dir):
         "Recommended figures for reports:\n\n"
         "- `01_main_figures/fig_main_01_all_scales_alns_cost_by_model.png`\n"
         "- `01_main_figures/fig_main_02_all_scales_alns_gap_m3_m4_vs_m2.png`\n"
-        "- `01_main_figures/fig_main_03_all_scales_exact_success_rate.png`\n",
+        "- `01_main_figures/fig_main_03_all_scales_exact_success_rate.png` (certified optimality only)\n",
         encoding="utf-8",
     )
     return out_dirs
@@ -210,7 +240,7 @@ def plot_all(avg_results, output_dir):
         4: "M4 Two-Phase Trans.",
     }
     model_short = {1: "M1", 2: "M2", 3: "M3", 4: "M4"}
-    solver_labels = {"exact": "Exact", "alns": "ALNS"}
+    solver_labels = {"exact": "Certified Exact", "alns": "ALNS"}
     model_colors = {1: "#4C78A8", 2: "#E45756", 3: "#F58518", 4: "#72B7B2"}
     solver_alpha = {"exact": 0.92, "alns": 0.72}
     combo_marker = {"exact": "o", "alns": "s"}
@@ -587,7 +617,7 @@ def plot_exact_success_heatmap(avg_results, scales, output_dir):
 
     fig, ax = plt.subplots(figsize=(8.8, 4.8))
     im = ax.imshow(rates, cmap="YlGn", vmin=0, vmax=1, aspect="auto")
-    ax.set_title("Exact Solver Success Rate", fontsize=16,
+    ax.set_title("Certified Exact Solver Success Rate", fontsize=16,
                  fontweight="bold", pad=12)
     ax.set_xticks(np.arange(len(scales)))
     ax.set_xticklabels(scale_labels)
@@ -645,10 +675,13 @@ def main():
                     t_limit = (exact_time_map if solver == "exact" else alns_time_map)[sd]
                     print(f"  [{done}/{total}] {tag}  t_limit={t_limit}s", end="", flush=True)
 
-                    r = run_one(model, solver, csv_path, fleet_cfg,
-                                alns_time=t_limit, seed=42)
+                    r = run_one(
+                        model, solver, csv_path, fleet_cfg,
+                        alns_time=t_limit, exact_time=t_limit, seed=42,
+                    )
 
-                    status_icon = "OK" if r["status"] == "OK" else "FAIL"
+                    success_status = "PROVEN_OPTIMAL" if solver == "exact" else "OK"
+                    status_icon = "OK" if r["status"] == success_status else "FAIL"
                     cost_str = f"{r['cost']:.1f}" if r["cost"] is not None else "N/A"
                     print(f"  -> {status_icon}  cost={cost_str}  t={r['time']:.1f}s")
 
@@ -663,7 +696,8 @@ def main():
                 costs, times, e1s, e2s = [], [], [], []
                 n_ok = 0
                 for (m, s, inst), r in raw_results[sd].items():
-                    if m == model and s == solver and r["status"] == "OK":
+                    success_status = "PROVEN_OPTIMAL" if solver == "exact" else "OK"
+                    if m == model and s == solver and r["status"] == success_status:
                         costs.append(r["cost"])
                         times.append(r["time"])
                         e1s.append(r["e1"])
@@ -707,11 +741,38 @@ def main():
                     "e1_mean": round(d["e1_mean"], 1),
                     "e2_mean": round(d["e2_mean"], 1),
                     "n_ok": d["n"], "n_total": d["n_total"],
+                    "exact_rows_require_proven_optimal": solver == "exact",
                 }
     json_path = out_dirs["data"] / "data_01_comparison_summary_by_scale_model_solver.json"
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(json_out, f, indent=2, ensure_ascii=False)
     print(f"\nJSON saved: {json_path}")
+
+    # Preserve every outcome, including time-limited feasible solutions and
+    # their bounds.  The aggregate above intentionally omits those rows from
+    # exact statistics, but they remain useful diagnostic evidence.
+    raw_rows = []
+    for scale, results in raw_results.items():
+        for (model, solver, instance), result in results.items():
+            info = result.get("solver_info") or {}
+            raw_rows.append({
+                "scale": scale,
+                "instance": instance,
+                "model": model,
+                "solver": solver,
+                "classification": result["status"],
+                "cost": result.get("cost"),
+                "runtime": result.get("time"),
+                "proven_optimal": info.get("proven_optimal"),
+                "solver_status": info.get("status"),
+                "solution_type": info.get("solution_type"),
+                "best_bound": info.get("best_bound"),
+                "mip_gap": info.get("mip_gap"),
+            })
+    raw_path = out_dirs["data"] / "data_02_comparison_run_statuses.json"
+    with open(raw_path, "w", encoding="utf-8") as f:
+        json.dump(raw_rows, f, indent=2, ensure_ascii=False)
+    print(f"Run statuses saved: {raw_path}")
 
     # ─── 打印汇总表 ───
     print("\n" + "=" * 100)

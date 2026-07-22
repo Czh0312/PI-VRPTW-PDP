@@ -1,7 +1,7 @@
 # models/model_4/solver.py
 # -*- coding: utf-8 -*-
 """
-Model 4 两阶段精确求解：
+Model 4 两阶段中转优化：
   阶段一：调用 Model 2 的 MIP 求解（无中转）
   阶段二：对固定路线，用 0-1 MIP 精确选择中转方案
 """
@@ -10,10 +10,14 @@ from models.alns_base import Route, Solution
 
 
 def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
-                TFp=9999.0, verbose=True):
+                TFp=9999.0, verbose=True, time_limit=300, mip_gap=0.0,
+                return_incumbent_on_time_limit=False, return_info=False):
     """
-    Model 4 两阶段精确求解
-    阶段一用 Model 2 的 MIP，阶段二用固定路线中转选择 MIP
+    Run the Model 4 two-stage method.
+
+    This method is exact only for its *fixed-route second-stage* subproblem;
+    it is not a global Model 4 exact algorithm.  The return metadata always
+    records that fact so comparison code cannot report it as certified exact.
     """
     if verbose:
         print(f"\n{'=' * 60}")
@@ -22,13 +26,21 @@ def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         print(f"--- 阶段一：Model 2 MIP (无中转) ---")
 
     # 阶段一：Model 2 MIP
-    e1_routes, e2_routes_by_sat = solve_m2_exact(
+    e1_routes, e2_routes_by_sat, stage1_info = solve_m2_exact(
         problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
-        TFp=TFp, verbose=verbose
+        TFp=TFp, verbose=verbose, time_limit=time_limit, mip_gap=mip_gap,
+        return_incumbent_on_time_limit=return_incumbent_on_time_limit,
+        return_info=True,
     )
 
     if e1_routes is None:
-        return None, None
+        info = {
+            "status": stage1_info.get("status", "NO_SOLUTION"),
+            "solution_type": "none",
+            "proven_optimal": False,
+            "stage1": stage1_info,
+        }
+        return (None, None, info) if return_info else (None, None)
 
     # 阶段一 cost（直接从路线计算）
     stage1_cost = _compute_total_distance(
@@ -73,6 +85,15 @@ def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
             for r in routes
         ]
 
+    info = {
+        "status": "TWO_STAGE_COMPLETE",
+        "solution_type": "two_stage_not_global",
+        "proven_optimal": False,
+        "stage1": stage1_info,
+        "objective": stage2_cost,
+    }
+    if return_info:
+        return e1_routes_out, e2_routes_out, info
     return e1_routes_out, e2_routes_out
 
 

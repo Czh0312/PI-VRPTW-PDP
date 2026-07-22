@@ -1,6 +1,48 @@
 # 2E-VRPTW-PDD
 
-两级带时间窗取送货车辆路径问题求解框架，包含 Model 1-5、Gurobi 精确求解器和 ALNS 启发式求解器。
+两级带时间窗取送货车辆路径问题求解框架，包含 Model 1-5、Gurobi MIP 与 ALNS 启发式求解器。
+
+## 精确求解口径
+
+项目将“有可行路线”和“已证明全局最优”严格分开：只有求解器返回
+`proven_optimal=True`（Gurobi 状态为 `OPTIMAL`，且模型未缩减候选空间）时，
+结果才能称为精确解。达到时间限制的 incumbent 会保留目标值、下界和 gap，
+但会标记为 `FEASIBLE_NOT_PROVEN`，不会进入 `run_comparison.py` 的 Exact 均值
+或成功率。
+
+- Model 1 / Model 2：`solve_exact(...)` 默认只返回已证明最优的解；如需限时
+  incumbent，显式调用 `solve_mip(...)`。
+- Model 3：全候选中转集合（默认）才允许报告精确；有限近邻候选是
+  `solve_restricted_mip(...)`。
+- Model 4：当前为固定基线路线后的两阶段中转优化，阶段二虽精确但整体不是
+  全局精确算法，因此始终标记为 `two_stage_not_global`。
+
+Model 2 另提供 `models.model_2.route_universe.solve_route_universe_exact`：它在
+每个卫星任务数不超过 10 时穷举全部容量/时间窗可行 E2 路线，并把路线选择与
+原始 E1–E2 联合时间约束同时求解。只有路线宇宙完整且 MIP 返回 `OPTIMAL` 才
+认证；任务或路线数超过安全上限时直接报告 `ROUTE_UNIVERSE_INCOMPLETE`，不会
+退化成“伪精确”的受限列池。
+
+`models.model_2.route_master.solve_route_master_exact` 是对应的直接路线主问题：
+每条 E2 路线都保留自己的发车/返回时间，客户保留唯一的绝对服务时刻，因此 E1
+送达、所有 E2 车返回后回收、以及跨车的“先送后取”都仍在同一个 MIP 中。它是后续
+branch-price 的正确主问题；当前仅在完整路线宇宙时认证。
+
+同文件的 `solve_route_master_pool(...)` 接受 ALNS 或既有 MIP 路线作为受限池，
+用于后续的列生成迭代；它即使返回 `OPTIMAL` 也固定标为
+`restricted_route_pool_optimal`，绝不等同于全局最优。
+
+路线主问题还支持 Ryan–Foster `same` / `different` 任务对分支。单个分支节点
+即使已被 MIP 闭合，也标为 `branch_node_optimal`；只有完整分支树闭合才可以形成
+全局精确证明。
+
+[`models/model_2/route_pricing.py`](models/model_2/route_pricing.py) 提供单条
+E2 路线的精确定价 oracle，支持任意弧成本、任务奖励和 Ryan–Foster 分支规则。
+它只认证“该单路线子问题”的最优性；在联合主问题对偶及完整分支树接入前，不会
+输出 Model 2 全局最优结论。
+
+精确求解的模块职责、返回状态、回归命令与尚未完成的 branch-price-and-cut 工作，
+见 [`docs/exact_solver_architecture.md`](docs/exact_solver_architecture.md)。
 
 ## 当前重点
 

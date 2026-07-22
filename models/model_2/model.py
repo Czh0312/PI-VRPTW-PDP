@@ -16,7 +16,9 @@ from .constraints import add_all_constraints
 
 
 def build_unified_pdp_model(problem, e1_tasks, e2_tasks_by_sat,
-                            vehicles_per_satellite, TFp=9999.0):
+                            vehicles_per_satellite, TFp=9999.0,
+                            e2_cost_lower_bounds=None,
+                            e1_cost_lower_bound=None):
     """
     构建带取送货的 2E-VRP-PDP 数学模型 (文档2)
     """
@@ -86,6 +88,76 @@ def build_unified_pdp_model(problem, e1_tasks, e2_tasks_by_sat,
             if task.cust in problem.nodes else 0.0
         )
 
+    # Safe arc-specific time Big-M values and impossible-arc elimination.
+    # A constructive global horizon is substantially tighter than the old
+    # 100000 fallback while preserving every feasible route: start every
+    # linked E1/E2 activity as early as possible, wait only for an earliest
+    # time window, and charge at most one longest arc/service for every task.
+    # This also bounds time variables of unvisited infinite-window nodes.
+    inf = float("inf")
+    e1_tw_map = {depot_id: (0.0, 0.0)}
+    e1_tw_map.update({task_id: task.tw for task_id, task in e1_task_map.items()})
+    e2_tw_map = {sat_id: (0.0, 0.0) for sat_id in F}
+    e2_tw_map.update({task_id: task.tw for task_id, task in e2_task_map.items()})
+
+    finite_window_times = [0.0]
+    for earliest, latest in list(e1_tw_map.values()) + list(e2_tw_map.values()):
+        if earliest < inf:
+            finite_window_times.append(earliest)
+        if latest < inf:
+            finite_window_times.append(latest)
+    if TFp < 9000.0:
+        finite_window_times.append(TFp)
+    max_arc_time = max(time_map.values(), default=0.0)
+    total_service = (sum(e1_service_time_map.values())
+                     + sum(e2_service_time_map.values()))
+    task_count = len(e1_task_nodes) + len(e2_task_nodes)
+    time_horizon = (
+        max(finite_window_times)
+        + (task_count + 2) * max_arc_time
+        + total_service
+        + 1.0
+    )
+    # ``fallback_time_m`` must also deactivate an arc whose source is at the
+    # horizon and whose target is an unvisited node at time zero.
+    fallback_time_m = time_horizon + max_arc_time
+
+    def _arc_time_m(tw_map, service_map, i, j):
+        latest_i = tw_map.get(i, (0.0, inf))[1]
+        if latest_i == inf:
+            return fallback_time_m
+        return max(
+            service_map.get(i, 0.0) + time_map[i, j],
+            latest_i + service_map.get(i, 0.0) + time_map[i, j],
+        )
+
+    def _time_infeasible(tw_map, service_map, i, j):
+        earliest_i = tw_map.get(i, (0.0, inf))[0]
+        latest_j = tw_map.get(j, (0.0, inf))[1]
+        return (latest_j < inf and earliest_i + service_map.get(i, 0.0)
+                + time_map[i, j] > latest_j + 1e-6)
+
+    e1_infeasible_arcs = {
+        (i, j) for i in [depot_id] + e1_task_nodes for j in e1_task_nodes
+        if i != j and _time_infeasible(e1_tw_map, e1_service_time_map, i, j)
+    }
+    e1_arc_time_m = {
+        (i, j): _arc_time_m(e1_tw_map, e1_service_time_map, i, j)
+        for i in [depot_id] + e1_task_nodes for j in e1_task_nodes if i != j
+    }
+    e2_infeasible_arcs, e2_arc_time_m = set(), {}
+    for sat_id, tasks in e2_tasks_by_sat.items():
+        valid_nodes = [sat_id] + [task.id for task in tasks]
+        for i in valid_nodes:
+            for j in [task.id for task in tasks]:
+                if i == j:
+                    continue
+                if _time_infeasible(e2_tw_map, e2_service_time_map, i, j):
+                    e2_infeasible_arcs.add((i, j))
+                e2_arc_time_m[i, j] = _arc_time_m(
+                    e2_tw_map, e2_service_time_map, i, j
+                )
+
     K_list = list(range(problem.e1_vehicle_count))
     V_by_sat_dict = {
         sid: [(sid, v) for v in range(vehicles_per_satellite)]
@@ -111,9 +183,16 @@ def build_unified_pdp_model(problem, e1_tasks, e2_tasks_by_sat,
         'time_map': time_map,
         'e1_service_time_map': e1_service_time_map,
         'e2_service_time_map': e2_service_time_map,
+        'e1_infeasible_arcs': e1_infeasible_arcs,
+        'e2_infeasible_arcs': e2_infeasible_arcs,
+        'e1_arc_time_m': e1_arc_time_m,
+        'e2_arc_time_m': e2_arc_time_m,
+        'e2_cost_lower_bounds': e2_cost_lower_bounds or {},
+        'e1_cost_lower_bound': e1_cost_lower_bound or 0.0,
         'TFp': TFp,
-        # Big-M 取安全的大值
-        'M_time': 100000.0,
+        'time_horizon': time_horizon,
+        # Big-M is derived from the safe instance horizon above.
+        'M_time': fallback_time_m,
         'M_weight_e1': 2 * problem.e1_weight_cap + 1000.0,
         'M_weight_e2': 2 * problem.e2_weight_cap + 1000.0,
         'M_vol_e1': 2 * problem.e1_volume_cap + 1000.0,
@@ -131,7 +210,8 @@ def build_unified_pdp_model(problem, e1_tasks, e2_tasks_by_sat,
     # --- E1 路由与状态变量 ---
     x = m.addVars(N1E, N1E, K, vtype=GRB.BINARY, name="x")
     # A_e1 现在按 (node, k) 索引
-    A_e1 = m.addVars(N1E, K, vtype=GRB.CONTINUOUS, lb=0.0, name="A_e1")
+    A_e1 = m.addVars(N1E, K, vtype=GRB.CONTINUOUS, lb=0.0,
+                     ub=time_horizon, name="A_e1")
     # 载重/体积：直接用变量上界替代单独的容量约束
     Q_k = m.addVars(N1E, K, vtype=GRB.CONTINUOUS,
                     lb=0.0, ub=problem.e1_weight_cap, name="Q_k")
@@ -153,7 +233,7 @@ def build_unified_pdp_model(problem, e1_tasks, e2_tasks_by_sat,
                 Vol_r[i, v] = m.addVar(
                     lb=0.0, ub=problem.e2_volume_cap, name=f"Vol_r_{i}_{v}")
                 A_e2[i, v] = m.addVar(
-                    lb=0.0, name=f"A_e2_{i}_{v}")
+                    lb=0.0, ub=time_horizon, name=f"A_e2_{i}_{v}")
                 for j in valid_nodes:
                     if i != j:
                         z[i, j, v] = m.addVar(
@@ -161,9 +241,11 @@ def build_unified_pdp_model(problem, e1_tasks, e2_tasks_by_sat,
 
     # --- E2 发车/返回时刻（衔接用） ---
     A_start = m.addVars(F, range(vehicles_per_satellite),
-                        vtype=GRB.CONTINUOUS, lb=0.0, name="A_start")
+                        vtype=GRB.CONTINUOUS, lb=0.0, ub=time_horizon,
+                        name="A_start")
     A_return = m.addVars(F, range(vehicles_per_satellite),
-                         vtype=GRB.CONTINUOUS, lb=0.0, name="A_return")
+                         vtype=GRB.CONTINUOUS, lb=0.0, ub=time_horizon,
+                         name="A_return")
 
     vars_dict = {
         'x': x, 'A_e1': A_e1, 'Q_k': Q_k, 'Vol_k': Vol_k,
