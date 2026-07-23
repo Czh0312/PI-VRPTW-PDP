@@ -74,50 +74,246 @@ def _apply_gurobi_params(m, gurobi_params, verbose):
             print(f"✓ Gurobi 参数 {name} = {value}")
 
 
+def _compute_warm_start_continuous(ctx, e1_routes, e2_routes_by_sat):
+    """Replay ALNS routes to (a) drop arcs the strengthened M2 fixed to 0 and
+    (b) compute complete continuous .Start values, so Gurobi accepts the start.
+
+    The strengthened M2 fixes time-window-infeasible arcs to 0 by an
+    *earliest-departure* test (model.py `_time_infeasible`), but ALNS routes use
+    *earliest-arrival-with-waiting* feasibility, so an ALNS route can traverse an
+    arc the MIP forbids. Setting x/z.Start=1 on such an arc makes the start
+    infeasible and Gurobi rejects it. This helper drops any route containing a
+    forbidden arc, and additionally derives the continuous time/load variables
+    (which the old warm-start left UNDEFINED) so Gurobi gets a complete start.
+
+    Mirrors constraints.py timing: earliest-arrival with waiting, TFp pickup
+    lower bound when TFp < 9000. E1/E2 routes are sorted by descending delivery
+    weight so the E1_LoadSym / E2_LoadSym ordering constraints hold.
+
+    Returns dict with binary arc sets + continuous value dicts (var-key -> float)
+    + '_stats'. Returns None on a fatal error (caller then skips warm-start).
+    """
+    import math
+
+    depot_id = ctx['depot_id']
+    K = ctx['K']
+    F_set = set(ctx['F'])
+    e1_task_map = ctx['e1_task_map']
+    e2_task_map = ctx['e2_task_map']
+    e2_tasks_by_sat = ctx['e2_tasks_by_sat']
+    time_map = ctx['time_map']
+    e1_svc = ctx['e1_service_time_map']
+    e2_svc = ctx['e2_service_time_map']
+    e1_bad = ctx['e1_infeasible_arcs']
+    e2_bad = ctx['e2_infeasible_arcs']
+    TFp = ctx['TFp']
+    tfp_active = TFp < 9000.0
+    vehicles_per_satellite = ctx['vehicles_per_satellite']
+
+    # Same-satellite E1 (Sp->Sd) and same-customer E2 (Cp->Cd) forbidden arcs
+    # (mirror constraints.py E1_ForbidArc / E2_ForbidSameCustPickBeforeDel).
+    e1_forbidden = set()
+    for s_id in ctx['F']:
+        pid, did = f"{s_id}p", f"{s_id}d"
+        if pid in e1_task_map and did in e1_task_map:
+            e1_forbidden.add((pid, did))
+    e2_forbidden = set()
+    for _sat, tasks in e2_tasks_by_sat.items():
+        for customer in {t.cust for t in tasks}:
+            d_id, p_id = f"{customer}d", f"{customer}p"
+            if d_id in e2_task_map and p_id in e2_task_map:
+                e2_forbidden.add((p_id, d_id))
+
+    def sq(t):  # signed weight: delivery consumes (+w), pickup returns (-w)
+        return t.w if t.kind == 'd' else -t.w
+
+    def sv(t):
+        return t.v if t.kind == 'd' else -t.v
+
+    def _del_w(r, task_map):
+        return sum(t.w for nid in (r or [])
+                   for t in [task_map.get(nid)] if t and t.kind == 'd')
+
+    out = {'e1_arcs': set(), 'e2_arcs': set(), 'A_e1': {}, 'Q_k': {}, 'Vol_k': {},
+           'A_e2': {}, 'Q_r': {}, 'Vol_r': {}, 'A_start': {}, 'A_return': {},
+           '_stats': {'e1_dropped': 0, 'e2_dropped': 0}}
+
+    # ---- E1 forward pass (sorted by descending delivery weight -> E1_LoadSym) ----
+    sat_departure = {}  # sat_id -> E2 start time
+    for k, route in zip(K, sorted((e1_routes or []), key=lambda r: _del_w(r, e1_task_map), reverse=True)):
+        if not route or len(route) < 2:
+            continue
+        arcs = list(zip(route, route[1:]))
+        if any((i, j) in e1_bad or (i, j) in e1_forbidden for i, j in arcs):
+            out['_stats']['e1_dropped'] += 1
+            continue
+        cur = 0.0
+        q = _del_w(route, e1_task_map)
+        v = sum(t.v for nid in route for t in [e1_task_map.get(nid)]
+                if t and t.kind == 'd')
+        out['A_e1'][depot_id, k] = 0.0
+        out['Q_k'][depot_id, k] = q
+        out['Vol_k'][depot_id, k] = v
+        feasible = True
+        for i, j in arcs:
+            out['e1_arcs'].add((i, j, k))
+            t = e1_task_map.get(j)
+            cur += time_map[i, j]
+            if t is not None:
+                e_j, l_j = t.tw
+                if cur < e_j:
+                    cur = e_j
+                if l_j < math.inf and cur > l_j + 1e-6:
+                    feasible = False
+                    break
+                if t.kind == 'p' and tfp_active and cur < TFp - 1e-6:
+                    cur = TFp
+                q -= sq(t)
+                v -= sv(t)
+                if q < -1e-6 or v < -1e-6:
+                    feasible = False
+                    break
+                out['A_e1'][j, k] = cur
+                out['Q_k'][j, k] = q
+                out['Vol_k'][j, k] = v
+                cur += e1_svc.get(j, 0.0)
+                if t.kind == 'd' and t.cust in F_set:
+                    sat_departure[t.cust] = cur  # arrival + service = E2 start
+        if not feasible:
+            for (i, j) in arcs:
+                out['e1_arcs'].discard((i, j, k))
+            out['_stats']['e1_dropped'] += 1
+
+    # ---- E2 per-satellite pass (sorted by descending init delivery weight) ----
+    for sat_id, routes in (e2_routes_by_sat or {}).items():
+        if not routes or not e2_tasks_by_sat.get(sat_id):
+            continue
+        if sat_id not in sat_departure:
+            continue  # E2 unanchored: its satellite delivery was dropped on E1
+        start_time = sat_departure[sat_id]
+        e2_sorted = sorted(routes[:vehicles_per_satellite],
+                           key=lambda r: _del_w(r, e2_task_map), reverse=True)
+        for v_idx, route in enumerate(e2_sorted):
+            if not route or len(route) < 2:
+                continue
+            arcs = list(zip(route, route[1:]))
+            if any((i, j) in e2_bad or (i, j) in e2_forbidden for i, j in arcs):
+                out['_stats']['e2_dropped'] += 1
+                continue
+            init_w = _del_w(route, e2_task_map)
+            init_v = sum(t.v for nid in route for t in [e2_task_map.get(nid)]
+                         if t and t.kind == 'd')
+            q, vol, rel, prev = init_w, init_v, 0.0, sat_id
+            v_key = (sat_id, v_idx)
+            arrivals = {}
+            feasible = True
+            for nid in route:
+                if nid == sat_id:
+                    continue
+                t = e2_task_map.get(nid)
+                rel += time_map[prev, nid]
+                abs_arr = start_time + rel
+                if t is not None:
+                    e_j, l_j = t.tw
+                    if abs_arr < e_j:
+                        rel = e_j - start_time
+                        abs_arr = e_j
+                    if l_j < math.inf and abs_arr > l_j + 1e-6:
+                        feasible = False
+                        break
+                    q -= sq(t)
+                    vol -= sv(t)
+                    if q < -1e-6 or vol < -1e-6:
+                        feasible = False
+                        break
+                    arrivals[nid] = abs_arr - start_time  # A_e2 is RELATIVE
+                    rel += e2_svc.get(nid, 0.0)
+                prev = nid
+            if not feasible:
+                out['_stats']['e2_dropped'] += 1
+                continue
+            for (i, j) in arcs:
+                if i == sat_id and j == sat_id:
+                    continue
+                out['e2_arcs'].add((i, j, v_key))
+            out['A_start'][sat_id, v_idx] = start_time
+            out['A_return'][sat_id, v_idx] = start_time + rel + time_map[prev, sat_id]
+            out['A_e2'][sat_id, v_key] = 0.0
+            out['Q_r'][sat_id, v_key] = init_w
+            out['Vol_r'][sat_id, v_key] = init_v
+            q2, vol2 = init_w, init_v
+            for nid in route:
+                t = e2_task_map.get(nid)
+                if t is None or nid == sat_id:
+                    continue
+                q2 -= sq(t)
+                vol2 -= sv(t)
+                out['A_e2'][nid, v_key] = arrivals.get(nid, 0.0)
+                out['Q_r'][nid, v_key] = q2
+                out['Vol_r'][nid, v_key] = vol2
+    return out
+
+
 def _apply_route_warm_start(vars_dict, ctx, warm_start_routes, verbose):
     if not warm_start_routes:
         return
 
     e1_routes, e2_routes_by_sat = warm_start_routes
+
+    # Reset all warm-started var groups (binaries + continuous) first.
+    var_groups = [vars_dict["x"], vars_dict["z"], vars_dict["A_e1"],
+                  vars_dict["A_e2"], vars_dict["Q_k"], vars_dict["Vol_k"],
+                  vars_dict["Q_r"], vars_dict["Vol_r"], vars_dict["A_start"],
+                  vars_dict["A_return"]]
+    for vd in var_groups:
+        for var in vd.values():
+            var.Start = GRB.UNDEFINED
+
+    try:
+        cont = _compute_warm_start_continuous(ctx, e1_routes, e2_routes_by_sat)
+    except Exception as exc:  # best-effort warm start: never crash the solve
+        if verbose:
+            print(f"[MIPStart] warm-start 计算失败，跳过: {exc}")
+        return
+    if cont is None:
+        return
+
     x = vars_dict["x"]
     z = vars_dict["z"]
-    for var in x.values():
-        var.Start = GRB.UNDEFINED
-    for var in z.values():
-        var.Start = GRB.UNDEFINED
 
-    K = ctx["K"]
-    vehicles_per_satellite = ctx["vehicles_per_satellite"]
-    started_x = 0
-    skipped_x = 0
-    started_z = 0
-    skipped_z = 0
-
-    for k, route in zip(K, e1_routes or []):
-        for i, j in zip(route, route[1:]):
-            key = (i, j, k)
-            if key in x:
-                x[key].Start = 1.0
-                started_x += 1
+    def _assign_bin(var_dict, arc_set):
+        started = skipped = 0
+        for key in arc_set:
+            if key in var_dict:
+                var_dict[key].Start = 1.0
+                started += 1
             else:
-                skipped_x += 1
+                skipped += 1
+        return started, skipped
 
-    for sat_id, routes in (e2_routes_by_sat or {}).items():
-        for v_idx, route in enumerate(routes[:vehicles_per_satellite]):
-            v_key = (sat_id, v_idx)
-            for i, j in zip(route, route[1:]):
-                key = (i, j, v_key)
-                if key in z:
-                    z[key].Start = 1.0
-                    started_z += 1
-                else:
-                    skipped_z += 1
+    def _assign_cont(var_dict, value_dict):
+        n = 0
+        for key, val in value_dict.items():
+            if key in var_dict:
+                var_dict[key].Start = val
+                n += 1
+        return n
+
+    sx, skx = _assign_bin(x, cont["e1_arcs"])
+    sz, skz = _assign_bin(z, cont["e2_arcs"])
+    n = {name: _assign_cont(vars_dict[name], cont[name])
+         for name in ("A_e1", "Q_k", "Vol_k", "A_e2", "Q_r", "Vol_r",
+                      "A_start", "A_return")}
 
     if verbose:
+        st = cont["_stats"]
         print(
-            "[MIPStart] 已写入路线 warm start: "
-            f"E1 arcs={started_x} (skip={skipped_x}), "
-            f"E2 arcs={started_z} (skip={skipped_z})"
+            "[MIPStart] 路线 warm start: "
+            f"E1 arcs={sx}(skip={skx},dropped={st['e1_dropped']}), "
+            f"E2 arcs={sz}(skip={skz},dropped={st['e2_dropped']}); "
+            f"连续 A_e1={n['A_e1']} Q_k={n['Q_k']} Vol_k={n['Vol_k']} "
+            f"A_start={n['A_start']} A_return={n['A_return']} "
+            f"A_e2={n['A_e2']} Q_r={n['Q_r']} Vol_r={n['Vol_r']}"
         )
 
 

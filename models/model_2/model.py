@@ -197,6 +197,9 @@ def build_unified_pdp_model(problem, e1_tasks, e2_tasks_by_sat,
         'M_weight_e2': 2 * problem.e2_weight_cap + 1000.0,
         'M_vol_e1': 2 * problem.e1_volume_cap + 1000.0,
         'M_vol_e2': 2 * problem.e2_volume_cap + 1000.0,
+        # Needed by the warm-start helper to rebuild same-customer forbidden
+        # arcs and replay E2 schedules (the e2_task_map loses the per-sat grouping).
+        'e2_tasks_by_sat': {sid: list(ts) for sid, ts in e2_tasks_by_sat.items()},
     }
 
     # ==========================================
