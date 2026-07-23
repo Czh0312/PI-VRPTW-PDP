@@ -95,6 +95,25 @@ def run_one(model, solver, data_path, fleet_cfg, alns_time=120,
     problem = ProblemInstance(nodes_dict, fleet_cfg, speed=fleet_cfg.get("speed", 1.0))
     problem.aggregate_demands_from_pre_assignment()
     e1_tasks, e2_tasks_by_sat = build_tasks_for_model(problem, model)
+    n_customers = len({t.cust for sat_tasks in e2_tasks_by_sat.values()
+                       for t in sat_tasks})
+
+    # Model 3's joint relocation MIP does not scale: with the full relocation
+    # candidate set (required for proven_optimal) model construction hangs at
+    # 50/100 customers, and a restricted candidate set yields a degenerate
+    # empty model. Skip M3 exact at large scale rather than hang the batch
+    # (see backlog task on build_model3_joint_exact).
+    if solver == "exact" and model == 3 and n_customers >= 50:
+        return dict(
+            cost=None, time=0.0, e1=0, e2=0,
+            status="UNAVAILABLE_M3_NOT_SCALABLE",
+            solver_info={
+                "solution_type": "none",
+                "proven_optimal": False,
+            },
+            log=f"Model 3 exact skipped at {n_customers} customers: joint MIP "
+                "construction does not scale.\n",
+        )
 
     if solver == "exact":
         fn = EXACT_SOLVERS[model]
@@ -120,8 +139,6 @@ def run_one(model, solver, data_path, fleet_cfg, alns_time=120,
         # proven. Gated to large instances: small ones prove optimal in seconds
         # and only waste the ALNS budget. (M4 exact is skipped upstream as
         # non-global, though its solve_exact also accepts warm_start_routes.)
-        n_customers = len({t.cust for sat_tasks in e2_tasks_by_sat.values()
-                           for t in sat_tasks})
         if model in (1, 2, 3) and n_customers >= 50:
             alns_fn = ALNS_SOLVERS[model]
             alns_kwargs = dict(
