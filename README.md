@@ -44,6 +44,39 @@ E2 路线的精确定价 oracle，支持任意弧成本、任务奖励和 Ryan�
 精确求解的模块职责、返回状态、回归命令与尚未完成的 branch-price-and-cut 工作，
 见 [`docs/exact_solver_architecture.md`](docs/exact_solver_architecture.md)。
 
+## 精确求解结果（已证明）
+
+下列结果均按上述口径认证（Gurobi 在未缩减模型上 `OPTIMAL` 才算 `proven_optimal`）。
+证据（卫星 BCP 最优值、warm-start 路线、16,336 列合并池）固化在
+[`reference/exact_proof_evidence/`](reference/exact_proof_evidence/)；完整研究日志见
+研究分支 `experiments/exact_worktree_progress.md`。
+
+| 算例 | 结果 | 状态 |
+|---|---:|---|
+| Model 1 `100_customers/C101` | **1622.92** | proven_optimal（Gurobi OPTIMAL，~1201s） |
+| Model 2 `10_customers/C101` | **543.09** | proven_optimal |
+| Model 2 `50_customers/C101` | **1289.06** | proven_optimal（注入 S5 branch-price 下界后弧流模型 20.9s 闭合） |
+| Model 2 `100_customers/C101` | incumbent **1829.0094** | **未由 Gurobi 证明** |
+
+5/10/15/20 客户小规模算例均可在秒级证明最优，这里只列大规模的代表结果。
+
+### Model 2 `100_customers/C101` 的残余 gap
+
+- 全部 8 个 E2 卫星已独立 branch-cut-and-price 证明最优，和 = **1031.8799**，恰等于
+  incumbent 的 E2 代价 → 残余 gap **不在 E2**。
+- 残余 0.2615%（4.78）完全是 **E1↔E2 配送耦合**：incumbent E1 代价 797.13 vs
+  E1 独立下界 792.35。受限列池（16,336 列）主问题已 `OPTIMAL = 1829.0094`，但那只
+  证明"该列池"最优，不是全路线宇宙。
+- Lagrangian 分解攻击该 gap 已确认是**死路**：束方法收敛到基线 1824.2267，即松弛
+  整数意义下耦合"免费"，gap 是 LP-integer 性质，要靠分支而非定价/下界闭合。
+- 2026-07-03 有一份手写严格闭合定理（核心：4.78 耦合代价全部集中在卫星 S1，放松
+  S1 省 4.78 会让 E2 S1 代价涨 31.55，净更差）声称 1829.0094 为全局最优。按项目
+  口径这**不等于** Gurobi `OPTIMAL` 证书，故 100 客户仍记为未证明。
+
+要把 1829.0094 变成正式 `proven_optimal`，需要在联合主问题上做完整
+branch-price-and-cut（路线定价吃 E1/linking 对偶）或可验证的全路线宇宙证明——即
+架构文档末尾列出的下一步，尚未完成。
+
 ## 当前重点
 
 当前主线是 **Model 5-Hybrid-Safety-Optimized-V6**：
