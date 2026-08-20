@@ -2,16 +2,25 @@
 
 两级带时间窗取送货车辆路径问题（Two-Echelon Vehicle Routing Problem with Time Windows
 and Pickup & Delivery）的求解框架。两级（E1 depot↔前置仓 satellite、E2 前置仓↔客户）、
-带时间窗、带取送货（配送 + 容器回收）、可选虚拟中转（transshipment）。
+带时间窗、带取送货（配送 + 容器回收）、可选虚拟中转（transshipment）、
+可选顾客-前置仓自由分配（Model 6/7）。
 
 本文档是整个项目的统一总览：模型体系、每个模型有哪些求解方法、精确求解的实现与
 已证明结果、启发式求解、数据与实验、当前状态与已知限制。
 
+**项目研究定位（2026-08-17）**：小规模用精确求解证明模型与实现正确性，大规模用 ALNS
+证明求解能力和管理价值。推荐主线是 M1/M2 exact baseline + M6/M7 机制消融 +
+M5/M6 大规模 ALNS。M6/M7 的路线列结果是 restricted-pool incumbent，不作为精确基准。
+实验主线详见 [`experiment_roadmap.md`](experiment_roadmap.md)。
+
 ---
 
-## 1. 模型体系（Model 1–5）
+## 1. 模型体系（Model 1–7）
 
-五个模型是**递进叠加**关系，每一级在前一级基础上加一类机制。所有模型都是两级。
+七个模型分为两组：**Model 1–5** 是递进叠加关系（取送货 + 中转），
+**Model 6–7** 是自由分配变体（顾客归属前置仓为决策变量）。所有模型都是两级。
+
+### 1.1 Model 1–5：取送货 + 中转递进
 
 | 模型 | 语义 | 取送货(PD) | 中转(transshipment) |
 |---|---|:---:|:---:|
@@ -27,6 +36,24 @@ and Pickup & Delivery）的求解框架。两级（E1 depot↔前置仓 satellit
   生成一对 transport pickup/drop 由另一辆 E2 车服务，可能省距离。M3/M4/M5 三种不同触发
   与优化方式，中转定义相同。
 - **Model 1** 是退化基线（无取送货、无中转），用于和完整模型对比、做精确求解基准。
+
+
+### 1.2 Model 6–7：自由分配变体
+
+Model 6 和 Model 7 把**顾客-前置仓分配内生化**——顾客归属哪个前置仓不再是数据固定的
+`assigned_sat`，而是二元决策变量 `w[c,s]`。其余机制与对应基线模型一致。
+
+| 模型 | 基线 | 取送货(PD) | 自由分配 | 语义 |
+|---|---|:---:|:---:|---|
+| **Model 6** | M2 | ✓ | ✓ | M2 + 顾客-前置仓分配内生化（w[c,s] 决策变量） |
+| **Model 7** | M1 | ✓ | ✓ | M1 + 顾客-前置仓分配内生化（纯配送 + 自由分配） |
+
+- **自由分配**：`w[c,s]=1` 表示顾客 c 归属前置仓 s。E2 车队按前置仓独立，
+  E1 路线由分配决定（无顾客的前置仓自动关闭）。
+- **M6** = M2 + 自由分配：解空间是 M2 的严格超集，50c 优化 2.1%。
+- **M7** = M1 + 自由分配：纯配送版本，E2 任务数减半，模型更紧凑。
+- 详见 [`docs/model6_free_assignment.md`](model6_free_assignment.md) 和
+  [`docs/model7_free_assignment_pure_delivery.md`](model7_free_assignment_pure_delivery.md)。
 
 ---
 
@@ -55,26 +82,30 @@ Model 2 另有**路线 master / pricing / universe** 一组 branch-price 基础�
 ### 3.1 各模型精确求解能力
 
 **Model 1（纯配送，弧流 MIP）— 全规模可证明最优**
-- `solve_exact`：E1/E2 弧流 + 时间窗 + 载重/体积。curation 加强：弧特定时间 Big-M、
-  不可行弧固定、初始载重等式、车辆对称破除。
-- 已证明（C101）：5c=369.15、10c=474.86、50c=1107.75、**100c=1622.92（proven_optimal，~1800s）**。
-- 状态：✅ 全规模精确可用。
+- `solve_exact`：E1/E2 弧流 + 时间窗 + 载重/体积。注意：当前 M1 建模是**旧式固定
+  M=100000 大 M**（无弧特定 Big-M、无不可行弧固定、无初始载量精确等式、无对称破除），
+  比 M2 的 curation 弱，LP 界也更松。
+- 已证明（C101）：5c=369.15、10c=474.86、50c=1107.75（Gurobi 直接 OPTIMAL，59s，可复现）。
+  **100c 的 1622.92 不可复现**：2026-08-10 直接求解 1800s 找到更优可行解 1602.22、
+  界 1166.95、gap 27.2%，未证明；旧数值来源待查证。
+- 状态：⚠️ ≤50c 直接可证明；100c 直接求解 30 分钟未闭合。
 
-**Model 2（取送货，弧流 MIP）— 小/中规模可证明，大规模受限**
+**Model 2（取送货，弧流 MIP）— 小规模直接可证明，中/大规模受限**
 - `solve_exact`：E1/E2 联合弧流 + 取送货 LIFO + TFp 取送时间衔接 + E1↔E2 时间耦合。
   curation 同样做了弧 Big-M / 不可行弧 / 初始载重等式 / 同客户 p→d 禁止等加强。
-- 已证明（C101）：5c=391.57、10c=543.09、**50c=1289.06**（proven_optimal；50c 需要
-  先用 S5 branch-price 求出下界、注入弧流后 20.9s 闭合）。
-- **100c = 1829.0094（未由 Gurobi 证明全局最优）**：8 个 E2 卫星已独立 branch-cut-and-price
-  证明最优（和 1031.8799 = incumbent 的 E2 代价）；受限列池（16,336 列）主问题 OPTIMAL=
-  1829.0094；全模型残余 gap 0.2615%（bound 1824.2267），全部来自 E1↔E2 配送耦合。
-  Lagrangian 分解攻击该 gap 已确认是死路；另有手写严格闭合定理声称全局最优（非 Gurobi 证书）。
+- 已证明（C101）：5c=391.57、10c=543.09。50c=1289.06 曾报告 proven_optimal
+  （下界注入 + warm start 后闭合），**2026-08-10 复现 600s 仅到 gap 0.18%，需复核**。
+- **直接求解实测（2026-08-10）**：50c 裸跑 900s 无可行解、界 1232.68；
+  带下界+warm start 600s 到界 1289.056（gap 0.18%）；100c 600s 无可行解、界 1657.70。
+  因此 **100c 的 1829.0094 不再按直接求解口径计为 proven_optimal**——它来自证书研究路径
+  （E1 阶跃函数 + S1 floor 精确定价证书），作为研究性下界证据保留。
 - 路线 master / pricing / universe（branch-price 基础，**均不单独认证**）：
   - `route_universe`：穷举 E2 路线宇宙（≤10 任务/卫星、≤250k 路线），完备+OPTIMAL 才认证。
   - `route_master`：车/时间感知直接主问题，支持 Ryan-Foster same/different 分支；仅完整宇宙时认证。
   - `route_pricing`：单条 E2 路线精确定价 oracle。
   - 完整 branch-price-and-cut 闭环（主问题对偶→定价→列加入→分支树→割）**尚未实现**。
-- 状态：✅ ≤50c 精确可用；⚠️ 100c 只有 incumbent（受限列池 OPTIMAL，全模型未证明）。
+- 状态：⚠️ ≤10c 直接可证明；50c 直接求解复现中（gap 0.18%）；**100c 直接求解不可闭合**。
+  100c 路线宇宙实测约 1190 万条（S1 单卫星 423 万），全宇宙直接 MIP 不现实。
 
 **Model 3（取送货 + 联合中转 MIP）— 不 scale**
 - `solve_exact`（`exact_joint.build_model3_joint_exact`）：路线 + 中转重定位在**一个** MIP
@@ -90,6 +121,18 @@ Model 2 另有**路线 master / pricing / universe** 一组 branch-price 基础�
 
 **Model 5 — 无精确求解**
 - 只有 ALNS。`main.py` 对 M5 exact 显式报错。
+
+**Model 6（自由分配取送货，受限路线列主问题）——50/100c 非全局证明**
+- `models/model_6/route_pool.py`：路线列重构 + `w[c,s]` 自由分配。
+  用路线变量 `y[rid]` 替代 ~285k 个 E2 弧变量，singleton 列 + ALNS 提取列。
+- 受限列池结果（C101）：50c=1285.14（4.5s）、100c=1867.95（101.5s）；Gurobi `OPTIMAL` 仅表示列池内最优。
+- 详见 [`docs/exact_50c_results.md`](exact_50c_results.md) 与 [`column_generation_m6_m7_diagnostic.md`](column_generation_m6_m7_diagnostic.md)。
+
+**Model 7（自由分配纯配送，受限路线列主问题）——非全局证明**
+- `models/model_7/route_pool.py`：M6 的纯配送版本，E2 任务数减半（无回收）。
+- 受限列池结果（C101）：10c=474.86（0.0s）、50c=1127.52/后续找到 1118.55、100c=1566.98（220.6s）；
+  均不是全局精确证明。
+- 详见 [`docs/model7_free_assignment_pure_delivery.md`](model7_free_assignment_pure_delivery.md)。
 
 ### 3.2 精确求解的统一返回契约
 
@@ -142,29 +185,44 @@ vs 强 Model 2 做到 **92 更好 / 26 持平 / 0 更差，平均成本 −3.91%
 
 ---
 
-## 6. 当前状态与已知限制（截至 2026-07-23）
+## 6. 当前状态与已知限制（截至 2026-08-16）
 
 **能用的**：
-- M1 精确：全规模可证明最优。
-- M2 精确：≤50c 可证明最优；100c 有强 incumbent + 受限列池 OPTIMAL。
+- M1 精确：≤50c 可证明最优（Gurobi 直接 OPTIMAL）；100c 未闭合。
+- M2 精确：≤10c Gurobi 直接 OPTIMAL；50c 路线列主问题 + BCP 下界 46.4s OPTIMAL；
+  100c E1 前沿枚举 + floor 证书分解证明最优（1829.0094）。
+- **M6 restricted route-pool：50c=1285.14、100c=1867.95**（列池内最优，非全局证明；
+  2026-08-17 修正口径，见 `column_generation_m6_m7_diagnostic.md`）。
+- **M7 restricted route-pool：10c=474.86、50c=1118.55（CG 找到更好列后）、100c=1566.98**
+  （列池内最优，非全局证明）。
 - M2–M5 ALNS：全部稳定可用，M5 V6 是推荐版本。
 - 精确求解契约 + 回归测试 `experiments/test_exact_contract.py` 全绿。
+- 联合 branch-price 根诊断工具：`experiments/run_joint_branch_price_root.py`（LP 天花板探测）。
 
 **已知限制 / 待办**：
-- **M2 100c 全局最优未证明**（0.2615% E1↔E2 耦合 gap）；完整 branch-price-and-cut 未实现。
 - **M3 精确不 scale**（≥50c 构造爆炸）；M3 只能 ALNS。
-- **M2 弧流 LP 下界弱**：100c 即便 warm-start，gap 仍 ~47%（下界 910 vs incumbent 1718）；
-  收紧需要接 E2/E1 cost lower-bound cuts（hooks 已在，未接）。
+- **M2 弧流 LP 下界弱**：100c LP 天花板 ~1567.47（E1 LP integrality gap）；
+  收紧需要 E1 整数约束或割平面。
 - **测试薄弱**：仅 `test_exact_contract.py` + `test_e2_start_time_regression.py` 有真断言；
   无 pytest/CI；大 ALNS solver 无自动化测试。
-- **README"当前重点"**仍写 M5 V6，未报告精确求解突破（本文档 + README 精确结果章节已补）。
+- **完整 branch-price-and-cut 树未实现**：根节点 LP 不能自证整数最优，
+  需要分支与割平面；严格闭合定理只覆盖个别实例且不计入直接求解口径。
 
-**最近工作**（部分在 main 已提交，部分在工作区未提交）：
-- main 已提交：精确求解 curation、warm-start 接线（M1/M2/M3）、M3 大规模保护、README 精确结果章节、
-  证据固化。
-- **工作区未提交**：M2 warm-start 修复——加强版 M2 之前拒绝 ALNS warm-start MIP start
-  （50/100c 返回 NO_PROOF）；修复后写完整连续变量 + 过滤禁用弧，M2 50c 从无解 →
-  feasible_not_proven 1326.34（Gurobi 接受 start，SolCount 10）。
+**最近工作**（2026-08-11 → 2026-08-16）：
+- **M6 受限路线列池求解**：50c/100c C101 均达列池内 Gurobi OPTIMAL（`models/model_6/route_pool.py`），后经口径修正不作为全局精确证明。
+- **M7 新模型**：M1 + M6 自由分配 = 纯配送自由分配模型（`models/model_7/route_pool.py`）。
+  10c/50c/100c C101 全部为受限列池 OPTIMAL，不作为全局精确证明。
+- **M2 100c 分解证明完成**：E1 前沿枚举（18 plans, 3 Pareto classes）+ floor 证书，证明最优值 1829.0094。
+- 精确求解结果文档更新：[`docs/exact_50c_results.md`](exact_50c_results.md)。
+
+**早期工作**（2026-08-03 → 2026-08-10）：
+- 从 worktree 移植联合 branch-price 根基础设施：`route_pool_exact.py`、`e2_route_cg.py`、
+  `joint_pricing.py`、`joint_branch_price_root.py`、`lagrangian_decomp.py`
+- 从 worktree 移植严格闭合定理证明：`probe_e1_stepfn.py`（E1 阶跃函数）、
+  `probe_s1_floor_cert.py`（S1 floor 精确定价证书）
+- **口径收紧（2026-08-10）**：proven_optimal 只来自 Gurobi 对完整模型的直接 OPTIMAL；
+  100c C101 的证书路径结论改记为研究性证据（1829.0094 非直接求解认证）。
+  直接求解实测：100c 600s 无可行解/界 1657.70；50c 带辅助 600s gap 0.18%。
 
 ---
 
@@ -172,16 +230,19 @@ vs 强 Model 2 做到 **92 更好 / 26 持平 / 0 更差，平均成本 −3.91%
 
 ```text
 core/          实例、节点、车队数据结构（ProblemInstance / Task / Fleet）
-models/        Model 1-5、ALNS 公共组件（alns_base/alns_engine/strong_initial_solution/solver_utils）
+models/        Model 1-7、ALNS 公共组件（alns_base/alns_engine/strong_initial_solution/solver_utils）
   model_2/     还有 route_master / route_universe / route_pricing（branch-price 基础）
   model_3/     exact_joint.py（联合中转 MIP）
   model_4/     transshipment_mip.py（阶段二中转选择 MIP）
+  model_6/     route_pool.py（自由分配取送货路线列主问题）
+  model_7/     route_pool.py（自由分配纯配送路线列主问题）
 experiments/   批量实验与对比脚本、test_exact_contract.py 回归测试
 scripts/       数据集生成、论文图生成
 data/          Solomon 风格算例 + 北京生鲜算例
 config/        app/fleet/economic_cost 配置
 reference/     exact_proof_evidence/（精确求解证据）+ 文献/参数追溯
-docs/          本文档、exact_solver_architecture、model5_optimization_summary
+docs/          本文档、exact_solver_architecture、model5_optimization_summary、
+               model6_free_assignment、model7_free_assignment_pure_delivery、exact_50c_results
 output/        实验输出（gitignore，磁盘留存）
 ```
 
@@ -199,4 +260,8 @@ python experiments/run_model2345_all_nonbeijing.py --iterations 80 --time 10
 
 # M1/M2 精确 vs ALNS 诊断
 python experiments/run_model12_exact_vs_alns_m5.py --scales 50_customers --instances C101 --models 2
+
+# M2/M6/M7 路线列实验（M6/M7 为受限列池，非全局证明）
+PYTHONPYCACHEPREFIX=/tmp/pycache .venv/bin/python \
+    experiments/run_50c_exact_m2_m6.py --scale 100_customers --skip-m2 --m6-time 600
 ```

@@ -29,7 +29,9 @@ class Satellite(Node):
         self.pickup_weight: float = 0.0
         self.pickup_volume: float = 0.0
         self.e1_delivery_due_date: float = float("inf")
-        self.e1_pickup_ready_time: float = 9999.0
+        # E1 回收的静态最早时刻不再使用大 M 占位；真正的下界是
+        # "该仓所有 E2 车辆返回时刻"，由 MIP Link_Pickup / ALNS 等待逻辑动态施加。
+        self.e1_pickup_ready_time: float = 0.0
 
 
 class Customer(Node):

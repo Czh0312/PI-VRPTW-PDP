@@ -106,6 +106,15 @@ def build_unified_pdp_model(problem, e1_tasks, e2_tasks_by_sat,
             finite_window_times.append(earliest)
         if latest < inf:
             finite_window_times.append(latest)
+    # 时间上界应来自实例本身，而不是本次传入的任务集：route-master 以空 E2
+    # 任务集构建 E1 基模型后再加入 E2 路线列，其客户时间窗必须仍被 horizon
+    # 覆盖，否则 RouteTWLo 会超出 task_time 上界而不可行。
+    for _c in problem.customers:
+        for _tw in (_c.tw_del, _c.tw_pick):
+            if _tw[0] < inf:
+                finite_window_times.append(_tw[0])
+            if _tw[1] < inf:
+                finite_window_times.append(_tw[1])
     if TFp < 9000.0:
         finite_window_times.append(TFp)
     max_arc_time = max(time_map.values(), default=0.0)

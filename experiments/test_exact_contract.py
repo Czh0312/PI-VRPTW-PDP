@@ -18,6 +18,8 @@ if str(PROJECT_ROOT) not in sys.path:
 from core.instance import ProblemInstance
 from models.model_1.solver import solve_exact as solve_m1
 from models.model_2.solver import solve_exact as solve_m2
+from models.model_6.exact import solve_exact as solve_m6
+from models.model_7.exact import solve_exact as solve_m7
 from models.model_2.route_universe import solve_route_universe_exact
 from models.model_2.route_master import (
     solve_route_master_exact,
@@ -55,8 +57,33 @@ def _assert_certified(name, solve, model, **kwargs):
 
 
 if __name__ == "__main__":
-    _assert_certified("M1", solve_m1, 1)
+    m1_info = _assert_certified("M1", solve_m1, 1)
     m2_info = _assert_certified("M2", solve_m2, 2, TFp=9999.0)
+
+    problem = _problem()
+    _, _, _, m6_info = solve_m6(
+        problem, problem.fleet.e2_per_sat_count,
+        time_limit=60, verbose=False, return_info=True,
+    )
+    assert m6_info["proven_optimal"] is True, m6_info
+    assert m6_info["solution_type"] == "proven_optimal", m6_info
+    assert m6_info["proof_scope"] == "full_arc_flow", m6_info
+    assert abs(m6_info["objective"] - m2_info["objective"]) <= 1e-6, (
+        m2_info, m6_info,
+    )
+    print("M6 arc-flow: certified and matches M2 on the fixed-assignment case")
+
+    problem = _problem()
+    _, _, _, m7_info = solve_m7(
+        problem, problem.fleet.e2_per_sat_count,
+        time_limit=60, verbose=False, return_info=True,
+    )
+    assert m7_info["proven_optimal"] is True, m7_info
+    assert m7_info["solution_type"] == "proven_optimal", m7_info
+    assert m7_info["objective"] <= m1_info["objective"] + 1e-6, (
+        m1_info, m7_info,
+    )
+    print("M7 arc-flow: certified and no worse than M1 fixed assignment")
 
     problem = _problem()
     e1_tasks, e2_tasks = build_tasks_for_model(problem, 2)

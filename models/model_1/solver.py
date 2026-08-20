@@ -141,6 +141,8 @@ def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
 
     m.setParam('MIPGap', mip_gap)
     m.setParam('TimeLimit', time_limit)
+    m.setParam('IntFeasTol', 1e-9)
+    m.setParam('FeasibilityTol', 1e-9)
     _apply_gurobi_params(m, gurobi_params, verbose)
     _apply_route_warm_start(vars_dict, ctx, warm_start_routes, verbose)
     m.optimize()

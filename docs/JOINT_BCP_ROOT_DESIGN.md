@@ -1,5 +1,8 @@
 # Model 2 联合 Branch-Price 根 — 实现设计（Path B）
 
+> 状态（2026-08-10）：本设计未落地为完整 BCP 根；`100_customers/C101` 的闭合结论
+> 来自证书路径（E1 阶跃 + S1 floor 证书），不满足“Gurobi 直接求解 OPTIMAL”口径。
+
 目标：实现缺失的联合 branch-price 根，闭合 `100_customers/C101` 的 0.2615% gap
 （incumbent **1829.0094** vs bound **1824.2267**），使 Model 2 在 100 客户达到
 `proven_optimal`。工作目录：本 worktree（`route_pool_exact.py` / `e2_route_cg.py` /

@@ -497,7 +497,9 @@ def _e1_pickups_late_enough(route, evaluator, min_pickup_time_by_sat):
             if task.kind == "p":
                 min_time = min_pickup_time_by_sat.get(task.cust, 0.0)
                 if current_time < min_time - FEAS_TOL:
-                    return False
+                    # E1 回收车允许在卫星等待至 E2 全部返回
+                    # （与 MIP Link_Pickup 语义一致）。
+                    current_time = min_time
             current_time += evaluator.service_time(node_id)
         prev = node_id
     return True

@@ -46,36 +46,34 @@ E2 路线的精确定价 oracle，支持任意弧成本、任务奖励和 Ryan�
 
 ## 精确求解结果（已证明）
 
-下列结果均按上述口径认证（Gurobi 在未缩减模型上 `OPTIMAL` 才算 `proven_optimal`）。
-证据（卫星 BCP 最优值、warm-start 路线、16,336 列合并池）固化在
-[`reference/exact_proof_evidence/`](reference/exact_proof_evidence/)；完整研究日志见
-研究分支 `experiments/exact_worktree_progress.md`。
+**口径（2026-08-10 收紧）**：`proven_optimal` 只授予 **Gurobi 对完整未缩减模型直接求解
+返回 `OPTIMAL`** 的结果。任何基于自定义证书/分解/严格闭合定理的结论都不再计入
+“已证明”表——它们只是研究性证据，见
+[`reference/exact_proof_evidence/`](reference/exact_proof_evidence/)。
 
 | 算例 | 结果 | 状态 |
 |---|---:|---|
-| Model 1 `100_customers/C101` | **1622.92** | proven_optimal（Gurobi OPTIMAL，~1201s） |
-| Model 2 `10_customers/C101` | **543.09** | proven_optimal |
-| Model 2 `50_customers/C101` | **1289.06** | proven_optimal（注入 S5 branch-price 下界后弧流模型 20.9s 闭合） |
-| Model 2 `100_customers/C101` | incumbent **1829.0094** | **未由 Gurobi 证明** |
+| Model 1 `100_customers/C101` | 1622.92 | **不可复现**：2026-08-10 直接求解 1800s 找到更优可行解 1602.22、界 1166.95、gap 27.2%，未证明；旧数值来源待查证 |
+| Model 2 `10_customers/C101` | **543.09** | proven_optimal（Gurobi 直接 OPTIMAL） |
+| Model 2 `50_customers/C101` | **1289.06** | 曾报告 Gurobi OPTIMAL（下界注入+warm start 后 20.9s 闭合）；**2026-08-10 复现：同样输入 600s 只到 gap 0.18%（界 1289.056），需复核** |
+| Model 2 `100_customers/C101` | 1829.0094 | **非直接求解认证**：Gurobi 直接求解 600s 无可行解、下界 1657.70；1829.0094 来自 ALNS + 证书路径 |
 
-5/10/15/20 客户小规模算例均可在秒级证明最优，这里只列大规模的代表结果。
+5/10/15/20 客户小规模算例均可在秒级直接证明最优，这里只列大规模的代表结果。
 
-### Model 2 `100_customers/C101` 的残余 gap
+### Model 2 直接求解的实测限制（2026-08-10）
 
-- 全部 8 个 E2 卫星已独立 branch-cut-and-price 证明最优，和 = **1031.8799**，恰等于
-  incumbent 的 E2 代价 → 残余 gap **不在 E2**。
-- 残余 0.2615%（4.78）完全是 **E1↔E2 配送耦合**：incumbent E1 代价 797.13 vs
-  E1 独立下界 792.35。受限列池（16,336 列）主问题已 `OPTIMAL = 1829.0094`，但那只
-  证明"该列池"最优，不是全路线宇宙。
-- Lagrangian 分解攻击该 gap 已确认是**死路**：束方法收敛到基线 1824.2267，即松弛
-  整数意义下耦合"免费"，gap 是 LP-integer 性质，要靠分支而非定价/下界闭合。
-- 2026-07-03 有一份手写严格闭合定理（核心：4.78 耦合代价全部集中在卫星 S1，放松
-  S1 省 4.78 会让 E2 S1 代价涨 31.55，净更差）声称 1829.0094 为全局最优。按项目
-  口径这**不等于** Gurobi `OPTIMAL` 证书，故 100 客户仍记为未证明。
+直接交给 Gurobi 求解弧流 MIP 的可达范围（2026-08-10）：
 
-要把 1829.0094 变成正式 `proven_optimal`，需要在联合主问题上做完整
-branch-price-and-cut（路线定价吃 E1/linking 对偶）或可验证的全路线宇宙证明——即
-架构文档末尾列出的下一步，尚未完成。
+- `100_customers/C101`（Model 1）：1800s → incumbent 1602.22、界 1166.95、gap 27.2%，未证明。
+- `50_customers/C101`：无辅助裸跑 900s → 无可行解、下界 1232.68；
+  注入卫星下界 + warm start 后 600s → incumbent 1291.40、界 1289.056、gap 0.18%，**未闭合**。
+- `100_customers/C101`：600s → 无可行解、下界 1657.70，**无法直接闭合**。
+- 路线主问题路线宇宙在 100c 下实测约 **1190 万条**（S1 单卫星 423 万条），
+  全宇宙直接建 MIP 不现实（千万级二进制列）。
+
+因此 100c C101 的 1829.0094 目前只能通过**证书研究路径**支持（E1 阶跃函数 +
+S1 floor 精确定价证书，`experiments/probe_e1_stepfn.py` +
+`experiments/probe_s1_floor_cert.py`），该结论不再标为 `proven_optimal`。
 
 ## 当前重点
 
@@ -98,6 +96,99 @@ branch-price-and-cut（路线定价吃 E1/linking 对偶）或可验证的全路
 ```text
 docs/model5_optimization_summary.md
 ```
+
+## Model 6：顾客-前置仓分配内生化（自由分配）
+
+Model 6 与 Model 2 的**唯一区别**：顾客归属哪个前置仓是决策变量（z_cs），
+不再由数据里的 `assigned_sat` 固定。其余机制（E2 每仓独立车队、路线锚定本仓、
+单分配送收同仓、E1 车队/容量/时间窗衔接、先送后取）与 M2 完全一致。
+因此 M6 的解空间是 M2 的严格超集——任何成本差都归因于"自由分配"这一个自由度。
+
+实现：
+
+```text
+models/model_6/alns_solver.py   分配感知 ALNS（跨仓搬移 + 动态 E1 需求重建）
+models/model_6/exact.py         小规模精确 MIP（5/10 客户可证明最优）
+experiments/run_model6_vs_model2.py   M6 vs M2 对比脚本（纯时间预算）
+docs/model6_free_assignment.md  建模要点与运行说明
+```
+
+关键结果（2026-08-11，30 算例 × 500 迭代 / 60s，seed=42）：
+
+| 规模 | M6更好 | 持平 | M6更差 | M2不可行但M6可行 | 平均gap% |
+|---|---:|---:|---:|---:|---:|
+| 5_customers | 2 | 4 | 0 | 0 | -1.39% |
+| 10_customers | 6 | 0 | 0 | 0 | -7.15% |
+| 20_customers | 5 | 0 | 0 | 1 | -6.24% |
+| 50_customers | 5 | 0 | 0 | 1 | -9.10% |
+| 100_customers | 5 | 0 | 0 | 1 | -9.51% |
+
+- **30/30 算例 M6 不劣于 M2，0 更差**（M6 早期在 50c RC201 落后，根因是
+  M6 缺少 M2 一直有的 E1 局部搜索，补上 E1 2-opt 后 RC201 变为 5/5 种子全胜）；
+- **恢复可行性**：20c RC101、50c RC101、100c R101 固定分配下不可行，
+  M6 均找到可行解（分别搬移 6/11/27 个顾客）；
+- 精确验证：5c/10c C101 的 M6 精确解 = 391.57 / 543.09，与 M2 已证明最优一致；
+- ⚠️ 10c 全为单前置仓算例，-7.15% 全部来自修复算子差异（成对联合插入），
+  与自由分配无关；20c 以上的收益才是自由分配的贡献。
+- 回收时间语义修正：E1 回收下界改为动态的"该仓最后一个容器返回时刻"
+  （MIP `Link_Pickup` / ALNS 等待逻辑），不再用 9999 大数占位，详见
+  [docs/model6_free_assignment.md](docs/model6_free_assignment.md)。
+
+## 认证精确分解（Model 2，100 顾客规模）— 证书路径，不计入直接精确解
+
+**注意**：本节是证书研究路径。它的 `PROVEN_OPTIMAL` 判决**不满足**“Gurobi 直接求解
+完整模型 `OPTIMAL`”的口径，不计入 README 上方的“已证明结果”表。
+
+`models/model_2/exact_decomposition.py` + `experiments/run_exact_m2_decomposition.py`
+实现了 Model 2 的可认证精确分解管线，把 C101 的"严格闭合定理"推广为通用算法
+（研究用途）：
+
+```text
+min over 可行 E1 计划 P  [ E1_cost(P) + sum_s E2_s(tau_s(P)) ]
+```
+
+1. **每卫星下界**：E2_s(tau) >= L_s 对任何 E1 计划成立（floor/cap 只会收缩可行
+   路线族），故 E1_cost >= UB - sum L_s 的计划自动闭合。
+2. **E1 帕累托前沿**：枚举成本低于阈值 C0 的 E1 计划（no-good 循环，断点续跑），
+   归并 tau 类并过滤被支配类。
+3. **floor 受限证书**：对开放类只需每个卫星一个 `s_max >= f_min(s)` 受限列生成
+   证书（单调性使同一证书覆盖所有开放类）。
+
+CLI：
+
+```bash
+# C101（全部缓存，~3 分钟出证）
+.venv/bin/python experiments/run_exact_m2_decomposition.py \
+    --scale 100_customers --instance C101 \
+    --columns-json reference/exact_proof_evidence/merged_columns/100_customers__C101__columns.json \
+    --satellite-lb-json reference/exact_proof_evidence/exact_incumbents/m2_100_c101_satellite_bcp_exact_lbs.json \
+    --incumbent 1829.0093866572092 --total-time-limit 3600 \
+    --output-dir output/exact_m2_decomp
+```
+
+证书管线已出证：`100_customers/C101`（1829.0094，PROVEN_OPTIMAL，191s）与
+`20_customers/C101`（全流程现场生成，3s）。该判决按上节口径**不**记为
+`proven_optimal`。`--total-time-limit` 保证单次运行到点自动收尾并写判决；
+`--resume-frontier-json` 支持前沿枚举断点续跑（每次运行会保存
+`frontier_plans.json`）。
+
+C103 的 8 个卫星下界已全部认证（S0=168.8318 由 BCP 证明最优；S1/S3/S6 用长定价
+列生成认证 LP；S2/S4/S5/S7 已认证），UB=1805.5435 已由路线池主问题给出；
+当前瓶颈在 C0=847 下的 E1 前沿枚举与 S1/S3/S6 的 pricing 认证墙（与 C101 历史上
+同一难点，需要 exact-label pricing / 更强的 BCP 调参），相关中间产物全部缓存在
+`output/exact_m2_decomp/100_customers__C103/`。
+
+### exact-label 定价支持 SRI 割对偶（2026-08-07）
+
+`e2_route_cg._solve_pricing_labeling_exact` 新增 `cut_duals` 参数：SRI 割的路由
+系数 `floor(|route ∩ cut| / 2)` 在标签选中第 2/4/... 个成员时增量累加割对偶，
+由于系数是 visited 掩码的确定函数，same-visited 支配仍然有效。`run_satellite_bcp.py`
+已允许 exact-label 处理割（移除 `CUTS_REQUIRE_MIP_PRICING` 拦截）。
+
+验证：C103 S2（18 任务）在 99-125 条 SRI 割下根 LP 从 113.27 抬到 **117.49**
+（+4.22），exact-label 多次 `EXACT_LABEL_OPTIMAL` 穷尽认证；36 任务大卫星
+（S1/S3/S6）的标签空间过大，仍需长尾调参。这打通了"小卫星割平面下界认证"
+的代码路径，是 C101 项目缺失能力的补全。
 
 ## 最新完整公平对比（Full V6）
 

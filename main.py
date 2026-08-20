@@ -20,6 +20,10 @@ from models.model_2.alns_solver import solve_alns as alns_m2
 from models.model_3.alns_solver import solve_alns as alns_m3
 from models.model_4.alns_solver import solve_alns as alns_m4
 from models.model_5.alns_solver import solve_alns as alns_m5
+from models.model_6.alns_solver import solve_alns as alns_m6
+from models.model_6.exact import solve_exact as solve_m6_exact
+from models.model_7.route_pool import solve_alns as alns_m7
+from models.model_7.exact import solve_exact as solve_m7_exact
 from utils.data_loader import parse_dataset
 from utils.task_builder import build_tasks_for_model
 from utils.plot import plot_vrp_solution
@@ -47,6 +51,19 @@ def _run_solver(model, solver, problem, e1_tasks, e2_tasks_by_sat,
         solvers = {1: solve_m1, 2: solve_m2, 3: solve_m3, 4: solve_m4}
         if model == 5:
             raise ValueError("Model 5 当前仅实现 ALNS 求解")
+        if model == 6:
+            return solve_m6_exact(
+                problem=problem,
+                vehicles_per_satellite=problem.fleet.e2_per_sat_count,
+                TFp=TFp,
+                verbose=True,
+            )
+        if model == 7:
+            return solve_m7_exact(
+                problem=problem,
+                vehicles_per_satellite=problem.fleet.e2_per_sat_count,
+                verbose=True,
+            )
         kwargs = dict(
             problem=problem,
             e1_tasks=e1_tasks,
@@ -58,6 +75,23 @@ def _run_solver(model, solver, problem, e1_tasks, e2_tasks_by_sat,
             kwargs["TFp"] = TFp
         return solvers[model](**kwargs)
     else:
+        if model == 6:
+            return alns_m6(
+                problem=problem,
+                vehicles_per_satellite=problem.fleet.e2_per_sat_count,
+                TFp=TFp,
+                max_iterations=alns_iter,
+                max_time=alns_time,
+                seed=seed,
+            )
+        if model == 7:
+            return alns_m7(
+                problem=problem,
+                vehicles_per_satellite=problem.fleet.e2_per_sat_count,
+                max_iterations=alns_iter,
+                max_time=alns_time,
+                seed=seed,
+            )
         alns_solvers = {1: alns_m1, 2: alns_m2, 3: alns_m3, 4: alns_m4,
                         5: alns_m5}
         kwargs = dict(
@@ -133,7 +167,7 @@ def main():
 
     start_time = time.time()
     with redirect_stdout(log_buf):
-        e1_routes, e2_routes_by_sat_res = _run_solver(
+        solver_result = _run_solver(
             model, solver, problem, e1_tasks, e2_tasks_by_sat,
             alns_iter, alns_time, seed,
             stage1_time_ratio=stage1_time_ratio,
@@ -141,6 +175,7 @@ def main():
             transshipment_max_total=transshipment_max_total,
             transshipment_max_per_satellite=transshipment_max_per_satellite,
         )
+    e1_routes, e2_routes_by_sat_res = solver_result[0], solver_result[1]
     run_time = time.time() - start_time
 
     # 写入日志文件

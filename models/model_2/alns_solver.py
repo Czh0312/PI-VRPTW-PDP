@@ -273,11 +273,9 @@ class Evaluator:
             if e2_arrivals[task_id] < e2_arrivals[d_id] + self.service_time(d_id) - FEAS_TOL:
                 return False
 
-        for sat_id, ret_time in e2_last_return_by_sat.items():
-            pick_node = f"{sat_id}p"
-            if pick_node in self.e1_task_map:
-                if e1_pickups.get(sat_id, -float('inf')) < ret_time - FEAS_TOL:
-                    return False
+        # E1 回收允许在前置仓等待至所有 E2 车辆返回
+        # （与 MIP Link_Pickup 语义一致），早到不再视为不可行。
+        # e1_pickups 仅用于此耦合检查，无下游依赖，故无需调整时刻。
 
         return True
 
