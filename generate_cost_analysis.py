@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Generate economic comparison outputs from routing results.
 
-The script runs Model 1 as the single-use baseline and Model 4 as the reusable
+The script runs Model 1 as the single-use baseline and Model 6 as the reusable
 closed-loop scheme, then converts route distances into monetary costs.
 """
 from __future__ import annotations

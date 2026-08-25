@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Run the Model 2 joint branch-price root on a problem instance.
+"""Run the Model 3 joint branch-price root on a problem instance.
 
 Gate 0 (pre-flight): --lp-ceiling-only
   One-shot LP solve over the loaded column pool — measures the ceiling that
@@ -18,7 +18,7 @@ Examples
 .venv/bin/python experiments/run_joint_branch_price_root.py \\
     --scale 100_customers --instance C101 \\
     --columns-json reference/exact_proof_evidence/merged_columns/100_customers__C101__columns.json \\
-    --satellite-lb-json reference/exact_proof_evidence/exact_incumbents/m2_100_c101_satellite_bcp_exact_lbs.json \\
+    --satellite-lb-json reference/exact_proof_evidence/exact_incumbents/m3_100_c101_satellite_bcp_exact_lbs.json \\
     --lp-ceiling-only
 
 # Full CG on 15c smoke
@@ -38,11 +38,11 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
 from core.instance import ProblemInstance
-from models.model_2.joint_branch_price_root import (
+from models.model_3.joint_branch_price_root import (
     solve_joint_branch_price_root,
     solve_joint_lp_ceiling,
 )
-from models.model_2.e2_route_cg import solve_satellite_route_cg
+from models.model_3.e2_route_cg import solve_satellite_route_cg
 from utils.data_loader import parse_dataset
 from utils.task_builder import build_tasks_for_model
 
@@ -54,7 +54,7 @@ DEFAULT_COLUMNS_JSON = str(
 )
 DEFAULT_SAT_LB_JSON = str(
     PROJECT_ROOT / "reference" / "exact_proof_evidence" / "exact_incumbents"
-    / "m2_100_c101_satellite_bcp_exact_lbs.json"
+    / "m3_100_c101_satellite_bcp_exact_lbs.json"
 )
 
 
@@ -134,7 +134,7 @@ def write_rows(path, rows):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Model 2 Joint Branch-Price Root")
+        description="Model 3 Joint Branch-Price Root")
     parser.add_argument("--scale", default="15_customers",
                         help="Data scale subdirectory (default: 15_customers)")
     parser.add_argument("--instance", default="C101")
@@ -153,7 +153,7 @@ def main():
                         help="Only solve the LP relaxation once (Gate 0)")
     parser.add_argument("--lp-ceiling-time-limit", type=float, default=600.0)
     parser.add_argument("--output-dir", type=Path,
-                        default=str(PROJECT_ROOT / "output" / "m2_joint_bcp_root"))
+                        default=str(PROJECT_ROOT / "output" / "m3_joint_bcp_root"))
     parser.add_argument("--verbose-gurobi", action="store_true")
     args = parser.parse_args()
 
@@ -167,7 +167,7 @@ def main():
         sys.exit(1)
 
     problem = build_problem(data_path, fleet_cfg)
-    e1_tasks, e2_tasks_by_sat = build_tasks_for_model(problem, 2)
+    e1_tasks, e2_tasks_by_sat = build_tasks_for_model(problem, 3)
 
     # Resolve column source
     if args.columns_json:

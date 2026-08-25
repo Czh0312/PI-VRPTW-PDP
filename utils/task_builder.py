@@ -9,7 +9,11 @@ def build_tasks_for_model(problem: ProblemInstance, model_type: int):
     cw = problem.fleet.container_weight
     cv = problem.fleet.container_volume
 
-    if model_type in (1, 7):
+    if model_type in (2, 4):
+        # 新 M2/M4 是顾客自由分仓模型，求解器直接从 ProblemInstance
+        # 构造任务；这里返回空容器，仅保持统一主入口的调用契约。
+        return e1_tasks, e2_tasks_by_sat
+    if model_type == 1:
         for s in problem.satellites:
             if s.delivery_weight > 1e-9:
                 e1_tasks.append(
@@ -21,7 +25,7 @@ def build_tasks_for_model(problem: ProblemInstance, model_type: int):
                 e2_tasks_by_sat[c.assigned_sat].append(
                     Task(f"{c.id}d", c.id, "d", c.demand + cw, cv, c.tw_del)
                 )
-    elif model_type in (2, 3, 4, 5):
+    elif model_type in (3, 5, 6, 7):
         for s in problem.satellites:
             if s.delivery_weight > 1e-9:
                 e1_tasks.append(
@@ -46,6 +50,6 @@ def build_tasks_for_model(problem: ProblemInstance, model_type: int):
                     Task(f"{c.id}p", c.id, "p", cw, cv, c.tw_pick)
                 )
     else:
-        raise ValueError(f"当前仅支持 model 1/2/3/4/5/7，收到: {model_type}")
+        raise ValueError(f"当前仅支持 model 1–7，收到: {model_type}")
 
     return e1_tasks, e2_tasks_by_sat

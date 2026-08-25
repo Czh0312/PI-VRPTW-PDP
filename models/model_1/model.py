@@ -32,7 +32,7 @@ def build_pure_delivery_model(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_s
         node_obj = problem.nodes.get(phys_id)
         return getattr(node_obj, "service_time", 0.0)
 
-    # 构建时间映射表（与 Model 2/3 保持一致）
+    # 构建时间映射表（与 Model 3/5 保持一致）
     all_node_ids = list(set(
         [depot_id] + f_set +
         [t.id for t in e1_tasks] +

@@ -1,0 +1,718 @@
+# -*- coding: utf-8 -*-
+"""Small-scale exact arc-flow MIP for Model 2.
+
+Model 2 = Model 1 (pure delivery) + free customer-satellite assignment.
+
+This is the certified counterpart of ``models/model_2/route_pool.py``.  Unlike
+the route-pool solver, this module does not restrict the E2 route universe:
+E2 arcs are represented explicitly, so a Gurobi ``OPTIMAL`` status is a global
+exact certificate for the formulated Model 2.
+
+Core decisions
+--------------
+- ``w[c,s]``: customer c is assigned to satellite s (single assignment);
+- E1 truck arcs over optional satellite-delivery nodes;
+- E2 vehicle arcs at every satellite over all customer delivery tasks;
+- E1/E2 timing and loads are jointly optimized.
+
+Only customer delivery tasks exist.  There are no pickup tasks, no E1 pickup
+nodes, no pickup-return linkage, and no same-customer delivery-before-pickup
+precedence.  The model is intended for small-scale exact benchmarks; large
+instances should use Model 2 ALNS.
+"""
+import gurobipy as gp
+from gurobipy import GRB
+
+from models.solver_utils import extract_routes_e1, extract_routes_e2
+
+
+def _status_name(status_code):
+    names = {
+        GRB.OPTIMAL: "OPTIMAL",
+        GRB.TIME_LIMIT: "TIME_LIMIT",
+        GRB.INFEASIBLE: "INFEASIBLE",
+        GRB.INF_OR_UNBD: "INF_OR_UNBD",
+        GRB.INTERRUPTED: "INTERRUPTED",
+        GRB.SUBOPTIMAL: "SUBOPTIMAL",
+        GRB.NUMERIC: "NUMERIC",
+    }
+    return names.get(status_code, str(status_code))
+
+
+def build_m2_exact_model(problem, vehicles_per_satellite=4):
+    """Build the full, unrestricted Model 2 arc-flow MIP."""
+    inf = float("inf")
+    depot_id = problem.depot.id
+    F = [s.id for s in problem.satellites]
+    customers = [c for c in problem.customers if c.demand > 1e-9]
+    C = [c.id for c in customers]
+    cw = problem.fleet.container_weight
+    cv = problem.fleet.container_volume
+    K = list(range(problem.e1_vehicle_count))
+
+    # Delivery demand includes the reusable container, matching Models 1/3/4.
+    cust_w = {c.id: c.weight_del + cw for c in customers}
+    cust_tw = {c.id: c.tw_del for c in customers}
+    cust_svc = {c.id: c.service_time for c in customers}
+
+    # E1 has only optional satellite-delivery nodes in Model 2.
+    e1_del_nodes = [f"{s}d" for s in F]
+    e1_nodes = [depot_id] + e1_del_nodes
+    e1_svc = {depot_id: 0.0}
+    for s in F:
+        e1_svc[f"{s}d"] = getattr(problem.nodes[s], "service_time", 0.0)
+
+    # E2 has one delivery task per customer.
+    e2_task_ids = [f"{c}d" for c in C]
+    e2_svc = {t: cust_svc[t[:-1]] for t in e2_task_ids}
+    e2_tw = {t: cust_tw[t[:-1]] for t in e2_task_ids}
+
+    # Distance/travel maps over all logical nodes.
+    all_loc = set([depot_id] + F + e1_del_nodes + e2_task_ids)
+
+    def phys(node_id):
+        if node_id in F or node_id == depot_id:
+            return node_id
+        if node_id.endswith("d"):
+            base = node_id[:-1]
+            if base in F or base in set(C):
+                return base
+        return node_id
+
+    dist_map = {}
+    time_map = {}
+    for i in all_loc:
+        phys_i = phys(i)
+        for j in all_loc:
+            dist_map[i, j] = problem.distance(phys_i, phys(j))
+            time_map[i, j] = problem.travel_time(phys_i, phys(j))
+
+    # A safe time horizon.  Any feasible solution has an earliest schedule no
+    # later than all finite deadlines plus every possible service/travel term.
+    finite_times = [0.0]
+    for task in e2_task_ids:
+        e_j, l_j = e2_tw[task]
+        finite_times.append(e_j)
+        if l_j < inf:
+            finite_times.append(l_j)
+    max_arc = max(time_map.values(), default=0.0)
+    total_svc = sum(e1_svc.values()) + sum(e2_svc.values())
+    task_count = len(e1_del_nodes) + len(F) * len(e2_task_ids)
+    time_horizon = (
+        max(finite_times)
+        + (task_count + 2) * max_arc
+        + total_svc
+        + 1.0
+    )
+    M_time = time_horizon + max_arc
+
+    # No arc pre-filtering: E2_Time constraints with big-M handle all arcs
+    # (matching M1's approach).  A_start is variable, so absolute TW values
+    # cannot be used as relative earliest times for pruning.
+    e2_infeasible = set()
+
+    total_del_w = sum(cust_w.values())
+    total_del_v = len(C) * cv
+
+    m = gp.Model("2E_VRPTW_M2_FreeAssignment_Exact")
+
+    # -------- Free customer-satellite assignment --------
+    w = m.addVars(C, F, vtype=GRB.BINARY, name="w")
+    for c in C:
+        m.addConstr(gp.quicksum(w[c, s] for s in F) == 1, f"Assign_{c}")
+
+    # -------- E1 arc flow over optional satellite-delivery nodes --------
+    x = m.addVars(e1_nodes, e1_nodes, K, vtype=GRB.BINARY, name="x")
+    A_e1 = m.addVars(e1_nodes, K, vtype=GRB.CONTINUOUS, lb=0.0,
+                     ub=time_horizon, name="A_e1")
+    Q_k = m.addVars(e1_nodes, K, vtype=GRB.CONTINUOUS, lb=0.0,
+                    ub=problem.e1_weight_cap, name="Q_k")
+    Vol_k = m.addVars(e1_nodes, K, vtype=GRB.CONTINUOUS, lb=0.0,
+                      ub=problem.e1_volume_cap, name="Vol_k")
+
+    # Each satellite-delivery node is visited at most once across all trucks.
+    for j in e1_del_nodes:
+        m.addConstr(
+            gp.quicksum(x[i, j, k] for i in e1_nodes for k in K if i != j) <= 1,
+            f"E1_Visit_{j}",
+        )
+
+    for k in K:
+        m.addConstr(
+            gp.quicksum(x[depot_id, j, k] for j in e1_del_nodes) <= 1,
+            f"E1_Start_{k}",
+        )
+        m.addConstr(
+            gp.quicksum(x[i, depot_id, k] for i in e1_del_nodes) <= 1,
+            f"E1_End_{k}",
+        )
+        for h in e1_del_nodes:
+            m.addConstr(
+                gp.quicksum(x[i, h, k] for i in e1_nodes if i != h)
+                - gp.quicksum(x[h, j, k] for j in e1_nodes if j != h) == 0,
+                f"E1_Flow_{h}_{k}",
+            )
+        depot_out = gp.quicksum(x[depot_id, j, k] for j in e1_del_nodes)
+        for j in e1_del_nodes:
+            m.addConstr(
+                gp.quicksum(x[i, j, k] for i in e1_nodes if i != j)
+                <= depot_out,
+                f"E1_Subtour_{j}_{k}",
+            )
+        m.addConstr(A_e1[depot_id, k] == 0, f"E1_DepotTime_{k}")
+        for i in e1_nodes:
+            m.addConstr(x[i, i, k] == 0, f"E1_NoSelf_{i}_{k}")
+
+    # Symmetry breaking among homogeneous E1 trucks.
+    for idx in range(len(K) - 1):
+        m.addConstr(
+            gp.quicksum(x[depot_id, j, K[idx]] for j in e1_del_nodes)
+            >= gp.quicksum(x[depot_id, j, K[idx + 1]] for j in e1_del_nodes),
+            f"E1_VehicleSym_{idx}",
+        )
+
+    # A satellite is opened iff at least one customer is assigned to it.
+    served_s = m.addVars(F, vtype=GRB.BINARY, name="served_s")
+    visits_d = {}
+    for s in F:
+        visits_d[s] = {}
+        for k in K:
+            visits_d[s, k] = gp.quicksum(
+                x[i, f"{s}d", k] for i in e1_nodes if i != f"{s}d"
+            )
+        for c in C:
+            m.addConstr(served_s[s] >= w[c, s], f"Served_ge_{c}_{s}")
+        m.addConstr(
+            served_s[s] <= gp.quicksum(w[c, s] for c in C),
+            f"Served_le_{s}",
+        )
+        m.addConstr(
+            gp.quicksum(visits_d[s, k] for k in K) == served_s[s],
+            f"E1_DelVisit_{s}",
+        )
+
+    # E1 initial load linearization: y[c,s,k] = w[c,s] AND truck-k visits S{s}d.
+    y = m.addVars(C, F, K, vtype=GRB.BINARY, name="y")
+    for c in C:
+        for s in F:
+            for k in K:
+                m.addConstr(y[c, s, k] <= w[c, s], f"Y_ub1_{c}_{s}_{k}")
+                m.addConstr(y[c, s, k] <= visits_d[s, k], f"Y_ub2_{c}_{s}_{k}")
+                m.addConstr(
+                    y[c, s, k] >= w[c, s] + visits_d[s, k] - 1,
+                    f"Y_lb_{c}_{s}_{k}",
+                )
+    for k in K:
+        m.addConstr(
+            Q_k[depot_id, k]
+            == gp.quicksum(cust_w[c] * y[c, s, k] for c in C for s in F),
+            f"E1_InitW_{k}",
+        )
+        m.addConstr(
+            Vol_k[depot_id, k]
+            == gp.quicksum(cv * y[c, s, k] for c in C for s in F),
+            f"E1_InitV_{k}",
+        )
+    m.addConstr(
+        gp.quicksum(Q_k[depot_id, k] for k in K) == total_del_w,
+        "E1_TotalWeight",
+    )
+    m.addConstr(
+        gp.quicksum(Vol_k[depot_id, k] for k in K) == total_del_v,
+        "E1_TotalVol",
+    )
+    for idx in range(len(K) - 1):
+        m.addConstr(
+            Q_k[depot_id, K[idx]] >= Q_k[depot_id, K[idx + 1]],
+            f"E1_LoadSym_{idx}",
+        )
+
+    # E1 load propagation at satellite-delivery nodes.
+    for i in e1_nodes:
+        for j in e1_del_nodes:
+            if i == j:
+                continue
+            s = j[:-1]
+            q_j = gp.quicksum(cust_w[c] * w[c, s] for c in C)
+            v_j = gp.quicksum(cv * w[c, s] for c in C)
+            M_w = problem.e1_weight_cap + total_del_w
+            M_v = problem.e1_volume_cap + total_del_v
+            for k in K:
+                m.addConstr(
+                    Q_k[j, k] <= Q_k[i, k] - q_j + M_w * (1 - x[i, j, k]),
+                    f"E1_W_up_{i}_{j}_{k}",
+                )
+                m.addConstr(
+                    Q_k[j, k] >= Q_k[i, k] - q_j - M_w * (1 - x[i, j, k]),
+                    f"E1_W_lo_{i}_{j}_{k}",
+                )
+                m.addConstr(
+                    Vol_k[j, k] <= Vol_k[i, k] - v_j + M_v * (1 - x[i, j, k]),
+                    f"E1_V_up_{i}_{j}_{k}",
+                )
+                m.addConstr(
+                    Vol_k[j, k] >= Vol_k[i, k] - v_j - M_v * (1 - x[i, j, k]),
+                    f"E1_V_lo_{i}_{j}_{k}",
+                )
+
+    # E1 travel-time propagation.
+    for i in e1_nodes:
+        for j in e1_del_nodes:
+            if i == j:
+                continue
+            for k in K:
+                m.addConstr(
+                    A_e1[j, k]
+                    >= A_e1[i, k] + e1_svc.get(i, 0.0) + time_map[i, j]
+                    - M_time * (1 - x[i, j, k]),
+                    f"E1_Time_{i}_{j}_{k}",
+                )
+
+    # If c is assigned to s, E1 must deliver to s before c's delivery deadline.
+    # Uses the same implication form as M1/M3: A_e1[s_d, k] <= l_d + M*(2 - visits - w).
+    for s in F:
+        for c in C:
+            l_d = cust_tw[c][1]
+            if l_d >= inf:
+                continue
+            for k in K:
+                m.addConstr(
+                    A_e1[f"{s}d", k]
+                    <= l_d + M_time * (2 - visits_d[s, k] - w[c, s]),
+                    f"E1_Due_{c}_{s}_{k}",
+                )
+
+    # -------- E2 arc flow at every satellite --------
+    z = {}
+    Q_r = {}
+    Vol_r = {}
+    A_e2 = {}
+    V_by_sat = {}
+    for s in F:
+        vehs = [(s, v) for v in range(vehicles_per_satellite)]
+        V_by_sat[s] = vehs
+        valid = [s] + e2_task_ids
+        for v in vehs:
+            for i in valid:
+                Q_r[i, v] = m.addVar(
+                    # The state is the load *after* serving node i.  Every
+                    # delivery-only route starts within capacity and can only
+                    # decrease thereafter, so this upper bound is valid for
+                    # every node (including an unvisited one, which can be
+                    # assigned state zero).
+                    lb=0.0, ub=problem.e2_weight_cap, name=f"Q_r_{i}_{v}"
+                )
+                Vol_r[i, v] = m.addVar(
+                    lb=0.0, ub=problem.e2_volume_cap, name=f"Vol_r_{i}_{v}"
+                )
+                A_e2[i, v] = m.addVar(
+                    lb=0.0, ub=time_horizon, name=f"A_e2_{i}_{v}"
+                )
+                for j in valid:
+                    if i != j:
+                        z[i, j, v] = m.addVar(
+                            vtype=GRB.BINARY, name=f"z_{i}_{j}_{v}"
+                        )
+
+    # ``served_by_vehicle[s,c,v]`` is the incoming E2 flow of customer c on
+    # one labelled vehicle.  It is binary in every integer solution because a
+    # vehicle has one predecessor/successor at a visited customer.  Retaining
+    # it as a linear expression avoids unnecessary auxiliary binaries while
+    # letting the load equations below link route selection to capacity.
+    served_by_vehicle = {}
+    for s in F:
+        valid = [s] + e2_task_ids
+        for c in C:
+            task_id = f"{c}d"
+            for v in V_by_sat[s]:
+                served_by_vehicle[s, c, v] = gp.quicksum(
+                    z[i, task_id, v]
+                    for i in valid
+                    if i != task_id and (i, task_id, v) in z
+                )
+
+    # Serving c from s is equivalent to w[c,s].
+    for s in F:
+        for c in C:
+            coverage = gp.quicksum(
+                served_by_vehicle[s, c, v] for v in V_by_sat[s]
+            )
+            m.addConstr(coverage == w[c, s], f"E2_Cov_{c}_{s}")
+
+    for s in F:
+        vehs = V_by_sat[s]
+        valid = [s] + e2_task_ids
+        for v in vehs:
+            m.addConstr(
+                gp.quicksum(z[s, j, v] for j in e2_task_ids if (s, j, v) in z)
+                == gp.quicksum(z[i, s, v] for i in e2_task_ids if (i, s, v) in z),
+                f"E2_DepotBal_{s}_{v}",
+            )
+            m.addConstr(
+                gp.quicksum(z[s, j, v] for j in e2_task_ids if (s, j, v) in z)
+                <= 1,
+                f"E2_Start_{s}_{v}",
+            )
+            for h in e2_task_ids:
+                m.addConstr(
+                    gp.quicksum(
+                        z[i, h, v] for i in valid
+                        if i != h and (i, h, v) in z
+                    )
+                    - gp.quicksum(
+                        z[h, j, v] for j in valid
+                        if j != h and (h, j, v) in z
+                    )
+                    == 0,
+                    f"E2_Flow_{h}_{v}",
+                )
+            m.addConstr(A_e2[s, v] == 0, f"E2_SatAnchor_{s}_{v}")
+            for i in valid:
+                for j in e2_task_ids:
+                    if (i, j, v) in z and (s, i, j) in e2_infeasible:
+                        m.addConstr(
+                            z[i, j, v] == 0,
+                            f"E2_TimeInfeasible_{i}_{j}_{v}",
+                        )
+        # Vehicles at one satellite are homogeneous.  Requiring used vehicle
+        # labels to form a prefix is safe: any feasible solution can be
+        # relabelled within a satellite (including all timing/load states) to
+        # satisfy it without changing its routes, assignment, or objective.
+        # We deliberately do not impose an order on route contents/times;
+        # those stronger rules need not be symmetry-preserving.
+        for v_idx in range(vehicles_per_satellite - 1):
+            v = (s, v_idx)
+            v_next = (s, v_idx + 1)
+            m.addConstr(
+                gp.quicksum(
+                    z[s, j, v] for j in e2_task_ids if (s, j, v) in z
+                )
+                >= gp.quicksum(
+                    z[s, j, v_next]
+                    for j in e2_task_ids if (s, j, v_next) in z
+                ),
+                f"E2_UseSym_{s}_{v_idx}",
+            )
+
+    # Relative E2 timing along each route.
+    for s in F:
+        valid = [s] + e2_task_ids
+        for v in V_by_sat[s]:
+            for i in valid:
+                for j in e2_task_ids:
+                    if i == j or (i, j, v) not in z:
+                        continue
+                    if (s, i, j) in e2_infeasible:
+                        continue
+                    m.addConstr(
+                        A_e2[j, v]
+                        >= A_e2[i, v] + e2_svc.get(i, 0.0) + time_map[i, j]
+                        - M_time * (1 - z[i, j, v]),
+                        f"E2_Time_{i}_{j}_{v}",
+                    )
+
+    # E2 initial load.  In a pure-delivery route there is a canonical state
+    # representation: depart with exactly the goods/containers delivered by
+    # that vehicle, and finish its final delivery with zero load.  Requiring
+    # this equality does not remove a route solution--any unused departure
+    # load in the former formulation can simply remain at the satellite--but
+    # gives the LP relaxation a direct route-to-capacity link.
+    for s in F:
+        vehs = V_by_sat[s]
+        for v in vehs:
+            m.addConstr(
+                Q_r[s, v]
+                == gp.quicksum(
+                    cust_w[c] * served_by_vehicle[s, c, v] for c in C
+                ),
+                f"E2_InitWExact_{s}_{v}",
+            )
+            m.addConstr(
+                Vol_r[s, v]
+                == gp.quicksum(
+                    cv * served_by_vehicle[s, c, v] for c in C
+                ),
+                f"E2_InitVExact_{s}_{v}",
+            )
+        # Redundant in integer solutions, but a useful compact coupling of
+        # assignment and aggregate E2 capacity at the root relaxation.
+        m.addConstr(
+            gp.quicksum(Q_r[s, v] for v in vehs)
+            == gp.quicksum(cust_w[c] * w[c, s] for c in C),
+            f"E2_TotalInitW_{s}",
+        )
+        m.addConstr(
+            gp.quicksum(Vol_r[s, v] for v in vehs)
+            == gp.quicksum(cv * w[c, s] for c in C),
+            f"E2_TotalInitV_{s}",
+        )
+        # Sorting the canonical departure loads is also label-symmetric: after
+        # sorting used routes by their load, all unused (zero-load) vehicles
+        # remain at the end.  It is safe together with E2_UseSym and removes
+        # additional permutations among equally feasible vehicle labels.
+        for v_idx in range(vehicles_per_satellite - 1):
+            m.addConstr(
+                Q_r[s, (s, v_idx)] >= Q_r[s, (s, v_idx + 1)],
+                f"E2_LoadSym_{s}_{v_idx}",
+            )
+
+    # E2 load propagation (all tasks are deliveries).
+    for s in F:
+        valid = [s] + e2_task_ids
+        for v in V_by_sat[s]:
+            for i in valid:
+                for j in e2_task_ids:
+                    if i == j or (i, j, v) not in z:
+                        continue
+                    c = j[:-1]
+                    q_j = cust_w[c]
+                    v_j = cv
+                    # With 0 <= Q_r <= cap and 0 <= Vol_r <= cap, these are
+                    # the exact inactive-arc constants.  Separate upper and
+                    # lower values are materially tighter than the inherited
+                    # 100000 constant while preserving all feasible routes.
+                    M_w_up = problem.e2_weight_cap + q_j
+                    M_w_lo = max(0.0, problem.e2_weight_cap - q_j)
+                    M_v_up = problem.e2_volume_cap + v_j
+                    M_v_lo = max(0.0, problem.e2_volume_cap - v_j)
+                    m.addConstr(
+                        Q_r[j, v] <= Q_r[i, v] - q_j + M_w_up * (1 - z[i, j, v]),
+                        f"E2_W_up_{i}_{j}_{v}",
+                    )
+                    m.addConstr(
+                        Q_r[j, v] >= Q_r[i, v] - q_j - M_w_lo * (1 - z[i, j, v]),
+                        f"E2_W_lo_{i}_{j}_{v}",
+                    )
+                    m.addConstr(
+                        Vol_r[j, v] <= Vol_r[i, v] - v_j + M_v_up * (1 - z[i, j, v]),
+                        f"E2_V_up_{i}_{j}_{v}",
+                    )
+                    m.addConstr(
+                        Vol_r[j, v] >= Vol_r[i, v] - v_j - M_v_lo * (1 - z[i, j, v]),
+                        f"E2_V_lo_{i}_{j}_{v}",
+                    )
+
+    # -------- E1-E2 synchronization --------
+    A_start = m.addVars(
+        F, range(vehicles_per_satellite),
+        vtype=GRB.CONTINUOUS, lb=0.0, ub=time_horizon, name="A_start",
+    )
+    A_return = m.addVars(
+        F, range(vehicles_per_satellite),
+        vtype=GRB.CONTINUOUS, lb=0.0, ub=time_horizon, name="A_return",
+    )
+    for s in F:
+        for v_idx in range(vehicles_per_satellite):
+            v = (s, v_idx)
+            used = gp.quicksum(
+                z[s, j, v] for j in e2_task_ids if (s, j, v) in z
+            )
+            # No Link_StartUsed/Link_ReturnUsed: M1 does not constrain
+            # A_start/A_return for unused vehicles.  Forcing them to 0
+            # over-constrains the model.
+            for k in K:
+                m.addConstr(
+                    A_start[s, v_idx]
+                    >= A_e1[f"{s}d", k] + e1_svc[f"{s}d"]
+                    - M_time * (2 - visits_d[s, k] - used),
+                    f"Link_Start_{s}_{v_idx}_{k}",
+                )
+
+            for task in e2_task_ids:
+                e_j, l_j = e2_tw[task]
+                served = gp.quicksum(
+                    z[i, task, v]
+                    for i in [s] + e2_task_ids
+                    if i != task and (i, task, v) in z
+                )
+                absolute_arrival = A_start[s, v_idx] + A_e2[task, v]
+                m.addConstr(
+                    absolute_arrival >= e_j - M_time * (1 - served),
+                    f"Link_TW_lo_{s}_{v_idx}_{task}",
+                )
+                if l_j < inf:
+                    m.addConstr(
+                        absolute_arrival <= l_j + M_time * (1 - served),
+                        f"Link_TW_hi_{s}_{v_idx}_{task}",
+                    )
+
+            for i in e2_task_ids:
+                if (i, s, v) not in z:
+                    continue
+                m.addConstr(
+                    A_return[s, v_idx]
+                    >= A_start[s, v_idx] + A_e2[i, v]
+                    + e2_svc.get(i, 0.0) + time_map[i, s]
+                    - M_time * (1 - z[i, s, v]),
+                    f"Link_Ret_lo_{s}_{v_idx}_{i}",
+                )
+                m.addConstr(
+                    A_return[s, v_idx]
+                    <= A_start[s, v_idx] + A_e2[i, v]
+                    + e2_svc.get(i, 0.0) + time_map[i, s]
+                    + M_time * (1 - z[i, s, v]),
+                    f"Link_Ret_hi_{s}_{v_idx}_{i}",
+                )
+
+    # -------- Objective: total E1 + E2 distance --------
+    obj = (
+        gp.quicksum(
+            dist_map[i, j] * x[i, j, k]
+            for k in K for i in e1_nodes for j in e1_nodes if i != j
+        )
+        + gp.quicksum(dist_map[i, j] * z[i, j, v] for (i, j, v) in z)
+    )
+    m.setObjective(obj, GRB.MINIMIZE)
+
+    ctx = {
+        "depot_id": depot_id,
+        "F": F,
+        "C": C,
+        "K": K,
+        "e1_nodes": e1_nodes,
+        "e1_del_nodes": e1_del_nodes,
+        "e2_task_ids": e2_task_ids,
+        "V_by_sat": V_by_sat,
+        "time_horizon": time_horizon,
+        "M_time": M_time,
+    }
+    vars_dict = {
+        "w": w,
+        "x": x,
+        "z": z,
+        "A_e1": A_e1,
+        "Q_k": Q_k,
+        "Vol_k": Vol_k,
+        "A_e2": A_e2,
+        "Q_r": Q_r,
+        "Vol_r": Vol_r,
+        "A_start": A_start,
+        "A_return": A_return,
+    }
+    return m, vars_dict, ctx
+
+
+def solve_exact(problem, vehicles_per_satellite, *, time_limit=None,
+                gurobi_params=None, verbose=True, return_info=False,
+                return_incumbent_on_time_limit=False):
+    """Solve small-scale Model 2 exactly.
+
+    Returns ``(e1_routes, e2_routes_by_sat, assignment[, info])``.
+
+    This is deliberately a *strict* exact entry point: unless
+    ``return_incumbent_on_time_limit`` is explicitly enabled, it returns no
+    routes after a time limit even if Gurobi found a feasible incumbent.  The
+    incumbent objective/bound remain available through ``info`` for
+    diagnostics, but only a Gurobi ``OPTIMAL`` status is a global certificate.
+    """
+    m, vars_dict, ctx = build_m2_exact_model(
+        problem, vehicles_per_satellite=vehicles_per_satellite
+    )
+    if not verbose:
+        m.setParam("OutputFlag", 0)
+    if time_limit is not None:
+        m.setParam("TimeLimit", time_limit)
+    m.setParam("MIPGap", 0.0)
+    m.setParam("IntFeasTol", 1e-9)
+    m.setParam("FeasibilityTol", 1e-9)
+    if gurobi_params:
+        for name, value in gurobi_params.items():
+            m.setParam(name, value)
+    m.optimize()
+
+    has_incumbent = getattr(m, "SolCount", 0) > 0
+    if m.status == GRB.OPTIMAL:
+        solution_type = "proven_optimal"
+    elif has_incumbent:
+        solution_type = "feasible_not_proven"
+    else:
+        solution_type = "none"
+
+    info = {
+        "status_code": m.status,
+        "status": _status_name(m.status),
+        "solution_type": solution_type,
+        "proven_optimal": m.status == GRB.OPTIMAL,
+        "proof_scope": "full_arc_flow",
+        "runtime": getattr(m, "Runtime", None),
+        "sol_count": getattr(m, "SolCount", 0),
+        "objective": None,
+        "best_bound": None,
+        "mip_gap": None,
+        "assignment": None,
+    }
+    if has_incumbent:
+        info["objective"] = m.ObjVal
+        info["mip_gap"] = m.MIPGap
+    # Gurobi can provide a valid dual bound even before finding an incumbent.
+    # Keep it in the diagnostic contract so a 50c time-limit result remains
+    # informative without being mistaken for a feasible solution.
+    try:
+        info["best_bound"] = m.ObjBound
+    except Exception:
+        pass
+
+    if not has_incumbent:
+        if verbose:
+            print(f"Model 2 exact: no feasible solution (status={info['status']})")
+        if return_info:
+            return None, None, None, info
+        return None, None, None
+
+    if m.status != GRB.OPTIMAL and not return_incumbent_on_time_limit:
+        if verbose:
+            print(
+                "Model 2 exact: feasible incumbent exists but optimality "
+                f"is not certified (status={info['status']}); routes withheld."
+            )
+        if return_info:
+            return None, None, None, info
+        return None, None, None
+
+    sol_x = {key: var.X for key, var in vars_dict["x"].items()}
+    sol_z = {key: var.X for key, var in vars_dict["z"].items()}
+    e1_routes = [
+        route
+        for _, route in extract_routes_e1(
+            sol_x, ctx["depot_id"], ctx["e1_del_nodes"], ctx["K"]
+        )
+    ]
+    e2_routes_by_sat = {
+        s: extract_routes_e2(
+            sol_z, s, ctx["e2_task_ids"], ctx["V_by_sat"][s]
+        )
+        for s in ctx["F"]
+    }
+    w = vars_dict["w"]
+    assignment = {
+        c: max(ctx["F"], key=lambda s: w[c, s].X) for c in ctx["C"]
+    }
+    info["assignment"] = assignment
+
+    if verbose:
+        print(
+            f"Model 2 {'exact' if info['proven_optimal'] else 'MIP incumbent'} "
+            f"objective: {m.ObjVal:.4f} "
+            f"(proven_optimal={info['proven_optimal']})"
+        )
+        for s in ctx["F"]:
+            count = sum(1 for assigned in assignment.values() if assigned == s)
+            if count:
+                print(f"  {s}: {count} customers, "
+                      f"{len(e2_routes_by_sat[s])} E2 routes")
+
+    if return_info:
+        return e1_routes, e2_routes_by_sat, assignment, info
+    return e1_routes, e2_routes_by_sat, assignment
+
+
+def solve_mip(problem, vehicles_per_satellite, **kwargs):
+    """Run the full M2 arc-flow MIP and explicitly allow an incumbent.
+
+    ``solve_exact`` is certification-first.  Long 50-customer experiments
+    that need a warm start or an upper bound should call this opt-in helper
+    instead, then inspect ``info['proven_optimal']`` before reporting an exact
+    result.
+    """
+    kwargs["return_incumbent_on_time_limit"] = True
+    return solve_exact(problem, vehicles_per_satellite, **kwargs)

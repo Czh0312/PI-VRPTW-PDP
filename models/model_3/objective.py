@@ -18,7 +18,5 @@ def set_objective(m: gp.Model, vars_dict: dict, ctx: dict):
         for j in n1e
         if i != j
     )
-    obj_e2 = gp.quicksum(
-        dist_map[i, j] * z[i, j, v] for (i, j, v) in z.keys()
-    )
+    obj_e2 = gp.quicksum(dist_map[i, j] * z[i, j, v] for (i, j, v) in z.keys())
     m.setObjective(obj_e1 + obj_e2, GRB.MINIMIZE)

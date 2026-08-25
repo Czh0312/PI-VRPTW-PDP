@@ -1,0 +1,64 @@
+{
+  "dataset_name": "Zhou 2E-VRPTWSPD forward benchmark with designed later packaging pickup windows",
+  "generated_date": "2026-08-24",
+  "organized_date": "2026-08-25",
+  "layout_version": 2,
+  "source_repository": "https://github.com/zll-hust/2E-VRPTWSPD",
+  "source_commit": "084f01f9302ebe4c0a42998167e2238ddc9cd353",
+  "source_usage": "Only forward network, delivery demand, delivery windows and service times are treated as source data.",
+  "set1_repair_rule": "Preserve the N+S+1 rows and x/y values consumed by the authors' Java reader; discard unread rows; normalize satellite records to x y 10 and depot records to x y 0.",
+  "repaired_set1_instance_count": 5,
+  "ignored_source_pickup": "Original Zhou pickup demand is retained in source_pickup_ignored for audit only and is not used.",
+  "assignment_rule": "Each customer is pre-assigned to its nearest satellite by Euclidean distance for Models 1/3/5/6/7; Models 2/4 may optimize assignment.",
+  "recovery_rule": "pickup_ready = delivery_due + service_time + usage_lag; pickup_due = pickup_ready + pickup_window_width",
+  "container_assumption": "One reusable container per customer; pickup weight 2 and volume 1, matching config/fleet_config.json.",
+  "time_unit": "Source benchmark time unit, interpreted as minutes in the designed scenarios.",
+  "scenarios": [
+    {
+      "scenario_id": "short_same_day",
+      "label_zh": "同日短周期",
+      "usage_lag": 120.0,
+      "pickup_window_width": 180.0,
+      "interpretation": "配送最迟完成后约2小时可回收，回收预约窗宽约3小时"
+    },
+    {
+      "scenario_id": "standard_same_day",
+      "label_zh": "同日标准周期",
+      "usage_lag": 360.0,
+      "pickup_window_width": 240.0,
+      "interpretation": "配送最迟完成后约6小时可回收，回收预约窗宽约4小时"
+    },
+    {
+      "scenario_id": "next_day",
+      "label_zh": "次日回收",
+      "usage_lag": 1440.0,
+      "pickup_window_width": 360.0,
+      "interpretation": "配送最迟完成后约24小时可回收，次日预约窗宽约6小时"
+    }
+  ],
+  "instance_count": 40,
+  "set1_instance_count": 22,
+  "set2_instance_count": 18,
+  "scale_groups": {
+    "small": {
+      "customer_counts": [
+        7,
+        10,
+        12
+      ],
+      "instance_count": 22,
+      "processed_csv_count": 66
+    },
+    "large": {
+      "customer_counts": [
+        100,
+        200
+      ],
+      "instance_count": 18,
+      "processed_csv_count": 54
+    }
+  },
+  "unique_forward_customer_rows": 2618,
+  "scenario_customer_rows": 7854,
+  "processed_csv_count": 120
+}

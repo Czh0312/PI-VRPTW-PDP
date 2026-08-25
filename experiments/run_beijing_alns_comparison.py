@@ -3,7 +3,7 @@
 """
 Quick ALNS comparison for the Beijing fresh datasets.
 
-Runs Model 2/3/4 ALNS on selected CSV files and writes:
+Runs Model 3/5/6 ALNS on selected CSV files and writes:
 - output/beijing_alns_comparison/summary.csv
 - output/beijing_alns_comparison/summary.json
 - output/beijing_alns_comparison/logs/*.txt
@@ -23,17 +23,17 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.instance import ProblemInstance
-from models.model_2.alns_solver import solve_alns as solve_m2_alns
 from models.model_3.alns_solver import solve_alns as solve_m3_alns
-from models.model_4.alns_solver import solve_alns as solve_m4_alns
+from models.model_5.alns_solver import solve_alns as solve_m5_alns
+from models.model_6.alns_solver import solve_alns as solve_m6_alns
 from utils.data_loader import parse_dataset
 from utils.task_builder import build_tasks_for_model
 
 
 SOLVERS = {
-    2: solve_m2_alns,
     3: solve_m3_alns,
-    4: solve_m4_alns,
+    5: solve_m5_alns,
+    6: solve_m6_alns,
 }
 
 
@@ -112,9 +112,9 @@ def run_one(data_path, model, seed, max_time, max_iterations, fleet_cfg, args):
         "seed": seed,
         "verbose": True,
     }
-    if model in (2, 4):
+    if model in (3, 6):
         kwargs["TFp"] = args.tfp
-    if model == 3:
+    if model == 5:
         kwargs.update({
             "transshipment_candidate_mode": args.trans_mode,
             "transshipment_time_budget": args.trans_budget,
@@ -123,7 +123,7 @@ def run_one(data_path, model, seed, max_time, max_iterations, fleet_cfg, args):
             "transshipment_max_total": args.max_trans,
             "transshipment_max_per_satellite": args.max_trans_per_sat,
         })
-    if model == 4:
+    if model == 6:
         kwargs.update({
             "stage1_time_ratio": args.stage1_ratio,
             "transshipment_time_budget": args.trans_budget,
@@ -187,14 +187,14 @@ def add_gaps(rows):
         by_case.setdefault(key, {})[row["model"]] = row
 
     for models in by_case.values():
-        base = models.get(2, {}).get("cost")
+        base = models.get(3, {}).get("cost")
         for model, row in models.items():
             if base and row.get("cost") is not None:
-                row["gap_vs_m2_pct"] = round((row["cost"] - base) / base * 100.0, 4)
-                row["saving_vs_m2"] = round(base - row["cost"], 4)
+                row["gap_vs_m3_pct"] = round((row["cost"] - base) / base * 100.0, 4)
+                row["saving_vs_m3"] = round(base - row["cost"], 4)
             else:
-                row["gap_vs_m2_pct"] = None
-                row["saving_vs_m2"] = None
+                row["gap_vs_m3_pct"] = None
+                row["saving_vs_m3"] = None
 
 
 def write_outputs(rows, logs, out_dir):
@@ -208,7 +208,7 @@ def write_outputs(rows, logs, out_dir):
     if rows:
         fieldnames = [
             "dataset", "model", "seed", "max_time", "max_iterations", "status",
-            "cost", "gap_vs_m2_pct", "saving_vs_m2", "elapsed",
+            "cost", "gap_vs_m3_pct", "saving_vs_m3", "elapsed",
             "e1_routes", "e2_routes", "transshipments",
             "stage1_cost", "stage2_cost", "reported_best_cost",
         ]
@@ -229,8 +229,8 @@ def print_summary(rows):
     print(f"{'Dataset':<24} {'M':<3} {'Seed':<5} {'Status':<12} {'Cost':>10} {'Gap%':>9} {'Save':>10} {'Trans':>6} {'Time':>8}")
     for row in rows:
         cost = "-" if row["cost"] is None else f"{row['cost']:.2f}"
-        gap = "-" if row["gap_vs_m2_pct"] is None else f"{row['gap_vs_m2_pct']:.2f}"
-        saving = "-" if row["saving_vs_m2"] is None else f"{row['saving_vs_m2']:.2f}"
+        gap = "-" if row["gap_vs_m3_pct"] is None else f"{row['gap_vs_m3_pct']:.2f}"
+        saving = "-" if row["saving_vs_m3"] is None else f"{row['saving_vs_m3']:.2f}"
         print(
             f"{row['dataset']:<24} M{row['model']:<2} {row['seed']:<5} "
             f"{row['status']:<12} {cost:>10} {gap:>9} {saving:>10} "
@@ -239,7 +239,7 @@ def print_summary(rows):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run Beijing fresh ALNS comparison for M2/M3/M4.")
+    parser = argparse.ArgumentParser(description="Run Beijing fresh ALNS comparison for M3/M5/M6.")
     parser.add_argument(
         "--data",
         nargs="+",
@@ -250,7 +250,7 @@ def main():
         ],
         help="Dataset CSV paths.",
     )
-    parser.add_argument("--models", nargs="+", type=int, default=[2, 3, 4], choices=[2, 3, 4])
+    parser.add_argument("--models", nargs="+", type=int, default=[3, 5, 6], choices=[3, 5, 6])
     parser.add_argument("--seeds", nargs="+", type=int, default=[42])
     parser.add_argument("--time", type=float, default=30.0, help="ALNS time limit per run.")
     parser.add_argument("--iterations", type=int, default=5000)

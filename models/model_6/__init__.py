@@ -1,1 +1,2 @@
-"""Model 6: 2E-VRPTW-PDD with endogenous customer-satellite assignment."""
+# models/model_6/__init__.py
+# -*- coding: utf-8 -*-

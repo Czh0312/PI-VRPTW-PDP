@@ -11,19 +11,20 @@ from contextlib import redirect_stdout
 from pathlib import Path
 
 from core.instance import ProblemInstance
+from models.catalog import require_model_number
 from models.model_1.solver import solve_exact as solve_m1
-from models.model_2.solver import solve_exact as solve_m2
 from models.model_3.solver import solve_exact as solve_m3
-from models.model_4.solver import solve_exact as solve_m4
+from models.model_5.solver import solve_exact as solve_m5
+from models.model_6.solver import solve_exact as solve_m6
 from models.model_1.alns_solver import solve_alns as alns_m1
-from models.model_2.alns_solver import solve_alns as alns_m2
 from models.model_3.alns_solver import solve_alns as alns_m3
-from models.model_4.alns_solver import solve_alns as alns_m4
 from models.model_5.alns_solver import solve_alns as alns_m5
 from models.model_6.alns_solver import solve_alns as alns_m6
-from models.model_6.exact import solve_exact as solve_m6_exact
-from models.model_7.route_pool import solve_alns as alns_m7
-from models.model_7.exact import solve_exact as solve_m7_exact
+from models.model_7.alns_solver import solve_alns as alns_m7
+from models.model_4.alns_solver import solve_alns as alns_m4
+from models.model_4.exact import solve_exact as solve_m4_exact
+from models.model_2.route_pool import solve_alns as alns_m2
+from models.model_2.exact import solve_exact as solve_m2_exact
 from utils.data_loader import parse_dataset
 from utils.task_builder import build_tasks_for_model
 from utils.plot import plot_vrp_solution
@@ -48,18 +49,18 @@ def _run_solver(model, solver, problem, e1_tasks, e2_tasks_by_sat,
                 transshipment_max_total=None,
                 transshipment_max_per_satellite=None):
     if solver == "exact":
-        solvers = {1: solve_m1, 2: solve_m2, 3: solve_m3, 4: solve_m4}
-        if model == 5:
-            raise ValueError("Model 5 当前仅实现 ALNS 求解")
-        if model == 6:
-            return solve_m6_exact(
+        solvers = {1: solve_m1, 3: solve_m3, 5: solve_m5, 6: solve_m6}
+        if model == 7:
+            raise ValueError("Model 7 当前仅实现 ALNS 求解")
+        if model == 4:
+            return solve_m4_exact(
                 problem=problem,
                 vehicles_per_satellite=problem.fleet.e2_per_sat_count,
                 TFp=TFp,
                 verbose=True,
             )
-        if model == 7:
-            return solve_m7_exact(
+        if model == 2:
+            return solve_m2_exact(
                 problem=problem,
                 vehicles_per_satellite=problem.fleet.e2_per_sat_count,
                 verbose=True,
@@ -71,12 +72,12 @@ def _run_solver(model, solver, problem, e1_tasks, e2_tasks_by_sat,
             vehicles_per_satellite=problem.fleet.e2_per_sat_count,
             verbose=True,
         )
-        if model in (2, 4):
+        if model in (3, 6):
             kwargs["TFp"] = TFp
         return solvers[model](**kwargs)
     else:
-        if model == 6:
-            return alns_m6(
+        if model == 4:
+            return alns_m4(
                 problem=problem,
                 vehicles_per_satellite=problem.fleet.e2_per_sat_count,
                 TFp=TFp,
@@ -84,16 +85,16 @@ def _run_solver(model, solver, problem, e1_tasks, e2_tasks_by_sat,
                 max_time=alns_time,
                 seed=seed,
             )
-        if model == 7:
-            return alns_m7(
+        if model == 2:
+            return alns_m2(
                 problem=problem,
                 vehicles_per_satellite=problem.fleet.e2_per_sat_count,
                 max_iterations=alns_iter,
                 max_time=alns_time,
                 seed=seed,
             )
-        alns_solvers = {1: alns_m1, 2: alns_m2, 3: alns_m3, 4: alns_m4,
-                        5: alns_m5}
+        alns_solvers = {1: alns_m1, 3: alns_m3, 5: alns_m5, 6: alns_m6,
+                        7: alns_m7}
         kwargs = dict(
             problem=problem,
             e1_tasks=e1_tasks,
@@ -103,13 +104,13 @@ def _run_solver(model, solver, problem, e1_tasks, e2_tasks_by_sat,
             max_time=alns_time,
             seed=seed,
         )
-        if model in (2, 4):
+        if model in (3, 6):
             kwargs["TFp"] = TFp
-        if model in (3, 4, 5):
+        if model in (5, 6, 7):
             kwargs["transshipment_min_net_saving"] = transshipment_min_net_saving
             kwargs["transshipment_max_total"] = transshipment_max_total
             kwargs["transshipment_max_per_satellite"] = transshipment_max_per_satellite
-        if model == 4:
+        if model == 6:
             kwargs["stage1_time_ratio"] = stage1_time_ratio
         return alns_solvers[model](**kwargs)
 
@@ -117,7 +118,7 @@ def _run_solver(model, solver, problem, e1_tasks, e2_tasks_by_sat,
 def main():
     app_cfg, fleet_cfg = load_config()
 
-    model = app_cfg["model"]
+    model = require_model_number(app_cfg["model"])
     data_file = app_cfg["data"]
     solver = app_cfg["solver"]
     alns_iter = app_cfg.get("alns_iter", 5000)

@@ -1,10 +1,10 @@
-# Model 2 联合 Branch-Price 根 — 实现设计（Path B）
+# Model 3 联合 Branch-Price 根 — 实现设计（Path B）
 
 > 状态（2026-08-10）：本设计未落地为完整 BCP 根；`100_customers/C101` 的闭合结论
 > 来自证书路径（E1 阶跃 + S1 floor 证书），不满足“Gurobi 直接求解 OPTIMAL”口径。
 
 目标：实现缺失的联合 branch-price 根，闭合 `100_customers/C101` 的 0.2615% gap
-（incumbent **1829.0094** vs bound **1824.2267**），使 Model 2 在 100 客户达到
+（incumbent **1829.0094** vs bound **1824.2267**），使 Model 3 在 100 客户达到
 `proven_optimal`。工作目录：本 worktree（`route_pool_exact.py` / `e2_route_cg.py` /
 `e2_ng_dssr_pricing.py` 在此）。
 
@@ -38,10 +38,10 @@ rho_pickup[s]  = sum_{rid,k} pi(Link_Pickup[s,rid,k]) * visits_pick[k].X / max(n
 
 | 文件 | 动作 | LOC | 说明 |
 |---|---|---|---|
-| `models/model_2/route_pool_exact.py` | 改 | ~70 | 实现 `return_duals`（现在 line 56 是死的）+ 加 `extract_joint_duals(m, vars_dict, ctx, e2_tasks_by_sat)`：读 `E2_Cover_{t}.Pi`、`E2_RouteLimit_{s}.Pi`、`Link_Start_{s}_{rid}_{k}.Pi`、`Link_Pickup_{s}_{rid}_{k}.Pi`、`E2_TaskTWlo/hi_{t}.Pi`、（可选）`E2_SatCostLB_{s}.Pi`，按上面公式聚合成 per-sat σ_s/ρ_s |
-| `models/model_2/joint_pricing.py`（新）| 新 | ~250 | `solve_joint_pricing_mip(problem, sat_id, tasks, pi_cover, nu_vehicle, sigma_start, rho_pickup, alpha_lo, alpha_hi, same_pairs, diff_pairs, pricing_time_limit, proof_as_feasibility, forbidden_paths, cut_duals)`：复制 `_solve_pricing_mip` 全部脚手架（y/z/A/Q/Vol/order/MTZ/容量/precedence/SRI/Ryan-Foster），加连续 `S_var`（lb=0）、`R_var`，加约束 `S_var ≤ A[first_task]`、`R_var ≥ A[last]+svc+travel_back`，目标改 `route_cost − Σπ·y − ν − Σcut·h − σ·S_var − ρ·R_var + Σ(α_lo−α_hi)·A`；proof 模式同理 |
-| `models/model_2/joint_branch_price_root.py`（新）| 新 | ~200 | `solve_joint_branch_price_root(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite, initial_columns, max_cg_iterations=200, pricing_time_limit=20, proof_as_feasibility=True)`：CG 循环 = 联合 LP 主问题（`build_route_pool_master(relax=True, return_duals=True)`，barrier 法）→ `extract_joint_duals` → 每卫星 `solve_joint_pricing_mip` → 去重加列 → 直到无负 reduced cost 列（`LP_PROVED`）。返回 lp_bound/incumbent/gap/proven_optimal |
-| `experiments/run_joint_branch_price_root.py`（新）| 新 | ~120 | CLI，镜像 `run_m2_route_pool_master_probe.py`。`--columns_json`（默认 16,336 列合并池，路径见 `analyze_m2_100_gap_certificate.py:78-79`）、`--max_cg_iterations`、`--pricing_time_limit`、`--proof_as_feasibility`、`--output_dir` |
+| `models/model_3/route_pool_exact.py` | 改 | ~70 | 实现 `return_duals`（现在 line 56 是死的）+ 加 `extract_joint_duals(m, vars_dict, ctx, e2_tasks_by_sat)`：读 `E2_Cover_{t}.Pi`、`E2_RouteLimit_{s}.Pi`、`Link_Start_{s}_{rid}_{k}.Pi`、`Link_Pickup_{s}_{rid}_{k}.Pi`、`E2_TaskTWlo/hi_{t}.Pi`、（可选）`E2_SatCostLB_{s}.Pi`，按上面公式聚合成 per-sat σ_s/ρ_s |
+| `models/model_3/joint_pricing.py`（新）| 新 | ~250 | `solve_joint_pricing_mip(problem, sat_id, tasks, pi_cover, nu_vehicle, sigma_start, rho_pickup, alpha_lo, alpha_hi, same_pairs, diff_pairs, pricing_time_limit, proof_as_feasibility, forbidden_paths, cut_duals)`：复制 `_solve_pricing_mip` 全部脚手架（y/z/A/Q/Vol/order/MTZ/容量/precedence/SRI/Ryan-Foster），加连续 `S_var`（lb=0）、`R_var`，加约束 `S_var ≤ A[first_task]`、`R_var ≥ A[last]+svc+travel_back`，目标改 `route_cost − Σπ·y − ν − Σcut·h − σ·S_var − ρ·R_var + Σ(α_lo−α_hi)·A`；proof 模式同理 |
+| `models/model_3/joint_branch_price_root.py`（新）| 新 | ~200 | `solve_joint_branch_price_root(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite, initial_columns, max_cg_iterations=200, pricing_time_limit=20, proof_as_feasibility=True)`：CG 循环 = 联合 LP 主问题（`build_route_pool_master(relax=True, return_duals=True)`，barrier 法）→ `extract_joint_duals` → 每卫星 `solve_joint_pricing_mip` → 去重加列 → 直到无负 reduced cost 列（`LP_PROVED`）。返回 lp_bound/incumbent/gap/proven_optimal |
+| `experiments/run_joint_branch_price_root.py`（新）| 新 | ~120 | CLI，镜像 `run_m3_route_pool_master_probe.py`。`--columns_json`（默认 16,336 列合并池，路径见 `analyze_m3_100_gap_certificate.py:78-79`）、`--max_cg_iterations`、`--pricing_time_limit`、`--proof_as_feasibility`、`--output_dir` |
 
 复用不改：`e2_route_cg._solve_pricing_mip`（模板）、`_solve_pricing_labeling_exact`
 （可选加速）、`route_pool_exact._normalize_columns / _route_cost / _phys / _service_time`、
@@ -75,12 +75,12 @@ RC(r, schedule) = Σ_arcs dist
 ## 回退（若联合定价真 stall）
 
 per-satellite BCP bound（1031.8799，已证）+ Lagrangian E1 耦合上界检查
-（`experiments/run_m2_lagrangian_bundle.py` 已存在）——另一条不需联合定价的证书路径。
+（`experiments/run_m3_lagrangian_bundle.py` 已存在）——另一条不需联合定价的证书路径。
 
 ## 工程注意
 
-- 跑 Gurobi（M3/M2 大模型）一律用 **shell 内 `sleep+kill` 看门狗 + 直写日志、不用管道**，
-  工具超时对后台大任务不生效（本会话有过 M3 8 小时挂死、`grep|tail` 吞缓冲的教训）。
+- 跑 Gurobi（M5/M3 大模型）一律用 **shell 内 `sleep+kill` 看门狗 + 直写日志、不用管道**，
+  工具超时对后台大任务不生效（本会话有过 M5 8 小时挂死、`grep|tail` 吞缓冲的教训）。
 - 这是**证明关键代码**：`proven_optimal` 契约不可破坏。任何 bound 异常就停，宁可报
   "未证"也不给假证书。
-- 种子列池：`output/m2_full_bcp_100_c101_merged_columns/100_customers__C101__columns.json`（16336 列）。
+- 种子列池：`output/m3_full_bcp_100_c101_merged_columns/100_customers__C101__columns.json`（16336 列）。

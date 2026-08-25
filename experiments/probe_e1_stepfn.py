@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Verify step 6 of the strict-closure theorem for Model 2 100c C101.
+"""Verify step 6 of the strict-closure theorem for Model 3 100c C101.
 
 Step 6 claims: for post_S_min[S1] in [BCP_post=126.17, tau_min=153.0776),
 E1_coupled does NOT save (stays 797.1295). The theorem is complete iff
@@ -24,8 +24,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
 from core.instance import ProblemInstance
-from models.model_2.lagrangian_decomp import solve_e1_subproblem, _setup_e1_geometry
-from models.model_2.route_pool_exact import _normalize_columns, _phys
+from models.model_3.lagrangian_decomp import solve_e1_subproblem, _setup_e1_geometry
+from models.model_3.route_pool_exact import _normalize_columns, _phys
 from utils.data_loader import parse_dataset
 from utils.task_builder import build_tasks_for_model
 
@@ -62,13 +62,13 @@ def main():
     nodes, _ = parse_dataset(str(DATA_DIR / "100_customers" / "C101.csv"))
     problem = ProblemInstance(nodes, fleet, speed=fleet.get("speed", 1.0))
     problem.aggregate_demands_from_pre_assignment()
-    e1_tasks, e2_by_sat = build_tasks_for_model(problem, 2)
+    e1_tasks, e2_by_sat = build_tasks_for_model(problem, 3)
     e2_task_map = {t.id: t for tasks in e2_by_sat.values() for t in tasks}
     g = _setup_e1_geometry(problem, e1_tasks)
     sat_ids = g["sat_ids"]
 
     columns_path = REFERENCE_DIR / "merged_columns" / "100_customers__C101__columns.json"
-    lbs_path = REFERENCE_DIR / "exact_incumbents" / "m2_100_c101_satellite_bcp_exact_lbs.json"
+    lbs_path = REFERENCE_DIR / "exact_incumbents" / "m3_100_c101_satellite_bcp_exact_lbs.json"
 
     payload = json.loads(columns_path.read_text())
     columns = payload["columns"]
@@ -82,7 +82,7 @@ def main():
         cols_by_sat.setdefault(col["sat_id"], []).append(col)
 
     # BCP_post per sat (recompute via E2 BCP selection)
-    from models.model_2.lagrangian_decomp import solve_e2_subproblem
+    from models.model_3.lagrangian_decomp import solve_e2_subproblem
     r2 = solve_e2_subproblem(problem, e2_by_sat, columns, {}, problem.fleet.e2_per_sat_count,
                              time_limit=90, satellite_cost_lbs=lbs or None)
     selected = set(r2.get("selected_route_ids", []))

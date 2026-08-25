@@ -10,7 +10,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from core.instance import ProblemInstance
 from models.alns_base import Route, Solution
-from models.model_4.alns_solver import (
+from models.model_6.alns_solver import (
     Evaluator,
     build_initial_solution,
     greedy_insertion,
@@ -24,7 +24,7 @@ DATA_FILE = PROJECT_ROOT / "data" / "10_customers" / "C103.csv"
 FLEET_FILE = PROJECT_ROOT / "config" / "fleet_config.json"
 
 
-def _model4_context():
+def _model6_context():
     with FLEET_FILE.open("r", encoding="utf-8") as f:
         fleet_config = json.load(f)
     nodes_dict, _ = parse_dataset(str(DATA_FILE))
@@ -34,7 +34,7 @@ def _model4_context():
         speed=fleet_config.get("speed", 1.0),
     )
     problem.aggregate_demands_from_pre_assignment()
-    e1_tasks, e2_tasks_by_sat = build_tasks_for_model(problem, 4)
+    e1_tasks, e2_tasks_by_sat = build_tasks_for_model(problem, 6)
     evaluator = Evaluator(
         problem,
         e1_tasks,
@@ -55,7 +55,7 @@ def _partial_solution(base_sol):
 
 
 def _assert_insert_uses_real_start(repair_op):
-    evaluator, base_sol = _model4_context()
+    evaluator, base_sol = _model6_context()
     e2_start_by_sat = evaluator.e2_start_times(base_sol)
     start_time = e2_start_by_sat["S6"]
     assert start_time == 75.0

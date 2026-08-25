@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Certify the universe min E2 S1 cost with a latest-departure floor, closing
-the last gap of the strict-closure theorem for Model 2 100c C101.
+the last gap of the strict-closure theorem for Model 3 100c C101.
 
 Theorem needs: E2_S1(s_max >= tau_min=153.0776) >= 203.00 over the FULL route
 universe (so that total(tau_min) = 792.3468 + E2_S1 + 833.6602 >= 1829.0094).
@@ -39,13 +39,13 @@ import gurobipy as gp
 from gurobipy import GRB
 
 from core.instance import ProblemInstance
-from models.model_2.e2_route_cg import (
+from models.model_3.e2_route_cg import (
     E2RouteColumn,
     _build_master,
     _solve_pricing_mip,
     _solve_pricing_labeling_exact,
 )
-from models.model_2.route_pool_exact import _normalize_columns, _phys
+from models.model_3.route_pool_exact import _normalize_columns, _phys
 from utils.data_loader import parse_dataset
 from utils.task_builder import build_tasks_for_model
 
@@ -101,7 +101,7 @@ def main():
     nodes, _ = parse_dataset(str(DATA_DIR / args.scale / f"{args.instance}.csv"))
     problem = ProblemInstance(nodes, fleet, speed=fleet.get("speed", 1.0))
     problem.aggregate_demands_from_pre_assignment()
-    _, e2_by_sat = build_tasks_for_model(problem, 2)
+    _, e2_by_sat = build_tasks_for_model(problem, 3)
     tasks = e2_by_sat[args.satellite]
     task_ids = [t.id for t in tasks]
     e2_task_map = {t.id: t for t in tasks}
@@ -211,7 +211,7 @@ def main():
     print(f"  threshold for closure = {args.threshold:.4f}")
     if converged and lp_obj >= args.threshold - 1e-4:
         print(f"\n  ==> CERTIFIED: universe E2_S1(s_max>={args.floor}) = {lp_obj:.4f} >= {args.threshold:.4f}")
-        print(f"      Strict-closure theorem COMPLETE -> Model 2 {args.scale}/{args.instance}")
+        print(f"      Strict-closure theorem COMPLETE -> Model 3 {args.scale}/{args.instance}")
         print(f"      PROVEN OPTIMAL at 1829.0093866572092.")
     elif lp_obj >= args.threshold - 1e-4:
         print(f"\n  ==> LP >= threshold but pricing NOT certified (status {last_info['status']});")

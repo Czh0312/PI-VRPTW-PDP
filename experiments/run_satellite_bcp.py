@@ -15,7 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
 from core.instance import ProblemInstance
-from models.model_2.e2_route_cg import (
+from models.model_3.e2_route_cg import (
     _build_master,
     _columns_from_paths,
     _singleton_column,
@@ -427,7 +427,7 @@ def _column_respects(col, same_pairs, diff_pairs):
 
 
 def _as_column_dicts(problem, sat_id, tasks, route_paths, column_dicts):
-    from models.model_2.e2_route_cg import E2RouteColumn
+    from models.model_3.e2_route_cg import E2RouteColumn
 
     task_map = {t.id: t for t in tasks}
     cols = []
@@ -624,7 +624,7 @@ def run(args):
     fleet_cfg = load_fleet_config()
     data_path = DATA_DIR / args.scale / f"{args.instance}.csv"
     problem = build_problem(data_path, fleet_cfg)
-    _, e2_tasks = build_tasks_for_model(problem, 2)
+    _, e2_tasks = build_tasks_for_model(problem, 3)
     tasks = e2_tasks[args.satellite]
     min_routes = _capacity_min_routes(problem, tasks) if args.capacity_route_minimum else None
     seed_routes = read_routes(args.seed_routes_json).get(args.satellite, [])

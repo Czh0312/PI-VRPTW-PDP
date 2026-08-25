@@ -14,15 +14,15 @@
 
 ## 2. 主线模型
 
-最终建议以 Model 6 / Model 5 为主线，弱化 Model 3 / Model 4：
+最终建议以 Model 4 / Model 7 为主线，弱化 Model 5 / Model 6：
 
 | 角色 | 模型 | 原因 |
 |---|---|---|
-| 核心贡献模型 | M6 = M2 + 顾客自由分配 | 直接体现“顾客归属前置仓是决策”的管理价值 |
-| 大规模求解主力 | M5 / M6 ALNS | 已有稳定 ALNS 框架和大量实验结果 |
-| 精确对照 | M1 / M2 | M1≤50c、M2 50c 可提供可复现精确基准 |
-| 机制消融 | M7 = M1 + 自由分配 | 把“自由分配”从取送货机制中剥离出来 |
-| 中转叙事 | M5 为主，M3/M4 为历史对照 | M3 精确不可扩展；M4 非全局精确 |
+| 核心贡献模型 | M4 = M3 + 顾客自由分配 | 直接体现“顾客归属前置仓是决策”的管理价值 |
+| 大规模求解主力 | M7 / M4 ALNS | 已有稳定 ALNS 框架和大量实验结果 |
+| 精确对照 | M1 / M3 | M1≤50c、M3 50c 可提供可复现精确基准 |
+| 机制消融 | M2 = M1 + 自由分配 | 把“自由分配”从取送货机制中剥离出来 |
+| 中转叙事 | M7 为主，M5/M6 为历史对照 | M5 精确不可扩展；M6 非全局精确 |
 
 ## 3. 实验设计
 
@@ -38,10 +38,10 @@
 
 | 规模 | Exact 基准 | ALNS 对比 | 说明 |
 |---|---|---|---|
-| 5c | M1、M2 | M2、M6、M7 | 快速全量实验 |
-| 10c | M1、M2 | M2、M6、M7 | 核心小规模验证 |
-| 20c | 选择性 | M2、M6、M7 | 精确视算例难度选择 |
-| 50c | 仅代表算例 | M2、M6、M7 | M1/M2 可证，但不宜全量硬跑 |
+| 5c | M1、M3 | M3、M4、M2 | 快速全量实验 |
+| 10c | M1、M3 | M3、M4、M2 | 核心小规模验证 |
+| 20c | 选择性 | M3、M4、M2 | 精确视算例难度选择 |
+| 50c | 仅代表算例 | M3、M4、M2 | M1/M3 可证，但不宜全量硬跑 |
 
 关键指标：
 
@@ -52,14 +52,14 @@
    \]
 3. 机制价值：
    \[
-   \text{Assignment gain} = \frac{M2 - M6}{M2}\times 100\%.
+   \text{Assignment gain} = \frac{M3 - M4}{M3}\times 100\%.
    \]
 
 注意：
 
-- M6/M7 当前路线列结果只能作为 heuristic incumbent；
+- M4/M2 当前路线列结果只能作为 heuristic incumbent；
 - 不能把 restricted pool optimum 当作精确基准；
-- 若小规模 M6/M7 未全局证明，ALNS gap 应分母使用 M2/M1 或标注为“相对受限池”。
+- 若小规模 M4/M2 未全局证明，ALNS gap 应分母使用 M3/M1 或标注为“相对受限池”。
 
 ### 3.2 大规模 ALNS 实验
 
@@ -69,9 +69,9 @@
 
 | 规模 | 实例 | 模型 | 指标 |
 |---|---|---|---|
-| 50c | 30 个非北京实例 | M2 / M5 / M6 | 可行率、成本、时间 |
-| 100c | 30 个非北京实例 | M2 / M5 / M6 | 可行率、成本、时间 |
-| 北京生鲜 | 3 个实例 | M2 / M5 / M6 | 管理场景案例 |
+| 50c | 30 个非北京实例 | M3 / M7 / M4 | 可行率、成本、时间 |
+| 100c | 30 个非北京实例 | M3 / M7 / M4 | 可行率、成本、时间 |
+| 北京生鲜 | 3 个实例 | M3 / M7 / M4 | 管理场景案例 |
 
 核心指标：
 
@@ -81,17 +81,17 @@
 4. 单位时间成本下降；
 5. 自由分配收益：
    \[
-   \frac{M2 - M6}{M2}.
+   \frac{M3 - M4}{M3}.
    \]
-6. 中转收益（若保留 M5 叙事）：
+6. 中转收益（若保留 M7 叙事）：
    \[
-   \frac{M2 - M5}{M2}.
+   \frac{M3 - M7}{M3}.
    \]
 
 公平性原则：
 
 - ALNS 按相同时间预算对比，而非相同迭代数；
-- M6 每轮评估更重，按迭代数比较会低估其时间成本；
+- M4 每轮评估更重，按迭代数比较会低估其时间成本；
 - 多 seed 报告均值 ± 标准差；
 - 单模型与 portfolio 分别报告，避免把额外计算时间隐藏在“取最优”中。
 
@@ -101,23 +101,23 @@
 
 | 消融 | 对照 | 证明内容 |
 |---|---|---|
-| 固定分配 vs 自由分配 | M2 vs M6 | 顾客归属决策的价值 |
-| 纯配送 vs 取送货 | M7 vs M6 | 回收/取送货机制的额外成本 |
-| 无中转 vs 中转 | M2 vs M5 | 中转试探的价值 |
-| 单策略 vs portfolio | M5 单策略 vs V6 | 算法鲁棒性 |
+| 固定分配 vs 自由分配 | M3 vs M4 | 顾客归属决策的价值 |
+| 纯配送 vs 取送货 | M2 vs M4 | 回收/取送货机制的额外成本 |
+| 无中转 vs 中转 | M3 vs M7 | 中转试探的价值 |
+| 单策略 vs portfolio | M7 单策略 vs V6 | 算法鲁棒性 |
 
 ### 3.4 精确 vs ALNS 交叉表
 
 小规模结果建议按如下形式呈现：
 
-| 规模 | Exact | M6 ALNS | ALNS gap | Assignment gain |
+| 规模 | Exact | M4 ALNS | ALNS gap | Assignment gain |
 |---|---:|---:|---:|---:|
 | 5c | ... | ... | ... | ... |
 | 10c | ... | ... | ... | ... |
 
 大规模结果建议按如下形式呈现：
 
-| 规模 | M2 | M5 | M6 | M6 vs M2 | 可行率 |
+| 规模 | M3 | M7 | M4 | M4 vs M3 | 可行率 |
 |---|---:|---:|---:|---:|---:|
 | 50c | ... | ... | ... | ... | ... |
 | 100c | ... | ... | ... | ... | ... |
@@ -126,10 +126,10 @@
 
 ### 可直接复用
 
-- `run_comparison.py`：M1–M4 exact/ALNS 批量框架；
-- `experiments/run_model6_vs_model2.py`：M2/M6 ALNS 公平对比；
-- `experiments/run_model2345_all_nonbeijing.py`：M2/M3/M4/M5 全量 ALNS 对比；
-- `experiments/run_model12_exact_vs_alns_m5.py`：exact vs ALNS vs M5 诊断实验；
+- `run_comparison.py`：M1/M3/M5/M6 exact/ALNS 批量框架；
+- `experiments/run_model4_vs_model3.py`：M3/M4 ALNS 公平对比；
+- `experiments/run_model3567_all_nonbeijing.py`：M3/M5/M6/M7 全量 ALNS 对比；
+- `experiments/run_model13_exact_vs_alns_m7.py`：exact vs ALNS vs M7 诊断实验；
 - `experiments/run_beijing_alns_comparison.py`：北京场景对比。
 
 ### 需要新增的统一实验
@@ -142,8 +142,8 @@ experiments/run_mainline_exact_alns.py
 
 功能：
 
-1. 小规模跑 M1/M2 exact + M2/M5/M6/M7 ALNS；
-2. 中大规模跑 M2/M5/M6/M7 ALNS；
+1. 小规模跑 M1/M3 exact + M3/M7/M4/M2 ALNS；
+2. 中大规模跑 M3/M7/M4/M2 ALNS；
 3. 输出：
    - machine-readable CSV/JSON；
    - exact vs ALNS gap 表；
@@ -166,12 +166,12 @@ PYTHONPYCACHEPREFIX=/tmp/pycache .venv/bin/python \
 
 ### 需要新增的 ALNS 包装
 
-目前 M6 ALNS 入口与 M2 不同：M2 需要 `e1_tasks/e2_tasks_by_satellite`，
-M6 只需要 `problem + vehicles_per_satellite`。为统一实验脚本，建议实现 adapter：
+目前 M4 ALNS 入口与 M3 不同：M3 需要 `e1_tasks/e2_tasks_by_satellite`，
+M4 只需要 `problem + vehicles_per_satellite`。为统一实验脚本，建议实现 adapter：
 
 ```text
-models/model_6/alns_adapter.py
-models/model_7/alns_adapter.py
+models/model_4/alns_adapter.py
+models/model_2/alns_adapter.py
 ```
 
 返回统一字段：
@@ -192,7 +192,7 @@ models/model_7/alns_adapter.py
 
 ### 第一阶段：统一口径和输出
 
-1. 新增 M6/M7 ALNS adapter；
+1. 新增 M4/M2 ALNS adapter；
 2. 新增主实验脚本；
 3. 明确 `restricted_pool_optimal` 不进入 Exact 汇总；
 4. 输出 CSV/JSON/Markdown 三份一致结果。
@@ -206,15 +206,15 @@ models/model_7/alns_adapter.py
 
 ### 第三阶段：中大规模价值实验
 
-1. 50c/100c 跑 M2/M5/M6；
+1. 50c/100c 跑 M3/M7/M4；
 2. 多 seed、多时间预算；
 3. 北京案例做场景展示；
 4. 输出论文主图和表。
 
 ### 第四阶段：算法消融
 
-1. M6 破坏/修复算子消融；
-2. M5 portfolio 消融；
+1. M4 破坏/修复算子消融；
+2. M7 portfolio 消融；
 3. 不同前置仓数量/容量的敏感性分析。
 
 ## 6. 论文叙事建议
@@ -234,14 +234,14 @@ models/model_7/alns_adapter.py
 当前项目的最优路线是：
 
 ```text
-M1/M2 exact（小规模正确性基准）
+M1/M3 exact（小规模正确性基准）
         +
-M6/M7 机制消融
+M4/M2 机制消融
         +
-M5/M6 ALNS（大规模求解能力）
+M7/M4 ALNS（大规模求解能力）
         =
 小规模精确对比 + 大规模价值验证
 ```
 
-M6/M7 的现有路线列结果只能作为启发式 upper bound 或 restricted-pool incumbent，
+M4/M2 的现有路线列结果只能作为启发式 upper bound 或 restricted-pool incumbent，
 不能作为全局精确解引用。

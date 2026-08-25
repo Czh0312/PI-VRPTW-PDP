@@ -136,11 +136,18 @@ def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         print("求解器配置: 精确最优解模式 (Model 1 纯配送)")
         print("=" * 60)
         print(f"✓ MIPGap = {mip_gap} (要求精确最优解)")
-        print(f"✓ 时间限制 {time_limit} 秒")
+        if time_limit is None:
+            print("✓ 无时间限制")
+        else:
+            print(f"✓ 时间限制 {time_limit} 秒")
         print("=" * 60)
 
     m.setParam('MIPGap', mip_gap)
-    m.setParam('TimeLimit', time_limit)
+    # ``None`` deliberately leaves Gurobi's TimeLimit at its default infinity.
+    # This is different from supplying an arbitrarily large finite limit and is
+    # needed by resumable proof campaigns that must run until OPTIMAL/INFEASIBLE.
+    if time_limit is not None:
+        m.setParam('TimeLimit', time_limit)
     m.setParam('IntFeasTol', 1e-9)
     m.setParam('FeasibilityTol', 1e-9)
     _apply_gurobi_params(m, gurobi_params, verbose)

@@ -568,10 +568,10 @@ def draw_model_progression() -> None:
 
     models = [
         ("Model 1", "纯配送\nDelivery"),
-        ("Model 2", "加入取货\nPickup"),
-        ("Model 3", "迭代中转\n中转作为算子"),
-        ("Model 4", "两阶段中转\n路线后处理"),
-        ("Model 5", "受控中转\ncandidate 内试探"),
+        ("Model 3", "加入取货\nPickup"),
+        ("Model 5", "迭代中转\n中转作为算子"),
+        ("Model 6", "两阶段中转\n路线后处理"),
+        ("Model 7", "受控中转\ncandidate 内试探"),
     ]
     xs = [0.6, 3.05, 5.5, 7.95, 10.4]
     fills = [
@@ -627,10 +627,10 @@ def draw_model_progression() -> None:
     save_figure(fig, "fig_03_model_progression")
 
 
-def draw_model5_candidate_flow() -> None:
+def draw_model7_candidate_flow() -> None:
     fig, ax = plt.subplots(figsize=(12.6, 6.2))
     clean_axis(ax, xlim=(0, 12.6), ylim=(0, 6.2))
-    ax.set_title("Model 5：candidate 内嵌受控中转的搜索流程", fontsize=18, color=COLORS["ink"], pad=12)
+    ax.set_title("Model 7：candidate 内嵌受控中转的搜索流程", fontsize=18, color=COLORS["ink"], pad=12)
 
     boxes = {
         "initial": (0.55, 3.85, "强可行初始解\nE1/E2 路线构造", COLORS["blue_light"], COLORS["blue"]),
@@ -669,7 +669,7 @@ def draw_model5_candidate_flow() -> None:
         fontsize=10,
     )
 
-    save_figure(fig, "fig_04_model5_candidate_flow")
+    save_figure(fig, "fig_04_model7_candidate_flow")
 
 
 def draw_net_gain_waterfall() -> None:
@@ -767,8 +767,8 @@ def write_index() -> None:
 |---|---|---|
 | 图 1 | `fig_01_transshipment_concept` | 解释“中转为什么能减少路程”，建议放在中转机制定义附近 |
 | 图 2 | `fig_02_two_echelon_pdd_network` | 解释两级取送货网络结构，建议放在问题描述章节 |
-| 图 3 | `fig_03_model_progression` | 解释 Model 1-5 的递进关系，建议放在模型设计或算法章节开头 |
-| 图 4 | `fig_04_model5_candidate_flow` | 解释 Model 5 中转嵌入 ALNS candidate 的流程，建议放在算法设计章节 |
+| 图 3 | `fig_03_model_progression` | 解释 Model 1/3/5/6/7 的递进关系，建议放在模型设计或算法章节开头 |
+| 图 4 | `fig_04_model7_candidate_flow` | 解释 Model 7 中转嵌入 ALNS candidate 的流程，建议放在算法设计章节 |
 | 图 5 | `fig_05_transshipment_net_gain` | 解释中转收益计算与防劣化判断，建议放在中转接受准则附近 |
 
 图 1 中的距离数值是概念示意值，不对应某个具体算例。若论文希望更严谨，可以后续替换为某个实验实例的真实路径距离。
@@ -781,7 +781,7 @@ def main() -> None:
     draw_transshipment_concept()
     draw_two_echelon_network()
     draw_model_progression()
-    draw_model5_candidate_flow()
+    draw_model7_candidate_flow()
     draw_net_gain_waterfall()
     write_index()
     print(f"Generated thesis figures in {OUT_DIR}")

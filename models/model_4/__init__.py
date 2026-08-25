@@ -1,2 +1,1 @@
-# models/model_4/__init__.py
-# -*- coding: utf-8 -*-
+"""Model 4: 2E-VRPTW-PDD with endogenous customer-satellite assignment."""

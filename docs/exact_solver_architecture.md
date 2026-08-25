@@ -17,7 +17,7 @@
 
 默认的 `solve_exact(...)` 是严格入口：仅在模型未缩减、Gurobi 返回 `OPTIMAL` 时
 返回路线并标记 `proven_optimal`。如只需要限时可行解、初始解或诊断结果，使用
-`solve_mip(...)`（Model 1/2）或显式允许 incumbent 的受限入口；这些结果绝不应
+`solve_mip(...)`（Model 1/3）或显式允许 incumbent 的受限入口；这些结果绝不应
 进入 Exact 平均值或成功率。
 
 ## 求解模块
@@ -25,13 +25,13 @@
 | 模块 | 入口 | 可认证的条件 | 非认证结果 |
 | --- | --- | --- | --- |
 | Model 1 | `models.model_1.solver.solve_exact` | 原始 MIP `OPTIMAL` | `feasible_not_proven` |
-| Model 2 弧流 | `models.model_2.solver.solve_exact` | 原始联合 MIP `OPTIMAL` | `feasible_not_proven` |
-| Model 2 路线宇宙 | `route_universe.solve_route_universe_exact` | 每个卫星的路线宇宙完整且 MIP `OPTIMAL` | `ROUTE_UNIVERSE_INCOMPLETE` |
-| Model 2 直接路线主问题 | `route_master.solve_route_master_exact` | 同上；E1/E2 联合时间约束仍在主问题中 | `branch_node_optimal` 或受限结果 |
-| Model 3 | `models.model_3.solver.solve_exact` | 全部中转候选（`max_relocation_candidates=None`）且 MIP `OPTIMAL` | `restricted_optimal` / `feasible_not_proven` |
-| Model 4 | `models.model_4.solver.solve_exact` | 无；固定路线后的两阶段流程不是原问题全局优化 | `two_stage_not_global` |
+| Model 3 弧流 | `models.model_3.solver.solve_exact` | 原始联合 MIP `OPTIMAL` | `feasible_not_proven` |
+| Model 3 路线宇宙 | `route_universe.solve_route_universe_exact` | 每个卫星的路线宇宙完整且 MIP `OPTIMAL` | `ROUTE_UNIVERSE_INCOMPLETE` |
+| Model 3 直接路线主问题 | `route_master.solve_route_master_exact` | 同上；E1/E2 联合时间约束仍在主问题中 | `branch_node_optimal` 或受限结果 |
+| Model 5 空容器单次接力 | `models.model_5.solver.solve_exact` | 完整候选范围下，零回收载荷松弛证书闭合，或完整联合 MIP 为 `OPTIMAL` | `restricted_optimal` / `feasible_not_proven` |
+| Model 6 | `models.model_6.solver.solve_exact` | 无；固定路线后的两阶段流程不是原问题全局优化 | `two_stage_not_global` |
 
-## Model 2 的路线组件
+## Model 3 的路线组件
 
 `route_universe.py` 穷举小规模卫星的容量/时间窗可行 E2 路线。安全上限默认是每个
 卫星 10 个任务、250,000 条路线；超过上限时立即停止并报告不完整，不以有限集合
@@ -44,16 +44,22 @@
 
 `route_pricing.py` 只精确求解**一条** E2 路线的定价子问题，支持弧成本、任务奖励
 和 Ryan–Foster `same` / `different` 规则。它尚未接入联合主问题的对偶、列加入循环
-和完整分支树，因而不能单独证明 Model 2 的全局最优。
+和完整分支树，因而不能单独证明 Model 3 的全局最优。
 
 ## 当前 MIP 强化
 
-Model 2 的弧流与直接路线主问题使用按实例构造的安全时间上界，而不是固定的
+Model 3 的弧流与直接路线主问题使用按实例构造的安全时间上界，而不是固定的
 `100000` 时间 Big-M。上界由所有有限时间窗、有效 `TFp`、最长行驶弧和全部任务
 服务时间构造；对任一可行路线，按最早可行时刻调度均落在此界内。模型还固定
 时间不可行弧、使用弧特定的时间 Big-M，并按 E1/E2 初始配送载重对同质车辆排序。
 这些都是有效不等式/变量界：不会删除任何可行解，也不会改变 `proven_optimal` 的
 语义。
+
+Model 5 还使用一个证书优先的精确入口。它保留原始 pickup 的位置、时间窗、先送后取
+和 E1–E2 同步，只把 E2 pickup 的回收载荷置零，得到规范 Model 5 的有效松弛。在
+距离满足三角不等式时，任意接力解都能通过删除 `TD/RP`、将 `TP` 映射回原 pickup
+并捷径化，转换为不更贵的松弛解。如果该松弛的精确下界等于无接力可行上界，入口
+直接返回完整 Model 5 的全局最优证书；否则自动回退联合 MIP。
 
 ## 开发与回归
 
@@ -64,8 +70,8 @@ PYTHONPYCACHEPREFIX=/tmp/2e_vrptw_pycache \
   .venv/bin/python experiments/test_exact_contract.py
 ```
 
-该测试在 `data/5_customers/C101.csv` 上验证：Model 1、Model 2 弧流、完整路线宇宙
-和直接路线主问题均认证；两种 Model 2 表达的目标值一致；有限路线池与单个
+该测试在 `data/5_customers/C101.csv` 上验证：Model 1、Model 3 弧流、完整路线宇宙
+和直接路线主问题均认证；两种 Model 3 表达的目标值一致；有限路线池与单个
 Ryan–Foster 分支节点不会被认证；定价 oracle 遵守分支规则。
 
 任何修改模型、列定义或状态映射后，都应先运行该测试，再运行目标规模的限时基准；

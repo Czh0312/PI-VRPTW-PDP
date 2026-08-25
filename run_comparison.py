@@ -15,13 +15,13 @@ from statistics import mean, stdev
 
 from core.instance import ProblemInstance
 from models.model_1.solver import solve_exact as exact_m1
-from models.model_2.solver import solve_exact as exact_m2
 from models.model_3.solver import solve_exact as exact_m3
-from models.model_4.solver import solve_exact as exact_m4
+from models.model_5.solver import solve_exact as exact_m5
+from models.model_6.solver import solve_exact as exact_m6
 from models.model_1.alns_solver import solve_alns as alns_m1
-from models.model_2.alns_solver import solve_alns as alns_m2
 from models.model_3.alns_solver import solve_alns as alns_m3
-from models.model_4.alns_solver import solve_alns as alns_m4
+from models.model_5.alns_solver import solve_alns as alns_m5
+from models.model_6.alns_solver import solve_alns as alns_m6
 from utils.data_loader import parse_dataset
 from utils.task_builder import build_tasks_for_model
 
@@ -30,8 +30,8 @@ CONFIG_DIR = PROJECT_ROOT / "config"
 OUTPUT_DIR = PROJECT_ROOT / "output"
 DATA_DIR = PROJECT_ROOT / "data"
 
-EXACT_SOLVERS = {1: exact_m1, 2: exact_m2, 3: exact_m3, 4: exact_m4}
-ALNS_SOLVERS = {1: alns_m1, 2: alns_m2, 3: alns_m3, 4: alns_m4}
+EXACT_SOLVERS = {1: exact_m1, 3: exact_m3, 5: exact_m5, 6: exact_m6}
+ALNS_SOLVERS = {1: alns_m1, 3: alns_m3, 5: alns_m5, 6: alns_m6}
 
 
 def load_fleet_config():
@@ -77,10 +77,10 @@ def run_one(model, solver, data_path, fleet_cfg, alns_time=120,
     A time-limited MIP incumbent is retained as diagnostic data, but is never
     folded into the Exact means, tables, or success rates.
     """
-    # Model 4 currently fixes the Model 2 routes before optimizing
+    # Model 6 currently fixes the Model 3 routes before optimizing
     # transshipments, so it has no global-exact implementation to benchmark.
     # Do not spend the exact budget producing a result that cannot qualify.
-    if solver == "exact" and model == 4:
+    if solver == "exact" and model == 6:
         return dict(
             cost=None, time=0.0, e1=0, e2=0,
             status="UNAVAILABLE_NON_GLOBAL",
@@ -88,7 +88,7 @@ def run_one(model, solver, data_path, fleet_cfg, alns_time=120,
                 "solution_type": "two_stage_not_global",
                 "proven_optimal": False,
             },
-            log="Model 4 has no global exact solver; skipped.\n",
+            log="Model 6 has no global exact solver; skipped.\n",
         )
 
     nodes_dict, _ = parse_dataset(str(data_path))
@@ -98,20 +98,20 @@ def run_one(model, solver, data_path, fleet_cfg, alns_time=120,
     n_customers = len({t.cust for sat_tasks in e2_tasks_by_sat.values()
                        for t in sat_tasks})
 
-    # Model 3's joint relocation MIP does not scale: with the full relocation
+    # Model 5's joint relocation MIP does not scale: with the full relocation
     # candidate set (required for proven_optimal) model construction hangs at
     # 50/100 customers, and a restricted candidate set yields a degenerate
-    # empty model. Skip M3 exact at large scale rather than hang the batch
-    # (see backlog task on build_model3_joint_exact).
-    if solver == "exact" and model == 3 and n_customers >= 50:
+    # empty model. Skip M5 exact at large scale rather than hang the batch
+    # (see backlog task on build_model5_joint_exact).
+    if solver == "exact" and model == 5 and n_customers >= 50:
         return dict(
             cost=None, time=0.0, e1=0, e2=0,
-            status="UNAVAILABLE_M3_NOT_SCALABLE",
+            status="UNAVAILABLE_M5_NOT_SCALABLE",
             solver_info={
                 "solution_type": "none",
                 "proven_optimal": False,
             },
-            log=f"Model 3 exact skipped at {n_customers} customers: joint MIP "
+            log=f"Model 5 exact skipped at {n_customers} customers: joint MIP "
                 "construction does not scale.\n",
         )
 
@@ -130,16 +130,16 @@ def run_one(model, solver, data_path, fleet_cfg, alns_time=120,
             # incumbent returns no routes at all and looks like infeasibility.
             return_incumbent_on_time_limit=True,
         )
-        if model in (2, 4):
+        if model in (3, 6):
             kwargs["TFp"] = 9999.0
         # ALNS warm start (models 1/2/3). Without it the 50/100-customer
         # arc-flow MIP finds no feasible solution within the exact time budget;
         # seeding Gurobi with an ALNS incumbent turns "no solution" into a real
         # solve (incumbent + bound), recorded as FEASIBLE_NOT_PROVEN, never as
         # proven. Gated to large instances: small ones prove optimal in seconds
-        # and only waste the ALNS budget. (M4 exact is skipped upstream as
+        # and only waste the ALNS budget. (M6 exact is skipped upstream as
         # non-global, though its solve_exact also accepts warm_start_routes.)
-        if model in (1, 2, 3) and n_customers >= 50:
+        if model in (1, 3, 5) and n_customers >= 50:
             alns_fn = ALNS_SOLVERS[model]
             alns_kwargs = dict(
                 problem=problem, e1_tasks=e1_tasks,
@@ -148,7 +148,7 @@ def run_one(model, solver, data_path, fleet_cfg, alns_time=120,
                 max_iterations=5000, max_time=min(alns_time, 60), seed=seed,
                 verbose=False,
             )
-            if model == 2:
+            if model == 3:
                 alns_kwargs["TFp"] = 9999.0
             try:
                 ws_buf = io.StringIO()
@@ -168,7 +168,7 @@ def run_one(model, solver, data_path, fleet_cfg, alns_time=120,
             max_iterations=5000, max_time=alns_time, seed=seed,
             verbose=True,
         )
-        if model in (2, 4):
+        if model in (3, 6):
             kwargs["TFp"] = 9999.0
 
     log_buf = io.StringIO()
@@ -249,7 +249,7 @@ def write_comparison_readme(output_dir):
         "Naming convention: `<kind>_<group>_<number>_<scope>_<metric>_<comparison>.<ext>`.\n\n"
         "Recommended figures for reports:\n\n"
         "- `01_main_figures/fig_main_01_all_scales_alns_cost_by_model.png`\n"
-        "- `01_main_figures/fig_main_02_all_scales_alns_gap_m3_m4_vs_m2.png`\n"
+        "- `01_main_figures/fig_main_02_all_scales_alns_gap_m5_m6_vs_m3.png`\n"
         "- `01_main_figures/fig_main_03_all_scales_exact_success_rate.png` (certified optimality only)\n",
         encoding="utf-8",
     )
@@ -286,19 +286,19 @@ def plot_all(avg_results, output_dir):
     scale_labels = [str(_extract_num(s)) for s in scales]
     model_names = {
         1: "M1 Delivery",
-        2: "M2 Pickup-Delivery",
-        3: "M3 Iterative Trans.",
-        4: "M4 Two-Phase Trans.",
+        2: "M3 Pickup-Delivery",
+        3: "M5 Iterative Trans.",
+        4: "M6 Two-Phase Trans.",
     }
-    model_short = {1: "M1", 2: "M2", 3: "M3", 4: "M4"}
+    model_short = {1: "M1", 3: "M3", 5: "M5", 6: "M6"}
     solver_labels = {"exact": "Certified Exact", "alns": "ALNS"}
-    model_colors = {1: "#4C78A8", 2: "#E45756", 3: "#F58518", 4: "#72B7B2"}
+    model_colors = {1: "#4C78A8", 3: "#E45756", 5: "#F58518", 6: "#72B7B2"}
     solver_alpha = {"exact": 0.92, "alns": 0.72}
     combo_marker = {"exact": "o", "alns": "s"}
     combo_ls = {"exact": "-", "alns": "--"}
 
     x = np.arange(len(scales))
-    models = [1, 2, 3, 4]
+    models = [1, 3, 5, 6]
     solvers = ["exact", "alns"]
 
     def _series(model, solver, metric):
@@ -432,7 +432,7 @@ def plot_all(avg_results, output_dir):
 
     plot_alns_cost_summary(avg_results, scales, out_dirs["main"])
     print("[5/7] ALNS 主对比图已保存")
-    plot_gap_vs_m2(avg_results, scales, out_dirs["main"])
+    plot_gap_vs_m3(avg_results, scales, out_dirs["main"])
     print("[6/7] Gap 对比图已保存")
     plot_exact_success_heatmap(avg_results, scales, out_dirs["main"])
     print("[7/7] Exact 成功率图已保存")
@@ -446,9 +446,9 @@ def plot_table(avg_results, scales, output_dir):
     import numpy as np
 
     solvers = ["exact", "alns"]
-    models = [1, 2, 3, 4]
+    models = [1, 3, 5, 6]
     solver_hdr = ["Exact", "ALNS"]
-    model_hdr = ["M1", "M2", "M3", "M4"]
+    model_hdr = ["M1", "M3", "M5", "M6"]
 
     # 构造 cell 文本：每个 (scale, solver) 对应 4 个 model
     n_scales = len(scales)
@@ -549,12 +549,12 @@ def plot_alns_cost_summary(avg_results, scales, output_dir):
     import numpy as np
 
     scale_nums = [_extract_num(s) for s in scales]
-    models = [1, 2, 3, 4]
+    models = [1, 3, 5, 6]
     model_labels = {
         1: "M1 Delivery",
-        2: "M2 Pickup-Delivery",
-        3: "M3 Iterative Trans.",
-        4: "M4 Two-Phase Trans.",
+        2: "M3 Pickup-Delivery",
+        3: "M5 Iterative Trans.",
+        4: "M6 Two-Phase Trans.",
     }
     colors = {1: "#4C78A8", 2: "#E45756", 3: "#F58518", 4: "#72B7B2"}
     label_offsets = {1: 0, 2: -45, 3: 0, 4: 45}
@@ -595,8 +595,8 @@ def plot_alns_cost_summary(avg_results, scales, output_dir):
     plt.close(fig)
 
 
-def plot_gap_vs_m2(avg_results, scales, output_dir):
-    """Show whether transshipment variants improve on the M2 ALNS baseline."""
+def plot_gap_vs_m3(avg_results, scales, output_dir):
+    """Show whether transshipment variants improve on the M3 ALNS baseline."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -604,7 +604,7 @@ def plot_gap_vs_m2(avg_results, scales, output_dir):
 
     scale_labels = [str(_extract_num(s)) for s in scales]
     x = np.arange(len(scales))
-    targets = [(3, "M3 vs M2"), (4, "M4 vs M2")]
+    targets = [(5, "M5 vs M3"), (6, "M6 vs M3")]
     colors = {3: "#F58518", 4: "#72B7B2"}
     width = 0.32
 
@@ -628,16 +628,16 @@ def plot_gap_vs_m2(avg_results, scales, output_dir):
                         va="bottom" if gap >= 0 else "top", fontsize=8)
 
     ax.axhline(0, color="#333333", linewidth=1.0)
-    ax.set_title("ALNS Cost Gap Relative to M2 Baseline", fontsize=16,
+    ax.set_title("ALNS Cost Gap Relative to M3 Baseline", fontsize=16,
                  fontweight="bold", pad=12)
-    ax.set_ylabel("Gap vs M2 ALNS (%)")
+    ax.set_ylabel("Gap vs M3 ALNS (%)")
     ax.set_xlabel("Number of Customers")
     ax.set_xticks(x)
     ax.set_xticklabels(scale_labels)
     ax.grid(True, axis="y", linestyle="--", alpha=0.35)
     ax.legend(fontsize=9, loc="upper left")
     plt.tight_layout()
-    fig.savefig(output_dir / "fig_main_02_all_scales_alns_gap_m3_m4_vs_m2.png", dpi=250,
+    fig.savefig(output_dir / "fig_main_02_all_scales_alns_gap_m5_m6_vs_m3.png", dpi=250,
                 bbox_inches="tight", facecolor="white")
     plt.close(fig)
 
@@ -649,8 +649,8 @@ def plot_exact_success_heatmap(avg_results, scales, output_dir):
     import matplotlib.pyplot as plt
     import numpy as np
 
-    models = [1, 2, 3, 4]
-    model_labels = ["M1", "M2", "M3", "M4"]
+    models = [1, 3, 5, 6]
+    model_labels = ["M1", "M3", "M5", "M6"]
     scale_labels = [str(_extract_num(s)) for s in scales]
     rates = np.zeros((len(models), len(scales)))
     labels = []
@@ -719,7 +719,7 @@ def main():
 
         for csv_path in csvs:
             inst_name = csv_path.stem
-            for model in [1, 2, 3, 4]:
+            for model in [1, 3, 5, 6]:
                 for solver in ["exact", "alns"]:
                     done += 1
                     tag = f"{inst_name}|M{model}|{solver}"
@@ -742,7 +742,7 @@ def main():
     avg_results = {}  # [scale][(model, solver)] = {cost_mean, cost_std, ...}
     for sd in scale_dirs:
         avg_results[sd] = {}
-        for model in [1, 2, 3, 4]:
+        for model in [1, 3, 5, 6]:
             for solver in ["exact", "alns"]:
                 costs, times, e1s, e2s = [], [], [], []
                 n_ok = 0
@@ -781,7 +781,7 @@ def main():
     json_out = {}
     for sd in scale_dirs:
         json_out[sd] = {}
-        for model in [1, 2, 3, 4]:
+        for model in [1, 3, 5, 6]:
             for solver in ["exact", "alns"]:
                 d = avg_results[sd][(model, solver)]
                 json_out[sd][f"M{model}_{solver}"] = {
@@ -832,7 +832,7 @@ def main():
     print("-" * 100)
     for sd in scale_dirs:
         for solver in ["exact", "alns"]:
-            for model in [1, 2, 3, 4]:
+            for model in [1, 3, 5, 6]:
                 d = avg_results[sd][(model, solver)]
                 c = f"{d['cost_mean']:.1f}" if d["cost_mean"] > 0 else "N/A"
                 cs = f"{d['cost_std']:.1f}" if d["cost_mean"] > 0 else "-"

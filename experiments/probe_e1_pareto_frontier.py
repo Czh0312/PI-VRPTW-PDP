@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Probe: enumerate the Pareto-minimal E1 plan frontier for Model 2 exactness.
+"""Probe: enumerate the Pareto-minimal E1 plan frontier for Model 3 exactness.
 
-Claim: the whole Model 2 exact problem decomposes as
+Claim: the whole Model 3 exact problem decomposes as
 
     min over feasible E1 plans P of [ E1_cost(P) + sum_s E2_s(P) ]
 
@@ -32,7 +32,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
 from core.instance import ProblemInstance
-from models.model_2.route_pool_exact import _add_e1_constraints
+from models.model_3.route_pool_exact import _add_e1_constraints
 from utils.data_loader import parse_dataset
 from utils.task_builder import build_tasks_for_model
 
@@ -151,7 +151,7 @@ def main():
     args = ap.parse_args()
 
     problem = load_problem(args.scale, args.instance)
-    e1_tasks, e2_tasks_by_sat = build_tasks_for_model(problem, 2)
+    e1_tasks, e2_tasks_by_sat = build_tasks_for_model(problem, 3)
     C0 = args.ub - args.e2_lb
     print(f"Instance: {args.scale}/{args.instance}")
     print(f"E1 trucks={problem.e1_vehicle_count} E1 tasks={len(e1_tasks)} "
