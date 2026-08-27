@@ -8,6 +8,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from utils.economic_cost import EconomicParams, RouteMetrics, period_sweep, value_decomposition
+from generate_cost_analysis import select_reusable_route
 
 
 PARAMS = EconomicParams(
@@ -70,6 +71,16 @@ def test_cleaning_cost_uses_returned_container_count():
     expected = (90 * (0.8 + 0.1) + 100 * 0.03 * 36.5) / 100
     assert result["returned_container_uses_per_period"] == 90
     assert abs(result["reusable_variable_cost_per_use"] - expected) < 1e-9
+
+
+def test_parallel_reusable_models_are_selected_by_transport_cost():
+    metrics = {
+        "m3": RouteMetrics(100, e1_distance_km=10, e2_distance_km=20),
+        # Shorter total distance, but expensive E1 kilometres make this costlier.
+        "m4": RouteMetrics(100, e1_distance_km=15, e2_distance_km=10),
+        "m6": RouteMetrics(100, e1_distance_km=10, e2_distance_km=16),
+    }
+    assert select_reusable_route(metrics, PARAMS, ["m3", "m4", "m6"]) == "m6"
 
 
 if __name__ == "__main__":

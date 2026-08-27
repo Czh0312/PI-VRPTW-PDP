@@ -376,7 +376,7 @@ output/experiments/model7_v6_stable_comparison_84datasets_seed42_combined.md
 python main.py
 ```
 
-运行“一次性包装—常规循环回收—优化循环回收”经济性对比：
+运行 M1/M3/M4/M6（或 M7）经济性与并列机制对比：
 
 ```bash
 python generate_cost_analysis.py --time 30
@@ -384,9 +384,16 @@ python generate_cost_analysis.py --time 30
 
 该脚本直接读取路径模型的 E1/E2 距离，按 `config/economic_cost_config.json`
 换算运输、包装购置、清洗分拣、扫码和损耗补充成本，并输出包装替代收益、闭环运输
-增量、路径优化收益、净边际收益、回本周期及临界条件。默认比较 Model 1、Model 3
-与 `analysis.optimized_route_model`（当前为 Model 6）。详见
+增量、自由分配收益、异步交接/路径优化收益、净边际收益、回本周期及临界条件。
+Model 4 与 `analysis.optimized_route_model`（当前为 Model 6）均相对 Model 3 独立
+比较，并从 M3/M4/M6 的已获得路线中按运输成本选择经济测算方案。详见
 [`docs/economic_cost_model.md`](docs/economic_cost_model.md)。
+
+专门验证 Model 6 同次运行的中转前后收益（90 秒、75%/25%、三种子、取消候选抽样）：
+
+```bash
+python scripts/run_m6_transshipment_validation.py
+```
 
 全部非北京算例对比：
 

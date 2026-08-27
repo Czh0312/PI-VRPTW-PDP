@@ -54,6 +54,11 @@ class RealCaseSupportTests(unittest.TestCase):
         self.assertEqual(e2["C0p"].v, 2.0)
         self.assertEqual({task.id for task in e1_tasks}, {"S0d", "S0p"})
 
+        # M4 constructs these tasks dynamically from its free assignment.
+        m4_e1, m4_e2 = build_tasks_for_model(problem, 4)
+        self.assertEqual(m4_e1, [])
+        self.assertEqual(m4_e2, {"S0": []})
+
     def test_labelled_asymmetric_road_matrices_override_euclidean_distance(self):
         content = (
             "node_id,D0,S0\n"

@@ -784,7 +784,8 @@ def postprocess_transshipment(sol, evaluator, verbose=True,
                               max_transshipments=None,
                               max_transshipments_per_sat=None,
                               target_cost=None, target_tolerance=1e-6,
-                              solver_start_time=None):
+                              solver_start_time=None,
+                              audit_log=None):
     solver_start_time = (time.time() if solver_start_time is None
                          else solver_start_time)
     if time_budget <= 0:
@@ -802,7 +803,8 @@ def postprocess_transshipment(sol, evaluator, verbose=True,
             break
         iteration += 1
         evaluator.task_to_phys = dict(sol.task_to_phys)
-        improved = _search_and_apply_relocation(
+        before_cost = evaluator.total_cost(sol)
+        improvement = _search_and_apply_relocation(
             sol, evaluator,
             time_budget=remaining,
             sample_pickups=sample_pickups,
@@ -813,9 +815,16 @@ def postprocess_transshipment(sol, evaluator, verbose=True,
             max_transshipments=max_transshipments,
             max_transshipments_per_sat=max_transshipments_per_sat,
         )
-        if not improved:
+        if not improvement:
             break
         sol.cost = evaluator.total_cost(sol)
+        if audit_log is not None:
+            audit_log.append({
+                **improvement,
+                "distance_before": float(before_cost),
+                "distance_after": float(sol.cost),
+                "actual_distance_saving": float(before_cost - sol.cost),
+            })
         if verbose:
             print(f"  中转迭代 {iteration}: cost={sol.cost:.2f}, "
                   f"中转数={len(sol.transshipments)}")
@@ -1044,7 +1053,15 @@ def _search_and_apply_relocation(sol, evaluator, time_budget=2.0,
             sol.transshipments.pop((sat_id, ben_idx, pick_node, new_phys), None)
             return False
 
-        return True
+        return {
+            "satellite": sat_id,
+            "pickup_node": pick_node,
+            "original_pickup_location": old_phys,
+            "handoff_location": new_phys,
+            "beneficiary_route_index": ben_idx,
+            "carrier_route_index": carrier_idx,
+            "estimated_net_distance_saving": float(net_saving),
+        }
 
     return False
 
@@ -1140,12 +1157,12 @@ def _removal_saving(route, node_id, evaluator):
 def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
                TFp=9999.0, max_iterations=5000, max_time=120,
                seed=42, verbose=True,
-               transshipment_time_budget=2.0,
-               transshipment_sample_pickups=5,
-               transshipment_sample_locations=3,
-               transshipment_sample_carriers=3,
-               transshipment_position_top_k=3,
-               stage1_time_ratio=0.95,
+               transshipment_time_budget=30.0,
+               transshipment_sample_pickups=None,
+               transshipment_sample_locations=None,
+               transshipment_sample_carriers=None,
+               transshipment_position_top_k=None,
+               stage1_time_ratio=0.75,
                transshipment_min_net_saving=0.01,
                transshipment_max_total=None,
                transshipment_max_per_satellite=None,
@@ -1249,6 +1266,8 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
     effective_transshipment_budget = (0.0 if target_hit_time is not None else min(
         max(0.0, float(transshipment_time_budget)), remaining_budget
     ))
+    transshipment_events = []
+    stage2_started = time.time()
     post_hit_time = postprocess_transshipment(
         best_sol, evaluator, verbose=verbose,
         time_budget=effective_transshipment_budget,
@@ -1262,7 +1281,9 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         target_cost=target_objective,
         target_tolerance=target_tolerance,
         solver_start_time=start_time,
+        audit_log=transshipment_events,
     )
+    stage2_elapsed = time.time() - stage2_started
     if target_hit_time is None:
         target_hit_time = post_hit_time
 
@@ -1336,10 +1357,22 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         "status": "FEASIBLE" if feasible else "NO_SOLUTION",
         "transshipment_count": len(best_sol.transshipments),
         "transshipment_improvement": float(stage1_cost - best_sol.cost),
+        "transshipment_events": transshipment_events,
         "strong_initial_solution": bool(strong_initial_solution),
         "external_initial_solution": initial_solution is not None,
         "refill_unused_time": bool(refill_unused_time),
+        "stage1_time_ratio": float(stage1_time_ratio),
+        "stage1_time_budget_seconds": float(stage1_limit),
+        "transshipment_time_budget_requested": float(transshipment_time_budget),
+        "transshipment_time_budget_effective": float(effective_transshipment_budget),
+        # Backward-compatible alias: this is the budget made available, not
+        # the measured wall-clock time.  Use the elapsed field below for audit.
         "transshipment_time_budget_used": float(effective_transshipment_budget),
+        "transshipment_search_elapsed_seconds": float(stage2_elapsed),
+        "transshipment_sample_pickups": transshipment_sample_pickups,
+        "transshipment_sample_locations": transshipment_sample_locations,
+        "transshipment_sample_carriers": transshipment_sample_carriers,
+        "transshipment_position_top_k": transshipment_position_top_k,
         "best_found_time": result.best_found_time,
         "target_hit_time": target_hit_time,
         "termination_reason": ("target" if target_hit_time is not None
