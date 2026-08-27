@@ -19,7 +19,11 @@ MODEL_SPECS = {
     3: ModelSpec(3, "fixed_pickup_delivery", "固定分仓、配送与延后回收"),
     4: ModelSpec(4, "free_pickup_delivery", "自由分仓、配送与延后回收"),
     5: ModelSpec(5, "exact_container_relay", "固定分仓、E2空容器单次接力联合精确优化"),
-    6: ModelSpec(6, "two_stage_transshipment", "固定分仓、两阶段中转优化"),
+    6: ModelSpec(
+        6,
+        "compact_homogeneous_relay",
+        "固定分仓、同质空箱异步事件地点交接紧凑联合优化",
+    ),
     7: ModelSpec(7, "iterative_transshipment", "固定分仓、迭代中转试探"),
 }
 

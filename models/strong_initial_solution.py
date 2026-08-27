@@ -84,6 +84,7 @@ def _candidate_e1_delivery_routes(problem, evaluator, depot_id, del_tasks,
     builders = (
         _build_e1_delivery_routes,
         _build_e1_urgent_split_delivery_routes,
+        _build_e1_direct_delivery_routes,
     )
     for builder in builders:
         routes = builder(problem, evaluator, depot_id, del_tasks, sat_urgency)
@@ -92,6 +93,29 @@ def _candidate_e1_delivery_routes(problem, evaluator, depot_id, del_tasks,
             continue
         seen.add(key)
         yield routes
+
+
+def _build_e1_direct_delivery_routes(problem, evaluator, depot_id, del_tasks,
+                                     sat_urgency):
+    """Use one direct E1 route per satellite when the fleet permits it.
+
+    This candidate is important on large tight-window instances: a
+    capacity-minimal packing can delay a satellite enough to make all of its
+    E2 customer routes infeasible, even though direct replenishment is valid.
+    """
+    max_routes = max(1, getattr(problem, "e1_vehicle_count", 1))
+    if len(del_tasks) > max_routes:
+        return _build_e1_urgent_split_delivery_routes(
+            problem, evaluator, depot_id, del_tasks, sat_urgency)
+    ordered = sorted(
+        del_tasks,
+        key=lambda t: (
+            sat_urgency.get(t.cust, float("inf")),
+            _task_due(t),
+            evaluator.dist(depot_id, t.cust),
+        ),
+    )
+    return [Route(depot_id, [task.id]) for task in ordered]
 
 
 def _satellite_urgency(e2_tasks_by_sat):

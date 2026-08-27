@@ -35,6 +35,8 @@ def plot_vrp_solution(
     # ==========================================
     def get_node(nid):
         """将任务ID (如 'S0d', 'C1p') 安全映射回物理节点 (如 'S0', 'C1')"""
+        if nid.startswith("MEET@"):
+            nid = nid.split("@", 1)[1]
         # 虚拟搬运节点: TRANS_PICK_X / TRANS_DROP_X → X
         if nid.startswith("TRANS_PICK_") or nid.startswith("TRANS_DROP_"):
             phys = nid.split("_", 2)[-1].rsplit("@", 1)[-1]

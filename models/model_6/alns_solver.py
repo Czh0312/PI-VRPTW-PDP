@@ -7,7 +7,7 @@ import random
 import time
 
 from models.alns_base import (
-    Route, Solution, FEAS_TOL,
+    Route, Solution, FEAS_TOL, clean_empty_routes,
     is_tfp_active,
 )
 from models.alns_engine import ALNSConfig, ALNSHooks, run_alns_search
@@ -144,7 +144,8 @@ class Evaluator:
             prev = nid
         return True
 
-    def e1_schedule(self, sol):
+    def e1_schedule(self, sol, pickup_ready=None):
+        pickup_ready = pickup_ready or {}
         delivery_departures = {}
         pickup_arrivals = {}
 
@@ -157,6 +158,9 @@ class Evaluator:
                 if task:
                     if current_time < task.tw[0]:
                         current_time = task.tw[0]
+                    if task.kind == 'p':
+                        current_time = max(
+                            current_time, pickup_ready.get(task.cust, 0.0))
                     if current_time > task.tw[1] + FEAS_TOL:
                         return None, None
                     if task.kind == 'p' and is_tfp_active(self.TFp) and current_time < self.TFp - FEAS_TOL:
@@ -271,7 +275,7 @@ class Evaluator:
         if len(visited_e1) != len(required_e1):
             return False
 
-        e1_departures, e1_pickups = self.e1_schedule(sol)
+        e1_departures, _ = self.e1_schedule(sol)
         if e1_departures is None:
             return False
 
@@ -330,11 +334,12 @@ class Evaluator:
             if e2_arrivals[pick_node] < e2_arrivals[drop_vnode] - FEAS_TOL:
                 return False
 
-        for sat_id, ret_time in e2_last_return_by_sat.items():
-            pick_node = f"{sat_id}p"
-            if pick_node in self.e1_task_map:
-                if e1_pickups.get(sat_id, -float('inf')) < ret_time - FEAS_TOL:
-                    return False
+        waited_departures, _ = self.e1_schedule(sol, e2_last_return_by_sat)
+        if waited_departures is None:
+            return False
+        if any(abs(waited_departures.get(sat, dep) - dep) > FEAS_TOL
+               for sat, dep in e1_departures.items()):
+            return False
         return True
 
 
@@ -544,6 +549,36 @@ def shaw_removal(sol, evaluator, num_remove, echelon='e2'):
         return random_removal(sol, evaluator, num_remove, echelon)
 
 
+def paired_customer_removal(sol, evaluator, num_remove, echelon='e2'):
+    """Remove delivery and pickup of selected customers together."""
+    if echelon != 'e2':
+        return random_removal(sol, evaluator, num_remove, echelon)
+    customers = {}
+    for routes in sol.e2_routes.values():
+        for route in routes:
+            for node_id in route.nodes:
+                task = evaluator.e2_task_map.get(node_id)
+                if task is not None:
+                    customers.setdefault(task.cust, set()).add(node_id)
+    customer_ids = list(customers)
+    random.shuffle(customer_ids)
+    pair_count = max(1, (num_remove + 1) // 2)
+    removed = []
+    for cust_id in customer_ids[:pair_count]:
+        task_ids = customers[cust_id]
+        ordered = sorted(
+            task_ids,
+            key=lambda nid: 0 if evaluator.e2_task_map[nid].kind == 'd' else 1)
+        for routes in sol.e2_routes.values():
+            for route in routes:
+                for node_id in ordered:
+                    if node_id in route.nodes:
+                        route.nodes.remove(node_id)
+        removed.extend(ordered)
+    clean_empty_routes(sol)
+    return removed
+
+
 def greedy_insertion(sol, removed, evaluator, echelon='e2'):
     if echelon == 'e2':
         e2_start_by_sat = evaluator.e2_start_times(sol)
@@ -562,18 +597,29 @@ def greedy_insertion(sol, removed, evaluator, echelon='e2'):
 
             routes = sol.e2_routes.get(sat_id, [])
             for r in routes:
+                old_cost = evaluator.route_distance(r)
                 for pos in range(len(r.nodes) + 1):
                     old_nodes = r.nodes[:]
                     r.nodes.insert(pos, nid)
                     if evaluator.check_e2_route_feasible(r, sat_id, start_time):
-                        insert_cost = evaluator.route_distance(r)
+                        insert_cost = evaluator.route_distance(r) - old_cost
                         if insert_cost < best_cost:
                             best_cost = insert_cost
                             best_route = r
                             best_pos = pos
                     r.nodes = old_nodes
 
-            if best_route is not None:
+            if len(routes) < evaluator.vehicles_per_satellite:
+                new_route = Route(sat_id, [nid])
+                if evaluator.check_e2_route_feasible(
+                        new_route, sat_id, start_time):
+                    new_cost = evaluator.route_distance(new_route)
+                    if new_cost < best_cost:
+                        best_cost = new_cost
+                        best_route = None
+                        best_pos = None
+
+            if best_pos is not None:
                 best_route.nodes.insert(best_pos, nid)
             else:
                 routes = sol.e2_routes.get(sat_id, [])
@@ -608,18 +654,28 @@ def greedy_insertion(sol, removed, evaluator, echelon='e2'):
             best_pos = None
 
             for r in sol.e1_routes:
+                old_cost = evaluator.route_distance(r)
                 for pos in range(len(r.nodes) + 1):
                     old_nodes = r.nodes[:]
                     r.nodes.insert(pos, nid)
                     if evaluator.check_e1_route_feasible(r):
-                        insert_cost = evaluator.route_distance(r)
+                        insert_cost = evaluator.route_distance(r) - old_cost
                         if insert_cost < best_cost:
                             best_cost = insert_cost
                             best_route = r
                             best_pos = pos
                     r.nodes = old_nodes
 
-            if best_route is not None:
+            if len(sol.e1_routes) < evaluator.problem.e1_vehicle_count:
+                new_route = Route(depot_id, [nid])
+                if evaluator.check_e1_route_feasible(new_route):
+                    new_cost = evaluator.route_distance(new_route)
+                    if new_cost < best_cost:
+                        best_cost = new_cost
+                        best_route = None
+                        best_pos = None
+
+            if best_pos is not None:
                 best_route.nodes.insert(best_pos, nid)
             else:
                 sol.e1_routes.append(Route(depot_id, [nid]))
@@ -649,18 +705,25 @@ def regret_insertion(sol, removed, evaluator, echelon='e2', k=2):
                 insertion_costs = []
                 routes = sol.e2_routes.get(sat_id, [])
                 for r in routes:
+                    old_cost = evaluator.route_distance(r)
                     for pos in range(len(r.nodes) + 1):
                         old_nodes = r.nodes[:]
                         r.nodes.insert(pos, nid)
                         if evaluator.check_e2_route_feasible(r, sat_id,
                                                              start_time):
-                            c = evaluator.route_distance(r)
+                            c = evaluator.route_distance(r) - old_cost
                             insertion_costs.append((c, r, pos))
                         r.nodes = old_nodes
 
+                if len(routes) < evaluator.vehicles_per_satellite:
+                    new_route = Route(sat_id, [nid])
+                    if evaluator.check_e2_route_feasible(
+                            new_route, sat_id, start_time):
+                        insertion_costs.append((
+                            evaluator.route_distance(new_route), None, 0))
+
                 if not insertion_costs:
-                    insertion_costs.append((
-                        evaluator.dist(sat_id, nid) * 2, None, 0))
+                    continue
 
                 insertion_costs.sort(key=lambda x: x[0])
                 regret = 0.0
@@ -719,19 +782,29 @@ def postprocess_transshipment(sol, evaluator, verbose=True,
                               position_top_k=3,
                               min_net_saving=0.01,
                               max_transshipments=None,
-                              max_transshipments_per_sat=None):
+                              max_transshipments_per_sat=None,
+                              target_cost=None, target_tolerance=1e-6,
+                              solver_start_time=None):
+    solver_start_time = (time.time() if solver_start_time is None
+                         else solver_start_time)
     if time_budget <= 0:
         sol.cost = evaluator.total_cost(sol)
         sol.task_to_phys = dict(evaluator.task_to_phys)
-        return
+        return ((time.time() - solver_start_time)
+                if target_cost is not None
+                and sol.cost <= target_cost + target_tolerance else None)
 
+    postprocess_start = time.time()
     iteration = 0
     while True:
+        remaining = time_budget - (time.time() - postprocess_start)
+        if remaining <= 0.0:
+            break
         iteration += 1
         evaluator.task_to_phys = dict(sol.task_to_phys)
         improved = _search_and_apply_relocation(
             sol, evaluator,
-            time_budget=time_budget,
+            time_budget=remaining,
             sample_pickups=sample_pickups,
             sample_locations=sample_locations,
             sample_carriers=sample_carriers,
@@ -742,13 +815,20 @@ def postprocess_transshipment(sol, evaluator, verbose=True,
         )
         if not improved:
             break
+        sol.cost = evaluator.total_cost(sol)
         if verbose:
-            sol.cost = evaluator.total_cost(sol)
             print(f"  中转迭代 {iteration}: cost={sol.cost:.2f}, "
                   f"中转数={len(sol.transshipments)}")
+        if (target_cost is not None
+                and sol.cost <= target_cost + target_tolerance):
+            sol.task_to_phys = dict(evaluator.task_to_phys)
+            return time.time() - solver_start_time
 
     sol.cost = evaluator.total_cost(sol)
     sol.task_to_phys = dict(evaluator.task_to_phys)
+    return ((time.time() - solver_start_time)
+            if target_cost is not None
+            and sol.cost <= target_cost + target_tolerance else None)
 
 
 def _search_and_apply_relocation(sol, evaluator, time_budget=2.0,
@@ -762,7 +842,7 @@ def _search_and_apply_relocation(sol, evaluator, time_budget=2.0,
     if _transshipment_limit_reached(sol, max_transshipments):
         return False
 
-    e2_start_by_sat, e1_pickups = evaluator.e1_schedule(sol)
+    e2_start_by_sat, _ = evaluator.e1_schedule(sol)
     if e2_start_by_sat is None:
         return False
 
@@ -811,6 +891,8 @@ def _search_and_apply_relocation(sol, evaluator, time_budget=2.0,
                 candidates = random.sample(candidates, sample_locations)
 
             for new_phys in candidates:
+                if time.time() - t_start > time_budget:
+                    break
                 evaluator.task_to_phys[pick_node] = new_phys
                 try:
                     saved_ben_nodes = ben_route.nodes[:]
@@ -828,11 +910,8 @@ def _search_and_apply_relocation(sol, evaluator, time_budget=2.0,
                             break
 
                         ben_route.nodes.insert(bp, pick_node)
-                        ben_ok, ben_arrivals, ben_return = evaluator.simulate_e2_route(
+                        ben_ok, ben_arrivals, _ben_return = evaluator.simulate_e2_route(
                             ben_route, sat_id, start_time)
-                        if ben_ok and f"{sat_id}p" in evaluator.e1_task_map:
-                            if ben_return > e1_pickups.get(sat_id, -float('inf')) + FEAS_TOL:
-                                ben_ok = False
 
                         d_id = f"{t.cust}d"
                         if ben_ok and d_id in ben_arrivals:
@@ -885,14 +964,16 @@ def _search_and_apply_relocation(sol, evaluator, time_budget=2.0,
                                     start_after=pp)
 
                                 for dp in drop_positions:
+                                    if time.time() - t_start > time_budget:
+                                        break
                                     old_nodes2 = carrier_route.nodes[:]
                                     old_loads2 = dict(carrier_route.transport_loads)
 
                                     carrier_route.nodes.insert(dp, drop_vnode)
                                     carrier_route.transport_loads[drop_vnode] = (t.w, t.v)
 
-                                    carrier_ok, carrier_arrivals, carrier_return = evaluator.simulate_e2_route(
-                                            carrier_route, sat_id, start_time)
+                                    carrier_ok, carrier_arrivals, _carrier_return = evaluator.simulate_e2_route(
+                                        carrier_route, sat_id, start_time)
                                     if carrier_ok and d_id in carrier_arrivals:
                                         if carrier_arrivals[pick_vnode] < (
                                                 carrier_arrivals[d_id]
@@ -903,9 +984,7 @@ def _search_and_apply_relocation(sol, evaluator, time_budget=2.0,
                                     if carrier_ok and (
                                             ben_arrivals.get(pick_node, float('inf'))
                                             >= carrier_arrivals.get(drop_vnode, float('inf'))
-                                            - FEAS_TOL) and (
-                                            f"{sat_id}p" not in evaluator.e1_task_map
-                                            or carrier_return <= e1_pickups.get(sat_id, -float('inf')) + FEAS_TOL):
+                                            - FEAS_TOL):
                                         new_cd = evaluator.route_distance(carrier_route)
                                         net = v2_saving - (new_cd - old_cd)
 
@@ -1070,14 +1149,23 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
                transshipment_min_net_saving=0.01,
                transshipment_max_total=None,
                transshipment_max_per_satellite=None,
-               strong_initial_solution=False):
+               strong_initial_solution=False,
+               return_info=False,
+               initial_solution=None,
+               refill_unused_time=True,
+               target_objective=None, target_tolerance=1e-6,
+               alns_config_overrides=None):
     random.seed(seed)
     start_time = time.time()
 
     evaluator = Evaluator(problem, e1_tasks, e2_tasks_by_sat, TFp,
                           vehicles_per_satellite=vehicles_per_satellite)
 
-    if strong_initial_solution:
+    if initial_solution is not None:
+        sol = initial_solution.copy()
+        if not sol.task_to_phys:
+            sol.task_to_phys = dict(evaluator.task_to_phys)
+    elif strong_initial_solution:
         sol = build_strong_initial_solution(
             problem, e1_tasks, e2_tasks_by_sat, evaluator)
     else:
@@ -1086,7 +1174,10 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
     if not evaluator.is_feasible(sol):
         if verbose:
             print("\n[WARN] Model 6 ALNS 初始解不满足全局时间/容量约束")
-        return None, None
+        info = {"objective": None, "runtime": time.time() - start_time,
+                "iterations": 0, "feasible": False, "status": "NO_SOLUTION",
+                "transshipment_count": 0}
+        return (None, None, info) if return_info else (None, None)
 
     sol.cost = evaluator.total_cost(sol)
     best_sol = sol.copy()
@@ -1122,19 +1213,30 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
     result = run_alns_search(
         initial_solution=sol,
         evaluator=evaluator,
-        destroy_ops=[random_removal, worst_removal, shaw_removal],
+        destroy_ops=[random_removal, worst_removal, shaw_removal,
+                     paired_customer_removal],
         repair_ops=[greedy_insertion, regret_insertion],
         config=ALNSConfig(
             max_iterations=max_iterations,
             max_time=stage1_limit,
+            target_cost=target_objective,
+            target_tolerance=target_tolerance,
+            **(alns_config_overrides or {}),
         ),
         hooks=Model6Stage1Hooks(),
         verbose=verbose,
         start_time=start_time,
     )
     best_sol = result.best_solution
+    if best_sol is None:
+        info = {"objective": None, "runtime": result.elapsed,
+                "iterations": result.iterations, "feasible": False,
+                "status": "NO_SOLUTION", "transshipment_count": 0}
+        return (None, None, info) if return_info else (None, None)
     best_cost = result.best_cost
     stage1_cost = best_cost
+    total_iterations = result.iterations
+    target_hit_time = result.target_hit_time
     if verbose:
         elapsed = time.time() - start_time
         print(f"\n  阶段一完成: cost={best_cost:.2f}, 耗时={elapsed:.2f}s")
@@ -1143,9 +1245,13 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         print(f"\n--- 阶段二：后处理中转搜索 ---")
 
     evaluator.task_to_phys = dict(best_sol.task_to_phys)
-    postprocess_transshipment(
+    remaining_budget = max(0.0, max_time - (time.time() - start_time))
+    effective_transshipment_budget = (0.0 if target_hit_time is not None else min(
+        max(0.0, float(transshipment_time_budget)), remaining_budget
+    ))
+    post_hit_time = postprocess_transshipment(
         best_sol, evaluator, verbose=verbose,
-        time_budget=transshipment_time_budget,
+        time_budget=effective_transshipment_budget,
         sample_pickups=transshipment_sample_pickups,
         sample_locations=transshipment_sample_locations,
         sample_carriers=transshipment_sample_carriers,
@@ -1153,7 +1259,45 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         min_net_saving=transshipment_min_net_saving,
         max_transshipments=transshipment_max_total,
         max_transshipments_per_sat=transshipment_max_per_satellite,
+        target_cost=target_objective,
+        target_tolerance=target_tolerance,
+        solver_start_time=start_time,
     )
+    if target_hit_time is None:
+        target_hit_time = post_hit_time
+
+    # If the transshipment scan finishes early without changing the solution,
+    # give its unused wall-clock budget back to the ordinary ALNS.  This keeps
+    # Model 6 comparable with Model 3 under one common total time budget.
+    if (refill_unused_time
+            and target_hit_time is None
+            and not best_sol.transshipments
+            and total_iterations < max_iterations
+            and time.time() - start_time < max_time - 1e-3):
+        refill = run_alns_search(
+            initial_solution=best_sol,
+            evaluator=evaluator,
+            destroy_ops=[random_removal, worst_removal, shaw_removal,
+                         paired_customer_removal],
+            repair_ops=[greedy_insertion, regret_insertion],
+            config=ALNSConfig(
+                max_iterations=max_iterations - total_iterations,
+                max_time=max_time,
+                target_cost=target_objective,
+                target_tolerance=target_tolerance,
+                **(alns_config_overrides or {}),
+            ),
+            hooks=Model6Stage1Hooks(),
+            verbose=False,
+            start_time=start_time,
+        )
+        total_iterations += refill.iterations
+        if refill.best_solution is not None:
+            best_sol = refill.best_solution
+            best_cost = refill.best_cost
+            stage1_cost = best_cost
+        if refill.target_hit_time is not None:
+            target_hit_time = refill.target_hit_time
 
     if verbose:
         print(f"\n  阶段二完成: cost={best_sol.cost:.2f} "
@@ -1184,7 +1328,27 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
 
     if verbose:
         _print_solution(best_sol, evaluator)
-    return e1_routes_out, e2_routes_out
+    feasible = bool(evaluator.is_feasible(best_sol))
+    info = {
+        "objective": float(best_sol.cost), "stage1_objective": float(stage1_cost),
+        "runtime": float(elapsed), "iterations": int(total_iterations),
+        "feasible": feasible,
+        "status": "FEASIBLE" if feasible else "NO_SOLUTION",
+        "transshipment_count": len(best_sol.transshipments),
+        "transshipment_improvement": float(stage1_cost - best_sol.cost),
+        "strong_initial_solution": bool(strong_initial_solution),
+        "external_initial_solution": initial_solution is not None,
+        "refill_unused_time": bool(refill_unused_time),
+        "transshipment_time_budget_used": float(effective_transshipment_budget),
+        "best_found_time": result.best_found_time,
+        "target_hit_time": target_hit_time,
+        "termination_reason": ("target" if target_hit_time is not None
+                               else result.termination_reason),
+        "restarts": result.restarts,
+        "local_search_improvements": result.local_search_improvements,
+    }
+    return ((e1_routes_out, e2_routes_out, info) if return_info
+            else (e1_routes_out, e2_routes_out))
 
 
 # =====================================================================

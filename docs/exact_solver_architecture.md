@@ -29,7 +29,7 @@
 | Model 3 路线宇宙 | `route_universe.solve_route_universe_exact` | 每个卫星的路线宇宙完整且 MIP `OPTIMAL` | `ROUTE_UNIVERSE_INCOMPLETE` |
 | Model 3 直接路线主问题 | `route_master.solve_route_master_exact` | 同上；E1/E2 联合时间约束仍在主问题中 | `branch_node_optimal` 或受限结果 |
 | Model 5 空容器单次接力 | `models.model_5.solver.solve_exact` | 完整候选范围下，零回收载荷松弛证书闭合，或完整联合 MIP 为 `OPTIMAL` | `restricted_optimal` / `feasible_not_proven` |
-| Model 6 | `models.model_6.solver.solve_exact` | 无；固定路线后的两阶段流程不是原问题全局优化 | `two_stage_not_global` |
+| Model 6 同质空箱异步交接 | `models.model_6.solver.solve_exact` | 零回收载荷严格下界与无中转上界闭合，或完整紧凑事件地点模型以零gap返回 `OPTIMAL` | `feasible_not_proven` |
 
 ## Model 3 的路线组件
 
@@ -55,11 +55,11 @@ Model 3 的弧流与直接路线主问题使用按实例构造的安全时间上
 这些都是有效不等式/变量界：不会删除任何可行解，也不会改变 `proven_optimal` 的
 语义。
 
-Model 5 还使用一个证书优先的精确入口。它保留原始 pickup 的位置、时间窗、先送后取
+Model 5和Model 6均使用证书优先的精确入口。它保留原始 pickup 的位置、时间窗、先送后取
 和 E1–E2 同步，只把 E2 pickup 的回收载荷置零，得到规范 Model 5 的有效松弛。在
 距离满足三角不等式时，任意接力解都能通过删除 `TD/RP`、将 `TP` 映射回原 pickup
 并捷径化，转换为不更贵的松弛解。如果该松弛的精确下界等于无接力可行上界，入口
-直接返回完整 Model 5 的全局最优证书；否则自动回退联合 MIP。
+直接返回对应完整中转模型的全局最优证书；否则自动回退各自的联合 MIP。
 
 ## 开发与回归
 

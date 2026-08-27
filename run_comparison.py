@@ -42,6 +42,8 @@ def load_fleet_config():
 # ─── 工具函数 ───
 
 def _to_phys(nid):
+    if nid.startswith("MEET@"):
+        nid = nid.split("@", 1)[1]
     if nid.startswith("TRANS_PICK_") or nid.startswith("TRANS_DROP_"):
         payload = nid.split("_", 2)[-1]
         return payload.rsplit("@", 1)[-1]
@@ -77,20 +79,6 @@ def run_one(model, solver, data_path, fleet_cfg, alns_time=120,
     A time-limited MIP incumbent is retained as diagnostic data, but is never
     folded into the Exact means, tables, or success rates.
     """
-    # Model 6 currently fixes the Model 3 routes before optimizing
-    # transshipments, so it has no global-exact implementation to benchmark.
-    # Do not spend the exact budget producing a result that cannot qualify.
-    if solver == "exact" and model == 6:
-        return dict(
-            cost=None, time=0.0, e1=0, e2=0,
-            status="UNAVAILABLE_NON_GLOBAL",
-            solver_info={
-                "solution_type": "two_stage_not_global",
-                "proven_optimal": False,
-            },
-            log="Model 6 has no global exact solver; skipped.\n",
-        )
-
     nodes_dict, _ = parse_dataset(str(data_path))
     problem = ProblemInstance(nodes_dict, fleet_cfg, speed=fleet_cfg.get("speed", 1.0))
     problem.aggregate_demands_from_pre_assignment()
@@ -137,9 +125,9 @@ def run_one(model, solver, data_path, fleet_cfg, alns_time=120,
         # seeding Gurobi with an ALNS incumbent turns "no solution" into a real
         # solve (incumbent + bound), recorded as FEASIBLE_NOT_PROVEN, never as
         # proven. Gated to large instances: small ones prove optimal in seconds
-        # and only waste the ALNS budget. (M6 exact is skipped upstream as
-        # non-global, though its solve_exact also accepts warm_start_routes.)
-        if model in (1, 3, 5) and n_customers >= 50:
+        # and only waste the ALNS budget. Compact M6 also accepts ordinary
+        # no-transfer routes as a valid incumbent.
+        if model in (1, 3, 5, 6) and n_customers >= 50:
             alns_fn = ALNS_SOLVERS[model]
             alns_kwargs = dict(
                 problem=problem, e1_tasks=e1_tasks,

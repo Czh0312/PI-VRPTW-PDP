@@ -27,15 +27,15 @@ M7/M4 大规模 ALNS。M4/M2 的路线列结果是 restricted-pool incumbent，�
 | **Model 1** | 纯配送 baseline | ✗（仅配送 Sxd / Cxd） | ✗ |
 | **Model 3** | 取送货 PDP | ✓（加 Sxp / Cxp 容器回收，LIFO 先送后取） | ✗ |
 | **Model 5** | M3 + E2 空容器单次接力 | ✓ | ✓（携带车、交接点、接收车与路线在**一个** MIP 里联合优化） |
-| **Model 6** | 取送货 + 两阶段中转 | ✓ | ✓（阶段一先定 M3 路线，阶段二固定路线后做中转选择 MIP） |
+| **Model 6** | 取送货 + 同质空箱异步交接 | ✓ | ✓（用 O/R 弧商品流与路线在一个紧凑 MIP 中联合优化） |
 | **Model 7** | 取送货 + 每轮中转试探 | ✓ | ✓（ALNS 每个 candidate 内嵌受控中转试探，portfolio V1–V6） |
 
 - **取送货**：E1 把配送送到前置仓（Sxd），再把前置仓攒的容器/回收物拉回 depot（Sxp）；
   E2 给客户配送（Cxd），再回收容器（Cxp）。约束：同一客户的 pickup 必须在 delivery 之后。
 - **空容器接力（relay）**：携带车在原顾客处实际取得空容器，把它运到同一前置仓
-  服务区内的交接点；另一辆接收车在容器卸下后接收并最终带回前置仓。每个容器不可
-  拆分且至多交接一次，不存在回收任务的“凭空搬移”。M5/M6/M7 的物理定义相同，
-  触发和优化方式不同。
+  服务区内的交接点；另一辆接收车接收并最终带回前置仓。M5 保留逐容器、任意候选
+  交接操作；M6 将同质空箱聚合，并把交接限制在已有配送/回收服务事件。两者都保证
+  每箱至多交接一次，但精确模型的可行域口径不同，不直接把目标值当作同一模型复现。
 - **Model 1** 是退化基线（无取送货、无中转），用于和完整模型对比、做精确求解基准。
 
 
@@ -68,7 +68,7 @@ Model 3 另有**路线 master / pricing / universe** 一组 branch-price 基础�
 | Model 1 | ✅ `solve_exact` | — | ✅ `solve_alns` |
 | Model 3 | ✅ `solve_exact` | ✅ route_universe / route_master / route_pricing | ✅ `solve_alns` |
 | Model 5 | ⚠️ `solve_exact`（仅小规模） | — | ✅ `solve_alns` |
-| Model 6 | ⚠️ `solve_exact`（两阶段，非全局） | — | ✅ `solve_alns` |
+| Model 6 | ✅ `solve_exact`（紧凑异步交接模型） | — | ✅ `solve_alns`（保留原两阶段启发式） |
 | Model 7 | ❌ 无 | — | ✅ `solve_alns` |
 
 **精确求解的核心契约**：只有未缩减候选空间的原模型达到 `OPTIMAL`，或有效松弛下界
@@ -121,10 +121,22 @@ Model 3 另有**路线 master / pricing / universe** 一组 branch-price 基础�
   爆炸/挂死**（全中转候选枚举），受限候选则产出退化空模型。run_comparison 在 ≥50c 跳过
   M5 exact（`UNAVAILABLE_M5_NOT_SCALABLE`），大规模仍主要依靠 ALNS。
 
-**Model 6（两阶段中转）— 非全局精确**
-- `solve_exact`：阶段一跑 M3 弧流定路线，阶段二在固定路线上用 0-1 MIP 精确选中转方案
-  （`transshipment_mip`，set-packing）。阶段二虽精确，但整体**不是**全局精确算法。
-- 状态：始终标 `two_stage_not_global`，`proven_optimal` 恒为 False。run_comparison 跳过 M6 exact。
+**Model 6（同质空箱异步交接）— 紧凑联合精确 MIP**
+- `solve_exact`默认先用零回收载荷严格松弛下界与无中转上界尝试闭合证书；未闭合时，
+  路线、任务服务车辆、车辆访问时刻以及整数空箱交接量在一个MIP中
+  联合优化。弧上分别携带未中转空箱 `own` 与已接力空箱 `relay`；只有 `own` 能转出，
+  因而每箱最多中转一次。配送载荷和两类空箱均用弧商品流守恒，不使用载荷状态 Big-M。
+- 交接只允许发生在同仓顾客的配送/回收事件地点，发送车可先放、接收车可后取；车辆可为
+  交接专程访问，但没有服务或交接时禁止无意义访问。转出的 `own` 必须已由发送车承运
+  进入交接点，禁止回收原点的零承运暂存。该范围完整求至 `OPTIMAL`
+  时标记 `proven_optimal=True`。
+- 历史 `transshipment_mip.py` 与 Model 6 ALNS 的固定路线二阶段逻辑仍保留为启发式路径，
+  但不再是 `solve_exact` 的实现。
+- `seed=105` 的 4 客户机制实例：证书未闭合后回退完整MIP（832变量、818约束），
+  12.138s证明 `OPTIMAL=95.556056`，与Model 5精确最优值一致；Model 5完整分解约
+  905.7s，Model 6约快74.6倍。标准22个小实例则全部由证书在0.450–14.306s闭合。详见
+  [`../results/model5_relay_benefit_seed105.md`](../results/model5_relay_benefit_seed105.md)。
+- 详细定义见 [`model6_compact_homogeneous_relay.md`](model6_compact_homogeneous_relay.md)。
 
 **Model 7 — 无精确求解**
 - 只有 ALNS。`main.py` 对 M7 exact 显式报错。

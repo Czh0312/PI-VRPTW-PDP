@@ -319,7 +319,8 @@ class Evaluator:
             prev = nid
         return True
 
-    def e1_schedule(self, sol):
+    def e1_schedule(self, sol, pickup_ready=None):
+        pickup_ready = pickup_ready or {}
         delivery_departures = {}
         pickup_arrivals = {}
 
@@ -332,6 +333,9 @@ class Evaluator:
                 if task:
                     if current_time < task.tw[0]:
                         current_time = task.tw[0]
+                    if task.kind == "p":
+                        current_time = max(
+                            current_time, pickup_ready.get(task.cust, 0.0))
                     if current_time > task.tw[1] + FEAS_TOL:
                         return None, None
                     if (task.kind == "p" and is_tfp_active(self.TFp)
@@ -461,9 +465,12 @@ class Evaluator:
                     < e2_arrivals[d_id] + self.service_time(d_id) - FEAS_TOL):
                 return False
 
-        # E1 回收允许在前置仓等待至所有 E2 车辆返回
-        # （与 MIP Link_Pickup 语义一致），早到不再视为不可行。
-        # e1_pickups 仅用于此耦合检查，无下游依赖，故无需调整时刻。
+        waited_departures, _ = self.e1_schedule(sol, e2_last_return_by_sat)
+        if waited_departures is None:
+            return False
+        if any(abs(waited_departures.get(sat, dep) - dep) > FEAS_TOL
+               for sat, dep in e1_departures.items()):
+            return False
 
         return True
 
@@ -640,6 +647,21 @@ def shaw_customer_removal(sol, evaluator, num_remove, echelon="e2"):
     return chosen
 
 
+def satellite_cluster_removal(sol, evaluator, num_remove, echelon="e2"):
+    """Remove every delivery/pickup pair assigned to one satellite."""
+    assignment = evaluator.assignment(sol)
+    by_sat = {}
+    for cust, sat_id in assignment.items():
+        by_sat.setdefault(sat_id, []).append(cust)
+    if not by_sat:
+        return []
+    sat_id = random.choice(sorted(by_sat))
+    removed = by_sat[sat_id]
+    for cust in removed:
+        _remove_customer(sol, cust)
+    return removed
+
+
 def _best_task_insert(sol, evaluator, sat_id, task, start_time,
                       after=None):
     """在指定前置仓找 task 的最优插入位置。
@@ -691,78 +713,121 @@ def _best_task_insert(sol, evaluator, sat_id, task, start_time,
     return best
 
 
-def multi_sat_insertion_cross(sol, removed, evaluator, echelon="e2", k=2):
-    """顺序插入 d 再插 p 的跨车版本（p 可进入同仓另一辆车）。
+def _copy_solution_into(target, source):
+    target.e1_routes = [route.copy() for route in source.e1_routes]
+    target.e2_routes = {
+        sat: [route.copy() for route in routes]
+        for sat, routes in source.e2_routes.items()
+    }
+    target.cost = source.cost
 
-    顺序插入 d 再插 p：p 可以进入同仓的另一辆车（保持 M3 的跨车自由度），
-    但 d/p 必须同仓（单分配不变式）。
+
+def _insert_pair_cross_at_sat(sol, evaluator, cust, sat_id):
+    """Insert one d/p pair at a fixed satellite, allowing different routes.
+
+    Every feasible delivery position is retained until the pickup has been
+    inserted.  This avoids the former dangling-route bug when the delivery
+    opened a new route and also captures cases where the cheapest delivery
+    insertion leaves no good pickup insertion.
     """
+    pair = evaluator.catalog[cust]
+    d_task, p_task = pair["d"], pair["p"]
+    deadline = getattr(evaluator, "_alns_deadline", float("inf"))
+    if time.time() >= deadline:
+        return None
+    routes = sol.e2_routes.get(sat_id, [])
+    delivery_options = [
+        (route_idx, pos)
+        for route_idx, route in enumerate(routes)
+        for pos in range(len(route.nodes) + 1)
+    ]
+    if len(routes) < evaluator.vehicles_per_satellite:
+        delivery_options.append((None, None))
+
+    # Exhaustive enumeration is useful for the certified small benchmark, but
+    # becomes too costly inside a large-instance ALNS iteration.  On larger
+    # instances retain the geometrically best delivery positions plus the
+    # new-route option; pickup positions are still checked exactly afterwards.
+    if len(evaluator.catalog) > 20 and len(delivery_options) > 12:
+        def approximate_delta(option):
+            route_idx, pos = option
+            if route_idx is None:
+                return 2.0 * evaluator.dist(sat_id, d_task.id)
+            nodes = routes[route_idx].nodes
+            prev_id = sat_id if pos == 0 else nodes[pos - 1]
+            next_id = sat_id if pos == len(nodes) else nodes[pos]
+            return (evaluator.dist(prev_id, d_task.id)
+                    + evaluator.dist(d_task.id, next_id)
+                    - evaluator.dist(prev_id, next_id))
+
+        delivery_options.sort(key=approximate_delta)
+        delivery_options = delivery_options[:12]
+
+    best = None
+    for route_idx, pos in delivery_options:
+        if time.time() >= deadline:
+            break
+        candidate = sol.copy()
+        candidate_routes = candidate.e2_routes.setdefault(sat_id, [])
+        if route_idx is None:
+            candidate_routes.append(Route(sat_id, [d_task.id]))
+            d_route = candidate_routes[-1]
+        else:
+            candidate_routes[route_idx].nodes.insert(pos, d_task.id)
+            d_route = candidate_routes[route_idx]
+
+        evaluator.rebuild_from_solution(candidate)
+        start_time = evaluator.e2_start_times(candidate).get(sat_id, 0.0)
+        feasible, arrivals, _ = evaluator.simulate_e2_route(
+            d_route, sat_id, start_time)
+        if not feasible or d_task.id not in arrivals:
+            continue
+        d_arrival = arrivals[d_task.id]
+        p_best = _best_task_insert(
+            candidate, evaluator, sat_id, p_task, start_time,
+            after=(d_task.id, d_arrival,
+                   evaluator.service_time(d_task.id)))
+        if p_best is None:
+            continue
+        _inc, p_route, p_pos = p_best
+        if p_route is None:
+            candidate.e2_routes.setdefault(sat_id, []).append(
+                Route(sat_id, [p_task.id]))
+        else:
+            p_route.nodes.insert(p_pos, p_task.id)
+        clean_empty_routes(candidate)
+        candidate.cost = evaluator.total_cost(candidate)
+        if best is None or candidate.cost < best.cost - FEAS_TOL:
+            best = candidate
+    return best
+
+
+def multi_sat_insertion_cross(sol, removed, evaluator, echelon="e2", k=2):
+    """Insert d/p pairs at any satellite and allow cross-route precedence."""
     pending = list(removed)
     random.shuffle(pending)
     for cust in pending:
-        evaluator.rebuild_from_solution(sol)
-        start_by_sat = evaluator.e2_start_times(sol)
-        pair = evaluator.catalog[cust]
-        d_task, p_task = pair["d"], pair["p"]
-
-        best = None  # (delta, sat, d_route, d_pos, p_route, p_pos)
-        for sat_id in evaluator.sat_ids:
-            start_time = start_by_sat.get(sat_id, 0.0)
-            d_best = _best_task_insert(
-                sol, evaluator, sat_id, d_task, start_time)
-            if d_best is None:
-                continue
-            d_inc, d_route, d_pos = d_best
-            d_route_orig, d_pos_orig = d_route, d_pos
-
-            # 提交 d，准备 p 的插入（记录各车到达时刻用于先送后取）
-            if d_route is None:
-                new_r = Route(sat_id, [d_task.id])
-                sol.e2_routes.setdefault(sat_id, []).append(new_r)
-                d_route, d_pos = new_r, 0
-            else:
-                d_route.nodes.insert(d_pos, d_task.id)
-
-            _, d_arrivals, _ = evaluator.simulate_e2_route(
-                d_route, sat_id, start_time)
-            d_arr = d_arrivals.get(d_task.id)
-
-            p_best = _best_task_insert(
-                sol, evaluator, sat_id, p_task, start_time,
-                after=(d_task.id, d_arr, evaluator.service_time(d_task.id)))
-
-            # 撤销 d
-            d_route.nodes.pop(d_pos)
-            if not d_route.nodes:
-                sol.e2_routes[sat_id].remove(d_route)
-
-            if p_best is not None:
-                p_inc, p_route, p_pos = p_best
-                total = d_inc + p_inc
-                if best is None or total < best[0] - FEAS_TOL:
-                    best = (total, sat_id, d_route_orig, d_pos_orig,
-                            p_route, p_pos)
-
+        if time.time() >= getattr(
+                evaluator, "_alns_deadline", float("inf")):
+            break
+        best = None
+        satellites = list(evaluator.sat_ids)
+        random.shuffle(satellites)
+        for sat_id in satellites:
+            candidate = _insert_pair_cross_at_sat(
+                sol, evaluator, cust, sat_id)
+            if (candidate is not None
+                    and (best is None
+                         or candidate.cost < best.cost - FEAS_TOL)):
+                best = candidate
         if best is not None:
-            _, sat_id, d_route, d_pos, p_route, p_pos = best
-            if d_route is None:
-                d_route = Route(sat_id, [d_task.id])
-                sol.e2_routes.setdefault(sat_id, []).append(d_route)
-                d_pos = 0
-            else:
-                d_route.nodes.insert(d_pos, d_task.id)
-            if p_route is None:
-                p_route = Route(sat_id, [p_task.id])
-                sol.e2_routes.setdefault(sat_id, []).append(p_route)
-                p_pos = 0
-            else:
-                p_route.nodes.insert(p_pos, p_task.id)
+            _copy_solution_into(sol, best)
         else:
-            # 找不到可行插入：就近强制建新仓路线（候选会被 is_feasible 拒绝）
             sat_id = min(evaluator.sat_ids,
                          key=lambda s: evaluator.dist(s, f"{cust}d"))
-            sol.e2_routes.setdefault(sat_id, []).append(
-                Route(sat_id, [d_task.id, p_task.id]))
+            pair = evaluator.catalog[cust]
+            sol.e2_routes.setdefault(sat_id, []).append(Route(
+                sat_id, [pair["d"].id, pair["p"].id]))
 
     evaluator.rebuild_from_solution(sol)
     clean_empty_routes(sol)
@@ -814,6 +879,73 @@ def multi_sat_insertion(sol, removed, evaluator, echelon="e2", k=2):
     clean_empty_routes(sol)
 
 
+def randomized_satellite_insertion(sol, removed, evaluator,
+                                   echelon="e2", k=2):
+    """Diversification repair that forces customers into random satellites."""
+    pending = list(removed)
+    random.shuffle(pending)
+    for cust in pending:
+        evaluator.rebuild_from_solution(sol)
+        starts = evaluator.e2_start_times(sol)
+        pair = evaluator.catalog[cust]
+        task_ids = [pair["d"].id, pair["p"].id]
+        satellites = list(evaluator.sat_ids)
+        random.shuffle(satellites)
+        inserted = False
+        for sat_id in satellites:
+            routes = sol.e2_routes.get(sat_id, [])
+            best_here = _best_e2_item_insert(
+                routes, task_ids, evaluator, sat_id,
+                starts.get(sat_id, 0.0))
+            if best_here is not None:
+                _inc, route, positions = best_here
+                _apply_positions(route, task_ids, positions)
+                inserted = True
+                break
+            if len(routes) < evaluator.vehicles_per_satellite:
+                new_route = Route(sat_id, list(task_ids))
+                if evaluator.check_e2_route_feasible(
+                        new_route, sat_id, starts.get(sat_id, 0.0)):
+                    sol.e2_routes.setdefault(sat_id, []).append(new_route)
+                    inserted = True
+                    break
+        if not inserted:
+            sat_id = min(evaluator.sat_ids,
+                         key=lambda sat: evaluator.dist(sat, pair["d"].id))
+            sol.e2_routes.setdefault(sat_id, []).append(
+                Route(sat_id, list(task_ids)))
+    evaluator.rebuild_from_solution(sol)
+    clean_empty_routes(sol)
+
+
+def consolidated_satellite_insertion(sol, removed, evaluator,
+                                     echelon="e2", k=2):
+    """Insert all removed customer pairs into one selected satellite."""
+    satellites = list(evaluator.sat_ids)
+    random.shuffle(satellites)
+    pending = list(removed)
+    random.shuffle(pending)
+    for target_sat in satellites:
+        if time.time() >= getattr(
+                evaluator, "_alns_deadline", float("inf")):
+            break
+        candidate = sol.copy()
+        feasible = True
+        for cust in pending:
+            inserted = _insert_pair_cross_at_sat(
+                candidate, evaluator, cust, target_sat)
+            if inserted is None:
+                feasible = False
+                break
+            candidate = inserted
+        if feasible:
+            candidate.cost = evaluator.total_cost(candidate)
+            if evaluator.is_feasible(candidate):
+                _copy_solution_into(sol, candidate)
+                return
+    multi_sat_insertion(sol, pending, evaluator, echelon=echelon, k=k)
+
+
 # =====================================================================
 #  E1 局部搜索（M3 的 e1 echelon 有类似作用，M4 需自行补上）
 # =====================================================================
@@ -862,19 +994,26 @@ class M4Hooks(ALNSHooks):
 # =====================================================================
 
 def solve_alns(problem, vehicles_per_satellite, TFp=9999.0,
-               max_iterations=5000, max_time=120, seed=42, verbose=True):
+               max_iterations=5000, max_time=120, seed=42, verbose=True,
+               return_info=False, initial_solution=None,
+               target_objective=None, target_tolerance=1e-6,
+               alns_config_overrides=None):
     random.seed(seed)
     start_time = time.time()
 
     evaluator = Evaluator(problem, TFp, vehicles_per_satellite)
-    sol = build_initial_solution(problem, evaluator, TFp)
+    sol = (initial_solution.copy() if initial_solution is not None
+           else build_initial_solution(problem, evaluator, TFp))
 
     if not evaluator.is_feasible(sol):
         if sol is None or not any(
                 r.nodes for routes in sol.e2_routes.values() for r in routes):
             if verbose:
                 print("\n[WARN] Model 4 无法构造含顾客的初始解")
-            return None, None, None
+            info = {"objective": None, "runtime": time.time() - start_time,
+                    "iterations": 0, "feasible": False, "status": "NO_SOLUTION"}
+            return ((None, None, None, info) if return_info
+                    else (None, None, None))
         if verbose:
             print("\n[WARN] Model 4 初始解不满足全局约束，"
                   "从该种子继续搜索（分配自由度可恢复可行性）")
@@ -904,18 +1043,30 @@ def solve_alns(problem, vehicles_per_satellite, TFp=9999.0,
             random_customer_removal,
             worst_customer_removal,
             shaw_customer_removal,
+            satellite_cluster_removal,
         ],
-        repair_ops=[multi_sat_insertion, multi_sat_insertion_cross],
+        repair_ops=[multi_sat_insertion, multi_sat_insertion_cross,
+                    randomized_satellite_insertion,
+                    consolidated_satellite_insertion],
         config=ALNSConfig(
             max_iterations=max_iterations,
             max_time=max_time,
             e2_probability=1.0,
+            target_cost=target_objective,
+            target_tolerance=target_tolerance,
+            **(alns_config_overrides or {}),
         ),
         hooks=M4Hooks(),
         verbose=verbose,
         start_time=start_time,
     )
     best_sol = result.best_solution
+    if best_sol is None:
+        info = {"objective": None, "runtime": result.elapsed,
+                "iterations": result.iterations, "feasible": False,
+                "status": "NO_SOLUTION"}
+        return ((None, None, None, info) if return_info
+                else (None, None, None))
     best_cost = result.best_cost
     elapsed = result.elapsed
 
@@ -935,4 +1086,18 @@ def solve_alns(problem, vehicles_per_satellite, TFp=9999.0,
         sat_id: [r.full_path() for r in routes]
         for sat_id, routes in best_sol.e2_routes.items()
     }
-    return e1_routes_out, e2_routes_out, evaluator.assignment(best_sol)
+    assignment = evaluator.assignment(best_sol)
+    feasible = bool(evaluator.is_feasible(best_sol))
+    info = {
+        "objective": float(best_cost), "runtime": float(elapsed),
+        "iterations": int(result.iterations), "feasible": feasible,
+        "status": "FEASIBLE" if feasible else "NO_SOLUTION",
+        "external_initial_solution": initial_solution is not None,
+        "best_found_time": result.best_found_time,
+        "target_hit_time": result.target_hit_time,
+        "termination_reason": result.termination_reason,
+        "restarts": result.restarts,
+        "local_search_improvements": result.local_search_improvements,
+    }
+    return ((e1_routes_out, e2_routes_out, assignment, info) if return_info
+            else (e1_routes_out, e2_routes_out, assignment))

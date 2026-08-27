@@ -25,8 +25,12 @@
   否则回退联合 MIP。有限近邻候选使用
   `solve_restricted_mip(...)`，不能作为原模型的最优性证明。详见
   [`docs/model5_exact_container_relay.md`](docs/model5_exact_container_relay.md)。
-- Model 6：当前为固定基线路线后的两阶段中转优化，阶段二虽精确但整体不是
-  全局精确算法，因此始终标记为 `two_stage_not_global`。
+- Model 6：采用**同质空箱 O/R 双商品弧流 + 服务地点异步交接**的紧凑联合 MIP。
+  路线、服务车辆和整数交接量同时优化；只有原生回收流 `own` 能转出，接力流
+  `relay` 不能再次中转。默认先尝试严格的零回收载荷松弛证书；证书不闭合时回退
+  完整紧凑MIP。只有有效下界与可行上界闭合，或完整MIP以零gap返回 `OPTIMAL` 时，
+  才标记 `proven_optimal=True`。详见
+  [`docs/model6_compact_homogeneous_relay.md`](docs/model6_compact_homogeneous_relay.md)。
 
 Model 3 另提供 `models.model_3.route_universe.solve_route_universe_exact`：它在
 每个卫星任务数不超过 10 时穷举全部容量/时间窗可行 E2 路线，并把路线选择与
@@ -68,6 +72,7 @@ E2 路线的精确定价 oracle，支持任意弧成本、任务奖励和 Ryan�
 | Model 3 `10_customers/C101` | **543.09** | proven_optimal（Gurobi 直接 OPTIMAL） |
 | Model 3 `50_customers/C101` | **1289.06** | 曾报告 Gurobi OPTIMAL（下界注入+warm start 后 20.9s 闭合）；**2026-08-10 复现：同样输入 600s 只到 gap 0.18%（界 1289.056），需复核** |
 | Model 3 `100_customers/C101` | 1829.0094 | **非直接求解认证**：Gurobi 直接求解 600s 无可行解、下界 1657.70；1829.0094 来自 ALNS + 证书路径 |
+| Model 6 `seed=105`（4 客户机制实例） | **95.556056** | 证书未闭合后回退完整MIP，12.138s达到 `OPTIMAL`；约比Model 5快74.6倍 |
 
 5/10/15/20 客户小规模算例均可在秒级直接证明最优，这里只列大规模的代表结果。
 

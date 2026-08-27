@@ -10,6 +10,7 @@ from models.alns_base import (
     Route, Solution, FEAS_TOL,
 )
 from models.alns_engine import ALNSConfig, run_alns_search
+from models.strong_initial_solution import build_strong_initial_solution
 
 
 # =====================================================================
@@ -122,7 +123,12 @@ class Evaluator:
                 prev = nid
         return departure
 
-    def check_e2_route_feasible(self, route, sat_id, start_time):
+    def e1_schedule(self, sol, pickup_ready=None):
+        """Compatibility interface used by the shared strong constructor."""
+        departure = self.e1_delivery_departure_times(sol)
+        return departure, {} if departure is not None else None
+
+    def simulate_e2_route(self, route, sat_id, start_time):
         total_w, total_v = 0.0, 0.0
         for nid in route.nodes:
             t = self.e2_task_map.get(nid)
@@ -130,12 +136,13 @@ class Evaluator:
                 total_w += t.w
                 total_v += t.v
         if total_w > self.problem.e2_weight_cap + FEAS_TOL:
-            return False
+            return False, {}, None
         if total_v > self.problem.e2_volume_cap + FEAS_TOL:
-            return False
+            return False, {}, None
 
         current_time = 0.0
         prev = sat_id
+        arrivals = {}
         for nid in route.nodes:
             travel = self.travel(prev, nid)
             current_time += travel
@@ -146,10 +153,16 @@ class Evaluator:
                     current_time = t.tw[0] - start_time
                     abs_arrival = t.tw[0]
                 if abs_arrival > t.tw[1] + FEAS_TOL:
-                    return False
+                    return False, {}, None
+                arrivals[nid] = abs_arrival
                 current_time += self.service_time(nid)
             prev = nid
-        return True
+        return_time = start_time + current_time + self.travel(prev, sat_id)
+        return True, arrivals, return_time
+
+    def check_e2_route_feasible(self, route, sat_id, start_time):
+        feasible, _, _ = self.simulate_e2_route(route, sat_id, start_time)
+        return feasible
 
     def is_feasible(self, sol):
         if len(sol.e1_routes) > self.problem.e1_vehicle_count:
@@ -405,18 +418,29 @@ def greedy_insertion(sol, removed, evaluator, echelon='e2'):
 
             routes = sol.e2_routes.get(sat_id, [])
             for r in routes:
+                old_cost = evaluator.route_distance(r)
                 for pos in range(len(r.nodes) + 1):
                     old_nodes = r.nodes[:]
                     r.nodes.insert(pos, nid)
                     if evaluator.check_e2_route_feasible(r, sat_id, start_time):
-                        insert_cost = evaluator.route_distance(r)
+                        insert_cost = evaluator.route_distance(r) - old_cost
                         if insert_cost < best_cost:
                             best_cost = insert_cost
                             best_route = r
                             best_pos = pos
                     r.nodes = old_nodes
 
-            if best_route is not None:
+            if len(routes) < evaluator.vehicles_per_satellite:
+                new_route = Route(sat_id, [nid])
+                if evaluator.check_e2_route_feasible(
+                        new_route, sat_id, start_time):
+                    new_cost = evaluator.route_distance(new_route)
+                    if new_cost < best_cost:
+                        best_cost = new_cost
+                        best_route = None
+                        best_pos = None
+
+            if best_pos is not None:
                 best_route.nodes.insert(best_pos, nid)
             else:
                 new_route = Route(sat_id, [nid])
@@ -436,18 +460,28 @@ def greedy_insertion(sol, removed, evaluator, echelon='e2'):
             best_pos = None
 
             for r in sol.e1_routes:
+                old_cost = evaluator.route_distance(r)
                 for pos in range(len(r.nodes) + 1):
                     old_nodes = r.nodes[:]
                     r.nodes.insert(pos, nid)
                     if evaluator.check_e1_route_feasible(r):
-                        insert_cost = evaluator.route_distance(r)
+                        insert_cost = evaluator.route_distance(r) - old_cost
                         if insert_cost < best_cost:
                             best_cost = insert_cost
                             best_route = r
                             best_pos = pos
                     r.nodes = old_nodes
 
-            if best_route is not None:
+            if len(sol.e1_routes) < evaluator.problem.e1_vehicle_count:
+                new_route = Route(depot_id, [nid])
+                if evaluator.check_e1_route_feasible(new_route):
+                    new_cost = evaluator.route_distance(new_route)
+                    if new_cost < best_cost:
+                        best_cost = new_cost
+                        best_route = None
+                        best_pos = None
+
+            if best_pos is not None:
                 best_route.nodes.insert(best_pos, nid)
             else:
                 new_route = Route(depot_id, [nid])
@@ -463,7 +497,7 @@ def regret_insertion(sol, removed, evaluator, echelon='e2', k=2):
             best_nid = None
             best_route_info = None
 
-            for nid in pending:
+            for nid in list(pending):
                 task = evaluator.e2_task_map.get(nid)
                 if not task:
                     pending.remove(nid)
@@ -478,20 +512,25 @@ def regret_insertion(sol, removed, evaluator, echelon='e2', k=2):
                 insertion_costs = []
                 routes = sol.e2_routes.get(sat_id, [])
                 for r in routes:
+                    old_cost = evaluator.route_distance(r)
                     for pos in range(len(r.nodes) + 1):
                         old_nodes = r.nodes[:]
                         r.nodes.insert(pos, nid)
                         if evaluator.check_e2_route_feasible(r, sat_id,
                                                              start_time):
-                            c = evaluator.route_distance(r)
+                            c = evaluator.route_distance(r) - old_cost
                             insertion_costs.append((c, r, pos))
                         r.nodes = old_nodes
 
+                if len(routes) < evaluator.vehicles_per_satellite:
+                    new_route = Route(sat_id, [nid])
+                    if evaluator.check_e2_route_feasible(
+                            new_route, sat_id, start_time):
+                        insertion_costs.append((
+                            evaluator.route_distance(new_route), None, 0))
+
                 if not insertion_costs:
-                    insertion_costs.append((
-                        evaluator.dist(sat_id, nid) * 2,
-                        None, 0
-                    ))
+                    continue
 
                 insertion_costs.sort(key=lambda x: x[0])
                 regret = 0.0
@@ -529,18 +568,28 @@ def regret_insertion(sol, removed, evaluator, echelon='e2', k=2):
 # =====================================================================
 
 def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
-               max_iterations=5000, max_time=120, seed=42, verbose=True):
+               max_iterations=5000, max_time=120, seed=42, verbose=True,
+               strong_initial_solution=False, return_info=False,
+               target_objective=None, target_tolerance=1e-6,
+               alns_config_overrides=None):
     random.seed(seed)
     start_time = time.time()
 
     evaluator = Evaluator(problem, e1_tasks, e2_tasks_by_sat,
                           vehicles_per_satellite=vehicles_per_satellite)
 
-    sol = build_initial_solution(problem, e1_tasks, e2_tasks_by_sat, evaluator)
+    if strong_initial_solution:
+        sol = build_strong_initial_solution(
+            problem, e1_tasks, e2_tasks_by_sat, evaluator)
+    else:
+        sol = build_initial_solution(
+            problem, e1_tasks, e2_tasks_by_sat, evaluator)
     if not evaluator.is_feasible(sol):
         if verbose:
             print("\n[WARN] Model 1 ALNS 初始解不满足全局时间/容量约束")
-        return None, None
+        info = {"objective": None, "runtime": time.time() - start_time,
+                "iterations": 0, "feasible": False, "status": "NO_SOLUTION"}
+        return (None, None, info) if return_info else (None, None)
 
     sol.cost = evaluator.total_cost(sol)
     best_sol = sol.copy()
@@ -560,11 +609,19 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         evaluator=evaluator,
         destroy_ops=[random_removal, worst_removal, shaw_removal],
         repair_ops=[greedy_insertion, regret_insertion],
-        config=ALNSConfig(max_iterations=max_iterations, max_time=max_time),
+        config=ALNSConfig(max_iterations=max_iterations, max_time=max_time,
+                          target_cost=target_objective,
+                          target_tolerance=target_tolerance,
+                          **(alns_config_overrides or {})),
         verbose=verbose,
         start_time=start_time,
     )
     best_sol = result.best_solution
+    if best_sol is None:
+        info = {"objective": None, "runtime": result.elapsed,
+                "iterations": result.iterations, "feasible": False,
+                "status": "NO_SOLUTION"}
+        return (None, None, info) if return_info else (None, None)
     best_cost = result.best_cost
     elapsed = result.elapsed
     if verbose:
@@ -583,7 +640,20 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
     if verbose:
         _print_solution(best_sol, evaluator)
 
-    return e1_routes_out, e2_routes_out
+    info = {
+        "objective": float(best_cost), "runtime": float(elapsed),
+        "iterations": int(result.iterations),
+        "feasible": bool(evaluator.is_feasible(best_sol)),
+        "status": "FEASIBLE" if evaluator.is_feasible(best_sol) else "NO_SOLUTION",
+        "strong_initial_solution": bool(strong_initial_solution),
+        "best_found_time": result.best_found_time,
+        "target_hit_time": result.target_hit_time,
+        "termination_reason": result.termination_reason,
+        "restarts": result.restarts,
+        "local_search_improvements": result.local_search_improvements,
+    }
+    return ((e1_routes_out, e2_routes_out, info) if return_info
+            else (e1_routes_out, e2_routes_out))
 
 
 # =====================================================================

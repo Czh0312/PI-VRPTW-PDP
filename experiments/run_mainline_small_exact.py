@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Run the small-scale certified-exact benchmark for Models 1/2/3/4/5.
+"""Run the small-scale certified-exact benchmark for Models 1/2/3/4/5/6.
 
 The output is append-only JSONL plus a compact CSV summary.  Only results with
 ``proven_optimal=True`` are counted as exact; time-limit incumbents are retained
@@ -27,6 +27,7 @@ from models.model_3.solver import solve_exact as solve_m3
 from models.model_4.exact import solve_exact as solve_m4
 from models.model_2.exact import solve_exact as solve_m2
 from models.model_5.solver import solve_exact as solve_m5
+from models.model_6.solver import solve_exact as solve_m6
 from utils.data_loader import parse_dataset
 from utils.task_builder import build_tasks_for_model
 
@@ -119,6 +120,16 @@ def solve_one(model, problem, time_limit, warm_start_routes=None,
             problem, e1, e2, vps, time_limit=time_limit,
             verbose=False, return_info=True,
             return_incumbent_on_time_limit=True,
+            gurobi_params=gurobi_params,
+        )
+        routes = (r1, r2)
+    elif model == 6:
+        e1, e2 = build_tasks_for_model(problem, 6)
+        r1, r2, info = solve_m6(
+            problem, e1, e2, vps, TFp=9999.0,
+            time_limit=time_limit, verbose=False, return_info=True,
+            return_incumbent_on_time_limit=True,
+            warm_start_routes=warm_start_routes,
             gurobi_params=gurobi_params,
         )
         routes = (r1, r2)
@@ -258,7 +269,7 @@ def run_instance(path, scale_group, scenario, args, fleet, gurobi_params,
     m3_routes = None
     for model in args.models:
         started = time.perf_counter()
-        warm_start = m3_routes if model == 4 else None
+        warm_start = m3_routes if model in (4, 6) else None
         try:
             info, routes = solve_one(
                 model, problem, args.time_limit,

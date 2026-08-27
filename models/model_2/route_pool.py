@@ -562,6 +562,7 @@ from models.alns_base import (
 from models.alns_engine import ALNSConfig, ALNSHooks, run_alns_search
 from models.strong_initial_solution import (
     _build_e1_delivery_routes,
+    build_strong_initial_solution,
 )
 from utils.task_builder import build_tasks_for_model
 from models.model_1.alns_solver import Evaluator as _M1Evaluator
@@ -945,14 +946,14 @@ def _candidate_seeds(problem):
 
 
 def build_initial_solution(problem, evaluator):
-    """Build initial solution using M1's builder with multiple assignment seeds."""
-    from models.model_1.alns_solver import build_initial_solution as m1_build
+    """Build a feasible initial solution from multiple assignment seeds."""
     vps = evaluator.vehicles_per_satellite
     best_any = None
     for seed in _candidate_seeds(problem):
         e1_tasks, e2_tasks_by_sat = build_tasks_from_assignment(problem, seed)
         m1_eval = _M1Evaluator(problem, e1_tasks, e2_tasks_by_sat, vps)
-        sol = m1_build(problem, e1_tasks, e2_tasks_by_sat, m1_eval)
+        sol = build_strong_initial_solution(
+            problem, e1_tasks, e2_tasks_by_sat, m1_eval)
         evaluator.rebuild_from_solution(sol)
         if evaluator.is_feasible(sol):
             sol.cost = evaluator.total_cost(sol)
@@ -1036,6 +1037,21 @@ def shaw_customer_removal(sol, evaluator, num_remove, echelon="e2"):
     return chosen
 
 
+def satellite_cluster_removal(sol, evaluator, num_remove, echelon="e2"):
+    """Remove every customer assigned to one nonempty satellite."""
+    assignment = evaluator.assignment(sol)
+    by_sat = {}
+    for cust, sat_id in assignment.items():
+        by_sat.setdefault(sat_id, []).append(cust)
+    if not by_sat:
+        return []
+    sat_id = random.choice(sorted(by_sat))
+    removed = by_sat[sat_id]
+    for cust in removed:
+        _remove_customer(sol, cust)
+    return removed
+
+
 def _best_task_insert(sol, evaluator, sat_id, task, start_time):
     """Find best insertion position for a delivery task at given satellite."""
     routes = sol.e2_routes.get(sat_id, [])
@@ -1096,6 +1112,151 @@ def multi_sat_insertion(sol, removed, evaluator, echelon="e2", k=2):
     clean_empty_routes(sol)
 
 
+def _partial_routes_feasible(sol, evaluator):
+    """Check all currently inserted tasks without requiring full coverage."""
+    starts, _ = evaluator.e1_schedule(sol)
+    if starts is None:
+        return False
+    for sat_id, routes in sol.e2_routes.items():
+        if len(routes) > evaluator.vehicles_per_satellite:
+            return False
+        start_time = starts.get(sat_id, 0.0)
+        for route in routes:
+            feasible, _, _ = evaluator.simulate_e2_route(
+                route, sat_id, start_time)
+            if not feasible:
+                return False
+    return True
+
+
+def global_cost_insertion(sol, removed, evaluator, echelon="e2", k=2):
+    """Repair deliveries using complete E1+E2 marginal cost.
+
+    The original greedy repair compares only second-echelon distance.  That can
+    repeatedly select a locally cheap satellite whose induced first-echelon
+    route is globally expensive.  This small-instance intensification evaluates
+    the full partial solution for every feasible insertion.
+    """
+    pending = list(removed)
+    random.shuffle(pending)
+    for cust in pending:
+        task = evaluator.catalog[cust]["d"]
+        best_candidate = None
+        best_cost = float("inf")
+        for sat_id in evaluator.sat_ids:
+            routes = sol.e2_routes.get(sat_id, [])
+            for route_idx, route in enumerate(routes):
+                for pos in range(len(route.nodes) + 1):
+                    candidate = sol.copy()
+                    candidate.e2_routes[sat_id][route_idx].nodes.insert(
+                        pos, task.id)
+                    candidate.cost = evaluator.total_cost(candidate)
+                    if (candidate.cost < best_cost - FEAS_TOL
+                            and _partial_routes_feasible(candidate, evaluator)):
+                        best_candidate = candidate
+                        best_cost = candidate.cost
+            if len(routes) < evaluator.vehicles_per_satellite:
+                candidate = sol.copy()
+                candidate.e2_routes.setdefault(sat_id, []).append(
+                    Route(sat_id, [task.id]))
+                candidate.cost = evaluator.total_cost(candidate)
+                if (candidate.cost < best_cost - FEAS_TOL
+                        and _partial_routes_feasible(candidate, evaluator)):
+                    best_candidate = candidate
+                    best_cost = candidate.cost
+
+        if best_candidate is None:
+            sat_id = min(evaluator.sat_ids,
+                         key=lambda s: evaluator.dist(s, task.id))
+            sol.e2_routes.setdefault(sat_id, []).append(
+                Route(sat_id, [task.id]))
+        else:
+            sol.e1_routes = [route.copy()
+                             for route in best_candidate.e1_routes]
+            sol.e2_routes = {
+                sat: [route.copy() for route in routes]
+                for sat, routes in best_candidate.e2_routes.items()
+            }
+            sol.cost = best_candidate.cost
+
+    evaluator.rebuild_from_solution(sol)
+    clean_empty_routes(sol)
+
+
+def randomized_satellite_insertion(sol, removed, evaluator,
+                                   echelon="e2", k=2):
+    """Diversification repair that does not greedily undo reassignment moves."""
+    pending = list(removed)
+    random.shuffle(pending)
+    for cust in pending:
+        evaluator.rebuild_from_solution(sol)
+        starts = evaluator.e2_start_times(sol)
+        task = evaluator.catalog[cust]["d"]
+        satellites = list(evaluator.sat_ids)
+        random.shuffle(satellites)
+        inserted = False
+        for sat_id in satellites:
+            best = _best_task_insert(
+                sol, evaluator, sat_id, task, starts.get(sat_id, 0.0))
+            if best is None:
+                continue
+            _inc, route, pos = best
+            if route is None:
+                sol.e2_routes.setdefault(sat_id, []).append(
+                    Route(sat_id, [task.id]))
+            else:
+                route.nodes.insert(pos, task.id)
+            inserted = True
+            break
+        if not inserted:
+            sat_id = min(evaluator.sat_ids,
+                         key=lambda sat: evaluator.dist(sat, task.id))
+            sol.e2_routes.setdefault(sat_id, []).append(
+                Route(sat_id, [task.id]))
+    evaluator.rebuild_from_solution(sol)
+    clean_empty_routes(sol)
+
+
+def consolidated_satellite_insertion(sol, removed, evaluator,
+                                     echelon="e2", k=2):
+    """Insert the whole removed cluster into one satellite."""
+    satellites = list(evaluator.sat_ids)
+    random.shuffle(satellites)
+    pending = list(removed)
+    random.shuffle(pending)
+    for target_sat in satellites:
+        candidate = sol.copy()
+        feasible = True
+        for cust in pending:
+            evaluator.rebuild_from_solution(candidate)
+            starts = evaluator.e2_start_times(candidate)
+            task = evaluator.catalog[cust]["d"]
+            best = _best_task_insert(
+                candidate, evaluator, target_sat, task,
+                starts.get(target_sat, 0.0))
+            if best is None:
+                feasible = False
+                break
+            _inc, route, pos = best
+            if route is None:
+                candidate.e2_routes.setdefault(target_sat, []).append(
+                    Route(target_sat, [task.id]))
+            else:
+                route.nodes.insert(pos, task.id)
+        if feasible:
+            candidate.cost = evaluator.total_cost(candidate)
+            if evaluator.is_feasible(candidate):
+                sol.e1_routes = [route.copy()
+                                 for route in candidate.e1_routes]
+                sol.e2_routes = {
+                    sat: [route.copy() for route in routes]
+                    for sat, routes in candidate.e2_routes.items()
+                }
+                sol.cost = candidate.cost
+                return
+    multi_sat_insertion(sol, pending, evaluator, echelon=echelon, k=k)
+
+
 def _e1_local_improve(sol, evaluator, max_rounds=6):
     rounds = 0
     while rounds < max_rounds:
@@ -1120,27 +1281,116 @@ def _e1_local_improve(sol, evaluator, max_rounds=6):
             break
 
 
+def _adopt_solution(target, source):
+    target.e1_routes = [route.copy() for route in source.e1_routes]
+    target.e2_routes = {
+        sat: [route.copy() for route in routes]
+        for sat, routes in source.e2_routes.items()
+    }
+    target.cost = source.cost
+
+
+def _assignment_first_improvement(sol, evaluator):
+    """Try one complete-cost customer reassignment or cross-satellite swap."""
+    base_cost = evaluator.total_cost(sol)
+    locations = []
+    for sat_id, routes in sol.e2_routes.items():
+        for route_idx, route in enumerate(routes):
+            for node_id in route.nodes:
+                task = evaluator.e2_task_map.get(node_id)
+                if task is not None:
+                    locations.append((task.cust, node_id, sat_id, route_idx))
+
+    for _cust, node_id, src_sat, _src_idx in locations:
+        for dst_sat in evaluator.sat_ids:
+            if dst_sat == src_sat:
+                continue
+            dst_routes = sol.e2_routes.get(dst_sat, [])
+            choices = [(idx, pos) for idx, route in enumerate(dst_routes)
+                       for pos in range(len(route.nodes) + 1)]
+            if len(dst_routes) < evaluator.vehicles_per_satellite:
+                choices.append((None, 0))
+            for dst_idx, dst_pos in choices:
+                candidate = sol.copy()
+                for routes in candidate.e2_routes.values():
+                    for route in routes:
+                        if node_id in route.nodes:
+                            route.nodes.remove(node_id)
+                clean_empty_routes(candidate)
+                if dst_idx is None:
+                    candidate.e2_routes.setdefault(dst_sat, []).append(
+                        Route(dst_sat, [node_id]))
+                else:
+                    candidate.e2_routes[dst_sat][dst_idx].nodes.insert(
+                        dst_pos, node_id)
+                candidate.cost = evaluator.total_cost(candidate)
+                if (candidate.cost < base_cost - FEAS_TOL
+                        and evaluator.is_feasible(candidate)):
+                    return candidate
+
+    for left_idx, left in enumerate(locations):
+        for right in locations[left_idx + 1:]:
+            if left[2] == right[2]:
+                continue
+            candidate = sol.copy()
+            left_node, right_node = left[1], right[1]
+            left_route = right_route = None
+            left_pos = right_pos = None
+            for routes in candidate.e2_routes.values():
+                for route in routes:
+                    if left_node in route.nodes:
+                        left_route, left_pos = route, route.nodes.index(left_node)
+                    if right_node in route.nodes:
+                        right_route, right_pos = route, route.nodes.index(right_node)
+            if left_route is None or right_route is None:
+                continue
+            left_route.nodes[left_pos], right_route.nodes[right_pos] = (
+                right_node, left_node)
+            candidate.cost = evaluator.total_cost(candidate)
+            if (candidate.cost < base_cost - FEAS_TOL
+                    and evaluator.is_feasible(candidate)):
+                return candidate
+    return None
+
+
+def _assignment_local_improve(sol, evaluator, max_rounds=3):
+    sol.cost = evaluator.total_cost(sol)
+    for _ in range(max_rounds):
+        candidate = _assignment_first_improvement(sol, evaluator)
+        if candidate is None:
+            break
+        _adopt_solution(sol, candidate)
+
+
 class M2Hooks(ALNSHooks):
     def after_operators(self, candidate, evaluator, current_solution,
                         iteration, d_idx, r_idx):
         _e1_local_improve(candidate, evaluator)
+        if len(evaluator.problem.customers) <= 20 and iteration % 50 == 0:
+            _assignment_local_improve(candidate, evaluator)
 
 
 def solve_alns(problem, vehicles_per_satellite=4, max_iterations=5000,
-               max_time=120, seed=42, verbose=True):
+               max_time=120, seed=42, verbose=True, return_info=False,
+               initial_solution=None, target_objective=None,
+               target_tolerance=1e-6, alns_config_overrides=None):
     """Run M2 ALNS: pure-delivery + free customer-satellite assignment."""
     random.seed(seed)
     start_time = time.time()
 
     evaluator = Evaluator(problem, vehicles_per_satellite)
-    sol = build_initial_solution(problem, evaluator)
+    sol = (initial_solution.copy() if initial_solution is not None
+           else build_initial_solution(problem, evaluator))
 
     if not evaluator.is_feasible(sol):
         if sol is None or not any(
                 r.nodes for routes in sol.e2_routes.values() for r in routes):
             if verbose:
                 print("\n[WARN] Model 2 无法构造含顾客的初始解")
-            return None, None, None
+            info = {"objective": None, "runtime": time.time() - start_time,
+                    "iterations": 0, "feasible": False, "status": "NO_SOLUTION"}
+            return ((None, None, None, info) if return_info
+                    else (None, None, None))
         if verbose:
             print("\n[WARN] Model 2 初始解不满足全局约束，"
                   "从该种子继续搜索（分配自由度可恢复可行性）")
@@ -1170,18 +1420,30 @@ def solve_alns(problem, vehicles_per_satellite=4, max_iterations=5000,
             random_customer_removal,
             worst_customer_removal,
             shaw_customer_removal,
+            satellite_cluster_removal,
         ],
-        repair_ops=[multi_sat_insertion],
+        repair_ops=[multi_sat_insertion, global_cost_insertion,
+                    randomized_satellite_insertion,
+                    consolidated_satellite_insertion],
         config=ALNSConfig(
             max_iterations=max_iterations,
             max_time=max_time,
             e2_probability=1.0,
+            target_cost=target_objective,
+            target_tolerance=target_tolerance,
+            **(alns_config_overrides or {}),
         ),
         hooks=M2Hooks(),
         verbose=verbose,
         start_time=start_time,
     )
     best_sol = result.best_solution
+    if best_sol is None:
+        info = {"objective": None, "runtime": result.elapsed,
+                "iterations": result.iterations, "feasible": False,
+                "status": "NO_SOLUTION"}
+        return ((None, None, None, info) if return_info
+                else (None, None, None))
     best_cost = result.best_cost
     elapsed = result.elapsed
 
@@ -1201,7 +1463,21 @@ def solve_alns(problem, vehicles_per_satellite=4, max_iterations=5000,
         sat_id: [r.full_path() for r in routes]
         for sat_id, routes in best_sol.e2_routes.items()
     }
-    return e1_routes_out, e2_routes_out, evaluator.assignment(best_sol)
+    assignment = evaluator.assignment(best_sol)
+    feasible = bool(evaluator.is_feasible(best_sol))
+    info = {
+        "objective": float(best_cost), "runtime": float(elapsed),
+        "iterations": int(result.iterations), "feasible": feasible,
+        "status": "FEASIBLE" if feasible else "NO_SOLUTION",
+        "external_initial_solution": initial_solution is not None,
+        "best_found_time": result.best_found_time,
+        "target_hit_time": result.target_hit_time,
+        "termination_reason": result.termination_reason,
+        "restarts": result.restarts,
+        "local_search_improvements": result.local_search_improvements,
+    }
+    return ((e1_routes_out, e2_routes_out, assignment, info) if return_info
+            else (e1_routes_out, e2_routes_out, assignment))
 
 
 # ---------------------------------------------------------------------------
