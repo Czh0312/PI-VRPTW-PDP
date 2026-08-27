@@ -21,9 +21,15 @@ def build_tasks_for_model(problem: ProblemInstance, model_type: int):
                 )
         for c in problem.customers:
             if c.assigned_sat and c.demand > 1e-9:
+                delivery_count = max(0.0, c.container_count_del)
                 # 配送重量 = 物品 + 容器
                 e2_tasks_by_sat[c.assigned_sat].append(
-                    Task(f"{c.id}d", c.id, "d", c.demand + cw, cv, c.tw_del)
+                    Task(
+                        f"{c.id}d", c.id, "d",
+                        c.demand + delivery_count * cw,
+                        delivery_count * cv,
+                        c.tw_del,
+                    )
                 )
     elif model_type in (3, 5, 6, 7):
         for s in problem.satellites:
@@ -39,15 +45,27 @@ def build_tasks_for_model(problem: ProblemInstance, model_type: int):
         for c in problem.customers:
             if not c.assigned_sat:
                 continue
-            if c.demand > 1e-9:
+            delivery_count = max(0.0, c.container_count_del)
+            pickup_count = max(0.0, c.container_count_pick)
+            if c.demand > 1e-9 or delivery_count > 1e-9:
                 # 配送重量 = 物品 + 容器
                 e2_tasks_by_sat[c.assigned_sat].append(
-                    Task(f"{c.id}d", c.id, "d", c.demand + cw, cv, c.tw_del)
+                    Task(
+                        f"{c.id}d", c.id, "d",
+                        c.demand + delivery_count * cw,
+                        delivery_count * cv,
+                        c.tw_del,
+                    )
                 )
-            if cw > 1e-9:
+            if pickup_count > 1e-9 and (cw > 1e-9 or cv > 1e-9):
                 # 回收重量 = 容器
                 e2_tasks_by_sat[c.assigned_sat].append(
-                    Task(f"{c.id}p", c.id, "p", cw, cv, c.tw_pick)
+                    Task(
+                        f"{c.id}p", c.id, "p",
+                        pickup_count * cw,
+                        pickup_count * cv,
+                        c.tw_pick,
+                    )
                 )
     else:
         raise ValueError(f"当前仅支持 model 1–7，收到: {model_type}")

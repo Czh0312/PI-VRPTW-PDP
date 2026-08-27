@@ -10,7 +10,9 @@ class ProblemInstance:
     """
 
     def __init__(self, nodes: Dict[str, Node], fleet_config: Dict[str, float],
-                 speed: float = 1.0):
+                 speed: float = 1.0,
+                 distance_matrix: Optional[Dict[str, Dict[str, float]]] = None,
+                 travel_time_matrix: Optional[Dict[str, Dict[str, float]]] = None):
         # ==========================================
         # 1. 基础节点数据初始化
         # ==========================================
@@ -38,6 +40,10 @@ class ProblemInstance:
         # 3. 路径成本预计算 (距离与时间)
         # ==========================================
         self.speed = speed
+        self.distance_matrix_source = "provided" if distance_matrix is not None else "euclidean"
+        self.travel_time_matrix_source = "provided" if travel_time_matrix is not None else "distance/speed"
+        self._provided_distance_matrix = distance_matrix
+        self._provided_travel_time_matrix = travel_time_matrix
         self._build_matrices()
 
     def _identify_node_types(self):
@@ -62,14 +68,14 @@ class ProblemInstance:
         """
         根据客户分配情况，聚合计算 E1 层卫星仓的各项需求指标。
 
-        - delivery_weight: 物品重量 + 容器重量（每个顾客一个容器）
-        - delivery_volume: 顾客数 × 容器体积
-        - pickup_weight: 顾客数 × 容器重量（只回收空容器）
-        - pickup_volume: 顾客数 × 容器体积
+        - delivery_weight: 物品重量 + 配送容器数 × 单箱重量
+        - delivery_volume: 配送容器数 × 单箱体积
+        - pickup_weight: 回收容器数 × 单箱重量
+        - pickup_volume: 回收容器数 × 单箱体积
+
+        旧数据没有容器数字段时，Customer 默认值为 1，保持历史口径。
         """
         sat_map = {s.id: s for s in self.satellites}
-        sat_cust_count = {s.id: 0 for s in self.satellites}
-
         cw = self.fleet.container_weight
         cv = self.fleet.container_volume
 
@@ -85,21 +91,18 @@ class ProblemInstance:
             assignment = cust.assigned_sat
             if assignment and assignment in sat_map:
                 sat = sat_map[assignment]
-                sat_cust_count[assignment] += 1
+                delivery_count = max(0.0, cust.container_count_del)
+                pickup_count = max(0.0, cust.container_count_pick)
 
                 # 配送重量 = 物品重量 + 容器重量
-                sat.delivery_weight += cust.weight_del + cw
+                sat.delivery_weight += cust.weight_del + delivery_count * cw
+                sat.delivery_volume += delivery_count * cv
+                sat.pickup_weight += pickup_count * cw
+                sat.pickup_volume += pickup_count * cv
 
                 # 时间窗逻辑
-                if cust.tw_del[1] < sat.e1_delivery_due_date:
+                if delivery_count > 0 and cust.tw_del[1] < sat.e1_delivery_due_date:
                     sat.e1_delivery_due_date = cust.tw_del[1]
-
-        # 体积和回收：顾客数 × 容器参数
-        for sat in self.satellites:
-            count = sat_cust_count[sat.id]
-            sat.delivery_volume = count * cv
-            sat.pickup_weight = count * cw
-            sat.pickup_volume = count * cv
 
     def _build_matrices(self):
         """
@@ -120,7 +123,40 @@ class ProblemInstance:
         nodes_list = [self.nodes[nid] for nid in ids]
         inv_speed = 1.0 / self.speed
         
+        if self._provided_distance_matrix is not None:
+            missing = [
+                (left, right)
+                for left in ids
+                for right in ids
+                if left not in self._provided_distance_matrix
+                or right not in self._provided_distance_matrix[left]
+            ]
+            if missing:
+                raise ValueError(f"距离矩阵缺少节点对: {missing[:5]}")
+        if self._provided_travel_time_matrix is not None:
+            missing = [
+                (left, right)
+                for left in ids
+                for right in ids
+                if left not in self._provided_travel_time_matrix
+                or right not in self._provided_travel_time_matrix[left]
+            ]
+            if missing:
+                raise ValueError(f"时间矩阵缺少节点对: {missing[:5]}")
+
         for i in range(n):
+            if self._provided_distance_matrix is not None:
+                for j in range(n):
+                    self.dist[i][j] = float(
+                        self._provided_distance_matrix[ids[i]][ids[j]]
+                    )
+                    if self._provided_travel_time_matrix is not None:
+                        self.time[i][j] = float(
+                            self._provided_travel_time_matrix[ids[i]][ids[j]]
+                        )
+                    else:
+                        self.time[i][j] = self.dist[i][j] * inv_speed
+                continue
             ni = nodes_list[i]
             for j in range(i + 1, n):
                 nj = nodes_list[j]

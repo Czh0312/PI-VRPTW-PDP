@@ -6,6 +6,14 @@ from typing import Dict, Tuple
 from core.node import Customer, Depot, Node, Satellite
 
 
+def _float_field(row: Dict[str, str], key: str, default: float) -> float:
+    """Read an optional numeric CSV field without treating zero as missing."""
+    raw = row.get(key)
+    if raw is None or not raw.strip():
+        return float(default)
+    return float(raw)
+
+
 def parse_dataset(filepath: str) -> Tuple[Dict[str, Node], Dict]:
     """
     解析标准的 CSV 格式数据文件。
@@ -29,6 +37,13 @@ def parse_dataset(filepath: str) -> Tuple[Dict[str, Node], Dict]:
                 nodes[node_id] = Satellite(node_id=node_id, x=x, y=y)
             elif node_type == "c":
                 assigned_sat = row.get("assigned_sat", "").strip() or None
+                fallback_count = _float_field(row, "container_count", 1.0)
+                delivery_container_count = _float_field(
+                    row, "delivery_container_count", fallback_count
+                )
+                pickup_container_count = _float_field(
+                    row, "pickup_container_count", fallback_count
+                )
                 customer = Customer(
                     node_id=node_id,
                     x=x,
@@ -44,6 +59,8 @@ def parse_dataset(filepath: str) -> Tuple[Dict[str, Node], Dict]:
                         float(row.get("pickup_due", 99999.0)),
                     ),
                     assigned_sat=assigned_sat,
+                    container_count_del=delivery_container_count,
+                    container_count_pick=pickup_container_count,
                 )
 
                 nodes[node_id] = customer

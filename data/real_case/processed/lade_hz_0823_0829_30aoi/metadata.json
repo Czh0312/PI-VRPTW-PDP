@@ -1,0 +1,89 @@
+{
+  "case_name": "LaDe-D Hangzhou 3-region 30-AOI rolling-week case",
+  "source_dataset": "Cainiao-AI/LaDe-D",
+  "source_url": "https://huggingface.co/datasets/Cainiao-AI/LaDe-D",
+  "source_license": "Apache-2.0 (Hugging Face dataset card)",
+  "source_file_sha256": "00b6b4dca471cadee796a3fc7f07dcd919499ec58459ea67db784dcb06089e75",
+  "study_year": "anonymous year; original file exposes MMDD only",
+  "selected_period": [
+    "08-23",
+    "08-29"
+  ],
+  "selected_regions": [
+    114,
+    124,
+    30
+  ],
+  "aois_per_region": 10,
+  "customer_count": 30,
+  "selection_rule": "top weekly orders among AOIs active on all seven selected days",
+  "satellite_location_basis": "median LaDe accept_gps coordinate by region/week",
+  "central_depot": {
+    "node_id": "D0",
+    "name": "杭州萧山国际机场旧货运中心（中心仓代理点）",
+    "lon": 120.425103,
+    "lat": 30.225378,
+    "source": "Wikimedia Commons geotag; YTO processing facility visible",
+    "source_url": "https://commons.wikimedia.org/wiki/File:202403_Old_Cargo_Center_of_Hangzhou_Xiaoshan_International_Airport.jpg"
+  },
+  "distance_matrix_source": "OSRM public driving table snapshot (OpenStreetMap road network)",
+  "distance_matrix_quality": {
+    "max_source_snap_distance_m": 386.9469713,
+    "max_destination_snap_distance_m": 386.9469713,
+    "note": "The largest snap is the public cargo-hub proxy coordinate; the raw response is retained."
+  },
+  "delivery_time_window_basis": "LaDe observed delivery completion 5th-95th percentile, expanded by 30 minutes, rounded to 30 minutes, and widened to at least 6 hours; this is a service-band proxy, not an observed promised time window",
+  "pickup_time_window_basis": "designed window: pickup starts no earlier than both the configured afternoon threshold and the delivery due time; it ends at the configured evening cutoff",
+  "return_model": {
+    "eventual_return_rate": 0.97,
+    "lag_day_probability": {
+      "1": 0.15,
+      "2": 0.45,
+      "3": 0.3,
+      "4": 0.1
+    },
+    "formula": "pickup[i,t] = round(return_rate * sum_lag p[lag] * delivery[i,t-lag])",
+    "status": "scenario assumption; LaDe-D has no reusable-packaging return records"
+  },
+  "payload_kg_per_order": {
+    "value": 2.0,
+    "status": "scenario assumption; LaDe-D has no parcel-weight field"
+  },
+  "daily_summary": [
+    {
+      "study_date": "08-23",
+      "delivery_containers": 255,
+      "pickup_containers": 240
+    },
+    {
+      "study_date": "08-24",
+      "delivery_containers": 236,
+      "pickup_containers": 237
+    },
+    {
+      "study_date": "08-25",
+      "delivery_containers": 227,
+      "pickup_containers": 236
+    },
+    {
+      "study_date": "08-26",
+      "delivery_containers": 228,
+      "pickup_containers": 233
+    },
+    {
+      "study_date": "08-27",
+      "delivery_containers": 238,
+      "pickup_containers": 225
+    },
+    {
+      "study_date": "08-28",
+      "delivery_containers": 238,
+      "pickup_containers": 222
+    },
+    {
+      "study_date": "08-29",
+      "delivery_containers": 235,
+      "pickup_containers": 230
+    }
+  ]
+}

@@ -5,9 +5,39 @@
 当前统一编号及旧结果换算见
 [`docs/model_numbering_migration.md`](docs/model_numbering_migration.md)。
 
-当前唯一正式数据集是 [`data/zhou_later_pickup/`](data/zhou_later_pickup/)：
-`small` 包含 7/10/12 客户实例，`large` 包含 100/200 客户实例。旧 Solomon
-派生数据和北京数据已从工作区删除；依赖 C101/R101 等旧路径的实验脚本仅作历史代码。
+当前数据分为两层：
+
+- [`data/zhou_later_pickup/`](data/zhou_later_pickup/) 是算法基准，`small` 包含
+  7/10/12 客户实例，`large` 包含 100/200 客户实例；坐标单位不能直接解释为 km。
+- [`data/real_case/`](data/real_case/) 是经济分析案例：从 LaDe-D 杭州真实配送记录中
+  选取 3 个相邻配送区域、30 个稳定 AOI 和连续 7 天需求，并保存 OSRM 道路距离
+  （km）/时间（min）矩阵；容器回收量与回收时间窗属于明确标注的情景设计。
+
+旧 Solomon 派生数据和北京数据已从工作区删除；依赖 C101/R101 等旧路径的实验脚本
+仅作历史代码。
+
+## 真实道路成本案例
+
+构建数据（原始 LaDe-D 杭州 parquet 需先放到 README 指定位置）：
+
+```bash
+python scripts/build_lade_real_case.py --fetch-osrm
+python scripts/audit_r3pack_dataset.py
+```
+
+运行代表日经济分析：
+
+```bash
+python generate_cost_analysis.py \
+  --data data/real_case/processed/lade_hz_0823_0829_30aoi/instances/lade_hz_0829_30aoi.csv \
+  --fleet-config config/fleet_config_lade_real_case.json \
+  --economic-config config/economic_cost_config_lade_real_case.json \
+  --distance-matrix data/real_case/processed/lade_hz_0823_0829_30aoi/distance_km.csv \
+  --duration-matrix data/real_case/processed/lade_hz_0823_0829_30aoi/duration_min.csv \
+  --time 10 --output output/economic_analysis_lade_real_0829
+```
+
+数据口径与当前结果见 [`docs/real_case_cost_analysis.md`](docs/real_case_cost_analysis.md)。
 
 ## 精确求解口径
 
@@ -345,6 +375,18 @@ output/experiments/model7_v6_stable_comparison_84datasets_seed42_combined.md
 ```bash
 python main.py
 ```
+
+运行“一次性包装—常规循环回收—优化循环回收”经济性对比：
+
+```bash
+python generate_cost_analysis.py --time 30
+```
+
+该脚本直接读取路径模型的 E1/E2 距离，按 `config/economic_cost_config.json`
+换算运输、包装购置、清洗分拣、扫码和损耗补充成本，并输出包装替代收益、闭环运输
+增量、路径优化收益、净边际收益、回本周期及临界条件。默认比较 Model 1、Model 3
+与 `analysis.optimized_route_model`（当前为 Model 6）。详见
+[`docs/economic_cost_model.md`](docs/economic_cost_model.md)。
 
 全部非北京算例对比：
 

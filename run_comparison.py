@@ -22,6 +22,7 @@ from models.model_1.alns_solver import solve_alns as alns_m1
 from models.model_3.alns_solver import solve_alns as alns_m3
 from models.model_5.alns_solver import solve_alns as alns_m5
 from models.model_6.alns_solver import solve_alns as alns_m6
+from models.model_7.alns_solver import solve_alns as alns_m7
 from utils.data_loader import parse_dataset
 from utils.task_builder import build_tasks_for_model
 
@@ -31,7 +32,7 @@ OUTPUT_DIR = PROJECT_ROOT / "output"
 DATA_DIR = PROJECT_ROOT / "data"
 
 EXACT_SOLVERS = {1: exact_m1, 3: exact_m3, 5: exact_m5, 6: exact_m6}
-ALNS_SOLVERS = {1: alns_m1, 3: alns_m3, 5: alns_m5, 6: alns_m6}
+ALNS_SOLVERS = {1: alns_m1, 3: alns_m3, 5: alns_m5, 6: alns_m6, 7: alns_m7}
 
 
 def load_fleet_config():
@@ -64,6 +65,17 @@ def _total_cost(problem, e1_routes, e2_routes_by_sat):
     return cost
 
 
+def _distance_breakdown(problem, e1_routes, e2_routes_by_sat):
+    """Return route distance by echelon without scraping human-readable logs."""
+    e1_distance = sum(_route_distance(problem, route) for route in e1_routes)
+    e2_distance = sum(
+        _route_distance(problem, route)
+        for routes in e2_routes_by_sat.values()
+        for route in routes
+    )
+    return e1_distance, e2_distance
+
+
 def _count_e2(e2_by_sat):
     return sum(len(v) for v in e2_by_sat.values())
 
@@ -71,7 +83,7 @@ def _count_e2(e2_by_sat):
 # ─── 单次求解 ───
 
 def run_one(model, solver, data_path, fleet_cfg, alns_time=120,
-            exact_time=300, seed=42):
+            exact_time=300, seed=42, solver_kwargs=None):
     """
     运行单次实验。
     solver: "exact" | "alns"
@@ -94,6 +106,7 @@ def run_one(model, solver, data_path, fleet_cfg, alns_time=120,
     if solver == "exact" and model == 5 and n_customers >= 50:
         return dict(
             cost=None, time=0.0, e1=0, e2=0,
+            e1_distance=None, e2_distance=None,
             status="UNAVAILABLE_M5_NOT_SCALABLE",
             solver_info={
                 "solution_type": "none",
@@ -104,6 +117,14 @@ def run_one(model, solver, data_path, fleet_cfg, alns_time=120,
         )
 
     if solver == "exact":
+        if model not in EXACT_SOLVERS:
+            return dict(
+                cost=None, time=0.0, e1=0, e2=0,
+                e1_distance=None, e2_distance=None,
+                status=f"UNAVAILABLE_EXACT_MODEL_{model}",
+                solver_info={"solution_type": "none", "proven_optimal": False},
+                log=f"Model {model} has no exact solver.\n",
+            )
         fn = EXACT_SOLVERS[model]
         kwargs = dict(
             problem=problem, e1_tasks=e1_tasks,
@@ -159,6 +180,9 @@ def run_one(model, solver, data_path, fleet_cfg, alns_time=120,
         if model in (3, 6):
             kwargs["TFp"] = 9999.0
 
+    if solver_kwargs:
+        kwargs.update(solver_kwargs)
+
     log_buf = io.StringIO()
     t0 = time.time()
     try:
@@ -171,6 +195,8 @@ def run_one(model, solver, data_path, fleet_cfg, alns_time=120,
             e1_routes, e2_routes = result
             solve_info = None
         if e1_routes and e2_routes:
+            e1_distance, e2_distance = _distance_breakdown(
+                problem, e1_routes, e2_routes)
             proven_optimal = bool(solve_info and solve_info.get("proven_optimal"))
             status = "PROVEN_OPTIMAL" if solver == "exact" and proven_optimal else (
                 "FEASIBLE_NOT_PROVEN" if solver == "exact" else "OK"
@@ -178,14 +204,17 @@ def run_one(model, solver, data_path, fleet_cfg, alns_time=120,
             return dict(
                 cost=_total_cost(problem, e1_routes, e2_routes),
                 time=elapsed, e1=len(e1_routes), e2=_count_e2(e2_routes),
+                e1_distance=e1_distance, e2_distance=e2_distance,
                 status=status, solver_info=solve_info, log=log_buf.getvalue(),
             )
         status = "NO_PROOF" if solver == "exact" else "INFEASIBLE"
-        return dict(cost=None, time=elapsed, e1=0, e2=0, status=status,
+        return dict(cost=None, time=elapsed, e1=0, e2=0,
+                    e1_distance=None, e2_distance=None, status=status,
                     solver_info=solve_info, log=log_buf.getvalue())
     except Exception as e:
         elapsed = time.time() - t0
         return dict(cost=None, time=elapsed, e1=0, e2=0,
+                    e1_distance=None, e2_distance=None,
                     status=f"ERROR: {e}", solver_info=None,
                     log=log_buf.getvalue())
 

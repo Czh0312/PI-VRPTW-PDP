@@ -49,6 +49,8 @@ class Customer(Node):
         weight_pick: float = 0.0,
         vol_del: float = 1.0,
         vol_pick: float = 1.0,
+        container_count_del: float = 1.0,
+        container_count_pick: float = 1.0,
     ):
         super().__init__(node_id, "c", x, y)
         self.weight_del: float = demand
@@ -56,6 +58,11 @@ class Customer(Node):
         self.service_time = service_time
         self.vol_del: float = vol_del
         self.vol_pick: float = vol_pick
+        # A customer row may aggregate many parcel/container movements at one
+        # AOI.  The legacy datasets omit these fields and therefore retain the
+        # original one-container-per-customer semantics.
+        self.container_count_del: float = container_count_del
+        self.container_count_pick: float = container_count_pick
         self.tw_del = tw_del
         self.tw_pick = tw_pick
         self.assigned_sat = assigned_sat
