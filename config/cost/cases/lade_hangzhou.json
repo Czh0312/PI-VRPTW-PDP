@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "parameter_scope": "real_case_lade_hangzhou",
+  "source_type": "literature_plus_scenario_assumptions",
+  "description": "Economic assumptions for the LaDe-D Hangzhou real-road case. Currency is CNY and transport distance is supplied by the saved OSRM road matrix in km.",
+  "single_use": {
+    "package_price_yuan": 4.0,
+    "end_of_life_cost_yuan": 0.3
+  },
+  "reusable": {
+    "container_price_yuan": 36.5,
+    "initial_pool_size": 900,
+    "cleaning_sorting_cost_yuan": 0.8,
+    "loss_rate_per_cycle": 0.03,
+    "tracking_scan_cost_yuan": 0.1
+  },
+  "transport": {
+    "e1_cost_yuan_per_km": 6.5,
+    "e2_cost_yuan_per_km": 2.2,
+    "diesel_price_yuan_per_liter": 7.6,
+    "e1_fuel_consumption_l_per_100km": 18.6,
+    "e2_fuel_consumption_l_per_100km": 8.2
+  },
+  "analysis": {
+    "operating_period": "one observed/modelled LaDe service day",
+    "optimized_route_model": 6,
+    "horizon_periods": 300,
+    "curve_max_periods": 600,
+    "curve_period_step": 10,
+    "distance_scale_to_km": 1.0,
+    "distance_scale_basis": "Saved OSRM road distance matrix in kilometers."
+  },
+  "loss_rate_sensitivity": {
+    "rates": [0.01, 0.03, 0.05, 0.08, 0.1]
+  },
+  "scenarios": [
+    {
+      "name": "baseline_standard_carton",
+      "single_use_package_price_yuan": 4.0,
+      "description": "Mainland-China standard carton baseline."
+    },
+    {
+      "name": "large_or_reinforced_package",
+      "single_use_package_price_yuan": 15.0,
+      "description": "Large/reinforced single-use packaging sensitivity."
+    },
+    {
+      "name": "r3pack_scrap_rate_sensitivity",
+      "reusable_loss_rate_per_cycle": 0.1,
+      "description": "International sensitivity point using R3PACK ScrapRate_m=0.10; not the China baseline."
+    }
+  ],
+  "parameter_basis": {
+    "initial_pool_size": "900 = rounded planning value based on about 235 deliveries/day, 2.35-day mean return lag, one-day washing buffer, 97% return rate and safety stock.",
+    "china_cost_sources": "See config/cost/cases/theoretical_validation.json and reference/cost/00_README.md.",
+    "r3pack_mapping": "See data/real_case/reports/r3pack_parameter_audit.json."
+  }
+}

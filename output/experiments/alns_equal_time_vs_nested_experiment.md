@@ -76,7 +76,7 @@ M6嵌套阶段在 **12/17** 个实例中使用中转，共 **45** 次，累计�
 
 ## 5. 数据文件
 
-- 等时间最终结果：`results/model12346_alns_scaling/large_standard_same_day_alns_seed42_final.jsonl`
-- 嵌套最终结果：`results/model12346_nested_extensions/nested_large_base10_ext2_seed42_final.jsonl`
-- 嵌套M2/M4原始批次：`results/model12346_nested_extensions/nested_large_base10_ext2_seed42_20260826_184752.jsonl`
-- 修正硬时间预算后的M6批次：`results/model12346_nested_extensions/nested_large_base10_ext2_seed42_20260826_185706.jsonl`
+- 等时间最终结果：`output/results/model12346_alns_scaling/large_standard_same_day_alns_seed42_final.jsonl`
+- 嵌套最终结果：`output/results/model12346_nested_extensions/nested_large_base10_ext2_seed42_final.jsonl`
+- 嵌套M2/M4原始批次：`output/results/model12346_nested_extensions/nested_large_base10_ext2_seed42_20260826_184752.jsonl`
+- 修正硬时间预算后的M6批次：`output/results/model12346_nested_extensions/nested_large_base10_ext2_seed42_20260826_185706.jsonl`

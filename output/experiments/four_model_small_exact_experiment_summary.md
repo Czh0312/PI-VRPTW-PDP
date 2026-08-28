@@ -204,12 +204,12 @@ M6平均求解时间约为M3的1.83倍，但仅为M4的11.37%（M4约为M6的8.8
 
 ## 8. 结果文件与复现依据
 
-- 正式汇总CSV：`../../results/mainline_small_exact/small_exact_20260825_123124.csv`
-- 逐次求解JSONL：`../../results/mainline_small_exact/small_exact_20260825_123124.jsonl`
-- 结果批次说明：`../../results/mainline_small_exact/README.md`
-- M6正式汇总CSV：`../../results/model6_standard_small_exact_unlimited/small_exact_20260826_171404.csv`
-- M6逐次求解JSONL：`../../results/model6_standard_small_exact_unlimited/small_exact_20260826_171404.jsonl`
-- M6结果说明：`../../results/model6_standard_small_exact_unlimited/README.md`
+- 正式汇总CSV：`../../output/results/mainline_small_exact/small_exact_20260825_123124.csv`
+- 逐次求解JSONL：`../../output/results/mainline_small_exact/small_exact_20260825_123124.jsonl`
+- 结果批次说明：`../../output/results/mainline_small_exact/README.md`
+- M6正式汇总CSV：`../../output/results/model6_standard_small_exact_unlimited/small_exact_20260826_171404.csv`
+- M6逐次求解JSONL：`../../output/results/model6_standard_small_exact_unlimited/small_exact_20260826_171404.jsonl`
+- M6结果说明：`../../output/results/model6_standard_small_exact_unlimited/README.md`
 
 本文档是面向论文写作和人工审阅的实验总结；CSV和JSONL是机器可读的正式结果与
 审计依据。若后续重新运行实验，应新建带日期或批次编号的总结文档，不直接覆盖本次

@@ -69,7 +69,7 @@
   - 原文："标载下（新能源重卡）每公里电耗成本约 **1 元**……（柴油车）每公里约 **2.5—3 元**……按年均行驶约 18 万公里计算。"
 - 中国电力企业联合会. 《新能源重卡成两会热词》. URL: https://www.ceec.net.cn/art/2024/3/16/art_11023_2530822.html 。日期：**2024-03**。
   - 原文："（燃油重卡）每公里成本约 **3.4 元**；（电动重卡）电费 1.3 元/度，每公里能耗 1.5 度电，成本不足 **2 元**。"
-- ZEFI2050（干线快速补能体系研究）. 《干线快速补能体系建设—重卡换电现状研究报告》（PDF）. URL: https://www.zefi2050.com/core/control/common/down.jsp?filename=/upload/file/2025/05/08/9d36a6b1a9724cb68516e451a3b394e5.pdf 。日期：**2025-05**。
+- ZEFI2050（干线快速补能体系研究）. 《干线快速补能体系建设—重卡换电现状研究报告》（PDF）. URL: https://www.zefi2050.com/models/routing/common/domain/control/common/down.jsp?filename=/upload/file/2025/05/08/9d36a6b1a9724cb68516e451a3b394e5.pdf 。日期：**2025-05**。
   - 原文："49 吨牵引重卡燃油车每公里运营成本约 **2.8 元**……每吨每公里运费约 0.3 元。"
 - 说明：注意以上均为"燃油/能源单成本"（约 2.5–3.4 元/km），并非全成本。按燃油占全成本 30% 反推，重卡全成本约 **8–10 元/km**，与"33211"结构和大宗干线 6.29 元/km（中卡）相互印证。
 
@@ -271,7 +271,7 @@
 14. 卡车之家. 《黄奇帆先生：您关于中国物流成本的判断应该谨慎》（TCO 七要素）（2023-11）. https://www.360che.com/news/231121/185942.html
 15. 人民日报. 《加速！新能源重卡跑向中长途》（2026-01）. https://paper.people.com.cn/rmrb/pc/content/202601/12/content_30131270.html
 16. 中国电力企业联合会. 《新能源重卡成两会热词》（2024-03）. https://www.ceec.net.cn/art/2024/3/16/art_11023_2530822.html
-17. ZEFI2050. 《干线快速补能体系建设—重卡换电现状研究报告》（2025-05）. https://www.zefi2050.com/core/control/common/down.jsp?filename=/upload/file/2025/05/08/9d36a6b1a9724cb68516e451a3b394e5.pdf
+17. ZEFI2050. 《干线快速补能体系建设—重卡换电现状研究报告》（2025-05）. https://www.zefi2050.com/models/routing/common/domain/control/common/down.jsp?filename=/upload/file/2025/05/08/9d36a6b1a9724cb68516e451a3b394e5.pdf
 18. 卡车之家. 《油价猛涨！城配运输"油转电"，成本竟能省一半？》（2026-04）. https://www.360che.com/news/260402/200468.html
 19. 凤凰财经. 《三线城市销量翻倍：新能源物流车在下沉市场倒逼燃油车退场》. https://finance.ifeng.com/c/8tuQUgBhn3T
 20. 开源证券. 《2025 年快递行业深度报告：末端降本三阶段，无人车打开新空间》（2025-07）. https://www.vzkoo.com/read/20250707d13040017ff87ed0f4ca3eaf.html

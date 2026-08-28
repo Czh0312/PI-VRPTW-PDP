@@ -8,8 +8,8 @@
 
 - 随机种子：42。
 - 迭代上限：1,000,000，实际主要受时间限制。
-- 小规模：22个 `small/standard_same_day` 算例，每模型5秒，使用 `config/fleet_config.json`。
-- 大规模：17个可行的 `large/standard_same_day` 算例，每模型10秒，使用独立的 `config/fleet_config_large.json`。其中12个为100客户、5个为200客户。
+- 小规模：22个 `small/standard_same_day` 算例，每模型5秒，使用 `config/routing/validation/zhou_small.json`。
+- 大规模：17个可行的 `large/standard_same_day` 算例，每模型10秒，使用独立的 `config/routing/validation/zhou_large.json`。其中12个为100客户、5个为200客户。
 - 大规模车队：一级车10辆，一级重量/体积容量1500/60；每仓二级车上限25辆，二级重量/体积容量300/5。车辆数是可用上限，并非强制全部派出。
 - 模型6：先运行无中转ALNS，再搜索一次中转；若未发生中转，未使用的阶段二时间返还给基础ALNS。所有输出都由模型自身评估器复核，并从输出路线重新计算距离。
 
@@ -94,10 +94,10 @@
 
 ## 7. 原始数据
 
-- 小规模最终合并结果：`results/model12346_alns_scaling/small_standard_same_day_alns_seed42_final.jsonl`
-- 大规模最终合并结果：`results/model12346_alns_scaling/large_standard_same_day_alns_seed42_final.jsonl`
-- 小规模五模型基线：`results/model12346_alns_scaling/small_standard_same_day_t5_seed42_20260826_174459.jsonl`
-- 小规模修正后M6：`results/model12346_alns_scaling/small_standard_same_day_t5_seed42_20260826_182757.jsonl`
-- 大规模五模型基线：`results/model12346_alns_scaling/large_standard_same_day_t10_seed42_20260826_180915.jsonl`
-- 大规模修正后M6：`results/model12346_alns_scaling/large_standard_same_day_t10_seed42_20260826_182515.jsonl`
-- 独立大规模车队：`config/fleet_config_large.json`
+- 小规模最终合并结果：`output/results/model12346_alns_scaling/small_standard_same_day_alns_seed42_final.jsonl`
+- 大规模最终合并结果：`output/results/model12346_alns_scaling/large_standard_same_day_alns_seed42_final.jsonl`
+- 小规模五模型基线：`output/results/model12346_alns_scaling/small_standard_same_day_t5_seed42_20260826_174459.jsonl`
+- 小规模修正后M6：`output/results/model12346_alns_scaling/small_standard_same_day_t5_seed42_20260826_182757.jsonl`
+- 大规模五模型基线：`output/results/model12346_alns_scaling/large_standard_same_day_t10_seed42_20260826_180915.jsonl`
+- 大规模修正后M6：`output/results/model12346_alns_scaling/large_standard_same_day_t10_seed42_20260826_182515.jsonl`
+- 独立大规模车队：`config/routing/validation/zhou_large.json`

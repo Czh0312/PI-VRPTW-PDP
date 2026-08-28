@@ -45,7 +45,7 @@ Model 4 与 Model 6 都是从 Model 3 扩展出的并列优化机制，不能解
 
 ## 五、口径限制
 
-- 距离口径：Zhou/Solomon-style coordinate units are provisionally treated as kilometers. This is an operating assumption, so absolute currency results require a real-kilometer dataset or a calibrated scale; relative route savings remain valid.；换算系数为 1.0。
+- 距离口径：Zhou later-pickup 坐标单位暂按公里解释，这是一项情景假设；绝对金额需要真实公里数据或校准系数支持，相对路线节省仍可比较。换算系数为 1.0。
 - 成本曲线把同一代表性路线按期重复，用于回本分析，不代表扩展客户规模。
 - 清洗、损耗率和容器池规模是运营假设，需结合敏感性结果报告。
 - 若坐标并非真实公里，绝对金额仅是情景测算；相对路径收益仍然有效。

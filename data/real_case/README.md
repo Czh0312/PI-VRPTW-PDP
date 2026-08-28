@@ -32,8 +32,8 @@ license 字段，因此本项目只保存本地原件和参数摘录，重新分
 ## 重建命令
 
 ```bash
-python scripts/build_lade_real_case.py --fetch-osrm
-python scripts/audit_r3pack_dataset.py
+python tools/data/build_lade_real_case.py --fetch-osrm
+python tools/audit/audit_r3pack_dataset.py
 ```
 
 构建脚本默认只读取杭州分片，不需要下载完整的 LaDe 数据集。

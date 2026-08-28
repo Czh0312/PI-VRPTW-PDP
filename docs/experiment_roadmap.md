@@ -1,247 +1,78 @@
-# 实验主线：小规模精确对比 + 大规模 ALNS
+# 当前实验路线
 
-## 1. 研究目标
+## 1. 目标
 
-本项目的研究目标不是证明所有规模都能精确求解，而是建立两条互补证据链：
+实验分成三条证据链：
 
-1. **小规模精确求解**：证明模型、约束和算法实现是正确的，并给出 ALNS 的最优性缺口；
-2. **大规模 ALNS 求解**：证明当精确方法失效时，启发式仍能稳定求解，并突出自由分配、
-   取送货和中转机制的管理价值。
+1. 小规模精确实验验证模型约束和 ALNS 解质量；
+2. 大规模 ALNS 实验验证算法可扩展性与各机制的边际价值；
+3. LaDe-D 案例把真实道路里程接入生命周期成本模型。
 
-一句话概括：
+当前实验只使用 `data/zhou_later_pickup/` 和 `data/real_case/`，模型范围为 Model 1–6。
 
-> 小规模解决“对不对”，大规模解决“有没有用”。
+## 2. 小规模精确验证
 
-## 2. 主线模型
+数据使用 Zhou Set1 的 7/10/12 客户实例。建议按模型能力分层：
 
-最终建议以 Model 4 / Model 7 为主线，弱化 Model 5 / Model 6：
+| 对比 | 目的 | 主要指标 |
+| --- | --- | --- |
+| M1 vs M2 | 自由分仓对纯配送的影响 | objective、assignment、runtime |
+| M3 vs M4 | 自由分仓对配送—回收的影响 | objective、assignment、runtime |
+| M3 vs M5 vs M6 | 空箱接力/交接的影响 | objective、relay events、runtime |
+| Exact vs ALNS | 启发式解质量 | proven optimum、ALNS gap、命中时间 |
 
-| 角色 | 模型 | 原因 |
-|---|---|---|
-| 核心贡献模型 | M4 = M3 + 顾客自由分配 | 直接体现“顾客归属前置仓是决策”的管理价值 |
-| 大规模求解主力 | M7 / M4 ALNS | 已有稳定 ALNS 框架和大量实验结果 |
-| 精确对照 | M1 / M3 | M1≤50c、M3 50c 可提供可复现精确基准 |
-| 机制消融 | M2 = M1 + 自由分配 | 把“自由分配”从取送货机制中剥离出来 |
-| 中转叙事 | M7 为主，M5/M6 为历史对照 | M5 精确不可扩展；M6 非全局精确 |
+精确求解达到时间限制时必须同时保存 incumbent、best bound 和 gap，并标记为未证明。不得将受限候选集合上的 `OPTIMAL` 当作原问题全局最优。
 
-## 3. 实验设计
+当前批处理入口：
 
-### 3.1 小规模精确对照实验
+```powershell
+python experiments/runs/run_mainline_small_exact.py `
+  --groups small --scenarios standard_same_day --models 1 2 3 4 6
 
-目的：
-
-- 验证自由分配确实降低成本；
-- 验证 ALNS 与精确最优的差距；
-- 检查每个模型的实现一致性。
-
-建议设置：
-
-| 规模 | Exact 基准 | ALNS 对比 | 说明 |
-|---|---|---|---|
-| 5c | M1、M3 | M3、M4、M2 | 快速全量实验 |
-| 10c | M1、M3 | M3、M4、M2 | 核心小规模验证 |
-| 20c | 选择性 | M3、M4、M2 | 精确视算例难度选择 |
-| 50c | 仅代表算例 | M3、M4、M2 | M1/M3 可证，但不宜全量硬跑 |
-
-关键指标：
-
-1. 精确状态 `proven_optimal`；
-2. ALNS 相对精确最优 gap：
-   \[
-   \text{ALNS gap} = \frac{ALNS - Exact}{Exact}\times 100\%.
-   \]
-3. 机制价值：
-   \[
-   \text{Assignment gain} = \frac{M3 - M4}{M3}\times 100\%.
-   \]
-
-注意：
-
-- M4/M2 当前路线列结果只能作为 heuristic incumbent；
-- 不能把 restricted pool optimum 当作精确基准；
-- 若小规模 M4/M2 未全局证明，ALNS gap 应分母使用 M3/M1 或标注为“相对受限池”。
-
-### 3.2 大规模 ALNS 实验
-
-目的：证明 ALNS 的规模能力与机制价值。
-
-建议设置：
-
-| 规模 | 实例 | 模型 | 指标 |
-|---|---|---|---|
-| 50c | 30 个非北京实例 | M3 / M7 / M4 | 可行率、成本、时间 |
-| 100c | 30 个非北京实例 | M3 / M7 / M4 | 可行率、成本、时间 |
-| 北京生鲜 | 3 个实例 | M3 / M7 / M4 | 管理场景案例 |
-
-核心指标：
-
-1. 可行率；
-2. 平均成本；
-3. 多 seed 标准差；
-4. 单位时间成本下降；
-5. 自由分配收益：
-   \[
-   \frac{M3 - M4}{M3}.
-   \]
-6. 中转收益（若保留 M7 叙事）：
-   \[
-   \frac{M3 - M7}{M3}.
-   \]
-
-公平性原则：
-
-- ALNS 按相同时间预算对比，而非相同迭代数；
-- M4 每轮评估更重，按迭代数比较会低估其时间成本；
-- 多 seed 报告均值 ± 标准差；
-- 单模型与 portfolio 分别报告，避免把额外计算时间隐藏在“取最优”中。
-
-### 3.3 消融实验
-
-建议四组：
-
-| 消融 | 对照 | 证明内容 |
-|---|---|---|
-| 固定分配 vs 自由分配 | M3 vs M4 | 顾客归属决策的价值 |
-| 纯配送 vs 取送货 | M2 vs M4 | 回收/取送货机制的额外成本 |
-| 无中转 vs 中转 | M3 vs M7 | 中转试探的价值 |
-| 单策略 vs portfolio | M7 单策略 vs V6 | 算法鲁棒性 |
-
-### 3.4 精确 vs ALNS 交叉表
-
-小规模结果建议按如下形式呈现：
-
-| 规模 | Exact | M4 ALNS | ALNS gap | Assignment gain |
-|---|---:|---:|---:|---:|
-| 5c | ... | ... | ... | ... |
-| 10c | ... | ... | ... | ... |
-
-大规模结果建议按如下形式呈现：
-
-| 规模 | M3 | M7 | M4 | M4 vs M3 | 可行率 |
-|---|---:|---:|---:|---:|---:|
-| 50c | ... | ... | ... | ... | ... |
-| 100c | ... | ... | ... | ... | ... |
-
-## 4. 当前已有资产
-
-### 可直接复用
-
-- `run_comparison.py`：M1/M3/M5/M6 exact/ALNS 批量框架；
-- `experiments/run_model4_vs_model3.py`：M3/M4 ALNS 公平对比；
-- `experiments/run_model3567_all_nonbeijing.py`：M3/M5/M6/M7 全量 ALNS 对比；
-- `experiments/run_model13_exact_vs_alns_m7.py`：exact vs ALNS vs M7 诊断实验；
-- `experiments/run_beijing_alns_comparison.py`：北京场景对比。
-
-### 需要新增的统一实验
-
-当前缺少一个“主线版”统一脚本，建议新增：
-
-```text
-experiments/run_mainline_exact_alns.py
+python experiments/runs/run_small_alns_time_to_exact.py --help
+python experiments/runs/run_model5_model6_exact_comparison.py --help
 ```
 
-功能：
+## 3. 中大规模 ALNS
 
-1. 小规模跑 M1/M3 exact + M3/M7/M4/M2 ALNS；
-2. 中大规模跑 M3/M7/M4/M2 ALNS；
-3. 输出：
-   - machine-readable CSV/JSON；
-   - exact vs ALNS gap 表；
-   - assignment gain 表；
-   - feasibility 表；
-   - 论文图。
+数据使用 Zhou Set2 的 100/200 客户实例。比较 M1、M2、M3、M4、M6，并在相同场景、时间预算和随机种子下报告：
 
-建议 CLI：
+- 可行率；
+- 总距离及 E1/E2 分项；
+- 多 seed 均值与标准差；
+- M2 相对 M1、M4 相对 M3 的自由分仓收益；
+- M6 相对 M3 的交接收益和实际交接次数；
+- 运行时间。
 
-```bash
-PYTHONPYCACHEPREFIX=/tmp/pycache .venv/bin/python \
-  experiments/run_mainline_exact_alns.py \
-  --small-scales 5_customers 10_customers \
-  --large-scales 50_customers 100_customers \
-  --alns-time 30 \
-  --seeds 42 7 99 \
-  --exact-time-small 300 \
-  --exact-instances C101 C201 R101 RC101
+入口：
+
+```powershell
+python main.py compare --scale large --scenario standard_same_day `
+  --time 10 --seed 42 --models 1 2 3 4 6
 ```
 
-### 需要新增的 ALNS 包装
+比较以相同时间预算为主。不同模型单次迭代的计算量不同，不能只用相同迭代数判断优劣。
 
-目前 M4 ALNS 入口与 M3 不同：M3 需要 `e1_tasks/e2_tasks_by_satellite`，
-M4 只需要 `problem + vehicles_per_satellite`。为统一实验脚本，建议实现 adapter：
+## 4. 真实案例成本分析
 
-```text
-models/model_4/alns_adapter.py
-models/model_2/alns_adapter.py
+LaDe-D 杭州案例使用 `config/cases/lade_hz_0829.json` 统一组合实例、车辆参数、成本参数和 OSRM 矩阵。需要报告：
+
+- 各路径机制的公里数与运输成本；
+- 一次性/可循环方案的累计成本曲线；
+- 清洗、追踪、损耗和运输的价值分解；
+- 损耗率等关键参数的敏感性；
+- 所有情景假设与真实观测字段的边界。
+
+```powershell
+python main.py cost --case config/cases/lade_hz_0829.json --time 10 `
+  --output output/economic_analysis_lade_real_0829
 ```
 
-返回统一字段：
+## 5. 报告规则
 
-```python
-{
-    "success": bool,
-    "cost": float | None,
-    "elapsed": float,
-    "e1_routes": ...,
-    "e2_routes_by_sat": ...,
-    "assignment": dict | None,
-    "moved_customers": int | None,
-}
-```
-
-## 5. 实施优先级
-
-### 第一阶段：统一口径和输出
-
-1. 新增 M4/M2 ALNS adapter；
-2. 新增主实验脚本；
-3. 明确 `restricted_pool_optimal` 不进入 Exact 汇总；
-4. 输出 CSV/JSON/Markdown 三份一致结果。
-
-### 第二阶段：小规模校准
-
-1. 5c/10c 全实例跑 exact vs ALNS；
-2. 计算精确 gap；
-3. 抽查路线、成本和分配；
-4. 找出 ALNS 最差算例，为算子调优提供依据。
-
-### 第三阶段：中大规模价值实验
-
-1. 50c/100c 跑 M3/M7/M4；
-2. 多 seed、多时间预算；
-3. 北京案例做场景展示；
-4. 输出论文主图和表。
-
-### 第四阶段：算法消融
-
-1. M4 破坏/修复算子消融；
-2. M7 portfolio 消融；
-3. 不同前置仓数量/容量的敏感性分析。
-
-## 6. 论文叙事建议
-
-建议论文主线写成：
-
-1. **问题背景**：两级生鲜配送 + 前置仓 + 容器回收；
-2. **模型贡献**：顾客-前置仓自由分配内生化；
-3. **算法贡献**：小规模精确求解 + 大规模 ALNS；
-4. **实验设计**：小规模证明正确性，大规模证明价值；
-5. **管理启示**：自由分配提高可行性、降低成本，并可自动关闭低利用前置仓。
-
-不要再把“100c 也能精确”作为主要承诺；应把“100c 精确失效而 ALNS 仍稳定”作为算法价值的证据。
-
-## 7. 结论
-
-当前项目的最优路线是：
-
-```text
-M1/M3 exact（小规模正确性基准）
-        +
-M4/M2 机制消融
-        +
-M7/M4 ALNS（大规模求解能力）
-        =
-小规模精确对比 + 大规模价值验证
-```
-
-M4/M2 的现有路线列结果只能作为启发式 upper bound 或 restricted-pool incumbent，
-不能作为全局精确解引用。
+- 机器可读的 CSV/JSON 与 Markdown 结论必须来源一致；
+- 结果目录保留数据集、场景、模型、seed、预算和时间戳；
+- 只在 `proven_optimal=True` 时计算相对精确最优 gap；
+- 未触发交接时应如实报告“0 次”，不能仅根据模型具备该机制推断收益；
+- Zhou 坐标不直接换算为真实人民币运输成本；真实成本采用 LaDe-D OSRM 公里矩阵；
+- 旧数据和 Model 7 研究记录统一查阅 `archive/`，不混入当前汇总。

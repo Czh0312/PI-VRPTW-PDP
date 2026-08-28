@@ -41,4 +41,4 @@
 
 ## 数据文件
 
-- 明细结果：`results/small_alns_time_to_exact/small_time_to_exact_t20_seed42_20260826_191920.jsonl`
+- 明细结果：`output/results/small_alns_time_to_exact/small_time_to_exact_t20_seed42_20260826_191920.jsonl`

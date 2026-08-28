@@ -18,16 +18,16 @@
 - 冷却方式：按墙钟时间冷却；
 - 停滞处理：停滞重启、升温和确定性局部强化；
 - 命中标准：`ALNS objective <= exact objective + 1e-5`；
-- 车队配置：`config/fleet_config.json`。
+- 车队配置：`config/routing/validation/zhou_small.json`。
 
 主要结果：
 
-- `results/small_alns_tuned_final/small_time_to_exact_t5_starts4_seed42_20260827_163529.jsonl`
-- `results/small_alns_tuned_final/small_time_to_exact_t5_starts4_seed42_20260827_163529.csv`
+- `output/results/small_alns_tuned_final/small_time_to_exact_t5_starts4_seed42_20260827_163529.jsonl`
+- `output/results/small_alns_tuned_final/small_time_to_exact_t5_starts4_seed42_20260827_163529.csv`
 
 对照的旧版 5 秒 ALNS 结果：
 
-- `results/model12346_alns_scaling/small_standard_same_day_alns_seed42_final.jsonl`
+- `output/results/model12346_alns_scaling/small_standard_same_day_alns_seed42_final.jsonl`
 
 ## 3. 最终解质量
 

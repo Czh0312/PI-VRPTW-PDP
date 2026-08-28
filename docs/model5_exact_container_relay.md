@@ -190,9 +190,9 @@ E2 节点的弧，也不会创建跨仓 `TP/TD/RP` 候选；显式传入其他�
 ## 9. 实现入口
 
 ```text
-models/model_5/exact_joint.py   联合 MIP 构造、容器接力约束和解提取
-models/model_5/solver.py        精确求解入口、证明口径和接力明细输出
-experiments/test_model5_exact_relay.py  退化关系与强制接力回归测试
+models/routing/variants/model_5/model.py         联合 MIP 构造、容器接力约束和解提取
+models/routing/variants/model_5/exact_solver.py  精确求解入口、证明口径和接力明细输出
+tests/routing/test_model5_exact.py  退化关系与强制接力回归测试
 ```
 
 规范精确调用：

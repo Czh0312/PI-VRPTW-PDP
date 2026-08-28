@@ -107,7 +107,7 @@ T_{P_c}\ge T_{D_c}+s_{D_c}.
 
 ## 5. 精确性口径
 
-`models.model_6.solver.solve_exact` 默认先解无中转可行上界与零回收载荷严格松弛。
+`models.routing.variants.model_6.exact_solver.solve_exact` 默认先解无中转可行上界与零回收载荷严格松弛。
 在距离满足三角不等式时，任何M6接力路线删除交接专程访问并捷径化后，都会映射为
 一个不更贵的松弛可行解。因此松弛下界等于无中转上界时，可直接证明完整M6最优。
 证书不闭合时，入口再构建上述完整事件集合、同仓全部车辆对和全部合法路线弧；完整
@@ -125,13 +125,13 @@ proof_scope = compact_async_event_handoff_model6
 ## 6. 实现与回归
 
 ```text
-models/model_6/compact_exact.py            模型构造、O/R 弧流与解提取
-models/model_6/solver.py                   严格精确入口与返回契约
-experiments/test_model6_compact_exact.py  退化和强制交接回归
+models/routing/variants/model_6/model.py                    模型构造、O/R 弧流与解提取
+models/routing/variants/model_6/exact_solver.py             严格精确入口与返回契约
+tests/routing/test_model6_exact.py  退化和强制交接回归
 ```
 
 回归命令：
 
 ```powershell
-C:\gurobi\win64\python311\bin\python.exe experiments/test_model6_compact_exact.py
+C:\gurobi\win64\python311\bin\python.exe tests/routing/test_model6_exact.py
 ```

@@ -72,13 +72,13 @@ M4 与 M6 方案差      = T_4 - T_6
 ## 5. 输出与复现
 
 ```bash
-python generate_cost_analysis.py --time 30
+python main.py cost --time 30
 ```
 
 Model 6 中转机制的扩展预算、多种子和逐次中转审计使用：
 
 ```bash
-python scripts/run_m6_transshipment_validation.py \
+python experiments/runs/run_m6_transshipment_validation.py \
   --total-time 90 --stage1-ratio 0.75 --seeds 42 43 44 \
   --sample-pickups 0 --sample-locations 0 \
   --sample-carriers 0 --position-top-k 0
@@ -101,7 +101,7 @@ Model 6 ALNS 的默认时间分配现为第一阶段 75%、中转阶段使用剩
 
 ## 6. 解释限制
 
-Zhou/Solomon 风格坐标不是已核验的道路公里。当前配置暂按 1 坐标单位等于 1 km
+Zhou later-pickup 坐标不是已核验的道路公里。当前配置暂按 1 坐标单位等于 1 km
 进行情景测算，所以绝对金额不能直接作为企业预算；路径间的相对距离差仍可用于评价算法。
 正式论文若报告绝对人民币结果，应改用真实公里数据，或用可追溯的比例尺校准
 `analysis.distance_scale_to_km`。

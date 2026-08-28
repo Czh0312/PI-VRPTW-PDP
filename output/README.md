@@ -3,7 +3,10 @@
 `output/` 是项目唯一的通用输出目录。不要再创建同级的 `outputs/`。
 
 - `experiments/`：启发式实验日志、汇总表和人工分析制品。
+- `results/`：精确求解和批处理产生的机器可读 JSON、JSONL、CSV。
 - `dataset_artifacts/`：数据集工作簿、预览图及其构建/校验脚本。
+- `economic_analysis*/`：成本分析表、图片和 Markdown 报告。
+- `m6_transshipment_validation*/`：真实场景下的 Model 6 中转验证结果。
 
 当前实验总结：
 
@@ -18,5 +21,5 @@
 - `experiments/small_alns_tuned_exact_comparison.md`：补齐关键邻域后的最终
   110组小规模实验；总体平均gap为0.1037%，97/110组命中精确最优。
 
-精确求解批处理产生的机器可读 JSON/CSV 继续保存在 `results/`，以便与通用展示
-制品分开。历史输出不会因为模型重新编号而改写；引用历史结果时仍需检查其编号口径。
+当前只保留可追溯到 `data/zhou_later_pickup/` 或 `data/real_case/` 的结果。
+旧数据集、已移除数据集和无持久化数据源的随机合成算例结果不放在本目录。

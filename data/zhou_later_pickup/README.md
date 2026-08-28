@@ -7,7 +7,7 @@
 来源：<https://github.com/zll-hust/2E-VRPTWSPD>
 
 - 固定来源提交：`084f01f9302ebe4c0a42998167e2238ddc9cd353`
-- 生成脚本：`scripts/generate_zhou_later_pickup_dataset.py`
+- 生成脚本：`tools/data/generate_zhou_later_pickup_dataset.py`
 - 原始快照：`reference/zhou_2E_VRPTWSPD_input/`
 - 实例数：40（Set1 22 个，Set2 18 个）
 - 正向顾客记录：2618
@@ -50,7 +50,7 @@ pickup_due   = pickup_ready + pickup_window_width
 ## 包装与分配假设
 
 - 每名顾客对应 1 个可循环包装容器。
-- 回收重量为 2、回收体积为 1，与 `config/fleet_config.json` 一致。
+- 回收重量为 2、回收体积为 1，与 `config/routing/validation/zhou_small.json` 一致。
 - 为兼容固定分配的 Models 1/3/5/6/7，顾客按欧氏距离预分配到最近前置仓。
 - Models 2/4 可以忽略该预分配并重新优化顾客—前置仓归属。
 

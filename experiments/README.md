@@ -1,18 +1,28 @@
-# experiments 目录说明
+# 实验目录
 
-当前正式数据已经切换到 `data/zhou_later_pickup/`。
+当前实验代码按职责分为：
 
-## 当前入口
+- `runs/`：运行精确、ALNS、模型扩展和交接验证实验；
+- `analysis/`：读取已有结果并生成汇总表；
+- `probes/`：预留给短期诊断探针，当前没有正式探针。
 
-- `run_mainline_small_exact.py`：读取 `small/<scenario>/`，运行 M1/M2/M3/M4
-  小规模精确实验。
-- `run_m4_exact_acceleration.py`：通过 `--dataset` 接收单个 Zhou 小算例。
-- `run_m4_assignment_decomposition.py`：通过 `--dataset` 接收单个 Zhou 小算例。
+正式数据只来自：
 
-## 历史脚本
+- `data/zhou_later_pickup/`：小规模 7/10/12 客户和大规模 100/200 客户；
+- `data/real_case/`：LaDe-D 杭州代表日与 OSRM 道路矩阵。
 
-目录中仍有一批脚本包含 `5_customers`、`C101`、`R101` 或 `beijing_fresh`
-等旧路径。这些脚本保存算法研究过程，但其数据已经删除，不能直接运行。它们需要
-逐个迁移为 Zhou 的 `small/large + scenario + Set1/Set2` 选择方式后，才能重新进入
-当前实验主线。不要通过随意把 C101 映射成某个 Set1/Set2 实例来修复。
+当前主入口：
 
+```powershell
+# 小规模精确批处理
+python experiments/runs/run_mainline_small_exact.py --help
+
+# 中大规模 ALNS 对比
+python experiments/runs/run_model12346_alns_scaling.py --help
+
+# Model 5/6 精确对比与 Model 6 交接验证
+python experiments/runs/run_model5_model6_exact_comparison.py --help
+python experiments/runs/run_m6_transshipment_validation.py --help
+```
+
+历史 C101/R101、北京案例、Model 7、列生成/分支定价探针和旧结果处理脚本位于 `archive/experiments/`。当前脚本应把结果统一写到 `output/`。
