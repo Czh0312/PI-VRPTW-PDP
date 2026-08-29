@@ -26,6 +26,10 @@ from models.routing.alns.types import (
     is_tfp_active,
 )
 from models.routing.alns.engine import ALNSConfig, ALNSHooks, run_alns_search
+from models.routing.alns.assignment_operators import (
+    assignment_boundary_removal,
+    two_satellite_removal,
+)
 from models.routing.alns.initial_solution import (
     build_strong_initial_solution,
     _apply_positions,
@@ -164,6 +168,35 @@ class Evaluator:
             nid: self.e1_task_map[nid]
             for nid in self.e1_del_nodes
         }
+
+        # A fixed-assignment M3 incumbent is already a valid member of M4's
+        # feasible set.  Preserve its complete E1 route structure when it is
+        # still feasible under the rebuilt task catalogue.  The old logic
+        # unconditionally removed and greedily reinserted every pickup, which
+        # could make a warm-started M4 objective worse before ALNS even began.
+        required_all = set(self.e1_task_map)
+        current_all = [
+            nid
+            for route in sol.e1_routes
+            for nid in route.nodes
+        ]
+        complete = (
+            len(sol.e1_routes) <= self.problem.e1_vehicle_count
+            and len(current_all) == len(required_all)
+            and set(current_all) == required_all
+        )
+        if complete and all(
+                self.check_e1_route_feasible(route)
+                for route in sol.e1_routes):
+            base_departures, _ = self.e1_schedule(sol)
+            if base_departures is not None:
+                e2_returns = self._e2_returns(sol)
+                waited_departures, _ = self.e1_schedule(sol, e2_returns)
+                if (waited_departures is not None
+                        and all(abs(waited_departures.get(sat, dep) - dep)
+                                <= FEAS_TOL
+                                for sat, dep in base_departures.items())):
+                    return
 
         # 配送节点集合与重量均未变时保留现有 E1 路线（保留局部改进），
         # 否则按确定性贪心重建。
@@ -541,8 +574,15 @@ def _candidate_seeds(problem):
         if len(sats) > 1:
             second[c.id] = sats[1].id
     seeds.append(nearest)
-    if second:
+    if second and len(problem.customers) <= 20:
         seeds.append(second)
+    if len(problem.customers) <= 20:
+        for satellite in problem.satellites:
+            seeds.append({c.id: satellite.id for c in problem.customers})
+    elif fixed:
+        seeds = [fixed]
+    else:
+        seeds = [nearest]
 
     # 去重（保持确定性）
     seen = set()
@@ -558,6 +598,7 @@ def _candidate_seeds(problem):
 def build_initial_solution(problem, evaluator, TFp=9999.0):
     """多种子构造初始解：优先数据固定分配，其次最近/次近前置仓。"""
     vps = evaluator.vehicles_per_satellite
+    best_feasible = None
     best_any = None
     for seed in _candidate_seeds(problem):
         e1_tasks, e2_tasks_by_sat = build_tasks_from_assignment(problem, seed)
@@ -565,12 +606,14 @@ def build_initial_solution(problem, evaluator, TFp=9999.0):
         sol = build_strong_initial_solution(
             problem, e1_tasks, e2_tasks_by_sat, m3_eval)
         evaluator.rebuild_from_solution(sol)
+        sol.cost = evaluator.total_cost(sol)
         if evaluator.is_feasible(sol):
-            sol.cost = evaluator.total_cost(sol)
-            return sol
-        if best_any is None or evaluator.total_cost(sol) < best_any.cost:
-            best_any = sol
-    return best_any
+            if (best_feasible is None
+                    or sol.cost < best_feasible.cost - FEAS_TOL):
+                best_feasible = sol.copy()
+        if best_any is None or sol.cost < best_any.cost - FEAS_TOL:
+            best_any = sol.copy()
+    return best_feasible or best_any
 
 
 # =====================================================================
@@ -950,19 +993,23 @@ def consolidated_satellite_insertion(sol, removed, evaluator,
 #  E1 局部搜索（M3 的 e1 echelon 有类似作用，M4 需自行补上）
 # =====================================================================
 
-def _e1_local_improve(sol, evaluator, max_rounds=6):
+def _e1_local_improve(sol, evaluator, max_rounds=3, deadline=None):
     """在配送节点集合不变的前提下对 E1 路线做 2-opt 交换。"""
     rounds = 0
     while rounds < max_rounds:
         rounds += 1
         improved = False
         for r in sol.e1_routes:
+            if deadline is not None and time.time() >= deadline:
+                return
             nodes = r.nodes
             n = len(nodes)
             if n < 2:
                 continue
             for i in range(n - 1):
                 for j in range(i + 1, n):
+                    if deadline is not None and time.time() >= deadline:
+                        return
                     t_i = evaluator.e1_task_map.get(nodes[i])
                     t_j = evaluator.e1_task_map.get(nodes[j])
                     if t_i is None or t_j is None:
@@ -981,12 +1028,62 @@ def _e1_local_improve(sol, evaluator, max_rounds=6):
             break
 
 
+def _assignment_first_improvement(sol, evaluator):
+    """Relocate one complete d/p pair using full E1+E2 objective cost."""
+    base_cost = evaluator.total_cost(sol)
+    assignment = evaluator.assignment(sol)
+    customers = list(assignment)
+    random.shuffle(customers)
+    deadline = getattr(evaluator, "_alns_deadline", float("inf"))
+    for customer in customers:
+        if time.time() >= deadline:
+            break
+        current_sat = assignment[customer]
+        removed = sol.copy()
+        _remove_customer(removed, customer)
+        evaluator.rebuild_from_solution(removed)
+        alternatives = [sat for sat in evaluator.sat_ids
+                        if sat != current_sat]
+        random.shuffle(alternatives)
+        for sat_id in alternatives:
+            if time.time() >= deadline:
+                break
+            candidate = _insert_pair_cross_at_sat(
+                removed, evaluator, customer, sat_id)
+            if candidate is None:
+                continue
+            candidate.cost = evaluator.total_cost(candidate)
+            if (candidate.cost < base_cost - FEAS_TOL
+                    and evaluator.is_feasible(candidate)):
+                return candidate
+    evaluator.rebuild_from_solution(sol)
+    return None
+
+
+def _assignment_local_improve(sol, evaluator, max_rounds=3):
+    sol.cost = evaluator.total_cost(sol)
+    for _ in range(max_rounds):
+        candidate = _assignment_first_improvement(sol, evaluator)
+        if candidate is None:
+            break
+        _copy_solution_into(sol, candidate)
+
+
 class M4Hooks(ALNSHooks):
     """每个候选算子后做一次 E1 2-opt 局部改进。"""
 
     def after_operators(self, candidate, evaluator, current_solution,
                         iteration, d_idx, r_idx):
-        _e1_local_improve(candidate, evaluator)
+        customer_count = len(evaluator.problem.customers)
+        cadence = 1 if customer_count <= 20 else 5
+        if iteration % cadence == 0:
+            _e1_local_improve(
+                candidate, evaluator,
+                max_rounds=3 if customer_count <= 20 else 1,
+                deadline=getattr(evaluator, "_alns_deadline", None),
+            )
+        if customer_count <= 20 and iteration % 100 == 0:
+            _assignment_local_improve(candidate, evaluator, max_rounds=1)
 
 
 # =====================================================================
@@ -1019,6 +1116,7 @@ def solve_alns(problem, vehicles_per_satellite, TFp=9999.0,
                   "从该种子继续搜索（分配自由度可恢复可行性）")
 
     sol.cost = evaluator.total_cost(sol)
+    initial_objective = float(sol.cost)
     best_sol = sol.copy()
     best_cost = sol.cost
 
@@ -1044,6 +1142,8 @@ def solve_alns(problem, vehicles_per_satellite, TFp=9999.0,
             worst_customer_removal,
             shaw_customer_removal,
             satellite_cluster_removal,
+            assignment_boundary_removal,
+            two_satellite_removal,
         ],
         repair_ops=[multi_sat_insertion, multi_sat_insertion_cross,
                     randomized_satellite_insertion,
@@ -1093,11 +1193,13 @@ def solve_alns(problem, vehicles_per_satellite, TFp=9999.0,
         "iterations": int(result.iterations), "feasible": feasible,
         "status": "FEASIBLE" if feasible else "NO_SOLUTION",
         "external_initial_solution": initial_solution is not None,
+        "initial_objective": initial_objective,
         "best_found_time": result.best_found_time,
         "target_hit_time": result.target_hit_time,
         "termination_reason": result.termination_reason,
         "restarts": result.restarts,
         "local_search_improvements": result.local_search_improvements,
+        "alns_diagnostics": result.diagnostics,
     }
     return ((e1_routes_out, e2_routes_out, assignment, info) if return_info
             else (e1_routes_out, e2_routes_out, assignment))

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Run the small-scale certified-exact benchmark for Models 1/2/3/4/5/6.
+"""Run the small-scale certified-exact benchmark for Models 1--7.
 
 The output is append-only JSONL plus a compact CSV summary.  Only results with
 ``proven_optimal=True`` are counted as exact; time-limit incumbents are retained
@@ -28,8 +28,10 @@ from models.routing.variants.model_3.exact_solver import solve_exact as solve_m3
 from models.routing.variants.model_4.exact_solver import solve_exact as solve_m4
 from models.routing.variants.model_5.exact_solver import solve_exact as solve_m5
 from models.routing.variants.model_6.exact_solver import solve_exact as solve_m6
+from models.routing.variants.model_7.exact_solver import solve_exact as solve_m7
 from models.routing.common.data_loader import parse_dataset
 from models.routing.common.task_builder import build_tasks_for_model
+from models.routing.common.solution_audit import audit_exact_solution
 
 
 def _fleet():
@@ -65,6 +67,8 @@ def _record(model, scale_group, scenario, instance, info, elapsed, problem):
         "scale_group": scale_group,
         "scenario": scenario,
         "instance": instance,
+        "customers": len(problem.customers),
+        "satellites": len(problem.satellites),
         "status": str(info.get("status")),
         "proven_optimal": bool(info.get("proven_optimal")),
         "solution_type": info.get("solution_type"),
@@ -77,6 +81,15 @@ def _record(model, scale_group, scenario, instance, info, elapsed, problem):
         "formulation": info.get("formulation"),
         "proof_scope": info.get("proof_scope"),
         "transshipment_count": info.get("transshipment_count"),
+        "assignment": info.get("assignment"),
+        "assignment_partitions_total": info.get("assignment_partitions_total"),
+        "assignment_partitions_evaluated": info.get(
+            "assignment_partitions_evaluated"),
+        "certificate_type": (info.get("certificate") or {}).get("type"),
+        "route_audit_valid": info.get("route_audit_valid"),
+        "route_objective": info.get("route_objective"),
+        "route_objective_delta": info.get("route_objective_delta"),
+        "route_audit_errors": info.get("route_audit_errors"),
         **_fleet_fields(problem),
     }
 
@@ -132,6 +145,20 @@ def solve_one(model, problem, time_limit, warm_start_routes=None,
             warm_start_routes=warm_start_routes,
             gurobi_params=gurobi_params,
         )
+        routes = (r1, r2)
+    elif model == 7:
+        r1, r2, assignment, info = solve_m7(
+            problem,
+            vehicles_per_satellite=vps,
+            TFp=9999.0,
+            time_limit=time_limit,
+            verbose=False,
+            return_info=True,
+            return_incumbent_on_time_limit=True,
+            gurobi_params=gurobi_params,
+            m4_formulation_options=m4_formulation_options,
+        )
+        info["assignment"] = assignment
         routes = (r1, r2)
     else:
         raise ValueError(model)
@@ -222,10 +249,15 @@ def main():
                 )
 
     # Records were appended as they completed, so JSONL survives interruption.
-    fields = ["model", "scale_group", "scenario", "instance", "status",
+    fields = ["model", "scale_group", "scenario", "instance", "customers",
+              "satellites", "status",
               "proven_optimal", "solution_type", "objective", "best_bound",
               "mip_gap", "runtime", "wall_time", "sol_count",
               "formulation", "proof_scope", "transshipment_count",
+              "assignment", "assignment_partitions_total",
+              "assignment_partitions_evaluated", "certificate_type",
+              "route_audit_valid", "route_objective",
+              "route_objective_delta", "route_audit_errors",
               "e1_vehicle_count", "e1_weight_capacity",
               "e1_container_capacity", "e2_vehicles_per_satellite",
               "e2_weight_capacity", "e2_container_capacity",
@@ -259,6 +291,15 @@ def main():
     # Any relationship violation is an implementation warning, not silent data.
     if any(not row[3] for rows in checks.values() for row in rows):
         sys.exit(2)
+    audit_failures = [
+        (rec["instance"], rec["model"], rec.get("route_audit_errors"))
+        for rec in records
+        if rec.get("proven_optimal") and rec.get("model") in (1, 2, 3, 4)
+        and rec.get("route_audit_valid") is not True
+    ]
+    if audit_failures:
+        print(f"Route-audit failures: {audit_failures}")
+        sys.exit(3)
 
 
 def run_instance(path, scale_group, scenario, args, fleet, gurobi_params,
@@ -279,6 +320,16 @@ def run_instance(path, scale_group, scenario, args, fleet, gurobi_params,
             )
             if model == 3 and routes[0] is not None:
                 m3_routes = routes
+            if model in (1, 2, 3, 4) and routes[0] is not None:
+                audit = audit_exact_solution(
+                    problem, model, routes[0], routes[1],
+                    assignment=info.get("assignment"),
+                    objective=info.get("objective"), tfp=9999.0,
+                )
+                info["route_audit_valid"] = audit["valid"]
+                info["route_objective"] = audit["route_objective"]
+                info["route_objective_delta"] = audit["objective_delta"]
+                info["route_audit_errors"] = audit["errors"]
             rec = _record(
                 model, scale_group, scenario, path.stem, info,
                 time.perf_counter() - started, problem,
@@ -287,6 +338,8 @@ def run_instance(path, scale_group, scenario, args, fleet, gurobi_params,
             rec = {
                 "model": model, "scale_group": scale_group,
                 "scenario": scenario, "instance": path.stem,
+                "customers": len(problem.customers),
+                "satellites": len(problem.satellites),
                 "status": "SCRIPT_ERROR", "proven_optimal": False,
                 "solution_type": "script_error", "objective": None,
                 "best_bound": None, "mip_gap": None, "runtime": None,

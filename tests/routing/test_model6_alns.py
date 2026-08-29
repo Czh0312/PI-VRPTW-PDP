@@ -3,12 +3,87 @@
 from pathlib import Path
 
 from models.routing.common.domain.instance import ProblemInstance
-from models.routing.alns.variants.model_6 import solve_alns as solve_m6
+from models.routing.alns.variants.model_6 import (
+    _undo_transshipment,
+    solve_alns as solve_m6,
+)
+from models.routing.alns.variants import model_6 as model6_module
+from models.routing.alns.types import Route, Solution
 from models.routing.common.data_loader import parse_dataset
 from models.routing.common.task_builder import build_tasks_for_model
 
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_m6_handoff_can_be_removed_for_exchange_search():
+    sol = Solution()
+    pickup = "C1p"
+    old_phys, new_phys = "C1", "C2"
+    pick_virtual = f"TRANS_PICK_{pickup}@{old_phys}"
+    drop_virtual = f"TRANS_DROP_{pickup}@{new_phys}"
+    carrier = Route("S0", [pick_virtual, drop_virtual])
+    carrier.transport_loads = {
+        pick_virtual: (2.0, 1.0), drop_virtual: (2.0, 1.0)}
+    sol.e2_routes = {"S0": [Route("S0", [pickup]), carrier]}
+    sol.task_to_phys = {pickup: new_phys}
+    key = ("S0", 0, pickup, new_phys)
+    sol.transshipments[key] = (old_phys, 1, 2.0, 1.0)
+
+    class Evaluator:
+        task_to_phys = {}
+
+        @staticmethod
+        def total_cost(_solution):
+            return 0.0
+
+        @staticmethod
+        def is_feasible(_solution):
+            return True
+
+    evaluator = Evaluator()
+    assert _undo_transshipment(sol, evaluator, key)
+    assert not sol.transshipments
+    assert sol.task_to_phys[pickup] == old_phys
+    cleaned_carrier = sol.e2_routes["S0"][1]
+    assert cleaned_carrier.nodes == []
+    assert cleaned_carrier.transport_loads == {}
+
+
+def test_m6_pure_removal_exchange_does_not_expand_false_as_audit_event(monkeypatch):
+    """An exchange can improve solely by deleting an existing handoff."""
+    sol = Solution()
+    sol.task_to_phys = {}
+
+    class Evaluator:
+        task_to_phys = {}
+
+        @staticmethod
+        def total_cost(_solution):
+            return 10.0
+
+    evaluator = Evaluator()
+    monkeypatch.setattr(
+        model6_module, "_search_and_apply_relocation",
+        lambda *_args, **_kwargs: False)
+    exchanges = iter([
+        {
+            "removed_key": ("S0", 0, "C1p", "C2"),
+            "added": False,
+            "before_cost": 12.0,
+            "after_cost": 10.0,
+        },
+        False,
+    ])
+    monkeypatch.setattr(
+        model6_module, "_search_and_apply_transshipment_exchange",
+        lambda *_args, **_kwargs: next(exchanges))
+    audit = [{"pickup_node": "C1p"}]
+
+    model6_module.postprocess_transshipment(
+        sol, evaluator, verbose=False, time_budget=1.0, audit_log=audit)
+
+    assert audit == []
 
 
 def test_m6_reports_same_run_before_after_identity():

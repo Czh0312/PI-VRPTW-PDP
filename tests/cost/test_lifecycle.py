@@ -83,6 +83,19 @@ def test_parallel_reusable_models_are_selected_by_transport_cost():
     assert select_reusable_route(metrics, PARAMS, ["m3", "m4", "m6"]) == "m6"
 
 
+def test_six_model_cost_selection_keeps_packaging_sides_separate():
+    metrics = {
+        "m1": RouteMetrics(100, e1_distance_km=10, e2_distance_km=20),
+        "m2": RouteMetrics(100, e1_distance_km=9, e2_distance_km=18),
+        "m3": RouteMetrics(100, e1_distance_km=12, e2_distance_km=25),
+        "m4": RouteMetrics(100, e1_distance_km=11, e2_distance_km=22),
+        "m6": RouteMetrics(100, e1_distance_km=12, e2_distance_km=24),
+        "m7": RouteMetrics(100, e1_distance_km=10, e2_distance_km=21),
+    }
+    assert select_reusable_route(metrics, PARAMS, ["m1", "m2"]) == "m2"
+    assert select_reusable_route(metrics, PARAMS, ["m3", "m4", "m6", "m7"]) == "m7"
+
+
 if __name__ == "__main__":
     test_value_identity_and_break_even()
     test_no_break_even_when_variable_saving_is_negative()

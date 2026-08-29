@@ -12,6 +12,10 @@ from models.routing.alns.types import (
 )
 from models.routing.alns.engine import ALNSConfig, run_alns_search
 from models.routing.alns.initial_solution import build_strong_initial_solution
+from models.routing.alns.paired_operators import (
+    insert_complete_customer_pairs,
+    route_customer_pair_removal,
+)
 
 
 # =====================================================================
@@ -719,13 +723,22 @@ def regret_insertion(sol, removed, evaluator, echelon='e2', k=2):
         greedy_insertion(sol, removed, evaluator, echelon='e1')
 
 
+def paired_insertion(sol, removed, evaluator, echelon='e2', k=2):
+    """Repair complete customer pairs jointly, including cross-route pairs."""
+    if echelon != 'e2':
+        return greedy_insertion(sol, removed, evaluator, echelon=echelon)
+    residual = insert_complete_customer_pairs(sol, removed, evaluator)
+    if residual:
+        greedy_insertion(sol, residual, evaluator, echelon='e2')
+
+
 # =====================================================================
 #  ALNS 主循环
 # =====================================================================
 
 def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
                TFp=9999.0, max_iterations=5000, max_time=120,
-               seed=42, verbose=True, strong_initial_solution=False,
+               seed=42, verbose=True, strong_initial_solution=True,
                return_info=False, target_objective=None,
                target_tolerance=1e-6, alns_config_overrides=None):
     random.seed(seed)
@@ -766,8 +779,8 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         initial_solution=sol,
         evaluator=evaluator,
         destroy_ops=[random_removal, worst_removal, shaw_removal,
-                     paired_customer_removal],
-        repair_ops=[greedy_insertion, regret_insertion],
+                     paired_customer_removal, route_customer_pair_removal],
+        repair_ops=[greedy_insertion, regret_insertion, paired_insertion],
         config=ALNSConfig(max_iterations=max_iterations, max_time=max_time,
                           target_cost=target_objective,
                           target_tolerance=target_tolerance,
@@ -808,6 +821,7 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         "termination_reason": result.termination_reason,
         "restarts": result.restarts,
         "local_search_improvements": result.local_search_improvements,
+        "alns_diagnostics": result.diagnostics,
     }
     return ((e1_routes_out, e2_routes_out, info) if return_info
             else (e1_routes_out, e2_routes_out))

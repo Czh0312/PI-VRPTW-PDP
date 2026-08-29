@@ -5,6 +5,7 @@
 """
 import argparse
 import io
+import json
 import time
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -20,6 +21,7 @@ from models.routing.catalog import require_model_number
 from models.routing.service import solve_routing
 from models.routing.common.data_loader import parse_dataset
 from models.routing.common.task_builder import build_tasks_for_model
+from models.routing.common.solution_audit import audit_exact_solution
 from reporting.route_plot import plot_vrp_solution
 
 
@@ -64,6 +66,10 @@ def main(argv=None):
         fleet_cfg = load_json(args.fleet_config)
 
     model = require_model_number(app_cfg["model"])
+    if model == 7:
+        # Model 7 needs a meaningful relay phase even when the shared M6
+        # configuration allocates almost all time to its first stage.
+        stage1_time_ratio = app_cfg.get("model7_stage1_time_ratio", 0.75)
     data_file = app_cfg["data"]
     solver = app_cfg["solver"]
     alns_iter = app_cfg.get("alns_iter", 5000)
@@ -93,6 +99,7 @@ def main(argv=None):
     run_prefix = f"run_model{model:02d}_{solver}_{data_stem}"
     log_path = routes_dir / f"{run_prefix}_routes_detail.txt"
     img_path = figures_dir / f"{run_prefix}_solution_route_map.png"
+    certificate_path = routes_dir / f"{run_prefix}_certificate.json"
 
     print("=" * 60)
     print("启动 2E-VRP 求解引擎")
@@ -128,6 +135,25 @@ def main(argv=None):
             transshipment_max_per_satellite=transshipment_max_per_satellite,
         )
     e1_routes, e2_routes_by_sat_res = solver_result[0], solver_result[1]
+    exact_info = None
+    exact_assignment = None
+    route_audit = None
+    if solver == "exact":
+        if solver_result and isinstance(solver_result[-1], dict):
+            exact_info = solver_result[-1]
+        if model in (2, 4, 7) and len(solver_result) >= 4:
+            exact_assignment = solver_result[2]
+        if (
+            model in (1, 2, 3, 4)
+            and e1_routes is not None
+            and e2_routes_by_sat_res is not None
+        ):
+            route_audit = audit_exact_solution(
+                problem, model, e1_routes, e2_routes_by_sat_res,
+                assignment=exact_assignment,
+                objective=(exact_info or {}).get("objective"),
+                tfp=app_cfg.get("TFp", 9999.0),
+            )
     run_time = time.time() - start_time
 
     # 写入日志文件
@@ -139,13 +165,55 @@ def main(argv=None):
         f.write("=" * 60 + "\n\n")
         f.write(log_content)
 
+    if solver == "exact":
+        exact_info = exact_info or {}
+        certificate = {
+            "model": model,
+            "data_file": str(data_path),
+            "status": exact_info.get("status"),
+            "status_code": exact_info.get("status_code"),
+            "solution_type": exact_info.get("solution_type"),
+            "proven_optimal": bool(exact_info.get("proven_optimal")),
+            "objective": exact_info.get("objective"),
+            "best_bound": exact_info.get("best_bound"),
+            "mip_gap": exact_info.get("mip_gap"),
+            "runtime": exact_info.get("runtime"),
+            "wall_time": run_time,
+            "sol_count": exact_info.get("sol_count"),
+            "proof_scope": exact_info.get("proof_scope"),
+            "formulation": exact_info.get("formulation"),
+            "assignment": exact_assignment,
+            "route_audit": route_audit,
+        }
+        with open(certificate_path, "w", encoding="utf-8") as f:
+            json.dump(certificate, f, ensure_ascii=False, indent=2)
+
     # 终端简要输出
-    if e1_routes:
+    exact_certified = bool(
+        exact_info
+        and exact_info.get("proven_optimal")
+        and (route_audit is None or route_audit.get("valid"))
+    )
+    if solver == "exact" and exact_certified:
+        print(
+            f"[OK] 已证明全局最优 | 耗时: {run_time:.2f}s | "
+            f"目标值: {exact_info.get('objective'):.6f} | "
+            f"Gap: {exact_info.get('mip_gap'):.3%}"
+        )
+    elif solver == "exact":
+        print(
+            f"[FAILED] 精确证明未闭合 | 耗时: {run_time:.2f}s | "
+            f"状态: {(exact_info or {}).get('status')} | "
+            f"路线审计: {None if route_audit is None else route_audit.get('valid')}"
+        )
+    elif e1_routes:
         print(f"[OK] 求解成功 | 耗时: {run_time:.2f}s | E1 路线: {len(e1_routes)} 条")
     else:
         print(f"[FAILED] 未找到可行解 | 耗时: {run_time:.2f}s")
 
     print(f"[OK] 路径日志已保存: {log_path}")
+    if solver == "exact":
+        print(f"[OK] 精确证书已保存: {certificate_path}")
 
     # 绘制路径图
     if e1_routes and e2_routes_by_sat_res:

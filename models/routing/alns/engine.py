@@ -10,6 +10,7 @@
 from dataclasses import dataclass
 import math
 import random
+import statistics
 import time
 
 from models.routing.alns.types import _roulette, clean_empty_routes, FEAS_TOL
@@ -20,6 +21,8 @@ class ALNSConfig:
     max_iterations: int = 5000
     max_time: float = 120
     segment_size: int = 100
+    segment_time: float | None = 1.0
+    min_segment_uses: int = 10
     sigma1: float = 33
     sigma2: float = 9
     sigma3: float = 3
@@ -31,9 +34,15 @@ class ALNSConfig:
     target_tolerance: float = 1e-6
     cooling_schedule: str = "time"
     stagnation_time: float | None = None
+    stagnation_fraction: float | None = 0.30
     reheat_fraction: float = 0.5
-    max_restarts: int = 0
+    max_restarts: int = 2
     intensification_time: float = 0.0
+    intensification_fraction: float = 0.08
+    temperature_target_acceptance: float = 0.50
+    temperature_calibration_samples: int = 20
+    reward_time_exponent: float = 0.5
+    operator_weight_floor: float = 0.05
 
 
 @dataclass
@@ -48,6 +57,7 @@ class ALNSResult:
     termination_reason: str
     restarts: int
     local_search_improvements: int
+    diagnostics: dict
 
 
 class ALNSHooks:
@@ -254,12 +264,26 @@ def run_alns_search(initial_solution, evaluator, destroy_ops, repair_ops,
 
     n_d = len(destroy_ops)
     n_r = len(repair_ops)
-    d_weights = [1.0] * n_d
-    r_weights = [1.0] * n_r
-    d_scores = [0.0] * n_d
-    r_scores = [0.0] * n_r
-    d_counts = [0] * n_d
-    r_counts = [0] * n_r
+    # Learn destroy-repair *pairs*. Crediting the two operators separately
+    # hides interactions: one destroy may work well with one repair and poorly
+    # with another.
+    n_pairs = n_d * n_r
+    pair_weights = [1.0] * n_pairs
+    pair_scores = [0.0] * n_pairs
+    pair_counts = [0] * n_pairs
+    pair_times = [0.0] * n_pairs
+    pair_totals = [
+        {
+            "attempts": 0,
+            "feasible": 0,
+            "accepted": 0,
+            "improving": 0,
+            "new_best": 0,
+            "infeasible": 0,
+            "runtime": 0.0,
+        }
+        for _ in range(n_pairs)
+    ]
 
     t_start = max(sol.cost * 0.05, 10.0)
     t_end = config.temperature_end
@@ -269,6 +293,10 @@ def run_alns_search(initial_solution, evaluator, destroy_ops, repair_ops,
     )
     phase_start_elapsed = time.time() - start_time
     phase_start_temperature = t_start
+    positive_deltas = []
+    temperature_calibrated = False
+    weight_updates = 0
+    last_weight_update_elapsed = phase_start_elapsed
     last_best_elapsed = best_found_time or phase_start_elapsed
     last_restart_elapsed = phase_start_elapsed
     restarts = 0
@@ -277,6 +305,62 @@ def run_alns_search(initial_solution, evaluator, destroy_ops, repair_ops,
     total_e1, total_e2 = _task_counts(sol)
     iteration = -1
     termination_reason = "target" if target_hit_time is not None else "iterations"
+    stagnation_limit = config.stagnation_time
+    if (stagnation_limit is None
+            and config.stagnation_fraction is not None):
+        stagnation_limit = max(
+            0.05, config.max_time * config.stagnation_fraction)
+    intensification_limit = config.intensification_time
+    if intensification_limit <= 0 and config.intensification_fraction > 0:
+        intensification_limit = max(
+            0.01, config.max_time * config.intensification_fraction)
+
+    def update_pair_weights(elapsed, force=False):
+        """Update weights after enough evidence or elapsed wall-clock time."""
+        nonlocal pair_scores, pair_counts, pair_times
+        nonlocal last_weight_update_elapsed, weight_updates
+        uses = sum(pair_counts)
+        count_trigger = config.segment_size > 0 and uses >= config.segment_size
+        time_trigger = (
+            config.segment_time is not None
+            and config.segment_time > 0
+            and uses >= max(1, config.min_segment_uses)
+            and elapsed - last_weight_update_elapsed >= config.segment_time
+        )
+        if not force and not count_trigger and not time_trigger:
+            return False
+        if uses <= 0:
+            return False
+
+        used_avg_times = [
+            pair_times[i] / pair_counts[i]
+            for i in range(n_pairs)
+            if pair_counts[i] > 0 and pair_times[i] > 0
+        ]
+        median_time = (statistics.median(used_avg_times)
+                       if used_avg_times else 1.0)
+        for i in range(n_pairs):
+            if pair_counts[i] <= 0:
+                continue
+            quality = pair_scores[i] / pair_counts[i]
+            avg_time = pair_times[i] / pair_counts[i]
+            time_factor = 1.0
+            if avg_time > 0 and median_time > 0:
+                time_factor = (median_time / avg_time) ** max(
+                    0.0, config.reward_time_exponent)
+                time_factor = min(4.0, max(0.25, time_factor))
+            target_weight = quality * time_factor
+            pair_weights[i] = max(
+                config.operator_weight_floor,
+                config.decay * pair_weights[i]
+                + (1 - config.decay) * target_weight,
+            )
+        pair_scores = [0.0] * n_pairs
+        pair_counts = [0] * n_pairs
+        pair_times = [0.0] * n_pairs
+        last_weight_update_elapsed = elapsed
+        weight_updates += 1
+        return True
 
     for iteration in range(0 if target_hit_time is not None
                            else config.max_iterations):
@@ -298,15 +382,15 @@ def run_alns_search(initial_solution, evaluator, destroy_ops, repair_ops,
                 t_end / phase_start_temperature) ** phase_progress
 
         stagnation_anchor = max(last_best_elapsed, last_restart_elapsed)
-        if (config.stagnation_time is not None
-                and config.stagnation_time > 0
+        if (stagnation_limit is not None
+                and stagnation_limit > 0
                 and best_sol is not None
                 and restarts < config.max_restarts
-                and elapsed_now - stagnation_anchor >= config.stagnation_time):
-            if config.intensification_time > 0:
+                and elapsed_now - stagnation_anchor >= stagnation_limit):
+            if intensification_limit > 0:
                 deadline = min(
                     start_time + config.max_time,
-                    time.time() + config.intensification_time)
+                    time.time() + intensification_limit)
                 intensified, improvement_count = _intensify(
                     best_sol, evaluator, deadline)
                 local_search_improvements += improvement_count
@@ -324,12 +408,9 @@ def run_alns_search(initial_solution, evaluator, destroy_ops, repair_ops,
             sol = best_sol.copy()
             current_is_feasible = True
             hooks.after_accept(evaluator, sol)
-            d_weights = [1.0] * n_d
-            r_weights = [1.0] * n_r
-            d_scores = [0.0] * n_d
-            r_scores = [0.0] * n_r
-            d_counts = [0] * n_d
-            r_counts = [0] * n_r
+            # Preserve both learned weights and the open observation segment.
+            # Resetting segment evidence here can prevent expensive models
+            # from ever reaching a wall-clock or attempt-count update.
             restarts += 1
             last_restart_elapsed = elapsed_now
             phase_start_elapsed = elapsed_now
@@ -337,10 +418,11 @@ def run_alns_search(initial_solution, evaluator, destroy_ops, repair_ops,
                 temperature, t_start * config.reheat_fraction)
             temperature = phase_start_temperature
 
-        d_idx = _roulette(d_weights)
-        r_idx = _roulette(r_weights)
-        d_counts[d_idx] += 1
-        r_counts[r_idx] += 1
+        pair_idx = _roulette(pair_weights)
+        d_idx, r_idx = divmod(pair_idx, n_r)
+        pair_counts[pair_idx] += 1
+        pair_totals[pair_idx]["attempts"] += 1
+        attempt_started = time.perf_counter()
 
         if random.random() < config.e2_probability and total_e2 > 0:
             echelon = 'e2'
@@ -362,19 +444,34 @@ def run_alns_search(initial_solution, evaluator, destroy_ops, repair_ops,
 
         if (hooks.check_feasibility_after_cost
                 and not evaluator.is_feasible(candidate)):
+            attempt_runtime = time.perf_counter() - attempt_started
+            pair_times[pair_idx] += attempt_runtime
+            pair_totals[pair_idx]["runtime"] += attempt_runtime
+            pair_totals[pair_idx]["infeasible"] += 1
             hooks.after_infeasible(evaluator, sol)
             if config.cooling_schedule == "iteration":
                 temperature *= cooling_rate
+            update_pair_weights(time.time() - start_time)
             continue
 
         candidate.cost = evaluator.total_cost(candidate)
         hooks.after_cost(candidate, evaluator, sol, iteration)
 
         if not evaluator.is_feasible(candidate):
+            attempt_runtime = time.perf_counter() - attempt_started
+            pair_times[pair_idx] += attempt_runtime
+            pair_totals[pair_idx]["runtime"] += attempt_runtime
+            pair_totals[pair_idx]["infeasible"] += 1
             hooks.after_infeasible(evaluator, sol)
             if config.cooling_schedule == "iteration":
                 temperature *= cooling_rate
+            update_pair_weights(time.time() - start_time)
             continue
+
+        attempt_runtime = time.perf_counter() - attempt_started
+        pair_times[pair_idx] += attempt_runtime
+        pair_totals[pair_idx]["runtime"] += attempt_runtime
+        pair_totals[pair_idx]["feasible"] += 1
 
         # Free-assignment models may deliberately start from an infeasible
         # assignment and repair it through their first destroy/repair move.
@@ -388,8 +485,8 @@ def run_alns_search(initial_solution, evaluator, destroy_ops, repair_ops,
                 best_cost = candidate.cost
                 best_found_time = time.time() - start_time
                 last_best_elapsed = best_found_time
-                d_scores[d_idx] += config.sigma1
-                r_scores[r_idx] += config.sigma1
+                pair_scores[pair_idx] += config.sigma1
+                pair_totals[pair_idx]["new_best"] += 1
                 if (config.target_cost is not None
                         and best_cost <= (config.target_cost
                                           + config.target_tolerance)):
@@ -398,19 +495,36 @@ def run_alns_search(initial_solution, evaluator, destroy_ops, repair_ops,
                     break
             if config.cooling_schedule == "iteration":
                 temperature *= cooling_rate
+            pair_totals[pair_idx]["accepted"] += 1
+            update_pair_weights(time.time() - start_time)
             continue
 
         delta = candidate.cost - sol.cost
+        if delta > FEAS_TOL and not temperature_calibrated:
+            positive_deltas.append(delta)
+            sample_count = max(1, config.temperature_calibration_samples)
+            if len(positive_deltas) >= sample_count:
+                target_acceptance = config.temperature_target_acceptance
+                if 0.0 < target_acceptance < 1.0:
+                    typical_delta = statistics.median(positive_deltas)
+                    calibrated = -typical_delta / math.log(target_acceptance)
+                    if math.isfinite(calibrated) and calibrated > 1e-10:
+                        temperature = calibrated
+                        phase_start_temperature = calibrated
+                        phase_start_elapsed = time.time() - start_time
+                        temperature_calibrated = True
         if delta < -FEAS_TOL:
             sol = candidate
             hooks.after_accept(evaluator, sol)
+            pair_totals[pair_idx]["accepted"] += 1
+            pair_totals[pair_idx]["improving"] += 1
             if sol.cost < best_cost - FEAS_TOL:
                 best_sol = sol.copy()
                 best_cost = sol.cost
                 best_found_time = time.time() - start_time
                 last_best_elapsed = best_found_time
-                d_scores[d_idx] += config.sigma1
-                r_scores[r_idx] += config.sigma1
+                pair_scores[pair_idx] += config.sigma1
+                pair_totals[pair_idx]["new_best"] += 1
                 if verbose and iteration % 100 == 0:
                     extra = hooks.new_best_extra(best_sol)
                     print(f"  [{iteration:5d}] ★ 新最优: {best_cost:.2f}{extra}")
@@ -421,45 +535,55 @@ def run_alns_search(initial_solution, evaluator, destroy_ops, repair_ops,
                     termination_reason = "target"
                     break
             else:
-                d_scores[d_idx] += config.sigma2
-                r_scores[r_idx] += config.sigma2
+                pair_scores[pair_idx] += config.sigma2
         elif temperature > 1e-10:
             prob = math.exp(-delta / temperature)
             if random.random() < prob:
                 sol = candidate
                 hooks.after_accept(evaluator, sol)
-                d_scores[d_idx] += config.sigma3
-                r_scores[r_idx] += config.sigma3
+                # Do not reward structural no-ops merely because exp(0)=1.
+                # Equal-cost candidates may still be accepted for diversity.
+                if delta > FEAS_TOL:
+                    pair_scores[pair_idx] += config.sigma3
+                pair_totals[pair_idx]["accepted"] += 1
 
         if config.cooling_schedule == "iteration":
             temperature *= cooling_rate
 
-        if (iteration + 1) % config.segment_size == 0:
-            for i in range(n_d):
-                if d_counts[i] > 0:
-                    d_weights[i] = (
-                        config.decay * d_weights[i] +
-                        (1 - config.decay) * d_scores[i] / d_counts[i]
-                    )
-                d_scores[i] = 0.0
-                d_counts[i] = 0
-            for i in range(n_r):
-                if r_counts[i] > 0:
-                    r_weights[i] = (
-                        config.decay * r_weights[i] +
-                        (1 - config.decay) * r_scores[i] / r_counts[i]
-                    )
-                r_scores[i] = 0.0
-                r_counts[i] = 0
-
-            if verbose:
-                elapsed = time.time() - start_time
-                extra = hooks.progress_extra(sol, best_sol)
-                print(f"  [{iteration + 1:5d}] cost={sol.cost:.2f}  "
-                      f"best={best_cost:.2f}  T={temperature:.4f}  "
-                      f"{extra}time={elapsed:.1f}s")
+        weights_changed = update_pair_weights(time.time() - start_time)
+        if weights_changed and verbose:
+            elapsed = time.time() - start_time
+            extra = hooks.progress_extra(sol, best_sol)
+            print(f"  [{iteration + 1:5d}] cost={sol.cost:.2f}  "
+                  f"best={best_cost:.2f}  T={temperature:.4f}  "
+                  f"{extra}time={elapsed:.1f}s")
 
     elapsed = time.time() - start_time
+    online_weight_updates = weight_updates
+    update_pair_weights(elapsed, force=True)
+    pair_diagnostics = []
+    for pair_idx, totals in enumerate(pair_totals):
+        d_idx, r_idx = divmod(pair_idx, n_r)
+        attempts = totals["attempts"]
+        feasible = totals["feasible"]
+        pair_diagnostics.append({
+            "destroy_index": d_idx,
+            "destroy": getattr(destroy_ops[d_idx], "__name__", str(d_idx)),
+            "repair_index": r_idx,
+            "repair": getattr(repair_ops[r_idx], "__name__", str(r_idx)),
+            **totals,
+            "feasible_rate": feasible / attempts if attempts else 0.0,
+            "acceptance_rate": (
+                totals["accepted"] / feasible if feasible else 0.0),
+            "final_weight": pair_weights[pair_idx],
+        })
+    diagnostics = {
+        "weight_updates": weight_updates,
+        "online_weight_updates": online_weight_updates,
+        "temperature_calibrated": temperature_calibrated,
+        "temperature_positive_delta_samples": len(positive_deltas),
+        "operator_pairs": pair_diagnostics,
+    }
     return ALNSResult(
         current_solution=sol,
         best_solution=best_sol,
@@ -471,4 +595,5 @@ def run_alns_search(initial_solution, evaluator, destroy_ops, repair_ops,
         termination_reason=termination_reason,
         restarts=restarts,
         local_search_improvements=local_search_improvements,
+        diagnostics=diagnostics,
     )

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Unified ALNS benchmark for Models 1, 2, 3, 4 and 6.
+"""Unified ALNS benchmark for Models 1, 2, 3, 4, 6 and 7.
 
 The five models share one wall-time budget, iteration ceiling and seed.  Every
 returned incumbent is checked through the model's own Evaluator before it is
@@ -27,11 +27,12 @@ from models.routing.alns.variants.model_2 import solve_alns as solve_m2
 from models.routing.alns.variants.model_3 import solve_alns as solve_m3
 from models.routing.alns.variants.model_4 import solve_alns as solve_m4
 from models.routing.alns.variants.model_6 import solve_alns as solve_m6
+from models.routing.alns.variants.model_7 import solve_alns as solve_m7
 from models.routing.common.data_loader import parse_dataset
 from models.routing.common.task_builder import build_tasks_for_model
 
 
-MODELS = (1, 2, 3, 4, 6)
+MODELS = (1, 2, 3, 4, 6, 7)
 
 
 def load_problem(path, fleet):
@@ -67,19 +68,21 @@ def route_cost(problem, e1_routes, e2_routes):
 
 def exact_references():
     result = {}
-    base_path = (
-        ROOT / "output" / "results" / "mainline_small_exact"
-        / "small_exact_20260825_123124.jsonl"
-    )
+    exact_dir = ROOT / "output" / "results" / "mainline_small_exact"
+    canonical_path = exact_dir / "small_exact_final.jsonl"
+    legacy_path = exact_dir / "small_exact_20260825_123124.jsonl"
+    base_path = canonical_path if canonical_path.exists() else legacy_path
     if base_path.exists():
         for line in base_path.read_text(encoding="utf-8").splitlines():
             row = json.loads(line)
             result[(row["instance"], int(row["model"]))] = row.get("objective")
+    # Older exact batches did not contain M6.  Keep the legacy supplement only
+    # when the canonical/current mainline file has no M6 rows.
     m6_path = (
         ROOT / "output" / "results" / "model6_standard_small_exact_unlimited"
         / "small_exact_20260826_171404.jsonl"
     )
-    if m6_path.exists():
+    if not any(model == 6 for _, model in result) and m6_path.exists():
         for line in m6_path.read_text(encoding="utf-8").splitlines():
             row = json.loads(line)
             result[(row["instance"], 6)] = row.get("objective")
@@ -135,6 +138,20 @@ def solve_one(model, problem, *, max_time, iterations, seed,
             **common,
         )
         assignment = None
+    elif model == 7:
+        stage2_budget = min(2.5, max(0.0, 0.25 * max_time))
+        r1, r2, assignment, info = solve_m7(
+            problem,
+            vehicles_per_satellite=vps,
+            TFp=9999.0,
+            stage1_time_ratio=0.75,
+            transshipment_time_budget=stage2_budget,
+            transshipment_sample_pickups=12,
+            transshipment_sample_locations=6,
+            transshipment_sample_carriers=4,
+            transshipment_position_top_k=4,
+            **common,
+        )
     else:
         raise ValueError(model)
     return r1, r2, assignment, info
@@ -232,11 +249,15 @@ def main(argv=None):
                     "route_cost_audit": safe(audited_cost),
                     "route_cost_delta": safe(objective_delta),
                     "transshipment_count": info.get("transshipment_count", 0),
-                    "stage1_objective": info.get("stage1_objective"),
+                    "stage1_objective": info.get(
+                        "stage1_objective",
+                        info.get("free_assignment_objective"),
+                    ),
                     "transshipment_improvement": info.get(
                         "transshipment_improvement", 0.0
                     ),
                     "assignment": assignment,
+                    "moved_customers": info.get("moved_customers"),
                     "seed": args.seed,
                     "time_budget": args.time,
                     "iteration_limit": args.iterations,

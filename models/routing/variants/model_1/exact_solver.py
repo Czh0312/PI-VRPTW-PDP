@@ -38,6 +38,8 @@ def _solve_info(m, solution_type):
         # different results.  Downstream experiments must use this field,
         # rather than inferring optimality from the presence of routes.
         "proven_optimal": solution_type == "proven_optimal",
+        "proof_scope": "full_arc_flow",
+        "formulation": "complete_fixed_assignment_delivery_arc_flow",
         "runtime": getattr(m, "Runtime", None),
         "sol_count": getattr(m, "SolCount", 0),
         "objective": None,

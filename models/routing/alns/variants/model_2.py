@@ -564,6 +564,10 @@ from models.routing.alns.types import (
     is_tfp_active,
 )
 from models.routing.alns.engine import ALNSConfig, ALNSHooks, run_alns_search
+from models.routing.alns.assignment_operators import (
+    assignment_boundary_removal,
+    two_satellite_removal,
+)
 from models.routing.alns.initial_solution import (
     _build_e1_delivery_routes,
     build_strong_initial_solution,
@@ -936,8 +940,17 @@ def _candidate_seeds(problem):
         if len(sats) > 1:
             second[c.id] = sats[1].id
     seeds.append(nearest)
-    if second:
+    if second and len(problem.customers) <= 20:
         seeds.append(second)
+    # Concentrated assignments are important when opening an extra satellite
+    # creates more E1 distance than it saves on E2 routes.
+    if len(problem.customers) <= 20:
+        for satellite in problem.satellites:
+            seeds.append({c.id: satellite.id for c in problem.customers})
+    elif fixed:
+        seeds = [fixed]
+    else:
+        seeds = [nearest]
 
     seen = set()
     out = []
@@ -952,6 +965,7 @@ def _candidate_seeds(problem):
 def build_initial_solution(problem, evaluator):
     """Build a feasible initial solution from multiple assignment seeds."""
     vps = evaluator.vehicles_per_satellite
+    best_feasible = None
     best_any = None
     for seed in _candidate_seeds(problem):
         e1_tasks, e2_tasks_by_sat = build_tasks_from_assignment(problem, seed)
@@ -959,12 +973,14 @@ def build_initial_solution(problem, evaluator):
         sol = build_strong_initial_solution(
             problem, e1_tasks, e2_tasks_by_sat, m1_eval)
         evaluator.rebuild_from_solution(sol)
+        sol.cost = evaluator.total_cost(sol)
         if evaluator.is_feasible(sol):
-            sol.cost = evaluator.total_cost(sol)
-            return sol
-        if best_any is None or evaluator.total_cost(sol) < best_any.cost:
-            best_any = sol
-    return best_any
+            if (best_feasible is None
+                    or sol.cost < best_feasible.cost - FEAS_TOL):
+                best_feasible = sol.copy()
+        if best_any is None or sol.cost < best_any.cost - FEAS_TOL:
+            best_any = sol.copy()
+    return best_feasible or best_any
 
 
 # =====================================================================
@@ -1261,18 +1277,22 @@ def consolidated_satellite_insertion(sol, removed, evaluator,
     multi_sat_insertion(sol, pending, evaluator, echelon=echelon, k=k)
 
 
-def _e1_local_improve(sol, evaluator, max_rounds=6):
+def _e1_local_improve(sol, evaluator, max_rounds=3, deadline=None):
     rounds = 0
     while rounds < max_rounds:
         rounds += 1
         improved = False
         for r in sol.e1_routes:
+            if deadline is not None and time.time() >= deadline:
+                return
             nodes = r.nodes
             n = len(nodes)
             if n < 2:
                 continue
             for i in range(n - 1):
                 for j in range(i + 1, n):
+                    if deadline is not None and time.time() >= deadline:
+                        return
                     old_cost = evaluator.route_distance(r)
                     nodes[i], nodes[j] = nodes[j], nodes[i]
                     ok = evaluator.check_e1_route_feasible(r)
@@ -1369,7 +1389,17 @@ def _assignment_local_improve(sol, evaluator, max_rounds=3):
 class M2Hooks(ALNSHooks):
     def after_operators(self, candidate, evaluator, current_solution,
                         iteration, d_idx, r_idx):
-        _e1_local_improve(candidate, evaluator)
+        # On large instances an exhaustive E1 pass after every candidate can
+        # consume more time than the destroy/repair itself. Use a bounded
+        # cadence so the adaptive layer receives enough observations.
+        customer_count = len(evaluator.problem.customers)
+        cadence = 1 if customer_count <= 20 else 5
+        if iteration % cadence == 0:
+            _e1_local_improve(
+                candidate, evaluator,
+                max_rounds=3 if customer_count <= 20 else 1,
+                deadline=getattr(evaluator, "_alns_deadline", None),
+            )
         if len(evaluator.problem.customers) <= 20 and iteration % 50 == 0:
             _assignment_local_improve(candidate, evaluator)
 
@@ -1400,6 +1430,7 @@ def solve_alns(problem, vehicles_per_satellite=4, max_iterations=5000,
                   "从该种子继续搜索（分配自由度可恢复可行性）")
 
     sol.cost = evaluator.total_cost(sol)
+    initial_objective = float(sol.cost)
     best_sol = sol.copy()
     best_cost = sol.cost
 
@@ -1425,6 +1456,8 @@ def solve_alns(problem, vehicles_per_satellite=4, max_iterations=5000,
             worst_customer_removal,
             shaw_customer_removal,
             satellite_cluster_removal,
+            assignment_boundary_removal,
+            two_satellite_removal,
         ],
         repair_ops=[multi_sat_insertion, global_cost_insertion,
                     randomized_satellite_insertion,
@@ -1474,11 +1507,13 @@ def solve_alns(problem, vehicles_per_satellite=4, max_iterations=5000,
         "iterations": int(result.iterations), "feasible": feasible,
         "status": "FEASIBLE" if feasible else "NO_SOLUTION",
         "external_initial_solution": initial_solution is not None,
+        "initial_objective": initial_objective,
         "best_found_time": result.best_found_time,
         "target_hit_time": result.target_hit_time,
         "termination_reason": result.termination_reason,
         "restarts": result.restarts,
         "local_search_improvements": result.local_search_improvements,
+        "alns_diagnostics": result.diagnostics,
     }
     return ((e1_routes_out, e2_routes_out, assignment, info) if return_info
             else (e1_routes_out, e2_routes_out, assignment))

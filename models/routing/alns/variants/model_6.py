@@ -12,6 +12,10 @@ from models.routing.alns.types import (
 )
 from models.routing.alns.engine import ALNSConfig, ALNSHooks, run_alns_search
 from models.routing.alns.initial_solution import build_strong_initial_solution
+from models.routing.alns.paired_operators import (
+    insert_complete_customer_pairs,
+    route_customer_pair_removal,
+)
 
 
 # =====================================================================
@@ -770,6 +774,15 @@ def regret_insertion(sol, removed, evaluator, echelon='e2', k=2):
         greedy_insertion(sol, removed, evaluator, echelon='e1')
 
 
+def paired_insertion(sol, removed, evaluator, echelon='e2', k=2):
+    """Repair complete customer pairs jointly, including cross-route pairs."""
+    if echelon != 'e2':
+        return greedy_insertion(sol, removed, evaluator, echelon=echelon)
+    residual = insert_complete_customer_pairs(sol, removed, evaluator)
+    if residual:
+        greedy_insertion(sol, residual, evaluator, echelon='e2')
+
+
 # =====================================================================
 #  阶段二：后处理中转优化
 # =====================================================================
@@ -816,7 +829,47 @@ def postprocess_transshipment(sol, evaluator, verbose=True,
             max_transshipments_per_sat=max_transshipments_per_sat,
         )
         if not improvement:
-            break
+            exchange = _search_and_apply_transshipment_exchange(
+                sol, evaluator,
+                time_budget=remaining,
+                sample_pickups=sample_pickups,
+                sample_locations=sample_locations,
+                sample_carriers=sample_carriers,
+                position_top_k=position_top_k,
+                min_net_saving=min_net_saving,
+                max_transshipments=max_transshipments,
+                max_transshipments_per_sat=max_transshipments_per_sat,
+            )
+            if not exchange:
+                break
+            improvement = exchange.get("added")
+            if audit_log is not None:
+                removed_pickup = exchange["removed_key"][2]
+                audit_log[:] = [
+                    event for event in audit_log
+                    if event.get("pickup_node") != removed_pickup
+                ]
+                # An improving exchange may consist only of removing the old
+                # handoff.  In that case ``added`` is False, so there is no
+                # replacement event to append to the audit log.
+                if isinstance(improvement, dict):
+                    audit_log.append({
+                        **improvement,
+                        "distance_before": float(exchange["before_cost"]),
+                        "distance_after": float(exchange["after_cost"]),
+                        "actual_distance_saving": float(
+                            exchange["before_cost"] - exchange["after_cost"]),
+                        "exchange": True,
+                    })
+            sol.cost = evaluator.total_cost(sol)
+            if verbose:
+                print(f"  中转交换 {iteration}: cost={sol.cost:.2f}, "
+                      f"中转数={len(sol.transshipments)}")
+            if (target_cost is not None
+                    and sol.cost <= target_cost + target_tolerance):
+                sol.task_to_phys = dict(evaluator.task_to_phys)
+                return time.time() - solver_start_time
+            continue
         sol.cost = evaluator.total_cost(sol)
         if audit_log is not None:
             audit_log.append({
@@ -838,6 +891,98 @@ def postprocess_transshipment(sol, evaluator, verbose=True,
     return ((time.time() - solver_start_time)
             if target_cost is not None
             and sol.cost <= target_cost + target_tolerance else None)
+
+
+def _adopt_solution(target, source):
+    target.e1_routes = [route.copy() for route in source.e1_routes]
+    target.e2_routes = {
+        sat: [route.copy() for route in routes]
+        for sat, routes in source.e2_routes.items()
+    }
+    target.cost = source.cost
+    target.task_to_phys = dict(source.task_to_phys)
+    target.transshipments = dict(source.transshipments)
+
+
+def _undo_transshipment(sol, evaluator, key):
+    payload = sol.transshipments.get(key)
+    if payload is None:
+        return False
+    sat_id, _ben_idx, pick_node, new_phys = key
+    old_phys, _carrier_idx, _cw, _cv = payload
+    pick_vnode = _transport_pick_node(pick_node, old_phys)
+    drop_vnode = _transport_drop_node(pick_node, new_phys)
+    for route in sol.e2_routes.get(sat_id, []):
+        route.nodes = [
+            node_id for node_id in route.nodes
+            if node_id not in (pick_vnode, drop_vnode)
+        ]
+        route.transport_loads.pop(pick_vnode, None)
+        route.transport_loads.pop(drop_vnode, None)
+    sol.transshipments.pop(key, None)
+    sol.task_to_phys[pick_node] = old_phys
+    evaluator.task_to_phys = dict(sol.task_to_phys)
+    sol.cost = evaluator.total_cost(sol)
+    return evaluator.is_feasible(sol)
+
+
+def _search_and_apply_transshipment_exchange(
+        sol, evaluator, time_budget,
+        sample_pickups, sample_locations, sample_carriers, position_top_k,
+        min_net_saving, max_transshipments, max_transshipments_per_sat):
+    """One-exchange neighborhood: remove a handoff, then rebuild the best one.
+
+    The former postprocessor could only append handoffs. This neighborhood can
+    move or replace an early greedy decision and can also delete a handoff if
+    later route changes make it unattractive.
+    """
+    if not sol.transshipments or time_budget <= 0:
+        return False
+    started = time.time()
+    before_cost = evaluator.total_cost(sol)
+    best = None
+    keys = list(sol.transshipments)
+    random.shuffle(keys)
+    for index, key in enumerate(keys):
+        remaining = time_budget - (time.time() - started)
+        if remaining <= 0:
+            break
+        candidate = sol.copy()
+        if not _undo_transshipment(candidate, evaluator, key):
+            continue
+        added = None
+        # Split the remaining budget across unvisited exchange candidates.
+        candidate_budget = remaining / max(1, len(keys) - index)
+        added = _search_and_apply_relocation(
+            candidate, evaluator,
+            time_budget=candidate_budget,
+            sample_pickups=sample_pickups,
+            sample_locations=sample_locations,
+            sample_carriers=sample_carriers,
+            position_top_k=position_top_k,
+            min_net_saving=min_net_saving,
+            max_transshipments=max_transshipments,
+            max_transshipments_per_sat=max_transshipments_per_sat,
+        )
+        candidate.cost = evaluator.total_cost(candidate)
+        if (candidate.cost < before_cost - FEAS_TOL
+                and evaluator.is_feasible(candidate)
+                and (best is None
+                     or candidate.cost < best[0].cost - FEAS_TOL)):
+            best = (candidate, key, added)
+
+    evaluator.task_to_phys = dict(sol.task_to_phys)
+    if best is None:
+        return False
+    candidate, removed_key, added = best
+    _adopt_solution(sol, candidate)
+    evaluator.task_to_phys = dict(sol.task_to_phys)
+    return {
+        "removed_key": removed_key,
+        "added": added,
+        "before_cost": before_cost,
+        "after_cost": sol.cost,
+    }
 
 
 def _search_and_apply_relocation(sol, evaluator, time_budget=2.0,
@@ -1166,7 +1311,7 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
                transshipment_min_net_saving=0.01,
                transshipment_max_total=None,
                transshipment_max_per_satellite=None,
-               strong_initial_solution=False,
+               strong_initial_solution=True,
                return_info=False,
                initial_solution=None,
                refill_unused_time=True,
@@ -1231,8 +1376,8 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         initial_solution=sol,
         evaluator=evaluator,
         destroy_ops=[random_removal, worst_removal, shaw_removal,
-                     paired_customer_removal],
-        repair_ops=[greedy_insertion, regret_insertion],
+                     paired_customer_removal, route_customer_pair_removal],
+        repair_ops=[greedy_insertion, regret_insertion, paired_insertion],
         config=ALNSConfig(
             max_iterations=max_iterations,
             max_time=stage1_limit,
@@ -1299,8 +1444,8 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
             initial_solution=best_sol,
             evaluator=evaluator,
             destroy_ops=[random_removal, worst_removal, shaw_removal,
-                         paired_customer_removal],
-            repair_ops=[greedy_insertion, regret_insertion],
+                         paired_customer_removal, route_customer_pair_removal],
+            repair_ops=[greedy_insertion, regret_insertion, paired_insertion],
             config=ALNSConfig(
                 max_iterations=max_iterations - total_iterations,
                 max_time=max_time,
@@ -1379,6 +1524,7 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
                                else result.termination_reason),
         "restarts": result.restarts,
         "local_search_improvements": result.local_search_improvements,
+        "alns_diagnostics": result.diagnostics,
     }
     return ((e1_routes_out, e2_routes_out, info) if return_info
             else (e1_routes_out, e2_routes_out))

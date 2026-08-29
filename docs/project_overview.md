@@ -11,7 +11,7 @@
 
 ## 2. 路径模型
 
-当前维护 Model 1–6：
+当前维护 Model 1–7：
 
 | 模型 | 分仓 | 任务 | 空箱交接 |
 | --- | --- | --- | --- |
@@ -21,8 +21,9 @@
 | M4 | 自由 | 配送与延后回收 | 无 |
 | M5 | 固定 | 配送与延后回收 | 单次车辆间接力 |
 | M6 | 固定 | 配送与延后回收 | 同质空箱异步交接 |
+| M7 | 自由 | 配送与延后回收 | 同质空箱异步交接 |
 
-每个变体目录只保留当前完整模型和对应精确入口。模型专属 ALNS 与数学模型分开存放，历史精确算法尝试位于 `archive/models/routing/variants/`。
+Model 1–7 的变体目录均保留当前完整模型和对应精确入口。Model 7 使用完整分仓分区与 Model 6 联合 MILP 构成严格精确求解；模型专属 ALNS 与数学模型分开存放，历史精确算法尝试位于 `archive/models/routing/variants/`。
 
 ## 3. 成本模型
 
@@ -66,5 +67,6 @@
 - [精确求解架构](exact_solver_architecture.md)：精确入口和结果契约；
 - [Model 2](model2_free_assignment_pure_delivery.md) / [Model 4](model4_free_assignment.md)：自由分仓模型；
 - [Model 5](model5_exact_container_relay.md) / [Model 6](model6_compact_homogeneous_relay.md)：空箱交接模型；
+- [Model 7](model7_hybrid_free_assignment_relay.md)：自由分仓与异步交接联合模型及 ALNS；
 - [真实案例成本分析](real_case_cost_analysis.md)：LaDe-D 案例口径与结果；
-- `archive/docs/`：旧设计、迁移记录、Model 7 和历史实验说明。
+- `archive/docs/`：旧设计、迁移记录和历史实验说明。

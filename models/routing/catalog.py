@@ -24,7 +24,11 @@ MODEL_SPECS = {
         "compact_homogeneous_relay",
         "固定分仓、同质空箱异步事件地点交接紧凑联合优化",
     ),
-    7: ModelSpec(7, "iterative_transshipment", "固定分仓、迭代中转试探"),
+    7: ModelSpec(
+        7,
+        "free_assignment_async_relay",
+        "自由分仓、配送与延后回收、同质空箱异步交接",
+    ),
 }
 
 # Number stored by old source code/results -> current canonical number.

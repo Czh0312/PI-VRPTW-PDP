@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Generate parallel M1/M3/M4/M6 reusable-container cost comparisons."""
+"""Generate M1/M2/M3/M4/M6/M7 routing-aware container cost comparisons."""
 from __future__ import annotations
 
 import argparse
@@ -19,11 +19,13 @@ import matplotlib.pyplot as plt
 
 from configuration.loader import PROJECT_ROOT, load_routing_case, resolve_project_path
 from models.routing.common.domain.instance import ProblemInstance
+from models.routing.alns.types import Route, Solution
 from models.routing.alns.variants.model_1 import solve_alns as solve_m1
+from models.routing.alns.variants.model_2 import solve_alns as solve_m2
 from models.routing.alns.variants.model_3 import solve_alns as solve_m3
 from models.routing.alns.variants.model_4 import solve_alns as solve_m4
 from models.routing.alns.variants.model_6 import solve_alns as solve_m6
-from models.routing.variants.model_7.alns_solver import solve_alns as solve_m7
+from models.routing.alns.variants.model_7 import solve_alns as solve_m7
 from models.routing.common.data_loader import parse_dataset
 from models.cost.lifecycle import (
     EconomicParams,
@@ -126,6 +128,17 @@ def _route_distance(problem: ProblemInstance, route: list[str]) -> float:
     )
 
 
+def _as_solution(e1_paths: list[list[str]], e2_paths: dict[str, list[list[str]]]) -> Solution:
+    """Convert public route paths into an incumbent accepted by nested ALNS models."""
+    solution = Solution()
+    solution.e1_routes = [Route(path[0], list(path[1:-1])) for path in e1_paths]
+    solution.e2_routes = {
+        sat_id: [Route(path[0], list(path[1:-1])) for path in paths]
+        for sat_id, paths in e2_paths.items()
+    }
+    return solution
+
+
 def solve_route_model(
     model: int,
     solver_fn,
@@ -147,18 +160,20 @@ def solve_route_model(
         travel_time_matrix=duration_matrix,
     )
     problem.aggregate_demands_from_pre_assignment()
-    if model == 4:
-        # M4 constructs customer delivery/pickup tasks dynamically because the
+    if model in (2, 4):
+        # Free-assignment models construct tasks dynamically because the
         # customer-satellite assignment is itself a decision variable.
         kwargs = {
             "problem": problem,
             "vehicles_per_satellite": problem.fleet.e2_per_sat_count,
-            "TFp": 9999.0,
             "max_iterations": 5000,
             "max_time": alns_time,
             "seed": seed,
             "verbose": False,
+            "return_info": True,
         }
+        if model == 4:
+            kwargs["TFp"] = 9999.0
     else:
         e1_tasks, e2_tasks = build_tasks_for_model(problem, model)
         kwargs = {
@@ -170,8 +185,9 @@ def solve_route_model(
             "max_time": alns_time,
             "seed": seed,
             "verbose": False,
+            "return_info": True,
         }
-        if model in (3, 6):
+        if model in (3, 6, 7):
             kwargs["TFp"] = 9999.0
     if solver_kwargs:
         kwargs.update(solver_kwargs)
@@ -182,12 +198,12 @@ def solve_route_model(
         solver_result = solver_fn(**kwargs)
     elapsed = time.time() - started
     e1_routes, e2_routes = solver_result[:2]
-    assignment = solver_result[2] if model == 4 else None
+    assignment = solver_result[2] if model in (2, 4, 7) else None
     solver_info = (
         solver_result[3]
-        if model == 4 and len(solver_result) >= 4
+        if model in (2, 4, 7) and len(solver_result) >= 4
         else solver_result[2]
-        if model != 4 and len(solver_result) >= 3
+        if model not in (2, 4, 7) and len(solver_result) >= 3
         and isinstance(solver_result[2], dict)
         else None
     )
@@ -220,6 +236,7 @@ def solve_route_model(
         "e2_distance": e2_distance,
         "assignment": assignment,
         "solver_info": solver_info,
+        "solution": _as_solution(e1_routes, e2_routes),
         "moved_customers": (
             sum(
                 1 for customer in problem.customers
@@ -237,12 +254,7 @@ def select_reusable_route(
     params: EconomicParams,
     candidate_keys: list[str],
 ) -> str:
-    """Select the observed reusable route with the lowest transport cost.
-
-    M4 and M6 are parallel extensions of M3, so selection is made directly
-    across all evaluated reusable candidates rather than as an M3->M4->M6
-    improvement chain.
-    """
+    """Select the observed route with the lowest E1/E2 transport cost."""
     available = [key for key in candidate_keys if key in route_metrics]
     if not available:
         raise ValueError("No feasible reusable route candidate is available")
@@ -299,17 +311,19 @@ def period_axis(max_periods: int, step: int, anchors: Iterable[float | int | Non
 def plot_horizon_curve(
     rows: list[dict],
     break_even: float | None,
-    selected_model: int,
+    selected_single_use_model: int,
+    reference_reusable_model: int,
+    selected_reusable_model: int,
     path: Path,
 ) -> None:
     periods = [row["period"] for row in rows]
     plt.figure(figsize=(10, 5.8))
     plt.plot(periods, [r["single_use_total"] for r in rows], linewidth=2.2,
-             label="Single-use / Model 1", color="#4C78A8")
+             label=f"Single-use / selected Model {selected_single_use_model}", color="#4C78A8")
     plt.plot(periods, [r["reusable_baseline_total"] for r in rows], linewidth=2.0,
-             label="Reusable baseline / Model 3", color="#F58518", linestyle="--")
+             label=f"Reusable reference / Model {reference_reusable_model}", color="#F58518", linestyle="--")
     plt.plot(periods, [r["reusable_optimized_total"] for r in rows], linewidth=2.4,
-             label=f"Reusable / selected Model {selected_model}", color="#54A24B")
+             label=f"Reusable / selected Model {selected_reusable_model}", color="#54A24B")
     if all(
         abs(r["reusable_baseline_total"] - r["reusable_optimized_total"]) <= 1e-9
         for r in rows
@@ -372,8 +386,9 @@ def write_markdown_report(path: Path, summary: dict) -> None:
     d = summary["baseline_decomposition"]
     metrics = summary["route_metrics"]
     comparison = summary["mechanism_comparison"]
-    selected_model = summary["selected_reusable_model"]
-    parallel_model = summary["parallel_route_model"]
+    selected_single_model = summary["selected_single_use_model"]
+    selected_reusable_model = summary["selected_reusable_model"]
+    reference_reusable_model = summary["reference_reusable_model"]
     shared_distance_basis = (
         "同一 OSRM 道路距离/时间矩阵"
         if summary["distance_assumption"].get("is_road_matrix", False)
@@ -385,38 +400,57 @@ def write_markdown_report(path: Path, summary: dict) -> None:
         "# 可循环容器经济性与路径优化价值报告", "",
         f"**结论：可循环容器{verdict}。**", "",
         "## 一、路线结果", "",
-        "| 方案 | E1距离/km | E2距离/km | 总距离/km | E1车辆 | E2车辆 |",
-        "|---|---:|---:|---:|---:|---:|",
+        "| 方案 | 搜索预算 | E1距离/km | E2距离/km | 总距离/km | 运输成本/元 | E1车辆 | E2车辆 |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for key, label in [
-        ("single_use_m1", "一次性包装 / Model 1"),
-        ("reusable_baseline_m3", "循环箱常规回收 / Model 3"),
+        ("single_use_m1", "一次性包装固定分仓 / Model 1"),
+        ("single_use_free_assignment_m2", "一次性包装自由分仓 / Model 2"),
+        ("reusable_baseline_m3", "循环箱固定分仓 / Model 3"),
         ("reusable_free_assignment_m4", "循环箱自由分配 / Model 4"),
-        (summary["parallel_route_key"], f"循环箱并列优化 / Model {parallel_model}"),
+        ("reusable_relay_m6", "循环箱固定分仓 + 异步交接 / Model 6"),
+        ("reusable_hybrid_m7", "循环箱自由分仓 + 异步交接 / Model 7"),
     ]:
         row = metrics[key]
-        selected = "（经济测算采用）" if row.get("model") == selected_model else ""
-        lines.append(f"| {label} | {fmt(row['e1_distance_km'])} | {fmt(row['e2_distance_km'])} | "
-                     f"{fmt(row['total_distance_km'])}{selected} | {row['e1_vehicle_count']} | {row['e2_vehicle_count']} |")
+        selected = (
+            "（一次性侧采用）" if row.get("model") == selected_single_model
+            else "（循环箱侧采用）" if row.get("model") == selected_reusable_model
+            else ""
+        )
+        budget = (
+            f"{row['chain_time_budget_seconds']:g}s"
+            if row.get("inherited_from_model") is None
+            else f"继承 M{row['inherited_from_model']} + {row['own_time_budget_seconds']:g}s"
+        )
+        lines.append(f"| {label} | {budget} | {fmt(row['e1_distance_km'])} | {fmt(row['e2_distance_km'])} | "
+                     f"{fmt(row['total_distance_km'])}{selected} | {fmt(row['transport_cost_per_period'])} | "
+                     f"{row['e1_vehicle_count']} | {row['e2_vehicle_count']} |")
     lines += [
-        "", f"同一数据、{shared_distance_basis}、seed={summary['seed']}、每模型 "
-        f"{summary['alns_time_per_model_seconds']:g} 秒预算下，在已测试的 "
-        f"Model 3、Model 4 和 Model {parallel_model} 路线中，经济测算采用运输成本最低的 "
-        f"Model {selected_model}。这是限时 ALNS 的阶段性结果，不代表所有模型的全局最优。",
-        "", "## 二、并列机制的经济价值", "",
+        "", f"同一数据、{shared_distance_basis}、seed={summary['seed']} 下，基模型 M1/M3 各运行 "
+        f"{summary['base_alns_time_seconds']:g} 秒，扩展模型继承其基模型可行解并追加 "
+        f"{summary['extension_time_seconds']:g} 秒机制搜索。一次性侧在 Model 1/2 中采用 "
+        f"Model {selected_single_model}，循环箱侧在 Model 3/4/6/7 中采用 Model "
+        f"{selected_reusable_model}。这是限时 ALNS 的阶段性结果，不代表各模型的全局最优。",
+        "", "## 二、扩展机制的经济价值", "",
         f"- 每期配送容器：**{d['container_uses_per_period']} 个**；回收容器：**{d['returned_container_uses_per_period']} 个**。",
         f"- 包装替代毛收益：**{fmt(d['gross_packaging_saving_per_period'])} 元/期**。",
-        f"- M1 → M3 闭环回收运输增量：**{fmt(comparison['closed_loop_transport_penalty_m1_to_m3'])} 元/期**。",
-        f"- M3 → M4 自由分配收益：**{fmt(comparison['free_assignment_saving_m3_to_m4'])} 元/期**。",
-        f"- 独立运行 M3 − M{parallel_model} 路线成本差：**{fmt(comparison['independent_route_cost_difference_m3_minus_parallel'])} 元/期**；该值混有第一阶段普通 ALNS 差异，不作为中转收益。",
-        f"- M{parallel_model} 同次运行的中转前后直接收益：**{fmt(comparison['parallel_internal_transshipment_transport_saving'])} 元/期**，中转 **{comparison['parallel_internal_transshipment_count'] or 0} 次**。",
-        f"- M4 − M{parallel_model} 运输成本差：**{fmt(comparison['m4_minus_parallel_transport_cost'])} 元/期**（正值表示 M{parallel_model} 更低）。",
-        f"- 采用 Model {selected_model} 后净边际收益：**{fmt(d['net_variable_saving_per_period'])} 元/期**。",
+        f"- M1 → M2 一次性侧自由分仓收益：**{fmt(comparison['single_use_free_assignment_saving_m1_to_m2'])} 元/期**。",
+        f"- 固定分仓 M1 → M3 闭环回收运输增量：**{fmt(comparison['closed_loop_transport_penalty_m1_to_m3'])} 元/期**。",
+        f"- 自由分仓 M2 → M4 闭环回收运输增量：**{fmt(comparison['closed_loop_transport_penalty_m2_to_m4'])} 元/期**。",
+        f"- M3 → M4 循环箱侧自由分仓收益：**{fmt(comparison['reusable_free_assignment_saving_m3_to_m4'])} 元/期**。",
+        f"- M3 → M6 固定分仓异步交接收益：**{fmt(comparison['m3_minus_m6_transport_cost'])} 元/期**。M6 直接继承本次 M3 解，因此该差额与同次运行中转收益一致。",
+        f"- M4 → M7 自由分仓异步交接收益：**{fmt(comparison['m4_minus_m7_transport_cost'])} 元/期**。M7 直接继承本次 M4 解，因此该差额与同次运行中转收益一致。",
+        f"- M6 同次运行中转直接收益：**{fmt(comparison['m6_internal_transshipment_transport_saving'])} 元/期**，中转 **{comparison['m6_internal_transshipment_count'] or 0} 次**。",
+        f"- M7 同次运行中转直接收益：**{fmt(comparison['m7_internal_transshipment_transport_saving'])} 元/期**，中转 **{comparison['m7_internal_transshipment_count'] or 0} 次**。",
+        f"- 采用 Model {selected_reusable_model} 后净边际收益：**{fmt(d['net_variable_saving_per_period'])} 元/期**。",
         f"- 初始容器池投资：**{fmt(d['fixed_pool_investment'])} 元**。",
         f"- 回本周期：**{fmt(d['break_even_periods'])} 期**；累计使用约 **{fmt(d['break_even_container_uses'], 0)} 次**。",
         f"- 临界一次性包装购置价：**{fmt(d['critical_single_use_package_price_yuan'])} 元/个**。",
         f"- 临界业务密度：**{fmt(d['critical_container_uses_per_period'])} 个容器/期**（路线不变且车辆容量可行时）。",
-        "", f"恒等式：`净边际收益 = 包装替代毛收益 − M1→M3闭环运输增量 + M3→所选Model {selected_model}路径收益`。",
+        "", f"价值分解采用与一次性侧相同分仓自由度的循环基准 Model {reference_reusable_model}。恒等式："
+        f"`净边际收益 = 包装替代毛收益 − 所选一次性Model {selected_single_model}→参考循环Model "
+        f"{reference_reusable_model}运输增量 + 参考循环Model {reference_reusable_model}→所选循环Model "
+        f"{selected_reusable_model}路径收益`。",
         "", "## 三、情景对比", "",
         "| 情景 | 净边际收益/期 | 回本期数 | 规划期净节省 | 节省率 |",
         "|---|---:|---:|---:|---:|",
@@ -434,7 +468,7 @@ def write_markdown_report(path: Path, summary: dict) -> None:
         ]
     lines += [
         "", "## 四、论文解释", "",
-        f"Model 4 与 Model {parallel_model} 都是从 Model 3 扩展出的并列优化机制，不能解释为连续的 M3→M4→M{parallel_model} 改进链。结果应分别报告自由分配与异步交接/路径机制的观测收益；限时 ALNS 值是同预算可行解，不是模型全局最优证明。",
+        "Model 2/4 分别测量一次性侧和循环箱侧的自由分仓价值；Model 6 是 Model 3 的固定分仓异步交接扩展；Model 7 是 Model 4 的自由分仓与异步交接联合扩展。纯中转收益只能取同一次 M6/M7 运行内部的阶段一与最终值之差，不能用独立 ALNS 结果相减。",
         "", "## 五、口径限制", "",
         f"- 距离口径：{summary['distance_assumption']['description']}；换算系数为 {summary['distance_assumption']['distance_scale_to_km']}。",
         "- 成本曲线把同一代表性路线按期重复，用于回本分析，不代表扩展客户规模。",
@@ -450,13 +484,20 @@ def main(argv=None) -> None:
     parser.add_argument("--case", default=str(DEFAULT_CASE), help="Composable case manifest")
     parser.add_argument("--data", help="Dataset path; defaults to the selected case")
     parser.add_argument("--time", type=float, help="ALNS seconds per route model")
+    parser.add_argument(
+        "--extension-time", type=float,
+        help="Additional seconds for each incumbent-preserving model extension",
+    )
     parser.add_argument("--seed", type=int, help="Random seed")
     parser.add_argument("--output", help="Output directory")
     parser.add_argument("--fleet-config", help="Override routing/fleet config JSON")
     parser.add_argument("--economic-config", help="Override economic config JSON")
     parser.add_argument("--distance-matrix", help="Labelled square road-distance matrix in km")
     parser.add_argument("--duration-matrix", help="Labelled square road-duration matrix in minutes")
-    parser.add_argument("--optimized-model", type=int, choices=[6, 7], help="Override optimized route model")
+    parser.add_argument(
+        "--optimized-model", type=int, choices=[6, 7],
+        help="Deprecated compatibility option; all six current models are evaluated",
+    )
     args = parser.parse_args(argv)
 
     app_cfg, fleet_cfg = load_routing_case(args.case)
@@ -477,6 +518,13 @@ def main(argv=None) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     alns_time = float(args.time if args.time is not None else app_cfg.get("alns_time", 30))
+    extension_time = float(
+        args.extension_time
+        if args.extension_time is not None
+        else analysis_cfg.get("extension_time_seconds", 2.0)
+    )
+    if extension_time < 0:
+        raise ValueError("--extension-time cannot be negative")
     seed = int(args.seed if args.seed is not None else app_cfg.get("seed", 42))
     distance_value = args.distance_matrix or app_cfg.get("distance_matrix")
     duration_value = args.duration_matrix or app_cfg.get("duration_matrix")
@@ -491,56 +539,68 @@ def main(argv=None) -> None:
     )
     uses, returned_uses, customers, count_basis = count_container_flows(data_path)
 
-    model7_kwargs = {
-        "strong_initial_solution": True,
-        "transshipment_baseline_guard": True,
+    extension_kwargs = {
+        "return_info": True,
+        "stage1_time_ratio": 0.0,
+        "transshipment_time_budget": extension_time,
         "transshipment_max_total": 2,
         "transshipment_max_per_satellite": 1,
-        "route_local_refine": True,
-        "inter_route_rebalance": True,
-        "inter_route_rebalance_rounds": 2,
-        "inter_route_rebalance_max_moves": 10,
-        "inter_route_rebalance_max_pairs": 30,
-        "iterative_rebalance": True,
-        "iterative_rebalance_trigger": "fixed",
-        "iterative_rebalance_interval": 10,
-        "iterative_rebalance_max_moves": 2,
-        "iterative_rebalance_max_pairs": 16,
     }
-    optimized_model = int(
-        args.optimized_model
-        if args.optimized_model is not None
-        else analysis_cfg.get("optimized_route_model", app_cfg.get("model", 6))
+    m1_run = solve_route_model(
+        1, solve_m1, data_path, fleet_cfg, alns_time, seed,
+        {"return_info": False},
+        distance_matrix=distance_matrix, duration_matrix=duration_matrix,
     )
-    if optimized_model not in (6, 7):
-        raise ValueError("analysis.optimized_route_model must be Model 6 or Model 7")
-    optimized_solver = solve_m6 if optimized_model == 6 else solve_m7
-    optimized_kwargs = (
-        {"strong_initial_solution": True, "return_info": True}
-        if optimized_model == 6
-        else model7_kwargs
+    m2_run = solve_route_model(
+        2, solve_m2, data_path, fleet_cfg, extension_time, seed,
+        {"initial_solution": m1_run["solution"], "return_info": False},
+        distance_matrix=distance_matrix, duration_matrix=duration_matrix,
     )
-    parallel_route_key = f"reusable_parallel_m{optimized_model}"
+    m3_run = solve_route_model(
+        3, solve_m3, data_path, fleet_cfg, alns_time, seed,
+        {"strong_initial_solution": True, "return_info": False},
+        distance_matrix=distance_matrix, duration_matrix=duration_matrix,
+    )
+    m4_run = solve_route_model(
+        4, solve_m4, data_path, fleet_cfg, extension_time, seed,
+        {"initial_solution": m3_run["solution"], "return_info": False},
+        distance_matrix=distance_matrix, duration_matrix=duration_matrix,
+    )
+    m6_run = solve_route_model(
+        6, solve_m6, data_path, fleet_cfg, extension_time, seed,
+        {
+            **extension_kwargs,
+            "strong_initial_solution": True,
+            "initial_solution": m3_run["solution"],
+            "refill_unused_time": False,
+        },
+        distance_matrix=distance_matrix, duration_matrix=duration_matrix,
+    )
+    m7_run = solve_route_model(
+        7, solve_m7, data_path, fleet_cfg, extension_time, seed,
+        {**extension_kwargs, "initial_solution": m4_run["solution"]},
+        distance_matrix=distance_matrix, duration_matrix=duration_matrix,
+    )
     route_runs = {
-        "single_use_m1": solve_route_model(
-            1, solve_m1, data_path, fleet_cfg, alns_time, seed,
-            distance_matrix=distance_matrix, duration_matrix=duration_matrix,
-        ),
-        "reusable_baseline_m3": solve_route_model(
-            3, solve_m3, data_path, fleet_cfg, alns_time, seed,
-            {"strong_initial_solution": True},
-            distance_matrix=distance_matrix, duration_matrix=duration_matrix,
-        ),
-        "reusable_free_assignment_m4": solve_route_model(
-            4, solve_m4, data_path, fleet_cfg, alns_time, seed,
-            distance_matrix=distance_matrix, duration_matrix=duration_matrix,
-        ),
-        parallel_route_key: solve_route_model(
-            optimized_model, optimized_solver, data_path, fleet_cfg,
-            alns_time, seed, optimized_kwargs,
-            distance_matrix=distance_matrix, duration_matrix=duration_matrix,
-        ),
+        "single_use_m1": m1_run,
+        "single_use_free_assignment_m2": m2_run,
+        "reusable_baseline_m3": m3_run,
+        "reusable_free_assignment_m4": m4_run,
+        "reusable_relay_m6": m6_run,
+        "reusable_hybrid_m7": m7_run,
     }
+    run_design = {
+        "single_use_m1": (None, alns_time, alns_time),
+        "single_use_free_assignment_m2": (1, extension_time, alns_time + extension_time),
+        "reusable_baseline_m3": (None, alns_time, alns_time),
+        "reusable_free_assignment_m4": (3, extension_time, alns_time + extension_time),
+        "reusable_relay_m6": (3, extension_time, alns_time + extension_time),
+        "reusable_hybrid_m7": (4, extension_time, alns_time + 2 * extension_time),
+    }
+    for key, (base_model, own_budget, chain_budget) in run_design.items():
+        route_runs[key]["inherited_from_model"] = base_model
+        route_runs[key]["own_time_budget_seconds"] = own_budget
+        route_runs[key]["chain_time_budget_seconds"] = chain_budget
     mandatory_failures = {
         name: result["status"]
         for name, result in route_runs.items()
@@ -554,87 +614,140 @@ def main(argv=None) -> None:
         for name, result in route_runs.items()
         if result.get("status") == "OK"
     }
-    su = route_metrics["single_use_m1"]
-    m3 = route_metrics["reusable_baseline_m3"]
-    m4 = route_metrics["reusable_free_assignment_m4"]
-    parallel = route_metrics[parallel_route_key]
-    selected_key = select_reusable_route(
-        route_metrics,
-        params,
-        ["reusable_baseline_m3", "reusable_free_assignment_m4", parallel_route_key],
-    )
-    selected = route_metrics[selected_key]
     model_by_key = {
+        "single_use_m1": 1,
+        "single_use_free_assignment_m2": 2,
         "reusable_baseline_m3": 3,
         "reusable_free_assignment_m4": 4,
-        parallel_route_key: optimized_model,
+        "reusable_relay_m6": 6,
+        "reusable_hybrid_m7": 7,
     }
-    selected_model = model_by_key[selected_key]
+    selected_single_key = select_reusable_route(
+        route_metrics, params,
+        ["single_use_m1", "single_use_free_assignment_m2"],
+    )
+    selected_single = route_metrics[selected_single_key]
+    m3 = route_metrics["reusable_baseline_m3"]
+    m4 = route_metrics["reusable_free_assignment_m4"]
+    m6 = route_metrics["reusable_relay_m6"]
+    m7 = route_metrics["reusable_hybrid_m7"]
+    selected_reusable_key = select_reusable_route(
+        route_metrics,
+        params,
+        ["reusable_baseline_m3", "reusable_free_assignment_m4",
+         "reusable_relay_m6", "reusable_hybrid_m7"],
+    )
+    selected_reusable = route_metrics[selected_reusable_key]
+    selected_single_model = model_by_key[selected_single_key]
+    selected_reusable_model = model_by_key[selected_reusable_key]
+    reference_reusable_key = (
+        "reusable_free_assignment_m4"
+        if selected_single_model == 2
+        else "reusable_baseline_m3"
+    )
+    reference_reusable = route_metrics[reference_reusable_key]
+    reference_reusable_model = model_by_key[reference_reusable_key]
 
     transport_costs = {
-        key: route_period_cost(route_metrics[key], params)
-        for key in model_by_key
+        key: route_period_cost(route_metrics[key], params) for key in model_by_key
     }
+    m6_info = route_runs["reusable_relay_m6"].get("solver_info", {}) or {}
+    m7_info = route_runs["reusable_hybrid_m7"].get("solver_info", {}) or {}
     mechanism_comparison = {
         "closed_loop_transport_penalty_m1_to_m3": (
-            transport_costs["reusable_baseline_m3"] - route_period_cost(su, params)
+            transport_costs["reusable_baseline_m3"] - transport_costs["single_use_m1"]
         ),
-        "free_assignment_saving_m3_to_m4": (
+        "closed_loop_transport_penalty_m2_to_m4": (
+            transport_costs["reusable_free_assignment_m4"]
+            - transport_costs["single_use_free_assignment_m2"]
+        ),
+        "single_use_free_assignment_saving_m1_to_m2": (
+            transport_costs["single_use_m1"]
+            - transport_costs["single_use_free_assignment_m2"]
+        ),
+        "reusable_free_assignment_saving_m3_to_m4": (
             transport_costs["reusable_baseline_m3"]
             - transport_costs["reusable_free_assignment_m4"]
         ),
-        "independent_route_cost_difference_m3_minus_parallel": (
+        "m3_minus_m6_transport_cost": (
             transport_costs["reusable_baseline_m3"]
-            - transport_costs[parallel_route_key]
+            - transport_costs["reusable_relay_m6"]
         ),
-        "m4_minus_parallel_transport_cost": (
+        "m4_minus_m7_transport_cost": (
             transport_costs["reusable_free_assignment_m4"]
-            - transport_costs[parallel_route_key]
+            - transport_costs["reusable_hybrid_m7"]
+        ),
+        "m6_minus_m7_transport_cost": (
+            transport_costs["reusable_relay_m6"]
+            - transport_costs["reusable_hybrid_m7"]
+        ),
+        "m1_to_m2_distance_saving_km": (
+            route_metrics["single_use_m1"].total_distance_km
+            - route_metrics["single_use_free_assignment_m2"].total_distance_km
         ),
         "m3_to_m4_distance_saving_km": m3.total_distance_km - m4.total_distance_km,
-        "m3_to_parallel_distance_saving_km": m3.total_distance_km - parallel.total_distance_km,
-        "m4_minus_parallel_distance_km": m4.total_distance_km - parallel.total_distance_km,
-        "parallel_internal_stage1_distance": (
-            route_runs[parallel_route_key].get("solver_info", {}) or {}
-        ).get("stage1_objective"),
-        "parallel_internal_transshipment_distance_saving": (
-            route_runs[parallel_route_key].get("solver_info", {}) or {}
-        ).get("transshipment_improvement"),
-        "parallel_internal_transshipment_transport_saving": (
-            (
-                route_runs[parallel_route_key].get("solver_info", {}) or {}
-            ).get("transshipment_improvement") * params.e2_cost_per_km
-            if (
-                route_runs[parallel_route_key].get("solver_info", {}) or {}
-            ).get("transshipment_improvement") is not None
-            else None
+        "m3_minus_m6_distance_km": m3.total_distance_km - m6.total_distance_km,
+        "m4_minus_m7_distance_km": m4.total_distance_km - m7.total_distance_km,
+        "m6_internal_stage1_distance": m6_info.get("stage1_objective"),
+        "m6_internal_transshipment_distance_saving": m6_info.get("transshipment_improvement"),
+        "m6_internal_transshipment_transport_saving": (
+            m6_info.get("transshipment_improvement") * params.e2_cost_per_km
+            if m6_info.get("transshipment_improvement") is not None else None
         ),
-        "parallel_internal_transshipment_count": (
-            route_runs[parallel_route_key].get("solver_info", {}) or {}
-        ).get("transshipment_count"),
-        "selected_reusable_model": selected_model,
-        "selection_criterion": "minimum observed E1/E2 transport cost among M3, M4 and the configured parallel model",
+        "m6_internal_transshipment_count": m6_info.get("transshipment_count"),
+        "m7_internal_stage1_distance": m7_info.get("free_assignment_objective"),
+        "m7_internal_transshipment_distance_saving": m7_info.get("transshipment_improvement"),
+        "m7_internal_transshipment_transport_saving": (
+            m7_info.get("transshipment_improvement") * params.e2_cost_per_km
+            if m7_info.get("transshipment_improvement") is not None else None
+        ),
+        "m7_internal_transshipment_count": m7_info.get("transshipment_count"),
+        "selected_single_use_model": selected_single_model,
+        "selected_reusable_model": selected_reusable_model,
+        "selection_criterion": "minimum observed E1/E2 transport cost within M1/M2 and M3/M4/M6/M7",
     }
 
     horizon = int(analysis_cfg.get("horizon_periods", 300))
     baseline = value_decomposition(
-        su, m3, selected, params, uses, horizon,
+        selected_single, reference_reusable, selected_reusable,
+        params, uses, horizon,
         returned_container_uses_per_period=returned_uses,
     )
     max_periods = int(analysis_cfg.get("curve_max_periods", max(600, horizon)))
     periods = period_axis(max_periods, int(analysis_cfg.get("curve_period_step", 10)),
                           [horizon, baseline["break_even_periods"]])
     curve = period_sweep(
-        su, m3, selected, params, uses, periods,
+        selected_single, reference_reusable, selected_reusable,
+        params, uses, periods,
         returned_container_uses_per_period=returned_uses,
     )
     write_csv(out_dir / "horizon_cost_curve.csv", curve)
     write_csv(out_dir / "value_decomposition.csv", [{**baseline, **mechanism_comparison}])
     write_csv(out_dir / "mechanism_comparison.csv", [mechanism_comparison])
+    write_csv(
+        out_dir / "route_model_comparison.csv",
+        [{
+            "model": model_by_key[key],
+            "route_key": key,
+            "packaging_side": "single_use" if model_by_key[key] in (1, 2) else "reusable",
+            "selected": key in (selected_single_key, selected_reusable_key),
+            "e1_distance_km": route_metrics[key].e1_distance_km,
+            "e2_distance_km": route_metrics[key].e2_distance_km,
+            "total_distance_km": route_metrics[key].total_distance_km,
+            "transport_cost_per_period": transport_costs[key],
+            "runtime_seconds": route_runs[key]["time"],
+            "inherited_from_model": route_runs[key]["inherited_from_model"],
+            "own_time_budget_seconds": route_runs[key]["own_time_budget_seconds"],
+            "chain_time_budget_seconds": route_runs[key]["chain_time_budget_seconds"],
+            "moved_customers": route_runs[key].get("moved_customers"),
+        } for key in model_by_key],
+    )
     plot_horizon_curve(
         curve,
         baseline["break_even_periods"],
-        selected_model,
+        selected_single_model,
+        reference_reusable_model,
+        selected_reusable_model,
         out_dir / "horizon_cost_curve.png",
     )
     plot_value_decomposition(baseline, out_dir / "value_decomposition.png")
@@ -643,7 +756,8 @@ def main(argv=None) -> None:
     for scenario in econ_cfg.get("scenarios", []):
         scenario_params = params_for_scenario(params, scenario)
         row = value_decomposition(
-            su, m3, selected, scenario_params, uses, horizon,
+            selected_single, reference_reusable, selected_reusable,
+            scenario_params, uses, horizon,
             returned_container_uses_per_period=returned_uses,
         )
         scenario_rows.append({"scenario": scenario["name"], "description": scenario.get("description", ""),
@@ -655,14 +769,15 @@ def main(argv=None) -> None:
         rate_params = params_for_scenario(params, {"reusable_loss_rate_per_cycle": float(rate)})
         loss_rows.append({"loss_rate": float(rate),
                           **value_decomposition(
-                              su, m3, selected, rate_params, uses, horizon,
+                              selected_single, reference_reusable,
+                              selected_reusable, rate_params, uses, horizon,
                               returned_container_uses_per_period=returned_uses,
                           )})
     write_csv(out_dir / "loss_rate_sensitivity.csv", loss_rows)
 
     metrics_dict = {}
     for name, metric in route_metrics.items():
-        model = model_by_key.get(name, 1 if name == "single_use_m1" else None)
+        model = model_by_key[name]
         metrics_dict[name] = {
             **metric.__dict__,
             "model": model,
@@ -670,12 +785,19 @@ def main(argv=None) -> None:
             "transport_cost_per_period": route_period_cost(metric, params),
             "raw_solver_objective_distance": route_runs[name]["cost"],
             "runtime_seconds": route_runs[name]["time"],
+            "inherited_from_model": route_runs[name]["inherited_from_model"],
+            "own_time_budget_seconds": route_runs[name]["own_time_budget_seconds"],
+            "chain_time_budget_seconds": route_runs[name]["chain_time_budget_seconds"],
             "moved_customers": route_runs[name].get("moved_customers"),
             "solver_info": route_runs[name].get("solver_info"),
         }
+    metrics_dict["single_use_selected"] = {
+        **metrics_dict[selected_single_key],
+        "selected_from": selected_single_key,
+    }
     metrics_dict["reusable_selected"] = {
-        **metrics_dict[selected_key],
-        "selected_from": selected_key,
+        **metrics_dict[selected_reusable_key],
+        "selected_from": selected_reusable_key,
     }
     # Backward-compatible alias for earlier readers of summary.json.
     metrics_dict["reusable_optimized"] = dict(metrics_dict["reusable_selected"])
@@ -689,16 +811,22 @@ def main(argv=None) -> None:
         "horizon_periods": horizon,
         "seed": seed,
         "alns_time_per_model_seconds": alns_time,
-        "evaluated_models": [1, 3, 4, optimized_model],
-        "parallel_route_model": optimized_model,
-        "parallel_route_key": parallel_route_key,
-        "selected_reusable_model": selected_model,
-        "selected_reusable_route_key": selected_key,
-        "selected_reusable_route_source": (
-            f"Lowest observed transport cost among Models 3, 4 and {optimized_model}"
-        ),
-        "optimized_route_model": selected_model,
-        "optimized_route_source": f"Selected Model {selected_model} observed route",
+        "base_alns_time_seconds": alns_time,
+        "extension_time_seconds": extension_time,
+        "search_design": "incumbent-preserving nested extensions: M2<-M1, M4/M6<-M3, M7<-M4",
+        "evaluated_models": [1, 2, 3, 4, 6, 7],
+        "selected_single_use_model": selected_single_model,
+        "selected_single_use_route_key": selected_single_key,
+        "selected_single_use_route_source": "Lowest observed transport cost among Models 1 and 2",
+        "reference_reusable_model": reference_reusable_model,
+        "reference_reusable_route_key": reference_reusable_key,
+        "selected_reusable_model": selected_reusable_model,
+        "selected_reusable_route_key": selected_reusable_key,
+        "selected_reusable_route_source": "Lowest observed transport cost among Models 3, 4, 6 and 7",
+        "parallel_route_model": 7,
+        "parallel_route_key": "reusable_hybrid_m7",
+        "optimized_route_model": selected_reusable_model,
+        "optimized_route_source": f"Selected Model {selected_reusable_model} observed route",
         "route_metrics": metrics_dict,
         "mechanism_comparison": mechanism_comparison,
         "economic_params": params.__dict__,

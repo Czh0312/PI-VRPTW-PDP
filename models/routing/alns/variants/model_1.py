@@ -7,7 +7,7 @@ import random
 import time
 
 from models.routing.alns.types import (
-    Route, Solution, FEAS_TOL,
+    Route, Solution, FEAS_TOL, clean_empty_routes,
 )
 from models.routing.alns.engine import ALNSConfig, run_alns_search
 from models.routing.alns.initial_solution import build_strong_initial_solution
@@ -396,6 +396,24 @@ def shaw_removal(sol, evaluator, num_remove, echelon='e2'):
         return random_removal(sol, evaluator, num_remove, echelon)
 
 
+def route_segment_removal(sol, evaluator, num_remove, echelon='e2'):
+    """Remove one contiguous route segment to enable route-level reshaping."""
+    if echelon == 'e2':
+        candidates = [route for routes in sol.e2_routes.values()
+                      for route in routes if route.nodes]
+    else:
+        candidates = [route for route in sol.e1_routes if route.nodes]
+    if not candidates:
+        return []
+    route = random.choice(candidates)
+    length = min(len(route.nodes), max(1, num_remove))
+    start = random.randint(0, len(route.nodes) - length)
+    removed = route.nodes[start:start + length]
+    del route.nodes[start:start + length]
+    clean_empty_routes(sol)
+    return removed
+
+
 # =====================================================================
 #  修复算子
 # =====================================================================
@@ -569,7 +587,7 @@ def regret_insertion(sol, removed, evaluator, echelon='e2', k=2):
 
 def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
                max_iterations=5000, max_time=120, seed=42, verbose=True,
-               strong_initial_solution=False, return_info=False,
+               strong_initial_solution=True, return_info=False,
                target_objective=None, target_tolerance=1e-6,
                alns_config_overrides=None):
     random.seed(seed)
@@ -607,7 +625,8 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
     result = run_alns_search(
         initial_solution=sol,
         evaluator=evaluator,
-        destroy_ops=[random_removal, worst_removal, shaw_removal],
+        destroy_ops=[random_removal, worst_removal, shaw_removal,
+                     route_segment_removal],
         repair_ops=[greedy_insertion, regret_insertion],
         config=ALNSConfig(max_iterations=max_iterations, max_time=max_time,
                           target_cost=target_objective,
@@ -651,6 +670,7 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         "termination_reason": result.termination_reason,
         "restarts": result.restarts,
         "local_search_improvements": result.local_search_improvements,
+        "alns_diagnostics": result.diagnostics,
     }
     return ((e1_routes_out, e2_routes_out, info) if return_info
             else (e1_routes_out, e2_routes_out))

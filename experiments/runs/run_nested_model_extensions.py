@@ -1,5 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Nested ALNS experiment: M2<-M1 and M4/M6<-M3 incumbents."""
+"""Nested ALNS experiment for incumbent-preserving model extensions.
+
+The paired extensions are M2<-M1, M4/M6<-M3, and M7<-M4.  Each
+extension receives the feasible incumbent produced by its base model, so the
+experiment measures the value of the added mechanism instead of conflating it
+with independent-search noise.
+"""
 from __future__ import annotations
 
 import argparse
@@ -21,6 +27,7 @@ from models.routing.alns.variants.model_2 import solve_alns as solve_m2
 from models.routing.alns.variants.model_3 import solve_alns as solve_m3
 from models.routing.alns.variants.model_4 import solve_alns as solve_m4
 from models.routing.alns.variants.model_6 import solve_alns as solve_m6
+from models.routing.alns.variants.model_7 import solve_alns as solve_m7
 from models.routing.common.task_builder import build_tasks_for_model
 
 
@@ -78,9 +85,9 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--instances", nargs="*")
     parser.add_argument("--extensions", nargs="*", type=int,
-                        choices=(2, 4, 6), default=(2, 4, 6))
+                        choices=(2, 4, 6, 7), default=(2, 4, 6, 7))
     parser.add_argument(
-        "--output-dir", default="output/results/model12346_nested_extensions")
+        "--output-dir", default="output/results/model123467_nested_extensions")
     args = parser.parse_args()
 
     fleet = json.loads(
@@ -131,7 +138,8 @@ def main():
             rows.append(extension_row(
                 path.stem, len(problem.customers), 2, 1, m1_info, m2_info,
                 m2_assignment, args.seed, args.base_time,
-                args.extension_time))
+                args.extension_time,
+                inherited_objective=m2_info.get("initial_objective")))
 
         if 4 in args.extensions or 6 in args.extensions:
             e1_m3, e2_m3 = build_tasks_for_model(problem, 3)
@@ -151,7 +159,8 @@ def main():
             rows.append(extension_row(
                 path.stem, len(problem.customers), 4, 3, m3_info, m4_info,
                 m4_assignment, args.seed, args.base_time,
-                args.extension_time))
+                args.extension_time,
+                inherited_objective=m4_info.get("initial_objective")))
 
         if 6 in args.extensions:
             _, _, m6_info = solve_m6(
@@ -171,6 +180,37 @@ def main():
                 path.stem, len(problem.customers), 6, 3, m3_info, m6_info,
                 None, args.seed, args.base_time, args.extension_time,
                 inherited_objective=m6_info["stage1_objective"]))
+
+        if 7 in args.extensions:
+            # M7 adds asynchronous relay to M4's free-assignment solution.
+            # Run M4 for the full base budget, then reserve the complete
+            # extension budget for relay.  With stage1_time_ratio=0, M7 keeps
+            # the inherited M4 incumbent and cannot lose its objective value.
+            m4_e1, m4_e2, _, m4_base_info = solve_m4(
+                problem, vps, TFp=9999.0, **common_base)
+            if not m4_base_info["feasible"]:
+                raise RuntimeError(f"M4 base infeasible: {path.stem}")
+            m4_sol = as_solution(m4_e1, m4_e2)
+            _, _, m7_assignment, m7_info = solve_m7(
+                problem,
+                vehicles_per_satellite=vps,
+                TFp=9999.0,
+                initial_solution=m4_sol,
+                stage1_time_ratio=0.0,
+                transshipment_time_budget=args.extension_time,
+                transshipment_sample_pickups=16,
+                transshipment_sample_locations=8,
+                transshipment_sample_carriers=6,
+                transshipment_position_top_k=5,
+                **common_ext,
+            )
+            if not m7_info["feasible"]:
+                raise RuntimeError(f"M7 extension infeasible: {path.stem}")
+            rows.append(extension_row(
+                path.stem, len(problem.customers), 7, 4,
+                m4_base_info, m7_info, m7_assignment, args.seed,
+                args.base_time, args.extension_time,
+                inherited_objective=m7_info["free_assignment_objective"]))
 
         with jsonl_path.open("a", encoding="utf-8") as handle:
             for row in rows[before:]:

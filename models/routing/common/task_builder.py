@@ -2,6 +2,66 @@ from models.routing.common.domain.instance import ProblemInstance
 from models.routing.common.domain.node import Task
 
 
+def build_tasks_from_assignment(problem: ProblemInstance, assignment: dict):
+    """Build delivery/pickup tasks for an explicit free-assignment partition.
+
+    This follows the Model 4/7 one-container-per-customer formulation and does
+    not mutate the pre-assignment stored on ``ProblemInstance``.
+    """
+    cw = problem.fleet.container_weight
+    cv = problem.fleet.container_volume
+    sat_ids = [satellite.id for satellite in problem.satellites]
+    e2_tasks_by_sat = {sat_id: [] for sat_id in sat_ids}
+    aggregate = {
+        sat_id: {
+            "count": 0,
+            "del_w": 0.0,
+            "del_v": 0.0,
+            "pick_w": 0.0,
+            "pick_v": 0.0,
+            "due": float("inf"),
+        }
+        for sat_id in sat_ids
+    }
+    for customer in problem.customers:
+        sat_id = assignment.get(customer.id)
+        if sat_id not in aggregate:
+            continue
+        values = aggregate[sat_id]
+        values["count"] += 1
+        values["del_w"] += customer.weight_del + cw
+        values["del_v"] += cv
+        values["pick_w"] += cw
+        values["pick_v"] += cv
+        values["due"] = min(values["due"], customer.tw_del[1])
+        e2_tasks_by_sat[sat_id].append(Task(
+            f"{customer.id}d", customer.id, "d",
+            customer.weight_del + cw, cv, customer.tw_del,
+        ))
+        e2_tasks_by_sat[sat_id].append(Task(
+            f"{customer.id}p", customer.id, "p",
+            cw, cv, customer.tw_pick,
+        ))
+
+    e1_tasks = []
+    for sat_id in sat_ids:
+        values = aggregate[sat_id]
+        if values["count"] <= 0:
+            continue
+        ready = getattr(problem.nodes[sat_id], "e1_pickup_ready_time", 0.0)
+        e1_tasks.append(Task(
+            f"{sat_id}d", sat_id, "d",
+            values["del_w"], values["del_v"],
+            (0.0, values["due"]),
+        ))
+        e1_tasks.append(Task(
+            f"{sat_id}p", sat_id, "p",
+            values["pick_w"], values["pick_v"],
+            (ready, float("inf")),
+        ))
+    return e1_tasks, e2_tasks_by_sat
+
+
 def build_tasks_for_model(problem: ProblemInstance, model_type: int):
     e1_tasks = []
     e2_tasks_by_sat = {s.id: [] for s in problem.satellites}
@@ -9,8 +69,8 @@ def build_tasks_for_model(problem: ProblemInstance, model_type: int):
     cw = problem.fleet.container_weight
     cv = problem.fleet.container_volume
 
-    if model_type in (2, 4):
-        # 新 M2/M4 是顾客自由分仓模型，求解器直接从 ProblemInstance
+    if model_type in (2, 4, 7):
+        # M2/M4/M7 是顾客自由分仓模型，求解器直接从 ProblemInstance
         # 构造任务；这里返回空容器，仅保持统一主入口的调用契约。
         return e1_tasks, e2_tasks_by_sat
     if model_type == 1:
@@ -31,7 +91,7 @@ def build_tasks_for_model(problem: ProblemInstance, model_type: int):
                         c.tw_del,
                     )
                 )
-    elif model_type in (3, 5, 6, 7):
+    elif model_type in (3, 5, 6):
         for s in problem.satellites:
             if s.delivery_weight > 1e-9:
                 e1_tasks.append(

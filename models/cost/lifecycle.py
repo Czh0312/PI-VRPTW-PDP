@@ -269,11 +269,11 @@ def value_decomposition(
 ) -> Dict[str, float | int | None]:
     """Explain where reusable-container value is created or lost.
 
-    The three route inputs deliberately separate two questions:
-
-    * Model 1 -> Model 3 measures the transport penalty of closing the loop.
-    * Model 3 -> the configured optimized model measures route-optimization value.
-    * Model 1 -> the optimized model plus packaging economics measures the business case.
+    The three route inputs deliberately separate two questions.  The first is
+    the selected single-use route, the second is a reusable reference with the
+    same assignment freedom, and the third is the selected reusable route.
+    This supports either the fixed-assignment M1/M3 comparison or the fairer
+    free-assignment M2/M4 comparison without changing the accounting identity.
 
     Route metrics describe one representative operating period and are repeated
     unchanged over ``horizon_periods``.  This is more transparent than scaling a

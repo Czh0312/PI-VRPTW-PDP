@@ -5,7 +5,7 @@
 - `models/routing/`：路径模型、精确求解器和 ALNS；
 - `models/cost/`：基于路线里程与业务参数计算生命周期成本。
 
-当前正式范围是 Model 1–6。Model 7 仅保留旧实现，不纳入当前模型整理、实验主线和文档说明。
+当前正式范围是 Model 1–7。Model 7 在 Model 4 自由分仓的基础上加入 Model 6 的同质空箱异步交接，并提供对应 ALNS。
 
 ## 快速开始
 
@@ -45,8 +45,9 @@ Gurobi 精确求解需要本机安装 `gurobipy` 并配置有效许可证；ALNS
 | Model 4 | 自由分仓、配送与延后回收 | `variants/model_4/model.py` | `variants/model_4/exact_solver.py` | `alns/variants/model_4.py` |
 | Model 5 | 空容器单次车辆间接力 | `variants/model_5/model.py` | `variants/model_5/exact_solver.py` | `alns/variants/model_5.py` |
 | Model 6 | 同质空箱异步事件地点交接 | `variants/model_6/model.py` | `variants/model_6/exact_solver.py` | `alns/variants/model_6.py` |
+| Model 7 | 自由分仓 + 同质空箱异步交接 | `variants/model_7/model.py` | `variants/model_7/exact_solver.py` | `alns/variants/model_7.py` |
 
-表中路径均位于 `models/routing/`。Model 1–6 统一采用：
+表中路径均位于 `models/routing/`。Model 1–7 均按统一结构放置：
 
 - `model.py` 保存当前完整数学模型；
 - `exact_solver.py` 保存对应的严格精确求解入口；

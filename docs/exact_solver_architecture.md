@@ -4,7 +4,7 @@
 
 ## 统一目录
 
-Model 1–6 的精确模块结构一致：
+Model 1–7 的精确模块结构一致：
 
 ```text
 models/routing/variants/model_N/
@@ -27,6 +27,11 @@ Model 1 和 Model 3 因公式组件较多，另有 `formulation/`；这只是完
 | `solution_type` | 精确、限时可行、受限模型等结果语义 |
 | `proven_optimal` | 是否已证明原问题全局最优 |
 
+此外，Model 1–4 的实验与 CLI 会对提取后的路线执行独立审计。审计器不读取
+Gurobi 变量，而是从路线重新检查任务覆盖、分仓、车辆数、载重/体积、时间窗、
+先送后取、E1–E2 衔接，并重新计算总距离。正式结果还必须满足
+`route_audit.valid=True` 且 `route_objective_delta` 在数值容差内。
+
 时间限制下得到的 incumbent 可以作为可行上界，但必须标记为 `feasible_not_proven` 或等价状态。
 
 ## 各模型的证明条件
@@ -39,8 +44,9 @@ Model 1 和 Model 3 因公式组件较多，另有 `formulation/`；这只是完
 | M4 | 完整自由分仓配送—回收弧流 MIP | 完整 MIP 返回 `OPTIMAL`；完整分仓枚举仅在全部分区闭合时可认证 |
 | M5 | 严格松弛证书，必要时回退完整单次接力联合 MIP | 有效下界与可行上界闭合，或完整联合 MIP 返回 `OPTIMAL` |
 | M6 | 严格松弛证书，必要时回退紧凑同质空箱联合 MIP | 有效下界与可行上界闭合，或完整紧凑 MIP 返回 `OPTIMAL` |
+| M7 | 完整顾客—前置仓分区枚举；每个分区求解 M6 完整联合 MIP | 所有互斥分仓分区均被证明最优或不可行，且最优可行分区已确定 |
 
-M5/M6 的有限近邻候选、固定路线二阶段优化或其他缩减候选只能作为受限结果，除非另有覆盖完整可行域的严格证明。
+M5/M6 的有限近邻候选、固定路线二阶段优化或其他缩减候选只能作为受限结果，除非另有覆盖完整可行域的严格证明。M7 只要有一个分仓分区未闭合，就只能报告限时 incumbent，不能报告联合模型全局最优。
 
 ## 历史算法的位置
 
@@ -59,9 +65,14 @@ archive/reference/README.md
 当前精确功能回归位于：
 
 ```text
+tests/routing/test_model1234_exact.py
 tests/routing/test_model5_exact.py
 tests/routing/test_model6_exact.py
+tests/routing/test_model7_exact.py
 ```
+
+`test_model1234_exact.py` 会分别调用四个完整 MIP，核对最优证书、自由分仓支配
+关系和独立路线审计，并确认被破坏的路线能够被审计器拒绝。
 
 运行全部功能测试：
 

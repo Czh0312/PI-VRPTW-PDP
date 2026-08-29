@@ -47,6 +47,8 @@ def _solve_info(m, solution_type):
         # Do not let callers mistake a time-limited incumbent for an exact
         # result merely because routes were returned.
         "proven_optimal": solution_type == "proven_optimal",
+        "proof_scope": "full_arc_flow",
+        "formulation": "complete_fixed_assignment_delivery_pickup_arc_flow",
         "runtime": getattr(m, "Runtime", None),
         "sol_count": getattr(m, "SolCount", 0),
         "objective": None,
