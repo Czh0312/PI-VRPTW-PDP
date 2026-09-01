@@ -25,14 +25,30 @@ def _assignment_key(problem, assignment):
     return tuple(assignment[customer.id] for customer in problem.customers)
 
 
-def iter_assignments(problem):
-    """Yield every assignment exactly once, with the input assignment first."""
+def iter_assignments(problem, preferred_assignments=None):
+    """Yield every assignment exactly once.
+
+    Feasible assignments supplied by an incumbent heuristic are visited first,
+    followed by the input assignment and the complete lexicographic product.
+    The preferred prefix changes only search order; the partition remains
+    exhaustive.
+    """
     customers = [customer.id for customer in problem.customers]
     satellites = [satellite.id for satellite in problem.satellites]
     if customers and not satellites:
         return
 
     seen = set()
+    for preferred in preferred_assignments or []:
+        if (set(preferred) != set(customers)
+                or any(value not in satellites
+                       for value in preferred.values())):
+            continue
+        key = _assignment_key(problem, preferred)
+        if key not in seen:
+            seen.add(key)
+            yield dict(preferred)
+
     original = {
         customer.id: customer.assigned_sat
         for customer in problem.customers
@@ -40,8 +56,9 @@ def iter_assignments(problem):
     }
     if len(original) == len(customers):
         key = _assignment_key(problem, original)
-        seen.add(key)
-        yield original
+        if key not in seen:
+            seen.add(key)
+            yield original
 
     for values in product(satellites, repeat=len(customers)):
         if values in seen:

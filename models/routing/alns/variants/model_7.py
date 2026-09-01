@@ -13,6 +13,7 @@ import random
 import time
 
 from models.routing.alns.engine import ALNSConfig, run_alns_search
+from models.routing.alns.types import FEAS_TOL
 from models.routing.alns.variants.model_4 import (
     Evaluator as FreeAssignmentEvaluator,
     M4Hooks,
@@ -26,11 +27,32 @@ from models.routing.alns.variants.model_4 import (
     shaw_customer_removal,
     worst_customer_removal,
 )
+from models.routing.alns.assignment_operators import (
+    assignment_boundary_removal,
+    two_satellite_removal,
+)
 from models.routing.common.task_builder import build_tasks_from_assignment
 from models.routing.alns.variants.model_6 import (
     Evaluator as RelayEvaluator,
     _path_with_relocations,
     postprocess_transshipment,
+)
+
+
+M7_DESTROY_OPS = (
+    random_customer_removal,
+    worst_customer_removal,
+    shaw_customer_removal,
+    satellite_cluster_removal,
+    assignment_boundary_removal,
+    two_satellite_removal,
+)
+
+M7_REPAIR_OPS = (
+    multi_sat_insertion,
+    multi_sat_insertion_cross,
+    randomized_satellite_insertion,
+    consolidated_satellite_insertion,
 )
 
 
@@ -73,6 +95,7 @@ def solve_alns(
     target_objective=None,
     target_tolerance=1e-6,
     alns_config_overrides=None,
+    refill_unused_time=True,
     **deprecated_options,
 ):
     """Solve the hybrid free-assignment/asynchronous-relay Model 7.
@@ -101,6 +124,7 @@ def solve_alns(
             problem, free_evaluator, TFp)
     )
     free_solution.cost = free_evaluator.total_cost(free_solution)
+    initial_objective = float(free_solution.cost)
 
     if verbose:
         print(f"\n{'=' * 60}")
@@ -113,18 +137,8 @@ def solve_alns(
     stage1_result = run_alns_search(
         initial_solution=free_solution,
         evaluator=free_evaluator,
-        destroy_ops=[
-            random_customer_removal,
-            worst_customer_removal,
-            shaw_customer_removal,
-            satellite_cluster_removal,
-        ],
-        repair_ops=[
-            multi_sat_insertion,
-            multi_sat_insertion_cross,
-            randomized_satellite_insertion,
-            consolidated_satellite_insertion,
-        ],
+        destroy_ops=M7_DESTROY_OPS,
+        repair_ops=M7_REPAIR_OPS,
         config=ALNSConfig(
             max_iterations=max_iterations,
             max_time=stage1_limit,
@@ -143,6 +157,7 @@ def solve_alns(
             return_info, time.time() - start_time,
             stage1_result.iterations)
 
+    no_relay_snapshot = best_solution.copy()
     assignment = free_evaluator.assignment(best_solution)
     free_assignment_cost = float(stage1_result.best_cost)
     best_solution.cost = free_assignment_cost
@@ -205,6 +220,68 @@ def solve_alns(
     )
     relay_elapsed = time.time() - relay_started
     best_solution.cost = relay_evaluator.total_cost(best_solution)
+    relay_solution = best_solution
+    relay_cost = float(best_solution.cost)
+    total_iterations = int(stage1_result.iterations)
+    refill_iterations = 0
+    refill_result = None
+
+    # Relay enumeration may finish well before its reserved budget.  Reuse the
+    # remaining total budget for free-assignment ALNS from a clean pre-relay
+    # snapshot, then keep the better incumbent.  This avoids exposing virtual
+    # relay nodes to Model 4 operators while ensuring Model 7 uses its full cap.
+    if (refill_unused_time
+            and relay_target_hit_time is None
+            and total_iterations < max_iterations
+            and time.time() - start_time < max_time - 1e-3):
+        refill_result = run_alns_search(
+            initial_solution=no_relay_snapshot,
+            evaluator=free_evaluator,
+            destroy_ops=M7_DESTROY_OPS,
+            repair_ops=M7_REPAIR_OPS,
+            config=ALNSConfig(
+                max_iterations=max_iterations - total_iterations,
+                max_time=max_time,
+                e2_probability=1.0,
+                target_cost=target_objective,
+                target_tolerance=target_tolerance,
+                **(alns_config_overrides or {}),
+            ),
+            hooks=M4Hooks(),
+            verbose=False,
+            start_time=start_time,
+        )
+        refill_iterations = int(refill_result.iterations)
+        total_iterations += refill_iterations
+        if refill_result.best_solution is not None:
+            free_assignment_cost = min(
+                free_assignment_cost, float(refill_result.best_cost))
+            if refill_result.best_cost < relay_cost - FEAS_TOL:
+                best_solution = refill_result.best_solution
+                assignment = free_evaluator.assignment(best_solution)
+                relay_e1_tasks, relay_e2_tasks = build_tasks_from_assignment(
+                    problem, assignment)
+                relay_evaluator = RelayEvaluator(
+                    problem,
+                    relay_e1_tasks,
+                    relay_e2_tasks,
+                    TFp,
+                    vehicles_per_satellite=vehicles_per_satellite,
+                )
+                best_solution.task_to_phys = dict(
+                    relay_evaluator.task_to_phys)
+                best_solution.transshipments = {}
+                best_solution.cost = relay_evaluator.total_cost(best_solution)
+                transshipment_events = []
+            else:
+                best_solution = relay_solution
+        if refill_result.target_hit_time is not None:
+            relay_target_hit_time = refill_result.target_hit_time
+
+    moved_customers = sum(
+        1 for customer in problem.customers
+        if assignment.get(customer.id) != customer.assigned_sat
+    )
     feasible = bool(relay_evaluator.is_feasible(best_solution))
     improvement = free_assignment_cost - best_solution.cost
 
@@ -226,9 +303,11 @@ def solve_alns(
         "free_assignment_objective": float(free_assignment_cost),
         "transshipment_improvement": float(improvement),
         "runtime": float(elapsed),
-        "iterations": int(stage1_result.iterations),
+        "iterations": int(total_iterations),
         "feasible": feasible,
         "status": "FEASIBLE" if feasible else "NO_SOLUTION",
+        "external_initial_solution": initial_solution is not None,
+        "initial_objective": initial_objective,
         "assignment": dict(assignment),
         "moved_customers": int(moved_customers),
         "transshipment_count": len(best_solution.transshipments),
@@ -238,7 +317,14 @@ def solve_alns(
         "transshipment_time_budget_requested": requested_relay_budget,
         "transshipment_time_budget_effective": float(relay_budget),
         "transshipment_search_elapsed_seconds": float(relay_elapsed),
-        "best_found_time": stage1_result.best_found_time,
+        "refill_unused_time": bool(refill_unused_time),
+        "refill_iterations": int(refill_iterations),
+        "best_found_time": (
+            refill_result.best_found_time
+            if (refill_result is not None
+                and refill_result.best_solution is best_solution)
+            else stage1_result.best_found_time
+        ),
         "target_hit_time": (
             stage1_result.target_hit_time
             if stage1_result.target_hit_time is not None
@@ -250,6 +336,7 @@ def solve_alns(
         ),
         "restarts": stage1_result.restarts,
         "local_search_improvements": stage1_result.local_search_improvements,
+        "alns_diagnostics": stage1_result.diagnostics,
         "model_scope": "free_assignment_plus_async_event_handoff",
     }
 

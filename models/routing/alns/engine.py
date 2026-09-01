@@ -100,6 +100,25 @@ class ALNSHooks:
         return f"\n达到时间限制 {max_time}s"
 
 
+def evaluate_solution(evaluator, solution):
+    """Evaluate one candidate without duplicating model-specific rebuilds.
+
+    Free-assignment evaluators reconstruct their task catalogues and E1 routes
+    from the E2 assignment.  Calling ``total_cost`` and ``is_feasible``
+    separately used to perform that reconstruction twice for every candidate.
+    Evaluators may now provide ``evaluate(solution) -> (cost, feasible)``;
+    fixed-assignment evaluators keep the backward-compatible fallback.
+    """
+    combined = getattr(evaluator, "evaluate", None)
+    if callable(combined):
+        cost, feasible = combined(solution)
+    else:
+        cost = evaluator.total_cost(solution)
+        feasible = evaluator.is_feasible(solution)
+    solution.cost = cost
+    return cost, bool(feasible)
+
+
 def _task_counts(sol):
     total_e2 = sum(
         len(r.nodes)
@@ -128,9 +147,16 @@ def _first_improving_route_move(sol, evaluator, deadline):
 
     def accept(candidate):
         clean_empty_routes(candidate)
-        candidate.cost = evaluator.total_cost(candidate)
+        if callable(getattr(evaluator, "evaluate", None)):
+            _, feasible = evaluate_solution(evaluator, candidate)
+        else:
+            # Fixed-assignment cost evaluation does not rebuild assignments.
+            # Reject non-improving neighbors before a full schedule audit.
+            candidate.cost = evaluator.total_cost(candidate)
+            feasible = (candidate.cost < base_cost - FEAS_TOL
+                        and evaluator.is_feasible(candidate))
         return (candidate if candidate.cost < base_cost - FEAS_TOL
-                and evaluator.is_feasible(candidate) else None)
+                and feasible else None)
 
     for kind, key in descriptors:
         routes = _route_group(sol, kind, key)
@@ -231,14 +257,14 @@ def _first_improving_route_move(sol, evaluator, deadline):
 def _intensify(sol, evaluator, deadline):
     improvements = 0
     current = sol.copy()
-    current.cost = evaluator.total_cost(current)
+    evaluate_solution(evaluator, current)
     while time.time() < deadline:
         candidate = _first_improving_route_move(current, evaluator, deadline)
         if candidate is None:
             break
         current = candidate
         improvements += 1
-    evaluator.is_feasible(current)
+    evaluate_solution(evaluator, current)
     return current, improvements
 
 
@@ -454,10 +480,10 @@ def run_alns_search(initial_solution, evaluator, destroy_ops, repair_ops,
             update_pair_weights(time.time() - start_time)
             continue
 
-        candidate.cost = evaluator.total_cost(candidate)
+        _, candidate_is_feasible = evaluate_solution(evaluator, candidate)
         hooks.after_cost(candidate, evaluator, sol, iteration)
 
-        if not evaluator.is_feasible(candidate):
+        if not candidate_is_feasible:
             attempt_runtime = time.perf_counter() - attempt_started
             pair_times[pair_idx] += attempt_runtime
             pair_totals[pair_idx]["runtime"] += attempt_runtime

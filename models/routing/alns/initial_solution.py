@@ -379,15 +379,18 @@ def _best_e2_item_insert(routes, task_ids, evaluator, sat_id, start_time):
         old_cost = _route_cost(evaluator, route)
         for positions in _e2_positions(route, task_ids):
             _apply_positions(route, task_ids, positions)
-            ok = evaluator.check_e2_route_feasible(
-                route, sat_id, start_time)
-            new_cost = _route_cost(evaluator, route)
-            _remove_inserted(route, positions)
-            if not ok:
-                continue
-            inc = new_cost - old_cost
-            if best is None or inc < best[0] - FEAS_TOL:
-                best = (inc, route, positions)
+            try:
+                # Cost was already computed for every position. Use that exact
+                # value first: a non-improving insertion cannot win even if it
+                # passes the more expensive time/load simulation. Keep the
+                # original enumeration and tie-breaking, with no shortlists.
+                inc = _route_cost(evaluator, route) - old_cost
+                if best is not None and inc >= best[0] - FEAS_TOL:
+                    continue
+                if evaluator.check_e2_route_feasible(route, sat_id, start_time):
+                    best = (inc, route, positions)
+            finally:
+                _remove_inserted(route, positions)
     return best
 
 

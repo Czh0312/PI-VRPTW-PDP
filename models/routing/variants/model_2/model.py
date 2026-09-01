@@ -23,7 +23,8 @@ instances should use Model 2 ALNS.
 import gurobipy as gp
 from gurobipy import GRB
 
-def build_model(problem, vehicles_per_satellite=4):
+
+def build_model(problem, vehicles_per_satellite=4, prune_e2_arcs=True):
     """Build the full, unrestricted Model 2 arc-flow MIP."""
     inf = float("inf")
     depot_id = problem.depot.id
@@ -90,10 +91,28 @@ def build_model(problem, vehicles_per_satellite=4):
     )
     M_time = time_horizon + max_arc
 
-    # No arc pre-filtering: E2_Time constraints with big-M handle all arcs
-    # (matching M1's approach).  A_start is variable, so absolute TW values
-    # cannot be used as relative earliest times for pruning.
+    # Exact E2 arc preprocessing. A_start is non-negative, so a task's absolute
+    # earliest window is also a valid lower bound on its absolute service time.
+    # If the earliest possible departure from i already reaches j after j's
+    # deadline, the arc cannot occur in any feasible solution.
     e2_infeasible = set()
+    e2_arc_candidates = 0
+    for s in F:
+        valid = [s] + e2_task_ids
+        for i in valid:
+            earliest_i = 0.0 if i == s else e2_tw[i][0]
+            service_i = e2_svc.get(i, 0.0)
+            for j in valid:
+                if i == j:
+                    continue
+                e2_arc_candidates += 1
+                if not prune_e2_arcs or j == s:
+                    continue
+                latest_j = e2_tw[j][1]
+                if (latest_j < inf
+                        and earliest_i + service_i + time_map[i, j]
+                        > latest_j + 1e-9):
+                    e2_infeasible.add((s, i, j))
 
     total_del_w = sum(cust_w.values())
     total_del_v = len(C) * cv
@@ -293,7 +312,7 @@ def build_model(problem, vehicles_per_satellite=4):
                     lb=0.0, ub=time_horizon, name=f"A_e2_{i}_{v}"
                 )
                 for j in valid:
-                    if i != j:
+                    if i != j and (s, i, j) not in e2_infeasible:
                         z[i, j, v] = m.addVar(
                             vtype=GRB.BINARY, name=f"z_{i}_{j}_{v}"
                         )
@@ -351,13 +370,6 @@ def build_model(problem, vehicles_per_satellite=4):
                     f"E2_Flow_{h}_{v}",
                 )
             m.addConstr(A_e2[s, v] == 0, f"E2_SatAnchor_{s}_{v}")
-            for i in valid:
-                for j in e2_task_ids:
-                    if (i, j, v) in z and (s, i, j) in e2_infeasible:
-                        m.addConstr(
-                            z[i, j, v] == 0,
-                            f"E2_TimeInfeasible_{i}_{j}_{v}",
-                        )
         # Vehicles at one satellite are homogeneous.  Requiring used vehicle
         # labels to form a prefix is safe: any feasible solution can be
         # relabelled within a satellite (including all timing/load states) to
@@ -559,9 +571,16 @@ def build_model(problem, vehicles_per_satellite=4):
         "V_by_sat": V_by_sat,
         "time_horizon": time_horizon,
         "M_time": M_time,
+        "formulation_stats": {
+            "e2_arc_candidates_per_vehicle_pool": e2_arc_candidates,
+            "e2_arcs_pruned_per_vehicle_pool": len(e2_infeasible),
+            "e2_arc_binaries_created": len(z),
+        },
     }
     vars_dict = {
         "w": w,
+        "served_s": served_s,
+        "y": y,
         "x": x,
         "z": z,
         "A_e1": A_e1,
@@ -574,3 +593,84 @@ def build_model(problem, vehicles_per_satellite=4):
         "A_return": A_return,
     }
     return m, vars_dict, ctx
+
+
+def apply_route_warm_start(vars_dict, ctx, problem, warm_start_routes):
+    """Apply a complete discrete M1/M2 route start."""
+    if not warm_start_routes:
+        return
+    e1_routes, e2_routes_by_sat = warm_start_routes
+    w = vars_dict["w"]
+    served_s = vars_dict["served_s"]
+    y = vars_dict["y"]
+    x = vars_dict["x"]
+    z = vars_dict["z"]
+    F, C, K = ctx["F"], ctx["C"], ctx["K"]
+    e2_task_ids = set(ctx["e2_task_ids"])
+
+    for var_dict in (w, served_s, y, x, z):
+        for var in var_dict.values():
+            var.Start = 0.0
+
+    assignment = {}
+    for sat_id, routes in (e2_routes_by_sat or {}).items():
+        for route in routes or []:
+            for node_id in route:
+                if node_id in e2_task_ids:
+                    assignment[node_id[:-1]] = sat_id
+    for customer in C:
+        sat_id = assignment.get(customer)
+        if sat_id not in F:
+            node = problem.nodes.get(customer)
+            sat_id = getattr(node, "assigned_sat", None)
+        if sat_id in F:
+            assignment[customer] = sat_id
+            w[customer, sat_id].Start = 1.0
+            served_s[sat_id].Start = 1.0
+
+    def e1_weight(route):
+        delivered = {
+            node[:-1] for node in route or []
+            if node.endswith("d") and node[:-1] in F
+        }
+        return sum(
+            problem.nodes[c].weight_del + problem.fleet.container_weight
+            for c, sat in assignment.items() if sat in delivered
+        )
+
+    ordered_e1 = sorted(
+        (route for route in (e1_routes or []) if route),
+        key=e1_weight,
+        reverse=True,
+    )
+    for k, route in zip(K, ordered_e1):
+        for i, j in zip(route, route[1:]):
+            if (i, j, k) in x:
+                x[i, j, k].Start = 1.0
+        delivered = {
+            node[:-1] for node in route
+            if node.endswith("d") and node[:-1] in F
+        }
+        for customer, sat_id in assignment.items():
+            if sat_id in delivered and (customer, sat_id, k) in y:
+                y[customer, sat_id, k].Start = 1.0
+
+    def e2_weight(route):
+        return sum(
+            problem.nodes[node[:-1]].weight_del
+            + problem.fleet.container_weight
+            for node in route or [] if node in e2_task_ids
+        )
+
+    for sat_id, routes in (e2_routes_by_sat or {}).items():
+        if sat_id not in ctx["V_by_sat"]:
+            continue
+        ordered = sorted(
+            (route for route in (routes or []) if route),
+            key=e2_weight,
+            reverse=True,
+        )
+        for vehicle, route in zip(ctx["V_by_sat"][sat_id], ordered):
+            for i, j in zip(route, route[1:]):
+                if (i, j, vehicle) in z:
+                    z[i, j, vehicle].Start = 1.0

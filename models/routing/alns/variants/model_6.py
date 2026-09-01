@@ -11,6 +11,7 @@ from models.routing.alns.types import (
     is_tfp_active,
 )
 from models.routing.alns.engine import ALNSConfig, ALNSHooks, run_alns_search
+from models.routing.alns.fixed_repair import FixedRouteInsertionCache
 from models.routing.alns.initial_solution import build_strong_initial_solution
 from models.routing.alns.paired_operators import (
     insert_complete_customer_pairs,
@@ -689,6 +690,7 @@ def regret_insertion(sol, removed, evaluator, echelon='e2', k=2):
     if echelon == 'e2':
         e2_start_by_sat = evaluator.e2_start_times(sol)
         pending = list(removed)
+        insertion_cache = FixedRouteInsertionCache(evaluator)
         while pending:
             best_regret = -float('inf')
             best_nid = None
@@ -709,15 +711,8 @@ def regret_insertion(sol, removed, evaluator, echelon='e2', k=2):
                 insertion_costs = []
                 routes = sol.e2_routes.get(sat_id, [])
                 for r in routes:
-                    old_cost = evaluator.route_distance(r)
-                    for pos in range(len(r.nodes) + 1):
-                        old_nodes = r.nodes[:]
-                        r.nodes.insert(pos, nid)
-                        if evaluator.check_e2_route_feasible(r, sat_id,
-                                                             start_time):
-                            c = evaluator.route_distance(r) - old_cost
-                            insertion_costs.append((c, r, pos))
-                        r.nodes = old_nodes
+                    insertion_costs.extend(insertion_cache.options(
+                        r, nid, sat_id, start_time))
 
                 if len(routes) < evaluator.vehicles_per_satellite:
                     new_route = Route(sat_id, [nid])
@@ -747,6 +742,7 @@ def regret_insertion(sol, removed, evaluator, echelon='e2', k=2):
             _, route, pos = best_route_info
             if route is not None:
                 route.nodes.insert(pos, best_nid)
+                insertion_cache.invalidate(route)
             else:
                 sat_id = evaluator.e2_task_satellite(best_nid)
                 if sat_id:
@@ -829,6 +825,11 @@ def postprocess_transshipment(sol, evaluator, verbose=True,
             max_transshipments_per_sat=max_transshipments_per_sat,
         )
         if not improvement:
+            # Relocation may consume most of this pass's budget. Do not give
+            # exchange the stale allowance measured before that scan.
+            remaining = time_budget - (time.time() - postprocess_start)
+            if remaining <= 0.0:
+                break
             exchange = _search_and_apply_transshipment_exchange(
                 sol, evaluator,
                 time_budget=remaining,
@@ -1014,7 +1015,9 @@ def _search_and_apply_relocation(sol, evaluator, time_budget=2.0,
             continue
 
         all_tasks = evaluator.e2_tasks_by_sat.get(sat_id, [])
-        all_phys = list(set(t.cust for t in all_tasks))
+        # Sampling an unordered set makes the same solver seed depend on the
+        # process's PYTHONHASHSEED. Keep the candidate order reproducible.
+        all_phys = sorted({t.cust for t in all_tasks})
         start_time = e2_start_by_sat.get(sat_id, 0.0)
 
         pickups = []
@@ -1342,6 +1345,7 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         return (None, None, info) if return_info else (None, None)
 
     sol.cost = evaluator.total_cost(sol)
+    initial_objective = float(sol.cost)
     best_sol = sol.copy()
     best_cost = sol.cost
 
@@ -1397,8 +1401,17 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         return (None, None, info) if return_info else (None, None)
     best_cost = result.best_cost
     stage1_cost = best_cost
+    stage1_snapshot = best_sol.copy()
     total_iterations = result.iterations
     target_hit_time = result.target_hit_time
+    refill_iterations = 0
+    phase_diagnostics = {
+        "stage1": {"objective": float(best_cost),
+                   "iterations": int(result.iterations),
+                   "elapsed_from_start": float(result.elapsed)},
+        "refill": None,
+        "selected_stage": "stage1",
+    }
     if verbose:
         elapsed = time.time() - start_time
         print(f"\n  阶段一完成: cost={best_cost:.2f}, 耗时={elapsed:.2f}s")
@@ -1429,19 +1442,29 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         audit_log=transshipment_events,
     )
     stage2_elapsed = time.time() - stage2_started
+    phase_diagnostics["transshipment"] = {
+        "objective": float(best_sol.cost), "elapsed": float(stage2_elapsed),
+        "improvement": float(result.best_cost - best_sol.cost),
+        "count": len(best_sol.transshipments),
+    }
+    if best_sol.cost < result.best_cost - FEAS_TOL:
+        phase_diagnostics["selected_stage"] = "transshipment"
     if target_hit_time is None:
         target_hit_time = post_hit_time
 
-    # If the transshipment scan finishes early without changing the solution,
-    # give its unused wall-clock budget back to the ordinary ALNS.  This keeps
-    # Model 6 comparable with Model 3 under one common total time budget.
+    # If the transshipment scan finishes early, give every unused wall-clock
+    # second back to ordinary ALNS.  Refill from the pre-relay snapshot: the
+    # standard operators do not own the virtual handoff nodes.  The better of
+    # the relay incumbent and the refilled zero-relay incumbent is retained.
     if (refill_unused_time
             and target_hit_time is None
-            and not best_sol.transshipments
             and total_iterations < max_iterations
             and time.time() - start_time < max_time - 1e-3):
+        relay_sol = best_sol
+        relay_cost = float(best_sol.cost)
+        refill_started = time.time()
         refill = run_alns_search(
-            initial_solution=best_sol,
+            initial_solution=stage1_snapshot,
             evaluator=evaluator,
             destroy_ops=[random_removal, worst_removal, shaw_removal,
                          paired_customer_removal, route_customer_pair_removal],
@@ -1457,11 +1480,24 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
             verbose=False,
             start_time=start_time,
         )
-        total_iterations += refill.iterations
+        refill_iterations = refill.iterations
+        total_iterations += refill_iterations
+        phase_diagnostics["refill"] = {
+            "objective": float(refill.best_cost) if refill.best_solution is not None else None,
+            "iterations": int(refill_iterations),
+            "elapsed": float(time.time() - refill_started),
+            "alns_diagnostics": refill.diagnostics,
+        }
         if refill.best_solution is not None:
-            best_sol = refill.best_solution
-            best_cost = refill.best_cost
-            stage1_cost = best_cost
+            stage1_cost = min(stage1_cost, float(refill.best_cost))
+            if refill.best_cost < relay_cost - FEAS_TOL:
+                best_sol = refill.best_solution
+                best_cost = refill.best_cost
+                transshipment_events = []
+                phase_diagnostics["selected_stage"] = "refill"
+            else:
+                best_sol = relay_sol
+                best_cost = relay_cost
         if refill.target_hit_time is not None:
             target_hit_time = refill.target_hit_time
 
@@ -1505,7 +1541,9 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         "transshipment_events": transshipment_events,
         "strong_initial_solution": bool(strong_initial_solution),
         "external_initial_solution": initial_solution is not None,
+        "initial_objective": initial_objective,
         "refill_unused_time": bool(refill_unused_time),
+        "refill_iterations": int(refill_iterations),
         "stage1_time_ratio": float(stage1_time_ratio),
         "stage1_time_budget_seconds": float(stage1_limit),
         "transshipment_time_budget_requested": float(transshipment_time_budget),
@@ -1525,6 +1563,9 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         "restarts": result.restarts,
         "local_search_improvements": result.local_search_improvements,
         "alns_diagnostics": result.diagnostics,
+        # Keep the original ALNS diagnostics for compatibility; refill has its
+        # own complete diagnostics and must not be mistaken for stage-one work.
+        "phase_diagnostics": phase_diagnostics,
     }
     return ((e1_routes_out, e2_routes_out, info) if return_info
             else (e1_routes_out, e2_routes_out))

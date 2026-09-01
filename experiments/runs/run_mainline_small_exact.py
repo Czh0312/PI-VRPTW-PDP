@@ -6,10 +6,13 @@ The output is append-only JSONL plus a compact CSV summary.  Only results with
 separately for diagnostics and are never merged into an exact-optimum column.
 """
 import argparse
+import copy
 import csv
 import json
+import math
 import sys
 import time
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -26,6 +29,7 @@ from models.routing.variants.model_1.exact_solver import solve_exact as solve_m1
 from models.routing.variants.model_2.exact_solver import solve_exact as solve_m2
 from models.routing.variants.model_3.exact_solver import solve_exact as solve_m3
 from models.routing.variants.model_4.exact_solver import solve_exact as solve_m4
+from models.routing.alns.variants.model_4 import solve_alns as solve_m4_alns
 from models.routing.variants.model_5.exact_solver import solve_exact as solve_m5
 from models.routing.variants.model_6.exact_solver import solve_exact as solve_m6
 from models.routing.variants.model_7.exact_solver import solve_exact as solve_m7
@@ -61,6 +65,149 @@ def _fleet_fields(problem):
     }
 
 
+def _run_m4_alns_warm_trial(problem, seconds, seed):
+    """Run one isolated ALNS trial; safe as a spawned-process entry point."""
+    started = time.perf_counter()
+    try:
+        e1, e2, assignment, alns_info = solve_m4_alns(
+            problem,
+            problem.fleet.e2_per_sat_count,
+            max_iterations=1_000_000,
+            max_time=seconds,
+            seed=seed,
+            verbose=False,
+            return_info=True,
+        )
+        return {
+            "seed": int(seed),
+            "wall_time": time.perf_counter() - started,
+            "routes": (e1, e2),
+            "assignment": assignment,
+            "alns_info": alns_info,
+            "error": None,
+        }
+    except Exception as exc:
+        return {
+            "seed": int(seed),
+            "wall_time": time.perf_counter() - started,
+            "routes": None,
+            "assignment": None,
+            "alns_info": {},
+            "error": repr(exc),
+        }
+
+
+def _build_m4_alns_warm_start(problem, seconds, seeds, workers=1):
+    """Return the best independently audited M4 ALNS incumbent."""
+    best = None
+    trials = []
+    total_started = time.perf_counter()
+    workers = max(1, min(int(workers), len(seeds)))
+    if workers > 1:
+        # Processes, rather than threads, isolate ALNS' module-level random
+        # generator.  All workers finish before Gurobi starts, so the exact
+        # solve still receives the full machine and an unchanged time budget.
+        with ProcessPoolExecutor(max_workers=workers) as executor:
+            futures = [(
+                seed,
+                executor.submit(
+                    _run_m4_alns_warm_trial, problem, seconds, seed),
+            ) for seed in seeds]
+            raw_trials = []
+            for seed, future in futures:
+                try:
+                    raw_trials.append(future.result())
+                except Exception as exc:
+                    raw_trials.append({
+                        "seed": int(seed),
+                        "wall_time": None,
+                        "routes": None,
+                        "assignment": None,
+                        "alns_info": {},
+                        "error": repr(exc),
+                    })
+    else:
+        # The sequential path preserves the historical execution protocol.
+        raw_trials = [
+            _run_m4_alns_warm_trial(copy.deepcopy(problem), seconds, seed)
+            for seed in seeds
+        ]
+
+    for raw_trial in raw_trials:
+        seed = raw_trial["seed"]
+        elapsed = raw_trial["wall_time"]
+        e1, e2 = raw_trial["routes"] or (None, None)
+        assignment = raw_trial["assignment"]
+        alns_info = raw_trial["alns_info"]
+        if raw_trial["error"] is not None:
+            trials.append({
+                "seed": seed,
+                "wall_time": elapsed,
+                "objective": None,
+                "valid": False,
+                "iterations": None,
+                "termination_reason": "error",
+                "audit_errors": [raw_trial["error"]],
+            })
+            continue
+        audit = None
+        if e1 is not None:
+            audit = audit_exact_solution(
+                problem, 4, e1, e2, assignment=assignment,
+                objective=alns_info.get("objective"), tfp=9999.0,
+            )
+        valid = bool(audit and audit["valid"])
+        objective = (
+            float(audit["route_objective"])
+            if valid and audit.get("route_objective") is not None
+            else None
+        )
+        trials.append({
+            "seed": int(seed),
+            "wall_time": elapsed,
+            "objective": objective,
+            "valid": valid,
+            "iterations": alns_info.get("iterations"),
+            "termination_reason": alns_info.get("termination_reason"),
+            "audit_errors": [] if audit is None else audit.get("errors", []),
+        })
+        if objective is not None and (
+                best is None or objective < best["objective"] - 1e-9):
+            best = {
+                "routes": (e1, e2),
+                "assignment": dict(assignment),
+                "objective": objective,
+                "seed": int(seed),
+            }
+    return {
+        "best": best,
+        "wall_time": time.perf_counter() - total_started,
+        "workers": workers,
+        "trials": trials,
+    }
+
+
+def _use_better_m4_alns_incumbent(info, routes, candidate):
+    """Keep an audited ALNS incumbent if the limited MIP returns worse."""
+    best = candidate.get("best") if candidate else None
+    if best is None or info.get("proven_optimal"):
+        return info, routes
+    exact_objective = info.get("objective")
+    if exact_objective is not None and exact_objective <= best["objective"] + 1e-6:
+        return info, routes
+
+    info["exact_incumbent_before_alns_fallback"] = exact_objective
+    info["objective"] = best["objective"]
+    info["assignment"] = dict(best["assignment"])
+    info["solution_type"] = "alns_warm_incumbent"
+    info["incumbent_source"] = "audited_m4_alns"
+    bound = info.get("best_bound")
+    if bound is not None and math.isfinite(float(bound)):
+        denominator = max(abs(best["objective"]), 1e-12)
+        info["mip_gap"] = max(0.0, (best["objective"] - float(bound)) / denominator)
+    return info, best["routes"]
+
+
 def _record(model, scale_group, scenario, instance, info, elapsed, problem):
     return {
         "model": model,
@@ -85,17 +232,54 @@ def _record(model, scale_group, scenario, instance, info, elapsed, problem):
         "assignment_partitions_total": info.get("assignment_partitions_total"),
         "assignment_partitions_evaluated": info.get(
             "assignment_partitions_evaluated"),
+        "assignment_partitions_resolved": info.get(
+            "assignment_partitions_resolved"),
+        "assignment_partitions_proven_feasible": info.get(
+            "assignment_partitions_proven_feasible"),
+        "assignment_partitions_proven_infeasible": info.get(
+            "assignment_partitions_proven_infeasible"),
+        "assignment_partition_retries": info.get(
+            "assignment_partition_retries"),
+        "partition_relaxation_screened": info.get("partition_relaxation_screened"),
+        "partition_relaxation_pruned": info.get("partition_relaxation_pruned"),
+        "assignment_partitions_unresolved": info.get(
+            "assignment_partitions_unresolved"),
+        "weakest_unresolved_bound": info.get("weakest_unresolved_bound"),
+        "weakest_unresolved_assignment": info.get(
+            "weakest_unresolved_assignment"),
+        "weakest_unresolved_status": info.get("weakest_unresolved_status"),
         "certificate_type": (info.get("certificate") or {}).get("type"),
+        "external_m4_incumbent": info.get("external_m4_incumbent"),
+        "incumbent_source": info.get("incumbent_source"),
         "route_audit_valid": info.get("route_audit_valid"),
         "route_objective": info.get("route_objective"),
         "route_objective_delta": info.get("route_objective_delta"),
         "route_audit_errors": info.get("route_audit_errors"),
+        "model_rows": info.get("model_rows"),
+        "model_columns": info.get("model_columns"),
+        "model_binary": info.get("model_binary"),
+        "model_nonzeros": info.get("model_nonzeros"),
+        "formulation_stats": info.get("formulation_stats"),
+        "node_count": info.get("node_count"),
+        "iteration_count": info.get("iteration_count"),
+        "work": info.get("work"),
+        "time_limit": info.get("time_limit"),
+        "work_limit": info.get("work_limit"),
+        "m4_alns_warm_attempted": info.get("m4_alns_warm_attempted"),
+        "m4_alns_warm_objective": info.get("m4_alns_warm_objective"),
+        "m4_alns_warm_seed": info.get("m4_alns_warm_seed"),
+        "m4_alns_warm_wall_time": info.get("m4_alns_warm_wall_time"),
+        "m4_alns_warm_workers": info.get("m4_alns_warm_workers"),
+        "m4_alns_warm_trials": info.get("m4_alns_warm_trials"),
+        "exact_incumbent_before_alns_fallback": info.get(
+            "exact_incumbent_before_alns_fallback"),
         **_fleet_fields(problem),
     }
 
 
 def solve_one(model, problem, time_limit, warm_start_routes=None,
-              gurobi_params=None, m4_formulation_options=None):
+              gurobi_params=None, m4_formulation_options=None,
+              m7_warm_start=None):
     """Solve one model instance. Returns (info, routes_or_None)."""
     vps = problem.fleet.e2_per_sat_count
     routes = None
@@ -110,6 +294,7 @@ def solve_one(model, problem, time_limit, warm_start_routes=None,
         r1, r2, _, info = solve_m2(
             problem, vps, time_limit=time_limit,
             verbose=False, return_info=True, gurobi_params=gurobi_params,
+            warm_start_routes=warm_start_routes,
         )
         routes = (r1, r2)
     elif model == 3:
@@ -125,6 +310,7 @@ def solve_one(model, problem, time_limit, warm_start_routes=None,
             verbose=False, return_info=True,
             warm_start_routes=warm_start_routes, gurobi_params=gurobi_params,
             formulation_options=m4_formulation_options,
+            return_incumbent_on_time_limit=True,
         )
         routes = (r1, r2)
     elif model == 5:
@@ -147,6 +333,12 @@ def solve_one(model, problem, time_limit, warm_start_routes=None,
         )
         routes = (r1, r2)
     elif model == 7:
+        m7_warm_routes = None
+        m7_warm_assignment = None
+        m7_warm_objective = None
+        if m7_warm_start is not None:
+            (m7_warm_routes, m7_warm_assignment,
+             m7_warm_objective) = m7_warm_start
         r1, r2, assignment, info = solve_m7(
             problem,
             vehicles_per_satellite=vps,
@@ -157,6 +349,9 @@ def solve_one(model, problem, time_limit, warm_start_routes=None,
             return_incumbent_on_time_limit=True,
             gurobi_params=gurobi_params,
             m4_formulation_options=m4_formulation_options,
+            warm_start_routes=m7_warm_routes,
+            warm_start_assignment=m7_warm_assignment,
+            warm_start_objective=m7_warm_objective,
         )
         info["assignment"] = assignment
         routes = (r1, r2)
@@ -201,10 +396,39 @@ def main():
             "strengthening for difficult instances."
         ),
     )
+    parser.add_argument(
+        "--m4-alns-warm-time", type=float, default=0.0,
+        help=(
+            "Seconds per ALNS seed used to build an audited M4 MIP start. "
+            "Disabled by default (0)."
+        ),
+    )
+    parser.add_argument(
+        "--m4-alns-warm-seeds", nargs="+", type=int, default=[41, 42, 43],
+        help="Random seeds for the optional M4 ALNS warm start.",
+    )
+    parser.add_argument(
+        "--m4-alns-warm-workers", type=int, default=3,
+        help=(
+            "Processes used for independent M4 ALNS seeds. Use the number "
+            "of seeds to reduce warm-start wall time (default 3); use 1 "
+            "to reproduce the historical sequential protocol."
+        ),
+    )
+    parser.add_argument(
+        "--m4-alns-warm-min-customers", type=int, default=12,
+        help="Only run the optional M4 ALNS warm start at or above this size.",
+    )
     parser.add_argument("--output-dir", default="output/results/mainline_small_exact")
     args = parser.parse_args()
     if args.time_limit is not None and args.time_limit <= 0.0:
         parser.error("--time-limit must be positive")
+    if args.m4_alns_warm_time < 0.0:
+        parser.error("--m4-alns-warm-time must be non-negative")
+    if args.m4_alns_warm_min_customers < 0:
+        parser.error("--m4-alns-warm-min-customers must be non-negative")
+    if args.m4_alns_warm_workers <= 0:
+        parser.error("--m4-alns-warm-workers must be positive")
     gurobi_params = {}
     for item in args.gurobi_param:
         if "=" not in item:
@@ -255,9 +479,27 @@ def main():
               "mip_gap", "runtime", "wall_time", "sol_count",
               "formulation", "proof_scope", "transshipment_count",
               "assignment", "assignment_partitions_total",
-              "assignment_partitions_evaluated", "certificate_type",
+              "assignment_partitions_evaluated",
+              "assignment_partitions_resolved",
+              "assignment_partitions_proven_feasible",
+              "assignment_partitions_proven_infeasible",
+              "assignment_partition_retries",
+              "partition_relaxation_screened", "partition_relaxation_pruned",
+              "assignment_partitions_unresolved",
+              "weakest_unresolved_bound",
+              "weakest_unresolved_assignment",
+              "weakest_unresolved_status", "certificate_type",
+              "external_m4_incumbent", "incumbent_source",
               "route_audit_valid", "route_objective",
               "route_objective_delta", "route_audit_errors",
+              "model_rows", "model_columns", "model_binary",
+              "model_nonzeros", "formulation_stats", "node_count",
+              "iteration_count", "work", "time_limit", "work_limit",
+              "m4_alns_warm_attempted", "m4_alns_warm_objective",
+              "m4_alns_warm_seed", "m4_alns_warm_wall_time",
+              "m4_alns_warm_workers",
+              "m4_alns_warm_trials",
+              "exact_incumbent_before_alns_fallback",
               "e1_vehicle_count", "e1_weight_capacity",
               "e1_container_capacity", "e2_vehicles_per_satellite",
               "e2_weight_capacity", "e2_container_capacity",
@@ -306,20 +548,64 @@ def run_instance(path, scale_group, scenario, args, fleet, gurobi_params,
                  m4_formulation_options, records, jsonl_path):
     """Run all requested models for one organized dataset instance."""
     problem = _problem(path, fleet)
-    # Cache M3 routes for the M4 warm start.
+    # Cache nested-model incumbents for exact MIP starts.
+    m1_routes = None
     m3_routes = None
+    # A solved M4 route is a zero-handoff feasible M7 incumbent.  Preserve the
+    # exact objective and assignment as well as the paths so a later M7 run on
+    # the same instance cannot return a worse time-limited solution.
+    m4_incumbent = None
     for model in args.models:
         started = time.perf_counter()
-        warm_start = m3_routes if model in (4, 6) else None
+        m4_alns_candidate = None
+        warm_start = (
+            m1_routes if model == 2
+            else m3_routes if model in (4, 6)
+            else None
+        )
         try:
+            if (model == 4
+                    and getattr(args, "m4_alns_warm_time", 0.0) > 0.0
+                    and len(problem.customers) >= getattr(
+                        args, "m4_alns_warm_min_customers", 12)):
+                m4_alns_candidate = _build_m4_alns_warm_start(
+                    problem,
+                    args.m4_alns_warm_time,
+                    args.m4_alns_warm_seeds,
+                    args.m4_alns_warm_workers,
+                )
+                if m4_alns_candidate["best"] is not None:
+                    warm_start = m4_alns_candidate["best"]["routes"]
             info, routes = solve_one(
                 model, problem, args.time_limit,
                 warm_start_routes=warm_start,
                 gurobi_params=gurobi_params,
                 m4_formulation_options=m4_formulation_options,
+                m7_warm_start=m4_incumbent if model == 7 else None,
             )
+            if model == 4:
+                info["m4_alns_warm_attempted"] = m4_alns_candidate is not None
+                if m4_alns_candidate is not None:
+                    best = m4_alns_candidate["best"]
+                    info["m4_alns_warm_objective"] = (
+                        None if best is None else best["objective"])
+                    info["m4_alns_warm_seed"] = (
+                        None if best is None else best["seed"])
+                    info["m4_alns_warm_wall_time"] = m4_alns_candidate["wall_time"]
+                    info["m4_alns_warm_workers"] = m4_alns_candidate["workers"]
+                    info["m4_alns_warm_trials"] = m4_alns_candidate["trials"]
+                    info, routes = _use_better_m4_alns_incumbent(
+                        info, routes, m4_alns_candidate)
+            if model == 1 and routes[0] is not None:
+                m1_routes = routes
             if model == 3 and routes[0] is not None:
                 m3_routes = routes
+            if (model == 4 and routes[0] is not None
+                    and info.get("assignment") is not None
+                    and info.get("objective") is not None):
+                m4_incumbent = (
+                    routes, dict(info["assignment"]), float(info["objective"])
+                )
             if model in (1, 2, 3, 4) and routes[0] is not None:
                 audit = audit_exact_solution(
                     problem, model, routes[0], routes[1],

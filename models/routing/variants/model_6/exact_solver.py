@@ -90,6 +90,14 @@ def _solve_info(model, solution_type, statistics, transshipments=None,
         "transshipment_count": len(transshipments or []),
         "transferred_container_count": int(transferred_boxes),
         "model_statistics": dict(statistics),
+        # Keep proof diagnostics in the normal result payload.  These are
+        # read-only Gurobi attributes and make it possible to distinguish a
+        # weak root relaxation from slow node processing without enabling a
+        # large solver log in batch experiments.
+        "node_count": float(getattr(model, "NodeCount", 0.0)),
+        "simplex_iterations": float(getattr(model, "IterCount", 0.0)),
+        "barrier_iterations": int(getattr(model, "BarIterCount", 0)),
+        "work_units": float(getattr(model, "Work", 0.0)),
     }
     if sol_count:
         info["objective"] = float(model.ObjVal)
@@ -106,7 +114,8 @@ def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
                 return_incumbent_on_time_limit=False, return_info=False,
                 warm_start_routes=None, gurobi_params=None,
                 strengthen=True, compute_iis_on_infeasible=True,
-                use_relaxation_certificate=True):
+                use_relaxation_certificate=True,
+                certificate_time_fraction=0.5):
     """Solve the complete compact Model 6 MILP.
 
     Unlike the historical two-stage implementation, routes and homogeneous
@@ -120,6 +129,27 @@ def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
             return None
         return max(0.01, float(time_limit) - (time.perf_counter() - started))
 
+    if not 0.0 <= float(certificate_time_fraction) <= 1.0:
+        raise ValueError("certificate_time_fraction must be in [0, 1]")
+    certificate_deadline = (
+        None if time_limit is None
+        else started + float(time_limit) * float(certificate_time_fraction)
+    )
+
+    def certificate_remaining_time():
+        global_remaining = remaining_time()
+        if certificate_deadline is None:
+            return global_remaining
+        return max(
+            0.01,
+            min(global_remaining,
+                certificate_deadline - time.perf_counter()),
+        )
+
+    def certificate_has_time():
+        return (certificate_deadline is None
+                or certificate_deadline - time.perf_counter() > 0.02)
+
     # Exact shortcut certificate.  Removing every empty-container load while
     # retaining all original pickup visits, time windows and E1/E2 timing is a
     # valid metric-distance relaxation of the O/R handoff model: delete the
@@ -128,20 +158,23 @@ def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
     direct_e1 = direct_e2 = None
     direct_info = relaxation_info = None
     if (use_relaxation_certificate
+            and (time_limit is None or certificate_time_fraction > 0.0)
             and _has_metric_distances(problem, e1_tasks, e2_tasks_by_sat)):
         if verbose:
             print("[CERT] 先求无中转可行上界与零回收载荷严格下界")
         direct_e1, direct_e2, direct_info = solve_m3_exact(
             problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
-            TFp=TFp, verbose=False, time_limit=remaining_time(), mip_gap=0.0,
+            TFp=TFp, verbose=False,
+            time_limit=certificate_remaining_time(), mip_gap=0.0,
             return_incumbent_on_time_limit=True, return_info=True,
             warm_start_routes=warm_start_routes, gurobi_params=gurobi_params,
         )
-        if direct_e1 and direct_e2:
+        if direct_e1 and direct_e2 and certificate_has_time():
             relaxed_tasks = _zero_pickup_load_relaxation(e2_tasks_by_sat)
             _lb_e1, _lb_e2, relaxation_info = solve_m3_exact(
                 problem, e1_tasks, relaxed_tasks, vehicles_per_satellite,
-                TFp=TFp, verbose=False, time_limit=remaining_time(), mip_gap=0.0,
+                TFp=TFp, verbose=False,
+                time_limit=certificate_remaining_time(), mip_gap=0.0,
                 return_incumbent_on_time_limit=True, return_info=True,
                 warm_start_routes=(direct_e1, direct_e2),
                 gurobi_params=gurobi_params,
