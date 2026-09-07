@@ -72,6 +72,10 @@ Model 7 已完成一组标准基准：Set1 的22个实例按120秒/例运行精�
 `output/experiments/model3467_large_alns_10s/report.md`，合并运行数据见
 `output/experiments/model3467_large_alns_10s/runs_merged.csv`。
 
+以上本地3秒/10秒批次及 `model347_comparison_20260906` 批次对应提交
+`2ab729d` 保存的合并前实现。随后合入远程 `5bcb040` 的求解器优化，
+包括 M7 剩余时间续搜；已有数值保持原样，不代表合并后代码的重新实验。
+
 ## 4. 真实案例成本分析
 
 LaDe-D 杭州案例使用 `config/cases/lade_hz_0829.json` 统一组合实例、车辆参数、成本参数和 OSRM 矩阵。需要报告：

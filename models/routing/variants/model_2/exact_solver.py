@@ -4,7 +4,7 @@ from gurobipy import GRB
 
 from models.routing.common.exact_utils import extract_routes_e1, extract_routes_e2
 
-from .model import build_model
+from .model import apply_route_warm_start, build_model
 
 
 def _status_name(status_code):
@@ -22,7 +22,8 @@ def _status_name(status_code):
 
 def solve_exact(problem, vehicles_per_satellite, *, time_limit=None,
                 gurobi_params=None, verbose=True, return_info=False,
-                return_incumbent_on_time_limit=False):
+                return_incumbent_on_time_limit=False,
+                warm_start_routes=None, prune_e2_arcs=True):
     """Solve small-scale Model 2 exactly.
 
     Returns ``(e1_routes, e2_routes_by_sat, assignment[, info])``.
@@ -34,8 +35,11 @@ def solve_exact(problem, vehicles_per_satellite, *, time_limit=None,
     diagnostics, but only a Gurobi ``OPTIMAL`` status is a global certificate.
     """
     m, vars_dict, ctx = build_model(
-        problem, vehicles_per_satellite=vehicles_per_satellite
+        problem,
+        vehicles_per_satellite=vehicles_per_satellite,
+        prune_e2_arcs=prune_e2_arcs,
     )
+    apply_route_warm_start(vars_dict, ctx, problem, warm_start_routes)
     if not verbose:
         m.setParam("OutputFlag", 0)
     if time_limit is not None:
@@ -69,6 +73,12 @@ def solve_exact(problem, vehicles_per_satellite, *, time_limit=None,
         "best_bound": None,
         "mip_gap": None,
         "assignment": None,
+        "external_m1_incumbent": warm_start_routes is not None,
+        "formulation_stats": dict(ctx["formulation_stats"]),
+        "model_rows": getattr(m, "NumConstrs", None),
+        "model_columns": getattr(m, "NumVars", None),
+        "model_binary": getattr(m, "NumBinVars", None),
+        "model_nonzeros": getattr(m, "NumNZs", None),
     }
     if has_incumbent:
         info["objective"] = m.ObjVal

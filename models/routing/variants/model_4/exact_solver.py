@@ -17,6 +17,7 @@ def _status_name(status_code):
         GRB.INTERRUPTED: "INTERRUPTED",
         GRB.SUBOPTIMAL: "SUBOPTIMAL",
         GRB.NUMERIC: "NUMERIC",
+        GRB.WORK_LIMIT: "WORK_LIMIT",
     }
     return names.get(status_code, str(status_code))
 
@@ -52,6 +53,12 @@ def solve_exact(problem, vehicles_per_satellite, TFp=9999.0,
         m.setParam("OutputFlag", 0)
     if time_limit is not None:
         m.setParam("TimeLimit", time_limit)
+        # Gurobi's wall-clock TimeLimit may substantially overrun while a
+        # long node operation is being finalized.  WorkLimit is deterministic
+        # and provides an independent secondary stop; explicit caller values
+        # below still take precedence.
+        if not gurobi_params or "WorkLimit" not in gurobi_params:
+            m.setParam("WorkLimit", float(time_limit))
     m.setParam("MIPGap", 0.0)
     m.setParam("IntFeasTol", 1e-9)
     m.setParam("FeasibilityTol", 1e-9)
@@ -92,6 +99,8 @@ def solve_exact(problem, vehicles_per_satellite, TFp=9999.0,
         "node_count": getattr(m, "NodeCount", None),
         "iteration_count": getattr(m, "IterCount", None),
         "work": getattr(m, "Work", None),
+        "time_limit": time_limit,
+        "work_limit": getattr(m.Params, "WorkLimit", None),
         "model_rows": getattr(m, "NumConstrs", None),
         "model_columns": getattr(m, "NumVars", None),
         "model_binary": getattr(m, "NumBinVars", None),

@@ -3,13 +3,81 @@
 import json
 from pathlib import Path
 
-from models.routing.alns.variants.model_7 import solve_alns
+import pytest
+
+from models.routing.alns.variants.model_7 import M7_DESTROY_OPS, solve_alns
+from models.routing.alns.variants.model_2 import (
+    _candidate_seeds as m2_candidate_seeds,
+)
+from models.routing.alns.variants.model_4 import (
+    Evaluator as M4Evaluator,
+    _remove_customer as m4_remove_customer,
+    build_initial_solution as build_m4_initial_solution,
+    _candidate_seeds as m4_candidate_seeds,
+)
 from models.routing.common.data_loader import parse_dataset
 from models.routing.common.domain.instance import ProblemInstance
 from models.routing.common.task_builder import build_tasks_for_model
 
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_model7_uses_full_free_assignment_destroy_set():
+    names = {operator.__name__ for operator in M7_DESTROY_OPS}
+    assert "assignment_boundary_removal" in names
+    assert "two_satellite_removal" in names
+
+
+def test_large_free_assignment_seeds_repair_impossible_deadline():
+    nodes, _ = parse_dataset(str(
+        ROOT / "data/zhou_later_pickup/large/standard_same_day/Set2_200-10-3.csv"
+    ))
+    fleet = json.loads((
+        ROOT / "config/routing/validation/zhou_large.json"
+    ).read_text(encoding="utf-8"))
+    problem = ProblemInstance(nodes, fleet, speed=fleet.get("speed", 1.0))
+    problem.aggregate_demands_from_pre_assignment()
+
+    # C93 cannot meet due=75 through its input S3 assignment even on the
+    # direct lower-bound path.  Both free-assignment solvers must expose a
+    # repaired seed instead of relying only on the structurally infeasible one.
+    assert any(seed["C93"] != "S3" for seed in m2_candidate_seeds(problem))
+    assert any(seed["C93"] != "S3" for seed in m4_candidate_seeds(problem))
+
+
+def test_same_assignment_delivery_positions_share_e2_start_time():
+    nodes, _ = parse_dataset(str(
+        ROOT / "data/zhou_later_pickup/small/standard_same_day/Set1_7-2-1b.csv"
+    ))
+    fleet = json.loads((
+        ROOT / "config/routing/validation/zhou_small.json"
+    ).read_text(encoding="utf-8"))
+    problem = ProblemInstance(nodes, fleet, speed=fleet.get("speed", 1.0))
+    problem.aggregate_demands_from_pre_assignment()
+    evaluator = M4Evaluator(
+        problem, TFp=9999.0,
+        vehicles_per_satellite=problem.fleet.e2_per_sat_count,
+    )
+    solution = build_m4_initial_solution(problem, evaluator)
+    customer = sorted(evaluator.assignment(solution))[0]
+    removed = solution.copy()
+    m4_remove_customer(removed, customer)
+    target_satellite = next(
+        satellite for satellite, routes in removed.e2_routes.items()
+        if routes and routes[0].nodes
+    )
+    delivery = evaluator.catalog[customer]["d"].id
+
+    starts = []
+    for position in (0, len(removed.e2_routes[target_satellite][0].nodes)):
+        candidate = removed.copy()
+        candidate.e2_routes[target_satellite][0].nodes.insert(
+            position, delivery)
+        evaluator.rebuild_from_solution(candidate)
+        starts.append(evaluator.e2_start_times(candidate)[target_satellite])
+
+    assert abs(starts[0] - starts[1]) <= 1e-9
 
 
 def test_model7_combines_free_assignment_and_relay_accounting():
@@ -81,7 +149,15 @@ def test_assignment_pool_retains_distinct_assignments_and_copies():
     assert {tuple(sol.assignment.values()) for sol in hooks.pool.values()} == {(1,), (3,)}
 
 
-def test_portfolio_can_select_worse_delivery_assignment_after_relay(monkeypatch):
+@pytest.mark.parametrize(
+    "refill_cost,refill_feasible,expected_assignment,expected_cost,expected_baseline",
+    [(None, True, 2, 80, 110), (90, True, 2, 80, 110),
+     (70, True, 1, 70, 70), (60, False, 2, 80, 110)],
+)
+def test_portfolio_can_select_worse_delivery_assignment_after_relay(
+    monkeypatch, refill_cost, refill_feasible,
+    expected_assignment, expected_cost, expected_baseline,
+):
     from copy import deepcopy
     from types import SimpleNamespace
     from models.routing.alns.variants import model_7
@@ -107,15 +183,27 @@ def test_portfolio_can_select_worse_delivery_assignment_after_relay(monkeypatch)
             return sol.cost
 
         def is_feasible(self, sol):
-            return True
+            return getattr(sol, "feasible", True)
 
+    search_calls = []
     def search(**kwargs):
-        kwargs["hooks"].remember(kwargs["evaluator"], Candidate(2, 110))
+        search_calls.append(kwargs)
+        if len(search_calls) == 1:
+            kwargs["hooks"].remember(kwargs["evaluator"], Candidate(2, 110))
+            solution = Candidate(1, 100)
+        else:
+            # Refill must start from the clean stage-one incumbent, even
+            # when a different assignment won the relay portfolio search.
+            assert kwargs["initial_solution"].assignment == {1: 1}
+            assert kwargs["initial_solution"].cost == 100
+            assert not kwargs["initial_solution"].transshipments
+            solution = Candidate(1, refill_cost)
+            solution.feasible = refill_feasible
         return SimpleNamespace(
-            best_solution=Candidate(1, 100), best_cost=100,
-            iterations=1, best_found_time=0, target_hit_time=None,
+            best_solution=solution, best_cost=solution.cost,
+            iterations=1, best_found_time=len(search_calls)-1, target_hit_time=None,
             termination_reason="iterations", restarts=0,
-            local_search_improvements=0)
+            local_search_improvements=0, diagnostics={})
 
     def relay(sol, evaluator, **kwargs):
         if sol.assignment[1] == 2:
@@ -130,10 +218,13 @@ def test_portfolio_can_select_worse_delivery_assignment_after_relay(monkeypatch)
     problem = SimpleNamespace(customers=[SimpleNamespace(id=1, assigned_sat=1)])
     *_, assignment, info = model_7.solve_alns(
         problem, initial_solution=Candidate(1, 100), max_time=10,
-        verbose=False, return_info=True)
-    assert assignment == {1: 2}
-    assert info["objective"] == 80
+        verbose=False, return_info=True, refill_unused_time=refill_cost is not None)
+    assert assignment == {1: expected_assignment}
+    assert info["objective"] == expected_cost
     assert info["stage1_best_objective"] == 100
-    assert info["free_assignment_objective"] == 110
-    assert info["transshipment_improvement"] == 30
+    assert info["free_assignment_objective"] == expected_baseline
+    assert info["transshipment_improvement"] == expected_baseline - expected_cost
     assert info["assignment_candidates_evaluated"] == 2
+    assert len(search_calls) == (1 if refill_cost is None else 2)
+    assert info["refill_iterations"] == (0 if refill_cost is None else 1)
+    assert info["feasible"]

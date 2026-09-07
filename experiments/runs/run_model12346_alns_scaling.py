@@ -30,9 +30,12 @@ from models.routing.alns.variants.model_6 import solve_alns as solve_m6
 from models.routing.alns.variants.model_7 import solve_alns as solve_m7
 from models.routing.common.data_loader import parse_dataset
 from models.routing.common.task_builder import build_tasks_for_model
+from models.routing.alns.types import Route, Solution
 
 
 MODELS = (1, 2, 3, 4, 6, 7)
+FIXED_ASSIGNMENT_MODELS = (1, 3, 6)
+INHERITANCE_BASE = {2: 1, 4: 3, 6: 3, 7: 4}
 
 
 def load_problem(path, fleet):
@@ -40,6 +43,52 @@ def load_problem(path, fleet):
     problem = ProblemInstance(nodes, fleet, speed=fleet.get("speed", 1.0))
     problem.aggregate_demands_from_pre_assignment()
     return problem
+
+
+def as_solution(e1_paths, e2_paths):
+    """Convert public path output back to the internal ALNS solution type."""
+    sol = Solution()
+    sol.e1_routes = [Route(path[0], list(path[1:-1])) for path in e1_paths]
+    sol.e2_routes = {
+        sat: [Route(path[0], list(path[1:-1])) for path in paths]
+        for sat, paths in e2_paths.items()
+    }
+    return sol
+
+
+def fixed_assignment_early_due_conflicts(problem, tolerance=1e-9):
+    """Return proof-safe direct-travel conflicts for fixed assignments.
+
+    Every fixed-assignment E2 delivery must first travel from the depot to its
+    assigned satellite and then from that satellite to the customer.  If even
+    this service-free direct lower bound misses the delivery due time, no route
+    construction or ALNS seed can make that fixed assignment feasible.
+    """
+    satellite_by_id = {sat.id: sat for sat in problem.satellites}
+    depot_id = problem.depot.id
+    speed = float(problem.speed)
+    conflicts = []
+    for customer in problem.customers:
+        sat_id = customer.assigned_sat
+        satellite = satellite_by_id.get(sat_id)
+        if satellite is None:
+            continue
+        due = float(customer.tw_del[1])
+        if not math.isfinite(due):
+            continue
+        earliest = (
+            problem.distance(depot_id, sat_id)
+            + problem.distance(sat_id, customer.id)
+        ) / speed
+        if earliest > due + tolerance:
+            conflicts.append({
+                "customer": customer.id,
+                "assigned_satellite": sat_id,
+                "earliest_direct_delivery": float(earliest),
+                "delivery_due": due,
+                "lateness_lower_bound": float(earliest - due),
+            })
+    return conflicts
 
 
 def physical(node_id):
@@ -91,7 +140,7 @@ def exact_references():
 
 def solve_one(model, problem, *, max_time, iterations, seed,
               target_objective=None, target_tolerance=1e-6,
-              alns_config_overrides=None):
+              alns_config_overrides=None, initial_solution=None):
     vps = problem.fleet.e2_per_sat_count
     common = {
         "max_iterations": iterations,
@@ -110,7 +159,8 @@ def solve_one(model, problem, *, max_time, iterations, seed,
         assignment = None
     elif model == 2:
         r1, r2, assignment, info = solve_m2(
-            problem, vehicles_per_satellite=vps, **common
+            problem, vehicles_per_satellite=vps,
+            initial_solution=initial_solution, **common
         )
     elif model == 3:
         e1, e2 = build_tasks_for_model(problem, 3)
@@ -121,7 +171,8 @@ def solve_one(model, problem, *, max_time, iterations, seed,
         assignment = None
     elif model == 4:
         r1, r2, assignment, info = solve_m4(
-            problem, vps, TFp=9999.0, **common
+            problem, vps, TFp=9999.0,
+            initial_solution=initial_solution, **common
         )
     elif model == 6:
         e1, e2 = build_tasks_for_model(problem, 6)
@@ -135,6 +186,7 @@ def solve_one(model, problem, *, max_time, iterations, seed,
             transshipment_sample_locations=6,
             transshipment_sample_carriers=4,
             transshipment_position_top_k=4,
+            initial_solution=initial_solution,
             **common,
         )
         assignment = None
@@ -150,6 +202,7 @@ def solve_one(model, problem, *, max_time, iterations, seed,
             transshipment_sample_locations=6,
             transshipment_sample_carriers=4,
             transshipment_position_top_k=4,
+            initial_solution=initial_solution,
             **common,
         )
     else:
@@ -172,6 +225,13 @@ def main(argv=None):
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--instances", nargs="*")
     parser.add_argument("--models", nargs="*", type=int, choices=MODELS)
+    parser.add_argument(
+        "--inherit-incumbents", action="store_true",
+        help=(
+            "Pass M1->M2, M3->M4/M6 and M4->M7 incumbents when their base "
+            "models were run earlier for the same instance."
+        ),
+    )
     parser.add_argument("--fleet-config")
     parser.add_argument(
         "--output-dir", default="output/results/model12346_alns_scaling"
@@ -207,13 +267,36 @@ def main(argv=None):
 
     for path in paths:
         problem = load_problem(path, fleet)
+        fixed_conflicts = fixed_assignment_early_due_conflicts(problem)
+        solution_cache = {}
         for model in (tuple(args.models) if args.models else MODELS):
             started = time.perf_counter()
+            inherited_from = (
+                INHERITANCE_BASE.get(model) if args.inherit_incumbents else None
+            )
+            initial_solution = solution_cache.get(inherited_from)
+            if initial_solution is None:
+                inherited_from = None
             try:
-                e1_routes, e2_routes, assignment, info = solve_one(
-                    model, problem, max_time=args.time,
-                    iterations=args.iterations, seed=args.seed,
-                )
+                if model in FIXED_ASSIGNMENT_MODELS and fixed_conflicts:
+                    e1_routes = e2_routes = assignment = None
+                    info = {
+                        "objective": None,
+                        "runtime": 0.0,
+                        "iterations": 0,
+                        "feasible": False,
+                        "status": "INFEASIBLE_FIXED_ASSIGNMENT",
+                        "failure_reason": (
+                            "earliest_direct_delivery_exceeds_due_time"
+                        ),
+                        "failure_details": fixed_conflicts,
+                    }
+                else:
+                    e1_routes, e2_routes, assignment, info = solve_one(
+                        model, problem, max_time=args.time,
+                        iterations=args.iterations, seed=args.seed,
+                        initial_solution=initial_solution,
+                    )
                 wall_time = time.perf_counter() - started
                 audited_cost = route_cost(problem, e1_routes, e2_routes)
                 objective = info.get("objective")
@@ -225,7 +308,11 @@ def main(argv=None):
                 status = info.get("status", "UNKNOWN")
                 if not feasible:
                     objective = None
-                    status = "NO_FEASIBLE_SOLUTION"
+                    if status != "INFEASIBLE_FIXED_ASSIGNMENT":
+                        status = "NO_FEASIBLE_SOLUTION"
+                elif model in (1, 3, 4):
+                    solution_cache[model] = as_solution(
+                        e1_routes, e2_routes)
                 reference = exact.get((path.stem, model))
                 gap_pct = (
                     None if objective is None or reference is None
@@ -265,6 +352,18 @@ def main(argv=None):
                     "e2_vehicles_per_satellite": (
                         problem.fleet.e2_per_sat_count),
                     "fleet_config": fleet_path.name,
+                    "protocol": (
+                        "incumbent_inheritance"
+                        if args.inherit_incumbents else "independent"
+                    ),
+                    "inherited_from_model": inherited_from,
+                    "initial_objective": info.get("initial_objective"),
+                    "phase_diagnostics": info.get("phase_diagnostics"),
+                    "refill_iterations": info.get("refill_iterations"),
+                    "transshipment_search_elapsed_seconds": info.get(
+                        "transshipment_search_elapsed_seconds"),
+                    "failure_reason": info.get("failure_reason"),
+                    "failure_details": info.get("failure_details"),
                 }
             except Exception as exc:
                 row = {
@@ -288,6 +387,11 @@ def main(argv=None):
                     "e2_vehicles_per_satellite": (
                         problem.fleet.e2_per_sat_count),
                     "fleet_config": fleet_path.name,
+                    "protocol": (
+                        "incumbent_inheritance"
+                        if args.inherit_incumbents else "independent"
+                    ),
+                    "inherited_from_model": inherited_from,
                     "error": repr(exc),
                 }
             rows.append(row)
@@ -306,6 +410,27 @@ def main(argv=None):
         writer.writerows(rows)
     print(f"Wrote {jsonl_path}")
     print(f"Wrote {csv_path}")
+
+    if args.inherit_incumbents:
+        by_instance = {}
+        for row in rows:
+            by_instance.setdefault(row["instance"], {})[row["model"]] = row
+        violations = []
+        for instance, model_rows in by_instance.items():
+            for model, base_model in INHERITANCE_BASE.items():
+                ext = model_rows.get(model)
+                base = model_rows.get(base_model)
+                if not ext or not base or not ext.get("feasible") or not base.get("feasible"):
+                    continue
+                if float(ext["objective"]) > float(base["objective"]) + 1e-7:
+                    violations.append((instance, model, base_model))
+        print(
+            "Inherited-incumbent dominance: "
+            f"{'passed' if not violations else 'FAILED'}; "
+            f"violations={violations}"
+        )
+        if violations:
+            sys.exit(2)
 
 
 if __name__ == "__main__":

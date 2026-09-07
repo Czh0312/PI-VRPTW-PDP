@@ -11,6 +11,7 @@ from models.routing.alns.types import (
     is_tfp_active,
 )
 from models.routing.alns.engine import ALNSConfig, run_alns_search
+from models.routing.alns.fixed_repair import FixedRouteInsertionCache
 from models.routing.alns.initial_solution import build_strong_initial_solution
 from models.routing.alns.paired_operators import (
     insert_complete_customer_pairs,
@@ -638,6 +639,7 @@ def regret_insertion(sol, removed, evaluator, echelon='e2', k=2):
     if echelon == 'e2':
         e2_start_by_sat = evaluator.e2_start_times(sol)
         pending = list(removed)
+        insertion_cache = FixedRouteInsertionCache(evaluator)
         while pending:
             best_regret = -float('inf')
             best_nid = None
@@ -658,15 +660,8 @@ def regret_insertion(sol, removed, evaluator, echelon='e2', k=2):
                 insertion_costs = []
                 routes = sol.e2_routes.get(sat_id, [])
                 for r in routes:
-                    old_cost = evaluator.route_distance(r)
-                    for pos in range(len(r.nodes) + 1):
-                        old_nodes = r.nodes[:]
-                        r.nodes.insert(pos, nid)
-                        if evaluator.check_e2_route_feasible(r, sat_id,
-                                                             start_time):
-                            c = evaluator.route_distance(r) - old_cost
-                            insertion_costs.append((c, r, pos))
-                        r.nodes = old_nodes
+                    insertion_costs.extend(insertion_cache.options(
+                        r, nid, sat_id, start_time))
 
                 if len(routes) < evaluator.vehicles_per_satellite:
                     new_route = Route(sat_id, [nid])
@@ -696,6 +691,7 @@ def regret_insertion(sol, removed, evaluator, echelon='e2', k=2):
             _, route, pos = best_route_info
             if route is not None:
                 route.nodes.insert(pos, best_nid)
+                insertion_cache.invalidate(route)
             else:
                 sat_id = evaluator.e2_task_satellite(best_nid)
                 if sat_id:

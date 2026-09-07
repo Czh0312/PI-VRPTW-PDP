@@ -25,7 +25,12 @@ from models.routing.alns.types import (
     clean_empty_routes,
     is_tfp_active,
 )
-from models.routing.alns.engine import ALNSConfig, ALNSHooks, run_alns_search
+from models.routing.alns.engine import (
+    ALNSConfig,
+    ALNSHooks,
+    evaluate_solution,
+    run_alns_search,
+)
 from models.routing.alns.assignment_operators import (
     assignment_boundary_removal,
     two_satellite_removal,
@@ -295,8 +300,9 @@ class Evaluator:
             total += self.dist(path[i], path[i + 1])
         return total
 
-    def total_cost(self, sol):
-        self.rebuild_from_solution(sol)
+    def total_cost(self, sol, _rebuild=True):
+        if _rebuild:
+            self.rebuild_from_solution(sol)
         cost = 0.0
         for r in sol.e1_routes:
             cost += self.route_distance(r)
@@ -304,6 +310,12 @@ class Evaluator:
             for r in routes:
                 cost += self.route_distance(r)
         return cost
+
+    def evaluate(self, sol):
+        """Return cost and feasibility after one assignment rebuild."""
+        self.rebuild_from_solution(sol)
+        cost = self.total_cost(sol, _rebuild=False)
+        return cost, self.is_feasible(sol, _rebuild=False)
 
     def check_e1_route_feasible(self, route):
         path = route.full_path()
@@ -436,8 +448,9 @@ class Evaluator:
         feasible, _, _ = self.simulate_e2_route(route, sat_id, start_time)
         return feasible
 
-    def is_feasible(self, sol):
-        self.rebuild_from_solution(sol)
+    def is_feasible(self, sol, _rebuild=True):
+        if _rebuild:
+            self.rebuild_from_solution(sol)
 
         assign = self.assignment(sol)
         required_customers = {c.id for c in self.problem.customers}
@@ -558,12 +571,42 @@ def _fixed_assignment(problem):
             if c.assigned_sat}
 
 
+def _deadline_repaired_assignment(problem, fixed):
+    """Move only assignments that miss their due time even on a direct path."""
+    repaired = dict(fixed)
+    depot_id = problem.depot.id
+
+    def direct_arrival(customer, satellite):
+        service = getattr(problem.nodes[satellite.id], "service_time", 0.0)
+        return (
+            problem.travel_time(depot_id, satellite.id)
+            + service
+            + problem.travel_time(satellite.id, customer.id)
+        )
+
+    for customer in problem.customers:
+        current = repaired.get(customer.id)
+        current_sat = next(
+            (sat for sat in problem.satellites if sat.id == current), None)
+        if current_sat is None:
+            continue
+        due = customer.tw_del[1]
+        if direct_arrival(customer, current_sat) <= due + FEAS_TOL:
+            continue
+        repaired[customer.id] = min(
+            problem.satellites,
+            key=lambda sat: direct_arrival(customer, sat),
+        ).id
+    return repaired
+
+
 def _candidate_seeds(problem):
     """初始分配的候选种子：数据固定分配 + 各阶最近前置仓。"""
     seeds = []
     fixed = _fixed_assignment(problem)
     if fixed:
         seeds.append(fixed)
+        seeds.append(_deadline_repaired_assignment(problem, fixed))
 
     nearest = {}
     second = {}
@@ -579,10 +622,12 @@ def _candidate_seeds(problem):
     if len(problem.customers) <= 20:
         for satellite in problem.satellites:
             seeds.append({c.id: satellite.id for c in problem.customers})
-    elif fixed:
-        seeds = [fixed]
     else:
-        seeds = [nearest]
+        # Do not trap a large free-assignment search in an infeasible input
+        # partition.  The nearest-satellite seed provides a deterministic
+        # feasibility escape while the fixed seed preserves the baseline.
+        seeds = ([fixed, _deadline_repaired_assignment(problem, fixed), nearest]
+                 if fixed else [nearest])
 
     # 去重（保持确定性）
     seen = set()
@@ -721,9 +766,14 @@ def _best_task_insert(sol, evaluator, sat_id, task, start_time,
         d_id = d_arr = None
 
     best = None
+    deadline = getattr(evaluator, "_alns_deadline", float("inf"))
     for r in routes:
+        if time.time() >= deadline:
+            break
         old_cost = evaluator.route_distance(r)
         for pos in range(len(r.nodes) + 1):
+            if time.time() >= deadline:
+                break
             r.nodes.insert(pos, task.id)
             feasible, arrivals, _ = evaluator.simulate_e2_route(
                 r, sat_id, start_time)
@@ -806,6 +856,23 @@ def _insert_pair_cross_at_sat(sol, evaluator, cust, sat_id):
         delivery_options.sort(key=approximate_delta)
         delivery_options = delivery_options[:12]
 
+    # Every option below assigns the same customer to the same satellite.
+    # Consequently the aggregated E1 delivery tasks and this satellite's E2
+    # departure time are identical; only the position inside an E2 route
+    # changes.  Build that assignment state once instead of rebuilding E1 for
+    # every delivery position.  Final candidates are still fully rebuilt by
+    # ``total_cost`` after pickup insertion, so E2 return-dependent E1 pickup
+    # placement and all downstream feasibility checks remain unchanged.
+    assignment_template = sol.copy()
+    template_routes = assignment_template.e2_routes.setdefault(sat_id, [])
+    if template_routes:
+        template_routes[0].nodes.append(d_task.id)
+    else:
+        template_routes.append(Route(sat_id, [d_task.id]))
+    evaluator.rebuild_from_solution(assignment_template)
+    start_time = evaluator.e2_start_times(
+        assignment_template).get(sat_id, 0.0)
+
     best = None
     for route_idx, pos in delivery_options:
         if time.time() >= deadline:
@@ -819,8 +886,6 @@ def _insert_pair_cross_at_sat(sol, evaluator, cust, sat_id):
             candidate_routes[route_idx].nodes.insert(pos, d_task.id)
             d_route = candidate_routes[route_idx]
 
-        evaluator.rebuild_from_solution(candidate)
-        start_time = evaluator.e2_start_times(candidate).get(sat_id, 0.0)
         feasible, arrivals, _ = evaluator.simulate_e2_route(
             d_route, sat_id, start_time)
         if not feasible or d_task.id not in arrivals:
@@ -856,6 +921,27 @@ def multi_sat_insertion_cross(sol, removed, evaluator, echelon="e2", k=2):
         best = None
         satellites = list(evaluator.sat_ids)
         random.shuffle(satellites)
+        if len(evaluator.catalog) > 20 and len(satellites) > 4:
+            d_task = evaluator.catalog[cust]["d"]
+
+            def satellite_lower_bound(sat_id):
+                routes = sol.e2_routes.get(sat_id, [])
+                best_delta = 2.0 * evaluator.dist(sat_id, d_task.id)
+                for route in routes:
+                    for pos in range(len(route.nodes) + 1):
+                        prev_id = sat_id if pos == 0 else route.nodes[pos - 1]
+                        next_id = (sat_id if pos == len(route.nodes)
+                                   else route.nodes[pos])
+                        delta = (
+                            evaluator.dist(prev_id, d_task.id)
+                            + evaluator.dist(d_task.id, next_id)
+                            - evaluator.dist(prev_id, next_id)
+                        )
+                        best_delta = min(best_delta, delta)
+                return best_delta
+
+            satellites.sort(key=satellite_lower_bound)
+            satellites = satellites[:4]
         for sat_id in satellites:
             candidate = _insert_pair_cross_at_sat(
                 sol, evaluator, cust, sat_id)
@@ -881,6 +967,9 @@ def multi_sat_insertion(sol, removed, evaluator, echelon="e2", k=2):
     pending = list(removed)
     random.shuffle(pending)
     for cust in pending:
+        if time.time() >= getattr(
+                evaluator, "_alns_deadline", float("inf")):
+            break
         evaluator.rebuild_from_solution(sol)
         start_by_sat = evaluator.e2_start_times(sol)
         pair = evaluator.catalog[cust]
@@ -888,6 +977,9 @@ def multi_sat_insertion(sol, removed, evaluator, echelon="e2", k=2):
 
         best = None  # (cost_delta, sat_id, route, positions)
         for sat_id in evaluator.sat_ids:
+            if time.time() >= getattr(
+                    evaluator, "_alns_deadline", float("inf")):
+                break
             start_time = start_by_sat.get(sat_id, 0.0)
             routes = sol.e2_routes.get(sat_id, [])
             best_here = _best_e2_item_insert(
@@ -928,6 +1020,9 @@ def randomized_satellite_insertion(sol, removed, evaluator,
     pending = list(removed)
     random.shuffle(pending)
     for cust in pending:
+        if time.time() >= getattr(
+                evaluator, "_alns_deadline", float("inf")):
+            break
         evaluator.rebuild_from_solution(sol)
         starts = evaluator.e2_start_times(sol)
         pair = evaluator.catalog[cust]
@@ -936,6 +1031,9 @@ def randomized_satellite_insertion(sol, removed, evaluator,
         random.shuffle(satellites)
         inserted = False
         for sat_id in satellites:
+            if time.time() >= getattr(
+                    evaluator, "_alns_deadline", float("inf")):
+                break
             routes = sol.e2_routes.get(sat_id, [])
             best_here = _best_e2_item_insert(
                 routes, task_ids, evaluator, sat_id,
@@ -982,8 +1080,8 @@ def consolidated_satellite_insertion(sol, removed, evaluator,
                 break
             candidate = inserted
         if feasible:
-            candidate.cost = evaluator.total_cost(candidate)
-            if evaluator.is_feasible(candidate):
+            _, candidate_feasible = evaluate_solution(evaluator, candidate)
+            if candidate_feasible:
                 _copy_solution_into(sol, candidate)
                 return
     multi_sat_insertion(sol, pending, evaluator, echelon=echelon, k=k)
@@ -1052,9 +1150,8 @@ def _assignment_first_improvement(sol, evaluator):
                 removed, evaluator, customer, sat_id)
             if candidate is None:
                 continue
-            candidate.cost = evaluator.total_cost(candidate)
-            if (candidate.cost < base_cost - FEAS_TOL
-                    and evaluator.is_feasible(candidate)):
+            _, feasible = evaluate_solution(evaluator, candidate)
+            if (candidate.cost < base_cost - FEAS_TOL and feasible):
                 return candidate
     evaluator.rebuild_from_solution(sol)
     return None

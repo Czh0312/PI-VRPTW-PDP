@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 """Regression checks for Model 6 same-run transshipment accounting."""
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 from models.routing.common.domain.instance import ProblemInstance
 from models.routing.alns.variants.model_6 import (
@@ -126,6 +129,11 @@ def test_m6_reports_same_run_before_after_identity():
     ) < 1e-8
     assert info["transshipment_count"] == len(info["transshipment_events"])
     assert info["transshipment_search_elapsed_seconds"] >= 0.0
+    phases = info["phase_diagnostics"]
+    assert phases["refill"] is None
+    assert phases["stage1"]["iterations"] == info["iterations"]
+    assert phases["transshipment"]["objective"] == info["objective"]
+    assert phases["stage1"]["objective"] == info["stage1_objective"]
     for event in info["transshipment_events"]:
         assert abs(
             event["distance_before"]
@@ -153,3 +161,49 @@ def test_exhausted_relocation_budget_does_not_start_exchange(monkeypatch):
     solution = SimpleNamespace(task_to_phys={}, cost=10.0)
     evaluator = SimpleNamespace(total_cost=lambda sol: sol.cost, task_to_phys={})
     model_6.postprocess_transshipment(solution, evaluator, time_budget=1, verbose=False)
+
+
+@pytest.mark.parametrize("scan_elapsed,expected_budget", [(0.8, 0.2), (1.1, None)])
+def test_exchange_uses_only_budget_left_after_relocation(monkeypatch, scan_elapsed, expected_budget):
+    clock = [0.0]
+    budgets = []
+    monkeypatch.setattr(model6_module.time, "time", lambda: clock[0])
+
+    def relocation(*args, **kwargs):
+        clock[0] += scan_elapsed
+        return False
+
+    def exchange(*args, **kwargs):
+        budgets.append(kwargs["time_budget"])
+        return False
+
+    monkeypatch.setattr(model6_module, "_search_and_apply_relocation", relocation)
+    monkeypatch.setattr(model6_module, "_search_and_apply_transshipment_exchange", exchange)
+    evaluator = SimpleNamespace(task_to_phys={}, total_cost=lambda sol: 10.0)
+    model6_module.postprocess_transshipment(Solution(), evaluator, verbose=False, time_budget=1.0)
+    if expected_budget is None:
+        assert budgets == []
+    else:
+        assert budgets == pytest.approx([expected_budget])
+
+
+def test_relocation_samples_stably_ordered_physical_locations(monkeypatch):
+    tasks = [SimpleNamespace(id=f"{cust}p", cust=cust, kind="p")
+             for cust in ["C3", "C1", "C2"]]
+    solution = Solution()
+    solution.e2_routes = {"S": [Route("S", [task.id for task in tasks])]}
+    evaluator = SimpleNamespace(
+        e2_tasks_by_sat={"S": tasks}, e2_task_map={task.id: task for task in tasks},
+        is_feasible=lambda sol: True, e1_schedule=lambda sol: ({"S": 0.0}, {}),
+        phys=lambda node: node[:-1], route_distance=lambda route: 0.0,
+    )
+    populations = []
+
+    def sampled(population, count):
+        populations.append(list(population))
+        return []
+
+    monkeypatch.setattr(model6_module.random, "sample", sampled)
+    model6_module._search_and_apply_relocation(solution, evaluator,
+        time_budget=5.0, sample_pickups=None, sample_locations=1)
+    assert populations == [["C1", "C2"], ["C2", "C3"], ["C1", "C3"]]
