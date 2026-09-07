@@ -1316,6 +1316,7 @@ def _adopt_solution(target, source):
 
 def _assignment_first_improvement(sol, evaluator):
     """Try one complete-cost customer reassignment or cross-satellite swap."""
+    deadline = getattr(evaluator, "_alns_deadline", float("inf"))
     base_cost = evaluator.total_cost(sol)
     locations = []
     for sat_id, routes in sol.e2_routes.items():
@@ -1335,6 +1336,8 @@ def _assignment_first_improvement(sol, evaluator):
             if len(dst_routes) < evaluator.vehicles_per_satellite:
                 choices.append((None, 0))
             for dst_idx, dst_pos in choices:
+                if time.time() >= deadline:
+                    return None
                 candidate = sol.copy()
                 for routes in candidate.e2_routes.values():
                     for route in routes:
@@ -1354,6 +1357,8 @@ def _assignment_first_improvement(sol, evaluator):
 
     for left_idx, left in enumerate(locations):
         for right in locations[left_idx + 1:]:
+            if time.time() >= deadline:
+                return None
             if left[2] == right[2]:
                 continue
             candidate = sol.copy()

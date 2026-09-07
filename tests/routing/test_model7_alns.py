@@ -55,3 +55,85 @@ def test_model7_combines_free_assignment_and_relay_accounting():
     ) < 1e-8
     assert info["objective"] <= info["free_assignment_objective"] + 1e-8
 
+
+
+def test_assignment_pool_retains_distinct_assignments_and_copies():
+    from types import SimpleNamespace
+    from copy import deepcopy
+    from models.routing.alns.variants.model_7 import AssignmentPoolHooks
+
+    class Candidate:
+        def __init__(self, assignment, cost):
+            self.assignment, self.cost = assignment, cost
+
+        def copy(self):
+            return deepcopy(self)
+
+    evaluator = SimpleNamespace(assignment=lambda sol: sol.assignment)
+    hooks = AssignmentPoolHooks(2)
+    first = Candidate({1: 1}, 10)
+    hooks.remember(evaluator, first)
+    first.cost = 99
+    hooks.remember(evaluator, Candidate({1: 1}, 12))
+    hooks.remember(evaluator, Candidate({1: 2}, 11))
+    assert sorted(sol.cost for sol in hooks.pool.values()) == [10, 11]
+    hooks.remember(evaluator, Candidate({1: 3}, 9))
+    assert {tuple(sol.assignment.values()) for sol in hooks.pool.values()} == {(1,), (3,)}
+
+
+def test_portfolio_can_select_worse_delivery_assignment_after_relay(monkeypatch):
+    from copy import deepcopy
+    from types import SimpleNamespace
+    from models.routing.alns.variants import model_7
+
+    class Candidate:
+        def __init__(self, satellite, cost):
+            self.assignment = {1: satellite}
+            self.cost = cost
+            self.e1_routes, self.e2_routes = [], {}
+            self.task_to_phys, self.transshipments = {}, {}
+
+        def copy(self):
+            return deepcopy(self)
+
+    class Evaluator:
+        def __init__(self, *args, **kwargs):
+            self.task_to_phys = {}
+
+        def assignment(self, sol):
+            return sol.assignment
+
+        def total_cost(self, sol):
+            return sol.cost
+
+        def is_feasible(self, sol):
+            return True
+
+    def search(**kwargs):
+        kwargs["hooks"].remember(kwargs["evaluator"], Candidate(2, 110))
+        return SimpleNamespace(
+            best_solution=Candidate(1, 100), best_cost=100,
+            iterations=1, best_found_time=0, target_hit_time=None,
+            termination_reason="iterations", restarts=0,
+            local_search_improvements=0)
+
+    def relay(sol, evaluator, **kwargs):
+        if sol.assignment[1] == 2:
+            sol.cost = 80
+        return None
+
+    monkeypatch.setattr(model_7, "FreeAssignmentEvaluator", Evaluator)
+    monkeypatch.setattr(model_7, "RelayEvaluator", Evaluator)
+    monkeypatch.setattr(model_7, "run_alns_search", search)
+    monkeypatch.setattr(model_7, "build_tasks_from_assignment", lambda *a: ([], {}))
+    monkeypatch.setattr(model_7, "postprocess_transshipment", relay)
+    problem = SimpleNamespace(customers=[SimpleNamespace(id=1, assigned_sat=1)])
+    *_, assignment, info = model_7.solve_alns(
+        problem, initial_solution=Candidate(1, 100), max_time=10,
+        verbose=False, return_info=True)
+    assert assignment == {1: 2}
+    assert info["objective"] == 80
+    assert info["stage1_best_objective"] == 100
+    assert info["free_assignment_objective"] == 110
+    assert info["transshipment_improvement"] == 30
+    assert info["assignment_candidates_evaluated"] == 2

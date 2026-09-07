@@ -132,3 +132,24 @@ def test_m6_reports_same_run_before_after_identity():
             - event["distance_after"]
             - event["actual_distance_saving"]
         ) < 1e-8
+
+
+def test_exhausted_relocation_budget_does_not_start_exchange(monkeypatch):
+    from types import SimpleNamespace
+    from models.routing.alns.variants import model_6
+
+    now = [0.0]
+    monkeypatch.setattr(model_6.time, "time", lambda: now[0])
+
+    def exhausted(*args, **kwargs):
+        now[0] += kwargs["time_budget"]
+        return False
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError("exchange started after the deadline")
+
+    monkeypatch.setattr(model_6, "_search_and_apply_relocation", exhausted)
+    monkeypatch.setattr(model_6, "_search_and_apply_transshipment_exchange", unexpected)
+    solution = SimpleNamespace(task_to_phys={}, cost=10.0)
+    evaluator = SimpleNamespace(total_cost=lambda sol: sol.cost, task_to_phys={})
+    model_6.postprocess_transshipment(solution, evaluator, time_budget=1, verbose=False)

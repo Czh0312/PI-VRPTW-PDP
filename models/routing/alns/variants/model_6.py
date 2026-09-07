@@ -829,6 +829,9 @@ def postprocess_transshipment(sol, evaluator, verbose=True,
             max_transshipments_per_sat=max_transshipments_per_sat,
         )
         if not improvement:
+            remaining = time_budget - (time.time() - postprocess_start)
+            if remaining <= 0.0:
+                break
             exchange = _search_and_apply_transshipment_exchange(
                 sol, evaluator,
                 time_budget=remaining,

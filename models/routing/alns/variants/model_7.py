@@ -2,8 +2,8 @@
 
 Model 7 combines the two independent extensions represented by Model 4 and
 Model 6. The first phase searches customer--satellite assignments and the
-associated E1/E2 routes with Model 4 operators. The second phase freezes the
-selected assignment and applies Model 6 asynchronous handoff search. The
+associated E1/E2 routes with Model 4 operators. The second phase applies Model 6 asynchronous handoff search to a bounded
+pool of distinct assignments. The
 zero-handoff Model 4 incumbent is always retained.
 """
 
@@ -16,6 +16,8 @@ from models.routing.alns.engine import ALNSConfig, run_alns_search
 from models.routing.alns.variants.model_4 import (
     Evaluator as FreeAssignmentEvaluator,
     M4Hooks,
+    assignment_boundary_removal,
+    two_satellite_removal,
     build_initial_solution as build_free_assignment_initial_solution,
     consolidated_satellite_insertion,
     multi_sat_insertion,
@@ -32,6 +34,29 @@ from models.routing.alns.variants.model_6 import (
     _path_with_relocations,
     postprocess_transshipment,
 )
+
+
+class AssignmentPoolHooks(M4Hooks):
+    """Keep the cheapest accepted solution for each of a few assignments."""
+
+    def __init__(self, size):
+        self.size = max(1, int(size))
+        self.pool = {}
+
+    def remember(self, evaluator, solution):
+        key = tuple(sorted(evaluator.assignment(solution).items()))
+        previous = self.pool.get(key)
+        if previous is not None and previous.cost <= solution.cost:
+            return
+        if len(self.pool) >= self.size and previous is None:
+            worst = max(self.pool, key=lambda k: self.pool[k].cost)
+            if self.pool[worst].cost <= solution.cost:
+                return
+            del self.pool[worst]
+        self.pool[key] = solution.copy()
+
+    def after_accept(self, evaluator, accepted_solution):
+        self.remember(evaluator, accepted_solution)
 
 
 def _no_solution(return_info, elapsed, iterations=0, reason="NO_SOLUTION"):
@@ -60,6 +85,7 @@ def solve_alns(
     seed=42,
     verbose=True,
     stage1_time_ratio=0.75,
+    assignment_pool_size=4,
     transshipment_time_budget=30.0,
     transshipment_sample_pickups=None,
     transshipment_sample_locations=None,
@@ -110,6 +136,10 @@ def solve_alns(
         print(f"阶段一时间占比: {ratio:.2f}")
         print("阶段一: Model 4 分配感知 ALNS")
 
+    pool_hooks = AssignmentPoolHooks(assignment_pool_size)
+    if free_evaluator.is_feasible(free_solution):
+        pool_hooks.remember(free_evaluator, free_solution)
+
     stage1_result = run_alns_search(
         initial_solution=free_solution,
         evaluator=free_evaluator,
@@ -118,6 +148,8 @@ def solve_alns(
             worst_customer_removal,
             shaw_customer_removal,
             satellite_cluster_removal,
+            assignment_boundary_removal,
+            two_satellite_removal,
         ],
         repair_ops=[
             multi_sat_insertion,
@@ -133,7 +165,7 @@ def solve_alns(
             target_tolerance=target_tolerance,
             **(alns_config_overrides or {}),
         ),
-        hooks=M4Hooks(),
+        hooks=pool_hooks,
         verbose=verbose,
         start_time=start_time,
     )
@@ -143,69 +175,80 @@ def solve_alns(
             return_info, time.time() - start_time,
             stage1_result.iterations)
 
-    assignment = free_evaluator.assignment(best_solution)
-    free_assignment_cost = float(stage1_result.best_cost)
-    best_solution.cost = free_assignment_cost
-    moved_customers = sum(
-        1 for customer in problem.customers
-        if assignment.get(customer.id) != customer.assigned_sat
-    )
-
-    # Rebuild a fixed task catalogue for the phase-one assignment so Model 6's
-    # transport-node load and synchronization audit can be reused unchanged.
-    relay_e1_tasks, relay_e2_tasks = build_tasks_from_assignment(
-        problem, assignment)
-    relay_evaluator = RelayEvaluator(
-        problem,
-        relay_e1_tasks,
-        relay_e2_tasks,
-        TFp,
-        vehicles_per_satellite=vehicles_per_satellite,
-    )
-    best_solution.task_to_phys = dict(relay_evaluator.task_to_phys)
-    best_solution.transshipments = {}
-    best_solution.cost = relay_evaluator.total_cost(best_solution)
-
-    if not relay_evaluator.is_feasible(best_solution):
-        if verbose:
-            print("[WARN] 自由分仓解无法通过 Model 7 交接评估器复核")
-        return _no_solution(
-            return_info, time.time() - start_time,
-            stage1_result.iterations, "AUDIT_FAILED")
-
-    # Recalculate the phase-one value with the relay evaluator to make the
-    # before/after accounting an exact identity under one cost implementation.
-    free_assignment_cost = float(best_solution.cost)
-    if verbose:
-        print(f"阶段一完成: cost={best_solution.cost:.2f}, "
-              f"换仓顾客={moved_customers}")
-        print("阶段二: Model 6 异步空箱交接搜索")
-
+    pool_hooks.remember(free_evaluator, best_solution)
+    stage1_best_cost = float(stage1_result.best_cost)
+    candidates = sorted(pool_hooks.pool.values(), key=lambda sol: sol.cost)
     remaining = max(0.0, float(max_time) - (time.time() - start_time))
     requested_relay_budget = max(0.0, float(transshipment_time_budget))
     relay_budget = min(requested_relay_budget, remaining)
-    transshipment_events = []
     relay_started = time.time()
-    relay_target_hit_time = postprocess_transshipment(
-        best_solution,
-        relay_evaluator,
-        verbose=verbose,
-        time_budget=relay_budget,
-        sample_pickups=transshipment_sample_pickups,
-        sample_locations=transshipment_sample_locations,
-        sample_carriers=transshipment_sample_carriers,
-        position_top_k=transshipment_position_top_k,
-        min_net_saving=transshipment_min_net_saving,
-        max_transshipments=transshipment_max_total,
-        max_transshipments_per_sat=transshipment_max_per_satellite,
-        target_cost=target_objective,
-        target_tolerance=target_tolerance,
-        solver_start_time=start_time,
-        audit_log=transshipment_events,
-    )
+    relay_deadline = relay_started + relay_budget
+    winner = None
+    candidate_reports = []
+    relay_target_hit_time = None
+    best_found_time = stage1_result.best_found_time
+    for index, candidate in enumerate(candidates):
+        # Always audit the best zero-relay candidate, even with no time left.
+        if index and time.time() >= relay_deadline:
+            break
+        candidate_assignment = free_evaluator.assignment(candidate)
+        relay_e1_tasks, relay_e2_tasks = build_tasks_from_assignment(
+            problem, candidate_assignment)
+        evaluator = RelayEvaluator(
+            problem, relay_e1_tasks, relay_e2_tasks, TFp,
+            vehicles_per_satellite=vehicles_per_satellite)
+        candidate = candidate.copy()
+        candidate.task_to_phys = dict(evaluator.task_to_phys)
+        candidate.transshipments = {}
+        candidate.cost = evaluator.total_cost(candidate)
+        if not evaluator.is_feasible(candidate):
+            continue
+        baseline = candidate.copy()
+        baseline_cost = float(candidate.cost)
+        events = []
+        candidate_budget = max(0.0, relay_deadline - time.time()) / (
+            len(candidates) - index)
+        hit = postprocess_transshipment(
+            candidate, evaluator, verbose=verbose,
+            time_budget=candidate_budget,
+            sample_pickups=transshipment_sample_pickups,
+            sample_locations=transshipment_sample_locations,
+            sample_carriers=transshipment_sample_carriers,
+            position_top_k=transshipment_position_top_k,
+            min_net_saving=transshipment_min_net_saving,
+            max_transshipments=transshipment_max_total,
+            max_transshipments_per_sat=transshipment_max_per_satellite,
+            target_cost=target_objective, target_tolerance=target_tolerance,
+            solver_start_time=start_time, audit_log=events)
+        candidate.cost = evaluator.total_cost(candidate)
+        if (not evaluator.is_feasible(candidate)
+                or candidate.cost > baseline_cost):
+            candidate, events, hit = baseline, [], None
+            evaluator.task_to_phys = dict(baseline.task_to_phys)
+        candidate_reports.append({
+            "assignment": dict(candidate_assignment),
+            "baseline_objective": baseline_cost,
+            "objective": float(candidate.cost),
+            "transshipment_count": len(candidate.transshipments),
+        })
+        if winner is None or candidate.cost < winner[0].cost:
+            if candidate.cost < stage1_best_cost:
+                best_found_time = time.time() - start_time
+            winner = (candidate, evaluator, candidate_assignment,
+                      baseline_cost, events)
+        if hit is not None:
+            relay_target_hit_time = hit
+            break
+    if winner is None:
+        return _no_solution(return_info, time.time() - start_time,
+                            stage1_result.iterations, "AUDIT_FAILED")
+    (best_solution, relay_evaluator, assignment,
+     free_assignment_cost, transshipment_events) = winner
+    moved_customers = sum(
+        assignment.get(customer.id) != customer.assigned_sat
+        for customer in problem.customers)
     relay_elapsed = time.time() - relay_started
-    best_solution.cost = relay_evaluator.total_cost(best_solution)
-    feasible = bool(relay_evaluator.is_feasible(best_solution))
+    feasible = True
     improvement = free_assignment_cost - best_solution.cost
 
     e1_routes_out = [
@@ -223,6 +266,10 @@ def solve_alns(
     elapsed = time.time() - start_time
     info = {
         "objective": float(best_solution.cost),
+        "stage1_best_objective": stage1_best_cost,
+        "assignment_pool_size": pool_hooks.size,
+        "assignment_candidates_evaluated": len(candidate_reports),
+        "assignment_candidate_results": candidate_reports,
         "free_assignment_objective": float(free_assignment_cost),
         "transshipment_improvement": float(improvement),
         "runtime": float(elapsed),
@@ -238,7 +285,7 @@ def solve_alns(
         "transshipment_time_budget_requested": requested_relay_budget,
         "transshipment_time_budget_effective": float(relay_budget),
         "transshipment_search_elapsed_seconds": float(relay_elapsed),
-        "best_found_time": stage1_result.best_found_time,
+        "best_found_time": best_found_time,
         "target_hit_time": (
             stage1_result.target_hit_time
             if stage1_result.target_hit_time is not None

@@ -61,6 +61,17 @@ Model 7 已完成一组标准基准：Set1 的22个实例按120秒/例运行精�
 `output/experiments/model7_exact_and_large_alns_experiment.md`，稳定机器可读结果见
 `output/results/model7_exact_and_alns/`。
 
+为直接比较大规模机制，另完成了 M3、M4、M6、M7 的统一 ALNS 批次：
+`standard_same_day` 的18个实例、seed=42/43/44、每例3秒、迭代上限
+1,000,000。结果见
+`output/experiments/model3467_large_comparison_20260906/report.md`；原始运行见
+同目录的 `runs.jsonl` 和 `runs.csv`。该批次用于比较限时启发式表现，不提供
+全局最优性结论。
+
+3秒批次作为快速探针；正式大规模比较采用同一实例和 seed 的10秒批次，结果见
+`output/experiments/model3467_large_alns_10s/report.md`，合并运行数据见
+`output/experiments/model3467_large_alns_10s/runs_merged.csv`。
+
 ## 4. 真实案例成本分析
 
 LaDe-D 杭州案例使用 `config/cases/lade_hz_0829.json` 统一组合实例、车辆参数、成本参数和 OSRM 矩阵。需要报告：
