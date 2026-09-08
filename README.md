@@ -16,6 +16,9 @@ python main.py
 # 指定路径案例、模型和求解方式
 python main.py route --case config/cases/zhou_small_demo.json --model 4 --solver alns --time 30
 
+# Model 7 逻辑型 Benders 精确分解（可选）
+python main.py route --model 7 --solver exact --exact-algorithm benders --exact-time 300
+
 # LaDe-D 杭州代表日成本分析
 python main.py cost --case config/cases/lade_hz_0829.json --time 10 `
   --output output/economic_analysis_lade_real_0829
@@ -75,6 +78,9 @@ Gurobi 精确求解需要本机安装 `gurobipy` 并配置有效许可证；ALNS
 - 证书未闭合时，回退的完整联合 MIP 返回 `OPTIMAL`。
 
 达到时间限制的 incumbent 应报告目标值、下界和 gap，但不能写成精确最优。详细契约见 [精确求解架构](docs/exact_solver_architecture.md)。
+
+Model 7 可选用[逻辑型 Benders 分解](docs/model7_benders.md)，通过分仓主问题与完整
+Model 6 子问题迭代求解。文档包含算法、参数和与原方法的实测对比。
 
 ## 项目目录
 

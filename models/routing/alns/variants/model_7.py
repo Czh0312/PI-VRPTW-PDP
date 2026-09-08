@@ -43,7 +43,8 @@ from models.routing.alns.variants.model_6 import (
 class AssignmentPoolHooks(M4Hooks):
     """Keep the cheapest accepted solution for each of a few assignments."""
 
-    def __init__(self, size):
+    def __init__(self, size, fixed_route_probability=0.8):
+        super().__init__(fixed_route_probability)
         self.size = max(1, int(size))
         self.pool = {}
 
@@ -121,6 +122,7 @@ def solve_alns(
     target_tolerance=1e-6,
     alns_config_overrides=None,
     refill_unused_time=True,
+    fixed_route_probability=0.8,
     **deprecated_options,
 ):
     """Solve the hybrid free-assignment/asynchronous-relay Model 7.
@@ -159,7 +161,7 @@ def solve_alns(
         print(f"阶段一时间占比: {ratio:.2f}")
         print("阶段一: Model 4 分配感知 ALNS")
 
-    pool_hooks = AssignmentPoolHooks(assignment_pool_size)
+    pool_hooks = AssignmentPoolHooks(assignment_pool_size, fixed_route_probability)
     if free_evaluator.is_feasible(free_solution):
         pool_hooks.remember(free_evaluator, free_solution)
 
@@ -262,6 +264,7 @@ def solve_alns(
     total_iterations = int(stage1_result.iterations)
     refill_iterations = 0
     refill_result = None
+    refill_hooks = M4Hooks(fixed_route_probability)
 
     # Relay enumeration may finish well before its reserved budget.  Reuse the
     # remaining total budget for free-assignment ALNS from a clean pre-relay
@@ -285,7 +288,7 @@ def solve_alns(
                 target_tolerance=target_tolerance,
                 **(alns_config_overrides or {}),
             ),
-            hooks=M4Hooks(),
+            hooks=refill_hooks,
             verbose=False,
             start_time=start_time,
         )
@@ -379,6 +382,11 @@ def solve_alns(
         "restarts": stage1_result.restarts,
         "local_search_improvements": stage1_result.local_search_improvements,
         "alns_diagnostics": stage1_result.diagnostics,
+        "fixed_route_probability": pool_hooks.fixed_route_probability,
+        "neighborhood_attempts": {
+            key: count + refill_hooks.neighborhood_attempts[key]
+            for key, count in pool_hooks.neighborhood_attempts.items()
+        },
         "model_scope": "free_assignment_plus_async_event_handoff",
     }
 

@@ -1,4 +1,4 @@
-"""Globally exact solver for Model 7 by exhaustive assignment partitioning."""
+"""Model 7 exact entry: assignment partitioning or logic-based Benders."""
 
 from __future__ import annotations
 
@@ -342,14 +342,36 @@ def solve_exact(
     warm_start_routes=None,
     warm_start_assignment=None,
     warm_start_objective=None,
+    algorithm="partition",
+    benders_options=None,
 ):
     """Solve the complete free-assignment/asynchronous-relay Model 7.
 
-    The input task buckets are ignored because assignment is endogenous.  A
-    global certificate is issued only after every assignment partition is
-    proven optimal or proven infeasible.  Otherwise any returned route is a
-    time-limited incumbent and ``proven_optimal`` remains false.
+    The input task buckets are ignored because assignment is endogenous.
+    ``algorithm='partition'`` uses enumeration and relaxation certificates;
+    ``algorithm='benders'`` selects assignments through a lower-bound master.
+    ``benders_options`` configures its master and subproblem time slices.
     """
+    if algorithm == "benders":
+        from .benders import solve_benders
+
+        return solve_benders(
+            problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
+            TFp=TFp, time_limit=time_limit, verbose=verbose,
+            return_info=return_info,
+            return_incumbent_on_time_limit=return_incumbent_on_time_limit,
+            gurobi_params=gurobi_params, strengthen=strengthen,
+            use_relaxation_certificate=use_relaxation_certificate,
+            partition_relaxation_screen=partition_relaxation_screen,
+            warm_start_routes=warm_start_routes,
+            warm_start_assignment=warm_start_assignment,
+            warm_start_objective=warm_start_objective,
+            **(benders_options or {}),
+        )
+    if algorithm != "partition":
+        raise ValueError(f"Unknown Model 7 exact algorithm: {algorithm}")
+    if benders_options:
+        raise ValueError("benders_options requires algorithm='benders'")
     del e1_tasks, e2_tasks_by_sat
     if vehicles_per_satellite is None:
         vehicles_per_satellite = problem.fleet.e2_per_sat_count

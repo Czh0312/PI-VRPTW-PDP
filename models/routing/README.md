@@ -7,7 +7,8 @@
 - `service.py`：正式入口使用的统一求解分发层；精确求解器按需加载。
 
 Model 1–7 统一使用 `model.py` 表示完整模型、`exact_solver.py` 表示严格精确入口。
-Model 7 的精确入口采用完整分仓分区加每个分区的 Model 6 联合 MILP；只有全部
-分区均闭合时才报告全局最优。
+Model 7 默认采用分仓枚举与松弛证书，也可通过 `algorithm="benders"` 选择逻辑型
+Benders：分仓主问题提供全局下界，固定分仓的完整 Model 6 提供可行路线。
+具体用法与对比见 `docs/model7_benders.md`。
 大型模型的必要约束与目标组件可放入 `formulation/`。过去尝试的列生成、分支定价、
 时间扩展和分解算法已移至 `archive/models/routing/variants/`，不再混入当前主线。

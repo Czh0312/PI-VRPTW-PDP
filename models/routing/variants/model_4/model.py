@@ -47,7 +47,12 @@ def _formulation_options(options):
 
 
 def build_model(problem, TFp=9999.0, vehicles_per_satellite=4,
-                formulation_options=None):
+                formulation_options=None, *, relax_e2_pickup_load=False, env=None):
+    """Build M4, or its E2 zero-pickup-load relaxation for a Benders master.
+
+    The relaxation switch is reserved for lower bounds. Delivery loads and
+    E1 pickup loads retain their original values; default M4 is unchanged.
+    """
     options = _formulation_options(formulation_options)
     inf = float("inf")
     depot_id = problem.depot.id
@@ -196,7 +201,7 @@ def build_model(problem, TFp=9999.0, vehicles_per_satellite=4,
     total_del_v = len(C) * cv
     total_pick_v = len(C) * cv
 
-    m = gp.Model("2E_VRPTW_PDD_M4_Exact")
+    m = gp.Model("2E_VRPTW_PDD_M4_Exact", env=env)
 
     # ---------------- 分配变量 ----------------
     w = m.addVars(C, F, vtype=GRB.BINARY, name="w")
@@ -555,6 +560,8 @@ def build_model(problem, TFp=9999.0, vehicles_per_satellite=4,
                     kind = j[-1]
                     w_j = cw if kind == "p" else cust_w[j[:-1]]
                     v_j = cv
+                    if relax_e2_pickup_load and kind == "p":
+                        w_j = v_j = 0.0
                     q_j = _signed_q(w_j, kind)
                     vv_j = _signed_q(v_j, kind)
                     # With explicit [0, capacity] bounds on every load

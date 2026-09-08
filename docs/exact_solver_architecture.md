@@ -44,9 +44,9 @@ Gurobi 变量，而是从路线重新检查任务覆盖、分仓、车辆数、�
 | M4 | 完整自由分仓配送—回收弧流 MIP | 完整 MIP 返回 `OPTIMAL`；完整分仓枚举仅在全部分区闭合时可认证 |
 | M5 | 严格松弛证书，必要时回退完整单次接力联合 MIP | 有效下界与可行上界闭合，或完整联合 MIP 返回 `OPTIMAL` |
 | M6 | 严格松弛证书，必要时回退紧凑同质空箱联合 MIP | 有效下界与可行上界闭合，或完整紧凑 MIP 返回 `OPTIMAL` |
-| M7 | 完整顾客—前置仓分区枚举；每个分区求解 M6 完整联合 MIP | 所有互斥分仓分区均被证明最优或不可行，且最优可行分区已确定 |
+| M7 | 默认完整分仓枚举与松弛证书；可选逻辑型 Benders，分仓子问题为完整 M6 | 分仓证明闭合，或 Benders 主问题下界与完整子问题可行上界闭合 |
 
-M5/M6 的有限近邻候选、固定路线二阶段优化或其他缩减候选只能作为受限结果，除非另有覆盖完整可行域的严格证明。M7 只要有一个分仓分区未闭合，就只能报告限时 incumbent，不能报告联合模型全局最优。
+M5/M6 的有限近邻候选、固定路线二阶段优化或其他缩减候选只能作为受限结果，除非另有覆盖完整可行域的严格证明。M7 枚举时若仍有可能改善的未闭合分区，只能报告限时 incumbent。Benders 通过覆盖全部分仓的主问题下界认证，无须逐个求解全部分区；实现与实验见 [Model 7 Benders](model7_benders.md)。
 
 ## 历史算法的位置
 
@@ -69,6 +69,7 @@ tests/routing/test_model1234_exact.py
 tests/routing/test_model5_exact.py
 tests/routing/test_model6_exact.py
 tests/routing/test_model7_exact.py
+tests/routing/test_model7_benders.py
 ```
 
 `test_model1234_exact.py` 会分别调用四个完整 MIP，核对最优证书、自由分仓支配

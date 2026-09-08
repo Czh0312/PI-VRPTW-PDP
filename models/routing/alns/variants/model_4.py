@@ -44,6 +44,7 @@ from models.routing.alns.initial_solution import (
 )
 from models.routing.common.task_builder import build_tasks_for_model
 from models.routing.alns.variants.model_3 import Evaluator as _M3Evaluator
+from models.routing.alns.variants import model_3 as _fixed_search
 
 
 # =====================================================================
@@ -73,6 +74,7 @@ class Evaluator:
         self._reset_maps()
 
     def _reset_maps(self):
+        self._active_assignment = None
         self.e1_task_map = {}
         self.e2_task_map = {}
         self.e2_task_sat = {}
@@ -105,6 +107,11 @@ class Evaluator:
     def rebuild_from_solution(self, sol):
         """从解的 E2 路由重建 E1/E2 任务映射，并确定性重建 E1 路线。"""
         assign = self.assignment(sol)
+        if assign == self._active_assignment:
+            # Routes and E2 return times may have changed, even when aggregate
+            # demands have not. Reuse tasks only, never the E1 schedule.
+            self._canonicalize_e1_routes(sol)
+            return
         cw = self.problem.fleet.container_weight
         cv = self.problem.fleet.container_volume
 
@@ -164,6 +171,7 @@ class Evaluator:
             if pid in self.e1_task_map and did in self.e1_task_map:
                 self.forbidden_e1.add((pid, did))
 
+        self._active_assignment = dict(assign)
         self._canonicalize_e1_routes(sol)
 
     def _canonicalize_e1_routes(self, sol):
@@ -1167,7 +1175,52 @@ def _assignment_local_improve(sol, evaluator, max_rounds=3):
 
 
 class M4Hooks(ALNSHooks):
-    """每个候选算子后做一次 E1 2-opt 局部改进。"""
+    """Mix fast route moves with assignment moves, then audit through M4.
+
+    The fixed evaluator is rebuilt from the complete candidate before any
+    removal. It belongs to this attempt only: rejected assignments must never
+    leak task maps or insertion options into the next attempt.
+    """
+
+    def __init__(self, fixed_route_probability=0.8):
+        self.fixed_route_probability = float(fixed_route_probability)
+        if not 0.0 <= self.fixed_route_probability <= 1.0:
+            raise ValueError("fixed_route_probability must be in [0, 1]")
+        self.neighborhood_attempts = {"fixed_routes": 0, "assignment": 0}
+
+    def apply_operators(self, candidate, evaluator, destroy_op, repair_op,
+                        d_idx, r_idx, num_remove, echelon):
+        use_fixed = (self.fixed_route_probability > 0
+                     and random.random() < self.fixed_route_probability
+                     and len(evaluator.assignment(candidate)) == len(evaluator.catalog))
+        if not use_fixed:
+            self.neighborhood_attempts["assignment"] += 1
+            return super().apply_operators(
+                candidate, evaluator, destroy_op, repair_op,
+                d_idx, r_idx, num_remove, echelon)
+
+        self.neighborhood_attempts["fixed_routes"] += 1
+        evaluator.rebuild_from_solution(candidate)
+        fixed = _M3Evaluator(
+            evaluator.problem, list(evaluator.e1_task_map.values()),
+            evaluator.e2_tasks_by_sat, evaluator.TFp,
+            evaluator.vehicles_per_satellite)
+        fixed._alns_deadline = getattr(evaluator, "_alns_deadline", float("inf"))
+        destroys = (
+            _fixed_search.random_removal, _fixed_search.worst_removal,
+            _fixed_search.shaw_removal, _fixed_search.paired_customer_removal,
+            _fixed_search.route_customer_pair_removal,
+            _fixed_search.route_customer_pair_removal,
+        )
+        repairs = (
+            _fixed_search.greedy_insertion, _fixed_search.regret_insertion,
+            _fixed_search.paired_insertion, _fixed_search.greedy_insertion,
+        )
+        fixed_echelon = "e2" if random.random() < 0.8 else "e1"
+        removed = destroys[d_idx % len(destroys)](
+            candidate, fixed, num_remove, fixed_echelon)
+        repairs[r_idx % len(repairs)](candidate, removed, fixed, fixed_echelon)
+        clean_empty_routes(candidate)
 
     def after_operators(self, candidate, evaluator, current_solution,
                         iteration, d_idx, r_idx):
@@ -1191,7 +1244,7 @@ def solve_alns(problem, vehicles_per_satellite, TFp=9999.0,
                max_iterations=5000, max_time=120, seed=42, verbose=True,
                return_info=False, initial_solution=None,
                target_objective=None, target_tolerance=1e-6,
-               alns_config_overrides=None):
+               alns_config_overrides=None, fixed_route_probability=0.8):
     random.seed(seed)
     start_time = time.time()
 
@@ -1231,6 +1284,7 @@ def solve_alns(problem, vehicles_per_satellite, TFp=9999.0,
             f"{s}:{sum(1 for v in assign.values() if v == s)}"
             for s in evaluator.sat_ids))
 
+    search_hooks = M4Hooks(fixed_route_probability)
     result = run_alns_search(
         initial_solution=sol,
         evaluator=evaluator,
@@ -1253,7 +1307,7 @@ def solve_alns(problem, vehicles_per_satellite, TFp=9999.0,
             target_tolerance=target_tolerance,
             **(alns_config_overrides or {}),
         ),
-        hooks=M4Hooks(),
+        hooks=search_hooks,
         verbose=verbose,
         start_time=start_time,
     )
@@ -1297,6 +1351,8 @@ def solve_alns(problem, vehicles_per_satellite, TFp=9999.0,
         "restarts": result.restarts,
         "local_search_improvements": result.local_search_improvements,
         "alns_diagnostics": result.diagnostics,
+        "fixed_route_probability": search_hooks.fixed_route_probability,
+        "neighborhood_attempts": dict(search_hooks.neighborhood_attempts),
     }
     return ((e1_routes_out, e2_routes_out, assignment, info) if return_info
             else (e1_routes_out, e2_routes_out, assignment))

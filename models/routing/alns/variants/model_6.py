@@ -5,6 +5,7 @@ Model 6 (两阶段：先规划再中转) 的 ALNS 求解器
 """
 import random
 import time
+from functools import lru_cache
 
 from models.routing.alns.types import (
     Route, Solution, FEAS_TOL, clean_empty_routes,
@@ -12,6 +13,7 @@ from models.routing.alns.types import (
 )
 from models.routing.alns.engine import ALNSConfig, ALNSHooks, run_alns_search
 from models.routing.alns.fixed_repair import FixedRouteInsertionCache
+from models.routing.alns.variants import model_3 as _fixed_search
 from models.routing.alns.initial_solution import build_strong_initial_solution
 from models.routing.alns.paired_operators import (
     insert_complete_customer_pairs,
@@ -1319,12 +1321,36 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
                initial_solution=None,
                refill_unused_time=True,
                target_objective=None, target_tolerance=1e-6,
-               alns_config_overrides=None):
+               alns_config_overrides=None, fast_stage1=True):
     random.seed(seed)
     start_time = time.time()
 
     evaluator = Evaluator(problem, e1_tasks, e2_tasks_by_sat, TFp,
                           vehicles_per_satellite=vehicles_per_satellite)
+
+    # Plain route search has the same constraints as M3. Virtual handoffs
+    # still require the relay evaluator and legacy relay-aware operators.
+    use_fixed = bool(fast_stage1 and not (
+        initial_solution is not None and initial_solution.transshipments))
+    search_module = _fixed_search if use_fixed else None
+    stage1_evaluator = (_fixed_search.Evaluator(
+        problem, e1_tasks, e2_tasks_by_sat, TFp, vehicles_per_satellite)
+        if use_fixed else evaluator)
+    if use_fixed:
+        # Native task locations are immutable throughout the no-relay search.
+        # Keep these bounded caches separate from the mutable relay evaluator.
+        stage1_evaluator.dist = lru_cache(maxsize=65536)(stage1_evaluator.dist)
+        stage1_evaluator.travel = lru_cache(maxsize=65536)(stage1_evaluator.travel)
+        stage1_evaluator.service_time = lru_cache(maxsize=4096)(
+            stage1_evaluator.service_time)
+    stage1_destroy = ([search_module.random_removal, search_module.worst_removal,
+                      search_module.shaw_removal, search_module.paired_customer_removal,
+                      route_customer_pair_removal] if use_fixed else
+                     [random_removal, worst_removal, shaw_removal,
+                      paired_customer_removal, route_customer_pair_removal])
+    stage1_repair = ([search_module.greedy_insertion, search_module.regret_insertion,
+                     search_module.paired_insertion] if use_fixed else
+                    [greedy_insertion, regret_insertion, paired_insertion])
 
     if initial_solution is not None:
         sol = initial_solution.copy()
@@ -1332,7 +1358,7 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
             sol.task_to_phys = dict(evaluator.task_to_phys)
     elif strong_initial_solution:
         sol = build_strong_initial_solution(
-            problem, e1_tasks, e2_tasks_by_sat, evaluator)
+            problem, e1_tasks, e2_tasks_by_sat, stage1_evaluator)
     else:
         sol = build_initial_solution(problem, e1_tasks, e2_tasks_by_sat,
                                      evaluator)
@@ -1378,10 +1404,9 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
 
     result = run_alns_search(
         initial_solution=sol,
-        evaluator=evaluator,
-        destroy_ops=[random_removal, worst_removal, shaw_removal,
-                     paired_customer_removal, route_customer_pair_removal],
-        repair_ops=[greedy_insertion, regret_insertion, paired_insertion],
+        evaluator=stage1_evaluator,
+        destroy_ops=stage1_destroy,
+        repair_ops=stage1_repair,
         config=ALNSConfig(
             max_iterations=max_iterations,
             max_time=stage1_limit,
@@ -1465,10 +1490,9 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         refill_started = time.time()
         refill = run_alns_search(
             initial_solution=stage1_snapshot,
-            evaluator=evaluator,
-            destroy_ops=[random_removal, worst_removal, shaw_removal,
-                         paired_customer_removal, route_customer_pair_removal],
-            repair_ops=[greedy_insertion, regret_insertion, paired_insertion],
+            evaluator=stage1_evaluator,
+            destroy_ops=stage1_destroy,
+            repair_ops=stage1_repair,
             config=ALNSConfig(
                 max_iterations=max_iterations - total_iterations,
                 max_time=max_time,
@@ -1540,6 +1564,7 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         "transshipment_improvement": float(stage1_cost - best_sol.cost),
         "transshipment_events": transshipment_events,
         "strong_initial_solution": bool(strong_initial_solution),
+        "fast_stage1": use_fixed,
         "external_initial_solution": initial_solution is not None,
         "initial_objective": initial_objective,
         "refill_unused_time": bool(refill_unused_time),
