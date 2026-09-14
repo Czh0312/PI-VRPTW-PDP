@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from models.routing.alns.variants import model_3, model_4, model_6
+from models.routing.alns.variants import model_2, model_3, model_4, model_6, model_7
 from models.routing.common.data_loader import parse_dataset
 from models.routing.common.domain.instance import ProblemInstance
 from models.routing.common.task_builder import build_tasks_for_model
@@ -23,24 +23,25 @@ def problem():
     return result
 
 
-def test_fixed_moves_preserve_current_assignment_after_rejected_partial_state(problem):
-    evaluator = model_4.Evaluator(problem, vehicles_per_satellite=problem.fleet.e2_per_sat_count)
-    solution = model_4.build_initial_solution(problem, evaluator)
+@pytest.mark.parametrize("module", [model_2, model_4])
+def test_fixed_moves_preserve_current_assignment_after_rejected_partial_state(problem, module):
+    evaluator = module.Evaluator(problem, vehicles_per_satellite=problem.fleet.e2_per_sat_count)
+    solution = module.build_initial_solution(problem, evaluator)
     assignment = evaluator.assignment(solution)
     original_paths = [r.full_path() for rs in solution.e2_routes.values() for r in rs]
-    hooks = model_4.M4Hooks(1.0)
+    hooks = (model_2.M2Hooks if module is model_2 else model_4.M4Hooks)(1.0)
     for destroy_idx in range(6):
         for repair_idx in range(4):
             random.seed(100 * destroy_idx + repair_idx)
             rejected = solution.copy()
-            model_4._remove_customer(rejected, next(iter(assignment)))
+            module._remove_customer(rejected, next(iter(assignment)))
             evaluator.rebuild_from_solution(rejected)
             candidate = solution.copy()
             hooks.apply_operators(candidate, evaluator, None, None,
                                   destroy_idx, repair_idx, 3, "e2")
             assert evaluator.assignment(candidate) == assignment
             cost, feasible = evaluator.evaluate(candidate)
-            fresh = model_4.Evaluator(problem, vehicles_per_satellite=problem.fleet.e2_per_sat_count)
+            fresh = module.Evaluator(problem, vehicles_per_satellite=problem.fleet.e2_per_sat_count)
             fresh_cost, fresh_feasible = fresh.evaluate(candidate.copy())
             assert cost == pytest.approx(fresh_cost)
             assert feasible == fresh_feasible
@@ -65,6 +66,35 @@ def test_assignment_cache_reuses_tasks_but_rechecks_route_schedule(problem):
     assert cost == pytest.approx(reference_cost)
     assert feasible == reference_feasible
     assert [r.nodes for r in changed.e1_routes] == [r.nodes for r in reference.e1_routes]
+
+
+def test_m2_route_seed_keeps_incumbent_and_shares_iteration_budget(problem):
+    from models.routing.common.solution_audit import audit_exact_solution
+    r1,r2,assignment,info = model_2.solve_alns(problem,
+        vehicles_per_satellite=problem.fleet.e2_per_sat_count,
+        max_iterations=120,max_time=5,seed=42,verbose=False,return_info=True,
+        route_seed_fraction=.2)
+    assert info['feasible']
+    assert 0 < info['route_seed_iterations'] <= info['iterations'] <= 120
+    assert info['objective'] <= info['route_seed_objective']+1e-6
+    assert info['route_seed_objective'] <= info['initial_objective']+1e-6
+    assert audit_exact_solution(problem,2,r1,r2,assignment=assignment,
+                                objective=info['objective'])['valid']
+
+
+@pytest.mark.parametrize('module',[model_4,model_7])
+def test_free_seed_search_respects_total_iteration_cap(problem,module):
+    from models.routing.common.solution_audit import audit_exact_solution
+    extra = dict(transshipment_time_budget=0,refill_unused_time=False) if module is model_7 else {}
+    r1,r2,assignment,info = module.solve_alns(problem,
+        vehicles_per_satellite=problem.fleet.e2_per_sat_count,
+        max_iterations=120,max_time=5,seed=42,verbose=False,return_info=True,
+        seed_search_fraction=.2,**extra)
+    assert 0 < info['initial_seed_iterations'] <= 24
+    assert info['iterations'] <= 120
+    assert info['objective'] <= info['initial_objective']+1e-6
+    assert audit_exact_solution(problem,4,r1,r2,assignment=assignment,
+                                objective=info['objective'])['valid']
 
 
 @pytest.mark.parametrize("fast", [False, True])

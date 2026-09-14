@@ -41,6 +41,8 @@ class Evaluator:
         for tasks in e2_tasks_by_sat.values():
             for t in tasks:
                 self.task_to_phys[t.id] = t.cust
+        from models.routing.alns.evaluation_cache import cache_static_evaluator
+        cache_static_evaluator(self)
 
     def e2_task_satellite(self, task_id):
         return self.e2_task_sat.get(task_id)

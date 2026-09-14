@@ -106,7 +106,7 @@ def solve_alns(
     max_time=120,
     seed=42,
     verbose=True,
-    stage1_time_ratio=0.75,
+    stage1_time_ratio=None,
     assignment_pool_size=4,
     transshipment_time_budget=30.0,
     transshipment_sample_pickups=None,
@@ -123,6 +123,7 @@ def solve_alns(
     alns_config_overrides=None,
     refill_unused_time=True,
     fixed_route_probability=0.8,
+    seed_search_fraction=None,
     **deprecated_options,
 ):
     """Solve the hybrid free-assignment/asynchronous-relay Model 7.
@@ -140,6 +141,12 @@ def solve_alns(
         print("[WARN] Model 7 已改为 M4+M6 联合机制，以下旧逐轮探针参数不再使用: "
               f"{names}")
 
+    if stage1_time_ratio is None:
+        stage1_time_ratio = .9 if len(problem.customers)>=10 and max_time>=5 else .75
+    if seed_search_fraction is None:
+        seed_search_fraction = .2 if 10<=len(problem.customers)<=20 and max_time>=5 else 0.
+    if not 0<=seed_search_fraction<1:
+        raise ValueError('seed_search_fraction must be in [0, 1)')
     ratio = max(0.0, min(1.0, float(stage1_time_ratio)))
     stage1_limit = max(0.0, float(max_time) * ratio)
     free_evaluator = FreeAssignmentEvaluator(
@@ -148,8 +155,13 @@ def solve_alns(
         initial_solution.copy()
         if initial_solution is not None
         else build_free_assignment_initial_solution(
-            problem, free_evaluator, TFp)
+            problem, free_evaluator, TFp,
+            seed_search_budget=min(1.0,max_time*seed_search_fraction)
+            if len(problem.customers) <= 20 and max_iterations >= 100
+            and (alns_config_overrides or {}).get('cooling_schedule','time') == 'time' else 0.0,
+            seed_search_iterations=int(max_iterations*seed_search_fraction))
     )
+    seed_iterations = sum(r['iterations'] for r in getattr(free_evaluator,'initial_seed_search',[]))
     free_solution.cost = free_evaluator.total_cost(free_solution)
     initial_objective = float(free_solution.cost)
 
@@ -165,13 +177,15 @@ def solve_alns(
     if free_evaluator.is_feasible(free_solution):
         pool_hooks.remember(free_evaluator, free_solution)
 
+    polish_reserve = (min(.05, stage1_limit*.01) if len(problem.customers) <= 20
+                      and (alns_config_overrides or {}).get('cooling_schedule','time') == 'time' else 0.0)
     stage1_result = run_alns_search(
         initial_solution=free_solution,
         evaluator=free_evaluator,
         destroy_ops=M7_DESTROY_OPS,
         repair_ops=M7_REPAIR_OPS,
         config=ALNSConfig(
-            max_iterations=max_iterations,
+            max_iterations=max(0,max_iterations-seed_iterations),
             max_time=stage1_limit,
             e2_probability=1.0,
             target_cost=target_objective,
@@ -181,12 +195,28 @@ def solve_alns(
         hooks=pool_hooks,
         verbose=verbose,
         start_time=start_time,
+        search_time_limit=stage1_limit-polish_reserve,
     )
     best_solution = stage1_result.best_solution
     if best_solution is None:
         return _no_solution(
             return_info, time.time() - start_time,
             stage1_result.iterations)
+
+    if (polish_reserve and stage1_result.target_hit_time is None
+            and any(best_solution.e2_routes.values())):
+        from models.routing.alns.route_exchange import improve_route_exchanges
+        free_evaluator._alns_deadline = start_time+stage1_limit
+        polished, changes = improve_route_exchanges(best_solution,free_evaluator,start_time+stage1_limit)
+        if polished.cost < best_solution.cost-FEAS_TOL:
+            best_solution = polished
+            stage1_result.best_solution = polished
+            stage1_result.best_cost = polished.cost
+            stage1_result.best_found_time = time.time()-start_time
+            stage1_result.local_search_improvements += changes
+            if target_objective is not None and polished.cost <= target_objective+target_tolerance:
+                stage1_result.target_hit_time = stage1_result.best_found_time
+                stage1_result.termination_reason = 'target'
 
     no_relay_snapshot = best_solution.copy()
     pool_hooks.remember(free_evaluator, best_solution)
@@ -261,7 +291,7 @@ def solve_alns(
     relay_elapsed = time.time() - relay_started
     best_solution.cost = relay_evaluator.total_cost(best_solution)
     relay_cost = float(best_solution.cost)
-    total_iterations = int(stage1_result.iterations)
+    total_iterations = seed_iterations+int(stage1_result.iterations)
     refill_iterations = 0
     refill_result = None
     refill_hooks = M4Hooks(fixed_route_probability)
@@ -358,6 +388,9 @@ def solve_alns(
         "status": "FEASIBLE" if feasible else "NO_SOLUTION",
         "external_initial_solution": initial_solution is not None,
         "initial_objective": initial_objective,
+        "initial_seed_search": getattr(free_evaluator,'initial_seed_search',[]),
+        "initial_seed_iterations": seed_iterations,
+        "seed_search_fraction": seed_search_fraction,
         "assignment": dict(assignment),
         "moved_customers": int(moved_customers),
         "transshipment_count": len(best_solution.transshipments),

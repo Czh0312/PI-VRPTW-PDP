@@ -43,6 +43,7 @@ class ALNSConfig:
     temperature_calibration_samples: int = 20
     reward_time_exponent: float = 0.5
     operator_weight_floor: float = 0.05
+    segment_reversal: bool = False
 
 
 @dataclass
@@ -160,6 +161,27 @@ def _first_improving_route_move(sol, evaluator, deadline):
 
     for kind, key in descriptors:
         routes = _route_group(sol, kind, key)
+        # Reverse route segments as a single move. Relocate/swap alone cannot
+        # escape many crossing-route local optima. Price the complete directed
+        # segment (road matrices need not be symmetric), then audit the move.
+        for route_idx, route in enumerate(routes):
+            if (not getattr(evaluator,'_segment_reversal',False)
+                    or len(route.nodes) < 3 or not callable(getattr(evaluator,'route_distance',None))):
+                continue
+            old_distance = evaluator.route_distance(route)
+            for left in range(len(route.nodes)-2):
+                for right in range(left+3, len(route.nodes)+1):
+                    if time.time() >= deadline:
+                        return None
+                    trial = route.copy()
+                    trial.nodes[left:right] = reversed(trial.nodes[left:right])
+                    if evaluator.route_distance(trial) >= old_distance-FEAS_TOL:
+                        continue
+                    candidate = sol.copy()
+                    _route_group(candidate,kind,key)[route_idx] = trial
+                    improved = accept(candidate)
+                    if improved is not None:
+                        return improved
         for route_idx, route in enumerate(routes):
             n = len(route.nodes)
             for old_pos in range(n):
@@ -269,13 +291,22 @@ def _intensify(sol, evaluator, deadline):
 
 
 def run_alns_search(initial_solution, evaluator, destroy_ops, repair_ops,
-                    config=None, hooks=None, verbose=True, start_time=None):
+                    config=None, hooks=None, verbose=True, start_time=None,
+                    search_time_limit=None):
     config = config or ALNSConfig()
     hooks = hooks or ALNSHooks()
     start_time = time.time() if start_time is None else start_time
     # Expensive model-specific operators may consult this deadline so one
     # neighborhood evaluation cannot substantially overrun the wall-clock cap.
-    evaluator._alns_deadline = start_time + config.max_time
+    if search_time_limit is not None and (
+            not math.isfinite(search_time_limit) or search_time_limit < 0):
+        raise ValueError("search_time_limit must be finite and nonnegative")
+    # A caller can reserve time for final polishing without rescaling the
+    # cooling schedule, stagnation thresholds, or intensification budgets.
+    stop_limit = (config.max_time if search_time_limit is None
+                  else min(config.max_time, search_time_limit))
+    evaluator._alns_deadline = start_time + stop_limit
+    evaluator._segment_reversal = config.segment_reversal
 
     sol = initial_solution
     current_is_feasible = evaluator.is_feasible(sol)
@@ -391,10 +422,10 @@ def run_alns_search(initial_solution, evaluator, destroy_ops, repair_ops,
     for iteration in range(0 if target_hit_time is not None
                            else config.max_iterations):
         elapsed_now = time.time() - start_time
-        if elapsed_now > config.max_time:
+        if elapsed_now > stop_limit:
             termination_reason = "time"
             if verbose:
-                msg = hooks.time_limit_message(iteration, config.max_time)
+                msg = hooks.time_limit_message(iteration, stop_limit)
                 if msg:
                     print(msg)
             break
@@ -415,7 +446,7 @@ def run_alns_search(initial_solution, evaluator, destroy_ops, repair_ops,
                 and elapsed_now - stagnation_anchor >= stagnation_limit):
             if intensification_limit > 0:
                 deadline = min(
-                    start_time + config.max_time,
+                    start_time + stop_limit,
                     time.time() + intensification_limit)
                 intensified, improvement_count = _intensify(
                     best_sol, evaluator, deadline)

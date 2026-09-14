@@ -16,8 +16,8 @@ python main.py
 # 指定路径案例、模型和求解方式
 python main.py route --case config/cases/zhou_small_demo.json --model 4 --solver alns --time 30
 
-# Model 7 逻辑型 Benders 精确分解（可选）
-python main.py route --model 7 --solver exact --exact-algorithm benders --exact-time 300
+# Model 7 原分仓枚举精确求解
+python main.py route --model 7 --solver exact --exact-time 300
 
 # LaDe-D 杭州代表日成本分析
 python main.py cost --case config/cases/lade_hz_0829.json --time 10 `
@@ -79,8 +79,25 @@ Gurobi 精确求解需要本机安装 `gurobipy` 并配置有效许可证；ALNS
 
 达到时间限制的 incumbent 应报告目标值、下界和 gap，但不能写成精确最优。详细契约见 [精确求解架构](docs/exact_solver_architecture.md)。
 
-Model 7 可选用[逻辑型 Benders 分解](docs/model7_benders.md)，通过分仓主问题与完整
-Model 6 子问题迭代求解。文档包含算法、参数和与原方法的实测对比。
+Model 7 使用完整分仓枚举、松弛证书和完整 Model 6 子问题进行精确求解。
+
+## 最新精确求解与 ALNS 结果
+
+2026-09-13 启动的六模型优化：
+[详细分析](docs/solver_optimization_20260913.md)与
+[最新精确/ALNS结果总表](output/experiments/solver_optimization_20260913/report.md)。
+新批次包含同预算基线对照、22 个小规模实例及18 个大规模实例，
+原始路线、上下界、证明状态和源代码快照均保留。总表顶部标明批次是否完成。
+
+以下为保留的历史批次：
+
+M4 默认交换邻域优化后的[更新总表](output/experiments/small_alns_updated_20260908/report.md)
+覆盖 22 个实例、3 个随机种子、六个模型：M4 按原种子重跑 66 次，其余五个模型沿用
+原批次 330 次记录，全部 396 条路线重新通过独立审计。报告明确标注批次来源，
+并更新模型间配对和 M4/M7 的共同精确样本比较。
+
+算法改动的独立同预算验证见 [M4 交换邻域对照](output/experiments/m4_exchange_schedule_20260908/report.md)。
+
 
 ## 项目目录
 

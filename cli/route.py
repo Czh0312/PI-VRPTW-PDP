@@ -6,6 +6,7 @@
 import argparse
 import io
 import json
+import math
 import time
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -42,11 +43,7 @@ def main(argv=None):
     )
     parser.add_argument("--model", type=int, choices=range(1, 8))
     parser.add_argument("--solver", choices=("alns", "exact"))
-    parser.add_argument("--exact-algorithm", choices=("default", "benders"),
-                        help="精确算法；benders 当前支持 Model 7")
     parser.add_argument("--exact-time", type=float, help="精确求解总时间限制（秒）")
-    parser.add_argument("--benders-subproblem-time", type=float,
-                        help="Benders 每个分仓子问题的初始时间片（秒）")
     parser.add_argument("--data", help="覆盖案例中的数据文件")
     parser.add_argument("--fleet-config", help="覆盖案例中的车辆参数文件")
     parser.add_argument("--time", type=float, help="覆盖 ALNS 时间限制（秒）")
@@ -59,14 +56,8 @@ def main(argv=None):
         app_cfg["model"] = args.model
     if args.solver is not None:
         app_cfg["solver"] = args.solver
-    if args.exact_algorithm is not None:
-        app_cfg["exact_algorithm"] = args.exact_algorithm
     if args.exact_time is not None:
         app_cfg["exact_time"] = args.exact_time
-    if args.benders_subproblem_time is not None:
-        benders_options = dict(app_cfg.get("benders_options") or {})
-        benders_options["subproblem_time_limit"] = args.benders_subproblem_time
-        app_cfg["benders_options"] = benders_options
     if args.data is not None:
         app_cfg["data"] = args.data
     if args.time is not None:
@@ -79,20 +70,13 @@ def main(argv=None):
         fleet_cfg = load_json(args.fleet_config)
 
     model = require_model_number(app_cfg["model"])
-    if model == 7:
-        # Model 7 needs a meaningful relay phase even when the shared M6
-        # configuration allocates almost all time to its first stage.
-        stage1_time_ratio = app_cfg.get("model7_stage1_time_ratio", 0.75)
     data_file = app_cfg["data"]
     solver = app_cfg["solver"]
-    exact_algorithm = app_cfg.get("exact_algorithm", "default")
-    if exact_algorithm == "benders" and (model != 7 or solver != "exact"):
-        parser.error("Benders 当前支持 --model 7 --solver exact")
-    solver_tag = "exact_benders" if solver == "exact" and exact_algorithm == "benders" else solver
     alns_iter = app_cfg.get("alns_iter", 5000)
     alns_time = app_cfg.get("alns_time", 120)
     seed = app_cfg.get("seed", 42)
-    stage1_time_ratio = app_cfg.get("stage1_time_ratio", 0.95)
+    stage1_time_ratio = (app_cfg.get("model7_stage1_time_ratio")
+                         if model == 7 else app_cfg.get("stage1_time_ratio"))
     transshipment_min_net_saving = app_cfg.get(
         "transshipment_min_net_saving", 0.01)
     transshipment_max_total = app_cfg.get("transshipment_max_total")
@@ -107,13 +91,13 @@ def main(argv=None):
     data_stem = data_path.stem
     # Organized single-run output:
     # output/single_runs/model4_alns/C101/{routes,figures}/...
-    sub_dir = OUTPUT_DIR / "single_runs" / f"model{model}_{solver_tag}" / data_stem
+    sub_dir = OUTPUT_DIR / "single_runs" / f"model{model}_{solver}" / data_stem
     routes_dir = sub_dir / "routes"
     figures_dir = sub_dir / "figures"
     routes_dir.mkdir(parents=True, exist_ok=True)
     figures_dir.mkdir(parents=True, exist_ok=True)
 
-    run_prefix = f"run_model{model:02d}_{solver_tag}_{data_stem}"
+    run_prefix = f"run_model{model:02d}_{solver}_{data_stem}"
     log_path = routes_dir / f"{run_prefix}_routes_detail.txt"
     img_path = figures_dir / f"{run_prefix}_solution_route_map.png"
     certificate_path = routes_dir / f"{run_prefix}_certificate.json"
@@ -122,7 +106,7 @@ def main(argv=None):
     print("启动 2E-VRP 求解引擎")
     print(f"数据文件: {data_path.name}")
     print(f"激活模型: Model {model}")
-    print(f"求解方法: {solver_tag.upper()}")
+    print(f"求解方法: {solver.upper()}")
     print(f"输出目录: {sub_dir}")
     print("=" * 60)
 
@@ -151,9 +135,7 @@ def main(argv=None):
             transshipment_max_total=transshipment_max_total,
             transshipment_max_per_satellite=transshipment_max_per_satellite,
             TFp=app_cfg.get("TFp", 9999.0),
-            exact_algorithm=exact_algorithm,
-            exact_time=app_cfg.get("exact_time"),
-            benders_options=app_cfg.get("benders_options"),
+            exact_time=app_cfg.get("exact_time", app_cfg.get("time_limit_seconds", 300)),
         )
     e1_routes, e2_routes_by_sat_res = solver_result[0], solver_result[1]
     exact_info = None
@@ -205,18 +187,7 @@ def main(argv=None):
             "formulation": exact_info.get("formulation"),
             "assignment": exact_assignment,
             "route_audit": route_audit,
-            "exact_algorithm": exact_algorithm,
         }
-        if exact_algorithm == "benders":
-            certificate["benders"] = {
-                field: exact_info.get(field) for field in (
-                    "iterations", "optimality_cuts", "feasibility_cuts",
-                    "assignment_partitions_total", "assignment_partitions_evaluated",
-                    "assignment_partition_retries", "master_runtime", "subproblem_runtime",
-                    "master_statistics", "master_relaxation", "iteration_history", "absolute_tolerance",
-                )
-            }
-            certificate["transshipments"] = exact_info.get("transshipments", [])
         with open(certificate_path, "w", encoding="utf-8") as f:
             json.dump(certificate, f, ensure_ascii=False, indent=2)
 
@@ -232,9 +203,21 @@ def main(argv=None):
             f"目标值: {exact_info.get('objective'):.6f} | "
             f"Gap: {exact_info.get('mip_gap'):.3%}"
         )
+    elif (solver == "exact" and e1_routes is not None
+          and e2_routes_by_sat_res is not None
+          and (exact_info or {}).get("objective") is not None
+          and (route_audit is None or route_audit.get("valid"))):
+        bound = exact_info.get("best_bound")
+        gap = exact_info.get("mip_gap")
+        bound_text = f"{bound:.6f}" if bound is not None and math.isfinite(bound) else "未知"
+        gap_text = f"{gap:.3%}" if gap is not None and math.isfinite(gap) else "未知"
+        print(
+            f"[FEASIBLE] 已找到可行解，最优证明未闭合 | 耗时: {run_time:.2f}s | "
+            f"目标值: {exact_info['objective']:.6f} | 下界: {bound_text} | Gap: {gap_text}"
+        )
     elif solver == "exact":
         print(
-            f"[FAILED] 精确证明未闭合 | 耗时: {run_time:.2f}s | "
+            f"[FAILED] 未返回有效可行解 | 耗时: {run_time:.2f}s | "
             f"状态: {(exact_info or {}).get('status')} | "
             f"路线审计: {None if route_audit is None else route_audit.get('valid')}"
         )
@@ -253,8 +236,8 @@ def main(argv=None):
             problem=problem,
             e1_routes=e1_routes,
             e2_routes_by_sat=e2_routes_by_sat_res,
-            title=f"2E-VRP Solution - Model {model} ({solver_tag.upper()}) - {data_stem}",
-            save_dir=f"single_runs/model{model}_{solver_tag}/{data_stem}/figures",
+            title=f"2E-VRP Solution - Model {model} ({solver.upper()}) - {data_stem}",
+            save_dir=f"single_runs/model{model}_{solver}/{data_stem}/figures",
             filename=img_path.name,
         )
     else:

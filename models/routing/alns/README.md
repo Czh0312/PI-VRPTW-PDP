@@ -33,7 +33,7 @@ engine setting through `alns_config_overrides`.
 
 M4/M7 also mix fixed-current-assignment route moves into their assignment
 neighborhoods (`fixed_route_probability=0.8`; set zero for assignment-only
-search). Each fixed move freezes a fresh M3 task catalogue before destruction,
+search). Each fixed move selects the complete assignment's M3 task catalogue before destruction,
 uses M3 E1/E2 repair, and passes the resulting candidate through the full M4
 evaluator. The learned destroy/repair indices now identify composite moves:
 each index has both a route and an assignment implementation. The separate
@@ -41,8 +41,17 @@ each index has both a route and an assignment implementation. The separate
 assignments from both branches and includes refill attempts in these counts.
 
 The M4 evaluator reuses task catalogues when assignments are unchanged, but
-always checks the changed E1/E2 schedules. No insertion cache or frozen task
-catalogue survives an attempt.
+always checks the changed E1/E2 schedules. Insertion options remain scoped to
+an attempt. Up to eight fixed evaluators may now survive, keyed by the complete
+assignment; each receives the current deadline. Rejected partial assignments
+cannot reuse a different assignment's catalogue.
+
+`evaluation_cache.py` caches immutable geometry and service times for M1–M4.
+Route costs use the complete path as the key; schedules also include the
+satellite and absolute departure time. The relay evaluator is excluded because
+handoff locations and loads are mutable. M2 exposes the experimental
+`fixed_route_probability=0.0`, using M1 route moves when enabled; its default
+remains assignment search because the quality probe was inconclusive.
 
 M6 defaults to `fast_stage1=True`: a plain M3 evaluator with bounded metric
 caches handles the no-relay search, including refill. The relay evaluator owns
@@ -62,3 +71,43 @@ It records public routes, recomputed distance, full diagnostics, and runtime
 for each model/instance/seed. Output creation is exclusive to protect earlier
 results. Equal-time iteration throughput measures search speed, not a promise
 of lower runtime for the same target quality or a proof of relay benefit.
+
+### M4 small-instance exchange polishing
+
+For at most 20 customers with time-based cooling, M4 defaults to
+`exchange_polish=True`. It reserves at most `min(0.05, max_time * 0.01)` seconds
+within the caller's total budget. The main search retains its nominal cooling,
+stagnation and restart schedule; the engine's optional `search_time_limit`
+changes only its hard deadline. The final pass exchanges complete customer
+delivery/pickup identities or same-satellite route suffixes, accepting only
+strict improvements validated against the complete M4 constraints.
+
+Set `exchange_polish=False` to reproduce the unpolished baseline. Large
+instances and iteration-cooled runs do not enable this pass automatically.
+`exchange_polish_improvements` and `exchange_polish_seconds` report its work.
+The experimental `search_phase_fraction` remains 1.0 by default: restarting
+learning in two phases did not demonstrate an overall advantage.
+
+M7 now reserves the same small exchange pass inside its first-stage budget.
+Continuous segment reversal remains off by default. The validated automatic
+initialization policies activate only for budgets of at least five seconds:
+
+- M2 uses `route_seed_fraction=0.2` above 20 customers. It searches routes for
+  the chosen initial assignment before the free-assignment phase.
+- M4/M7 use `seed_search_fraction=0.2` for 10–20 customers. All candidate
+  assignments share at most `min(1 second, 0.2 * max_time)` for route search.
+- M7 uses a first-stage ratio of 0.9 from 10 customers upward; otherwise 0.75.
+
+Explicit values override these automatic choices. Initialization iterations
+and elapsed time are charged against the same total limits as the main and
+refill searches. Three-second runs retain their previous search allocation.
+M6 retains its default first-stage ratio of 0.8: the full 18-instance,
+two-seed check found 15 wins and 19 losses when increasing it to 0.9.
+Its final selection and source provenance are recorded in
+`output/experiments/solver_optimization_20260913/final_policy.json`.
+The complete comparison and latest routes are in that directory's `report.md`.
+
+The final 22-instance, three-seed paired validation is recorded in
+`output/experiments/m4_exchange_schedule_20260908/report.md`. All 132 routes
+passed independent audits. This is empirical quality improvement, not an
+optimality guarantee or a guarantee that every seed improves.

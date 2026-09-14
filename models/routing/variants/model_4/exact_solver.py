@@ -26,7 +26,7 @@ def solve_exact(problem, vehicles_per_satellite, TFp=9999.0,
                 time_limit=None, gurobi_params=None, verbose=True,
                 return_info=False, warm_start_routes=None,
                 return_incumbent_on_time_limit=False,
-                formulation_options=None):
+                formulation_options=None, backend="auto"):
     """求解 M4 精确模型（仅适合小规模）。
 
     返回 (e1_routes, e2_routes_by_sat[, assignment][, info])。
@@ -37,6 +37,17 @@ def solve_exact(problem, vehicles_per_satellite, TFp=9999.0,
     diagnostics or warm-start generation and always inspect
     ``info['proven_optimal']`` before reporting an exact result.
     """
+    if backend == "auto":
+        backend = "indexed" if formulation_options is not None else "commodity_flow"
+    if backend == "commodity_flow":
+        from models.routing.common.commodity_flow import solve_commodity_flow
+        return solve_commodity_flow(problem, 4, vehicles_per_satellite, TFp=TFp,
+            verbose=verbose, time_limit=time_limit,
+            return_incumbent_on_time_limit=return_incumbent_on_time_limit,
+            return_info=return_info, warm_start_routes=warm_start_routes,
+            gurobi_params=gurobi_params)
+    if backend != "indexed":
+        raise ValueError(f"Unknown exact backend: {backend}")
     m, vars_dict, ctx = build_model(
         problem, TFp=TFp, vehicles_per_satellite=vehicles_per_satellite,
         formulation_options=formulation_options)

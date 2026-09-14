@@ -72,6 +72,8 @@ class Evaluator:
             self.catalog[c.id] = {"d": d_task, "p": p_task}
 
         self._reset_maps()
+        from models.routing.alns.evaluation_cache import cache_static_evaluator
+        cache_static_evaluator(self, catalogue=self.catalog)
 
     def _reset_maps(self):
         self._active_assignment = None
@@ -648,16 +650,41 @@ def _candidate_seeds(problem):
     return out
 
 
-def build_initial_solution(problem, evaluator, TFp=9999.0):
+def build_initial_solution(problem, evaluator, TFp=9999.0, seed_search_budget=0.0,
+                           seed_search_iterations=1000000):
     """多种子构造初始解：优先数据固定分配，其次最近/次近前置仓。"""
     vps = evaluator.vehicles_per_satellite
     best_feasible = None
     best_any = None
-    for seed in _candidate_seeds(problem):
+    seeds = _candidate_seeds(problem)
+    deadline = time.time()+max(0.0,seed_search_budget)
+    evaluator.initial_seed_search = []
+    remaining_iterations = max(0,int(seed_search_iterations))
+    for index, seed in enumerate(seeds):
         e1_tasks, e2_tasks_by_sat = build_tasks_from_assignment(problem, seed)
         m3_eval = _M3Evaluator(problem, e1_tasks, e2_tasks_by_sat, TFp, vps)
         sol = build_strong_initial_solution(
             problem, e1_tasks, e2_tasks_by_sat, m3_eval)
+        before = sol.cost
+        allowance = max(0.0,deadline-time.time()) / (len(seeds)-index)
+        iterations = 0
+        iteration_allowance = remaining_iterations//(len(seeds)-index)
+        if allowance > .005 and iteration_allowance>0 and m3_eval.is_feasible(sol):
+            probe = run_alns_search(sol,m3_eval,
+                [_fixed_search.random_removal,_fixed_search.worst_removal,
+                 _fixed_search.shaw_removal,_fixed_search.paired_customer_removal,
+                 _fixed_search.route_customer_pair_removal],
+                [_fixed_search.greedy_insertion,_fixed_search.regret_insertion,
+                 _fixed_search.paired_insertion],
+                config=ALNSConfig(max_iterations=iteration_allowance,max_time=allowance,
+                    max_restarts=0,stagnation_fraction=None,intensification_fraction=0),
+                verbose=False)
+            iterations = probe.iterations
+            remaining_iterations -= iterations
+            if probe.best_solution is not None:
+                sol = probe.best_solution
+        evaluator.initial_seed_search.append(dict(assignment=dict(seed),before=before,
+            after=sol.cost,iterations=iterations))
         evaluator.rebuild_from_solution(sol)
         sol.cost = evaluator.total_cost(sol)
         if evaluator.is_feasible(sol):
@@ -1177,9 +1204,9 @@ def _assignment_local_improve(sol, evaluator, max_rounds=3):
 class M4Hooks(ALNSHooks):
     """Mix fast route moves with assignment moves, then audit through M4.
 
-    The fixed evaluator is rebuilt from the complete candidate before any
-    removal. It belongs to this attempt only: rejected assignments must never
-    leak task maps or insertion options into the next attempt.
+    The fixed evaluator is selected by the complete candidate assignment
+    before removal. Rejected partial assignments must never leak task maps or
+    insertion options into a different assignment's attempt.
     """
 
     def __init__(self, fixed_route_probability=0.8):
@@ -1187,6 +1214,7 @@ class M4Hooks(ALNSHooks):
         if not 0.0 <= self.fixed_route_probability <= 1.0:
             raise ValueError("fixed_route_probability must be in [0, 1]")
         self.neighborhood_attempts = {"fixed_routes": 0, "assignment": 0}
+        self._fixed_evaluators = {}
 
     def apply_operators(self, candidate, evaluator, destroy_op, repair_op,
                         d_idx, r_idx, num_remove, echelon):
@@ -1201,10 +1229,16 @@ class M4Hooks(ALNSHooks):
 
         self.neighborhood_attempts["fixed_routes"] += 1
         evaluator.rebuild_from_solution(candidate)
-        fixed = _M3Evaluator(
-            evaluator.problem, list(evaluator.e1_task_map.values()),
-            evaluator.e2_tasks_by_sat, evaluator.TFp,
-            evaluator.vehicles_per_satellite)
+        key = tuple(sorted(evaluator.assignment(candidate).items()))
+        fixed = self._fixed_evaluators.get(key)
+        if fixed is None:
+            fixed = _M3Evaluator(
+                evaluator.problem, list(evaluator.e1_task_map.values()),
+                evaluator.e2_tasks_by_sat, evaluator.TFp,
+                evaluator.vehicles_per_satellite)
+            if len(self._fixed_evaluators) >= 8:
+                self._fixed_evaluators.pop(next(iter(self._fixed_evaluators)))
+            self._fixed_evaluators[key] = fixed
         fixed._alns_deadline = getattr(evaluator, "_alns_deadline", float("inf"))
         destroys = (
             _fixed_search.random_removal, _fixed_search.worst_removal,
@@ -1244,13 +1278,38 @@ def solve_alns(problem, vehicles_per_satellite, TFp=9999.0,
                max_iterations=5000, max_time=120, seed=42, verbose=True,
                return_info=False, initial_solution=None,
                target_objective=None, target_tolerance=1e-6,
-               alns_config_overrides=None, fixed_route_probability=0.8):
+               alns_config_overrides=None, fixed_route_probability=0.8,
+               search_phase_fraction=1.0, exchange_polish=None, seed_search_fraction=None):
+    """Optionally restart learning from the incumbent within one total budget.
+
+    A fraction below one gives the first cooling phase that share of the
+    wall-clock budget. The second phase retains its best feasible solution,
+    resets operator weights/temperature, and uses only remaining time/iterations.
+    The default remains one phase; a split is an experimental opt-in.
+    """
+    if not 0.0 < search_phase_fraction <= 1.0:
+        raise ValueError("search_phase_fraction must be in (0, 1]")
     random.seed(seed)
     start_time = time.time()
+    if seed_search_fraction is None:
+        seed_search_fraction = .2 if 10<=len(problem.customers)<=20 and max_time>=5 else 0.
+    if not 0<=seed_search_fraction<1:
+        raise ValueError('seed_search_fraction must be in [0, 1)')
+    if exchange_polish is None:
+        exchange_polish = (len(problem.customers) <= 20
+                           and (alns_config_overrides or {}).get("cooling_schedule", "time") == "time")
+    polish_reserve = min(0.05, max(0.0, max_time * 0.01)) if exchange_polish else 0.0
+    search_time = max_time - polish_reserve
 
     evaluator = Evaluator(problem, TFp, vehicles_per_satellite)
     sol = (initial_solution.copy() if initial_solution is not None
-           else build_initial_solution(problem, evaluator, TFp))
+           else build_initial_solution(problem, evaluator, TFp,
+               seed_search_budget=min(1.0,max_time*seed_search_fraction)
+               if len(problem.customers) <= 20 and max_iterations >= 100
+               and (alns_config_overrides or {}).get('cooling_schedule','time') == 'time' else 0.0,
+               seed_search_iterations=int(max_iterations*seed_search_fraction)))
+    seed_iterations = sum(r['iterations'] for r in getattr(evaluator,'initial_seed_search',[]))
+    main_iteration_budget = max(0,max_iterations-seed_iterations)
 
     if not evaluator.is_feasible(sol):
         if sol is None or not any(
@@ -1285,32 +1344,43 @@ def solve_alns(problem, vehicles_per_satellite, TFp=9999.0,
             for s in evaluator.sat_ids))
 
     search_hooks = M4Hooks(fixed_route_probability)
-    result = run_alns_search(
-        initial_solution=sol,
-        evaluator=evaluator,
-        destroy_ops=[
-            random_customer_removal,
-            worst_customer_removal,
-            shaw_customer_removal,
-            satellite_cluster_removal,
-            assignment_boundary_removal,
-            two_satellite_removal,
-        ],
-        repair_ops=[multi_sat_insertion, multi_sat_insertion_cross,
-                    randomized_satellite_insertion,
-                    consolidated_satellite_insertion],
-        config=ALNSConfig(
-            max_iterations=max_iterations,
-            max_time=max_time,
-            e2_probability=1.0,
-            target_cost=target_objective,
-            target_tolerance=target_tolerance,
-            **(alns_config_overrides or {}),
-        ),
-        hooks=search_hooks,
-        verbose=verbose,
-        start_time=start_time,
-    )
+    destroy_ops = [
+        random_customer_removal,
+        worst_customer_removal,
+        shaw_customer_removal,
+        satellite_cluster_removal,
+        assignment_boundary_removal,
+        two_satellite_removal,
+    ]
+    repair_ops = [multi_sat_insertion, multi_sat_insertion_cross,
+                  randomized_satellite_insertion, consolidated_satellite_insertion]
+
+    def search(initial, deadline_seconds, iterations):
+        return run_alns_search(
+            initial_solution=initial, evaluator=evaluator,
+            destroy_ops=destroy_ops, repair_ops=repair_ops,
+            config=ALNSConfig(
+                max_iterations=iterations, max_time=deadline_seconds,
+                e2_probability=1.0, target_cost=target_objective,
+                target_tolerance=target_tolerance,
+                **(alns_config_overrides or {})),
+            hooks=search_hooks, verbose=verbose, start_time=start_time,
+            search_time_limit=search_time if exchange_polish else None)
+
+    result = search(sol, max_time * search_phase_fraction, main_iteration_budget)
+    phase_results = [result]
+    if (search_phase_fraction < 1.0 and result.best_solution is not None
+            and result.target_hit_time is None and result.iterations < main_iteration_budget
+            and time.time() - start_time < search_time - 1e-3):
+        first = result
+        result = search(first.best_solution.copy(), max_time,
+                        main_iteration_budget - first.iterations)
+        phase_results.append(result)
+        # Never lose a feasible incumbent even if a later phase is interrupted.
+        if result.best_solution is None or result.best_cost >= first.best_cost:
+            result.best_solution = first.best_solution
+            result.best_cost = first.best_cost
+            result.best_found_time = first.best_found_time
     best_sol = result.best_solution
     if best_sol is None:
         info = {"objective": None, "runtime": result.elapsed,
@@ -1319,7 +1389,23 @@ def solve_alns(problem, vehicles_per_satellite, TFp=9999.0,
         return ((None, None, None, info) if return_info
                 else (None, None, None))
     best_cost = result.best_cost
-    elapsed = result.elapsed
+    polish_improvements = 0
+    polish_started = time.time()
+    if (exchange_polish and result.target_hit_time is None
+            and polish_started < start_time + max_time):
+        from models.routing.alns.route_exchange import improve_route_exchanges
+
+        evaluator._alns_deadline = start_time + max_time
+        polished, polish_improvements = improve_route_exchanges(
+            best_sol, evaluator, start_time + max_time)
+        if polished.cost < best_cost - FEAS_TOL:
+            best_sol, best_cost = polished, polished.cost
+            result.best_found_time = time.time() - start_time
+            if target_objective is not None and best_cost <= target_objective + target_tolerance:
+                result.target_hit_time = result.best_found_time
+                result.termination_reason = "target"
+    polish_elapsed = time.time() - polish_started
+    elapsed = time.time() - start_time
 
     if verbose:
         print(f"\n{'=' * 60}")
@@ -1339,18 +1425,51 @@ def solve_alns(problem, vehicles_per_satellite, TFp=9999.0,
     }
     assignment = evaluator.assignment(best_sol)
     feasible = bool(evaluator.is_feasible(best_sol))
+    diagnostics = dict(result.diagnostics)
+    if len(phase_results) > 1:
+        for field in ("weight_updates", "online_weight_updates",
+                      "temperature_positive_delta_samples"):
+            diagnostics[field] = sum(p.diagnostics.get(field, 0) for p in phase_results)
+        diagnostics["temperature_calibrated"] = any(
+            p.diagnostics.get("temperature_calibrated", False) for p in phase_results)
+        pairs = {}
+        for phase in phase_results:
+            for entry in phase.diagnostics.get("operator_pairs", []):
+                key = (entry["destroy_index"], entry["repair_index"])
+                previous = pairs.get(key)
+                merged = dict(entry)
+                if previous is not None:
+                    for field in ("attempts", "feasible", "accepted", "improving",
+                                  "new_best", "infeasible", "runtime"):
+                        merged[field] += previous[field]
+                merged["feasible_rate"] = (merged["feasible"] / merged["attempts"]
+                                           if merged["attempts"] else 0.0)
+                merged["acceptance_rate"] = (merged["accepted"] / merged["feasible"]
+                                             if merged["feasible"] else 0.0)
+                pairs[key] = merged
+        diagnostics["operator_pairs"] = list(pairs.values())
     info = {
         "objective": float(best_cost), "runtime": float(elapsed),
-        "iterations": int(result.iterations), "feasible": feasible,
+        "iterations": seed_iterations+sum(p.iterations for p in phase_results), "feasible": feasible,
         "status": "FEASIBLE" if feasible else "NO_SOLUTION",
         "external_initial_solution": initial_solution is not None,
         "initial_objective": initial_objective,
+        "initial_seed_search": getattr(evaluator,'initial_seed_search',[]),
+        "initial_seed_iterations": seed_iterations,
+        "seed_search_fraction": seed_search_fraction,
         "best_found_time": result.best_found_time,
         "target_hit_time": result.target_hit_time,
         "termination_reason": result.termination_reason,
-        "restarts": result.restarts,
-        "local_search_improvements": result.local_search_improvements,
-        "alns_diagnostics": result.diagnostics,
+        "restarts": sum(p.restarts for p in phase_results),
+        "local_search_improvements": sum(p.local_search_improvements for p in phase_results) + polish_improvements,
+        "exchange_polish": bool(exchange_polish),
+        "exchange_polish_improvements": polish_improvements,
+        "exchange_polish_seconds": polish_elapsed,
+        "alns_diagnostics": diagnostics,
+        "search_phase_fraction": search_phase_fraction,
+        "search_phases": len(phase_results),
+        "phase_diagnostics": [dict(iterations=p.iterations, elapsed=p.elapsed,
+                                   diagnostics=p.diagnostics) for p in phase_results],
         "fixed_route_probability": search_hooks.fixed_route_probability,
         "neighborhood_attempts": dict(search_hooks.neighborhood_attempts),
     }

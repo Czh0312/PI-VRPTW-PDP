@@ -23,7 +23,7 @@ def _status_name(status_code):
 def solve_exact(problem, vehicles_per_satellite, *, time_limit=None,
                 gurobi_params=None, verbose=True, return_info=False,
                 return_incumbent_on_time_limit=False,
-                warm_start_routes=None, prune_e2_arcs=True):
+                warm_start_routes=None, prune_e2_arcs=True, backend="auto"):
     """Solve small-scale Model 2 exactly.
 
     Returns ``(e1_routes, e2_routes_by_sat, assignment[, info])``.
@@ -34,6 +34,17 @@ def solve_exact(problem, vehicles_per_satellite, *, time_limit=None,
     incumbent objective/bound remain available through ``info`` for
     diagnostics, but only a Gurobi ``OPTIMAL`` status is a global certificate.
     """
+    if backend == "auto":
+        backend = "commodity_flow" if prune_e2_arcs else "indexed"
+    if backend == "commodity_flow":
+        from models.routing.common.commodity_flow import solve_commodity_flow
+        return solve_commodity_flow(problem, 2, vehicles_per_satellite,
+            verbose=verbose, time_limit=time_limit,
+            return_incumbent_on_time_limit=return_incumbent_on_time_limit,
+            return_info=return_info, warm_start_routes=warm_start_routes,
+            gurobi_params=gurobi_params)
+    if backend != "indexed":
+        raise ValueError(f"Unknown exact backend: {backend}")
     m, vars_dict, ctx = build_model(
         problem,
         vehicles_per_satellite=vehicles_per_satellite,

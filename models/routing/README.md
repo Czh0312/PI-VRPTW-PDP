@@ -7,8 +7,10 @@
 - `service.py`：正式入口使用的统一求解分发层；精确求解器按需加载。
 
 Model 1–7 统一使用 `model.py` 表示完整模型、`exact_solver.py` 表示严格精确入口。
-Model 7 默认采用分仓枚举与松弛证书，也可通过 `algorithm="benders"` 选择逻辑型
-Benders：分仓主问题提供全局下界，固定分仓的完整 Model 6 提供可行路线。
-具体用法与对比见 `docs/model7_benders.md`。
+Model 7 采用完整分仓枚举与松弛证书，固定分仓后调用完整 Model 6 子问题。
+M2/M3/M4 的默认精确入口使用 `common/commodity_flow.py` 的完整四类货物流模型；
+原车辆索引模型通过 `backend="indexed"` 保留。M1 默认继续使用原模型。
+M7 可利用全局松弛同时筛除多个不能改善的分仓，仍保留未闭合子问题的有效下界。
+详见项目 `docs/solver_optimization_20260913.md` 及对应结果总表。
 大型模型的必要约束与目标组件可放入 `formulation/`。过去尝试的列生成、分支定价、
 时间扩展和分解算法已移至 `archive/models/routing/variants/`，不再混入当前主线。

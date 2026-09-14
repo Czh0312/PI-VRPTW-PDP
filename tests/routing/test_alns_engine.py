@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import random
 import time
 
 from models.routing.alns.engine import (
@@ -42,6 +43,45 @@ def _noop_destroy(solution, evaluator, num_remove, echelon="e2"):
 
 def _noop_repair(solution, removed, evaluator, echelon="e2", k=2):
     return None
+
+
+def test_early_stop_preserves_nominal_search_trajectory(monkeypatch):
+    from models.routing.alns.engine import ALNSHooks
+
+    def run(stop_limit):
+        clock = [0.0]
+        monkeypatch.setattr(time, 'time', lambda: clock[0])
+        random.seed(71)
+        trace = []
+
+        class Hooks(ALNSHooks):
+            def after_cost(self, candidate, evaluator, current, iteration):
+                trace.append((iteration, current.cost, candidate.cost))
+
+        def destroy(candidate, evaluator, count, echelon):
+            clock[0] += 0.05
+            candidate.cost += random.choice([-0.5, 1.0, 2.0])
+            return []
+
+        solution = Solution()
+        solution.e1_routes = [Route('D', ['S1d'])]
+        solution.cost = 10.0
+        config = ALNSConfig(max_time=1, max_iterations=100,
+            max_restarts=0, stagnation_fraction=None, intensification_fraction=0,
+            segment_time=None, reward_time_exponent=0)
+        evaluator = _AlwaysFeasibleEvaluator()
+        result = run_alns_search(solution,evaluator,[destroy],[_noop_repair],
+            config=config,hooks=Hooks(),start_time=0,verbose=False,
+            search_time_limit=stop_limit)
+        assert config.max_time == 1
+        assert evaluator._alns_deadline == (1 if stop_limit is None else stop_limit)
+        return trace,result
+
+    full,_ = run(None)
+    short,result = run(0.4)
+    assert 0 < len(short) < len(full)
+    assert short == full[:len(short)]
+    assert result.termination_reason == 'time'
 
 
 def test_time_segment_updates_even_before_one_hundred_iterations():

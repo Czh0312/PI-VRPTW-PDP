@@ -1,4 +1,4 @@
-"""Model 7 exact entry: assignment partitioning or logic-based Benders."""
+"""Globally exact solver for Model 7 by exhaustive assignment partitioning."""
 
 from __future__ import annotations
 
@@ -197,7 +197,7 @@ def _global_relaxation_certificate(
     warm_start_objective=None,
     direct_time_fraction=0.35,
 ):
-    """Try to close Model 7 with a metric zero-container-load bound.
+    """Try to close Model 7 with a metric zero-E2-pickup-load bound.
 
     The direct M4 solution is returned even when the certificate does not
     close.  It is a valid zero-handoff Model 7 incumbent and must not be lost
@@ -214,7 +214,7 @@ def _global_relaxation_certificate(
         return None
 
     if verbose:
-        print("[CERT] 求自由分仓无交接上界与零容器载荷全局下界")
+        print("[CERT] 求自由分仓无交接上界与零E2回收载荷全局下界")
     has_external_incumbent = (
         warm_start_routes is not None
         and warm_start_assignment is not None
@@ -267,16 +267,16 @@ def _global_relaxation_certificate(
             "lower_info": None,
         }
 
-    relaxed_problem = copy.deepcopy(problem)
-    relaxed_problem.fleet.container_weight = 0.0
-    relaxed_problem.fleet.container_volume = 0.0
+    # Retain outbound full-container weight/volume and all E1 pickup loads.
+    # Only E2 collected-empty loads are relaxed. This dominates the previous
+    # zero-*all*-container relaxation without excluding any shortcut relay route.
+    from models.routing.common.commodity_flow import solve_commodity_flow
     warm_start = (
         (direct_e1, direct_e2)
         if direct_e1 is not None and direct_e2 is not None else None
     )
-    _lb_e1, _lb_e2, _lb_assignment, lower_info = solve_m4(
-        relaxed_problem,
-        vehicles_per_satellite,
+    _lb_e1, _lb_e2, _lb_assignment, lower_info = solve_commodity_flow(
+        problem, 4, vehicles_per_satellite,
         TFp=TFp,
         time_limit=remaining_time(),
         verbose=False,
@@ -284,8 +284,24 @@ def _global_relaxation_certificate(
         return_incumbent_on_time_limit=True,
         warm_start_routes=warm_start,
         gurobi_params=gurobi_params,
-        formulation_options=formulation_options,
+        zero_pickup_load=True, auto_warm_start=False,
     )
+    # A relaxed route is not automatically feasible in M7. If independent
+    # replay under ORIGINAL M4 loads validates it, however, it is a legitimate
+    # zero-handoff upper bound and can close the certificate immediately.
+    incumbent_source = 'external_m4' if has_external_incumbent else 'internal_m4'
+    if (_lb_e1 is not None and _lb_e2 is not None
+            and lower_info.get('objective') is not None
+            and (incumbent is None or lower_info['objective'] < incumbent-1e-9)):
+        from models.routing.common.solution_audit import audit_exact_solution
+        audit = audit_exact_solution(problem,4,_lb_e1,_lb_e2,
+            assignment=_lb_assignment,objective=lower_info['objective'],tfp=TFp)
+        if audit['valid']:
+            direct_e1,direct_e2,direct_assignment = _lb_e1,_lb_e2,_lb_assignment
+            incumbent = audit['route_objective']
+            direct_info = dict(status='RELAXATION_ROUTE_REVALIDATED',objective=incumbent,
+                               proven_optimal=False,route_audit=audit)
+            incumbent_source = 'independently_validated_relaxation_route'
     certified_lower_bound = (
         lower_info.get("objective")
         if lower_info.get("proven_optimal") else None
@@ -315,6 +331,8 @@ def _global_relaxation_certificate(
         "certified": certified,
         "direct_info": direct_info,
         "lower_info": lower_info,
+        "relaxation_assignment": _lb_assignment,
+        "incumbent_source": incumbent_source,
     }
 
 
@@ -334,7 +352,7 @@ def solve_exact(
     use_global_relaxation_certificate=True,
     m4_formulation_options=None,
     global_certificate_time_fraction=0.5,
-    global_certificate_direct_fraction=0.35,
+    global_certificate_direct_fraction=0.75,
     partition_sweep_threshold=128,
     partition_time_limit=5.0,
     partition_relaxation_screen=True,
@@ -342,36 +360,15 @@ def solve_exact(
     warm_start_routes=None,
     warm_start_assignment=None,
     warm_start_objective=None,
-    algorithm="partition",
-    benders_options=None,
+    use_assignment_master=True,
 ):
     """Solve the complete free-assignment/asynchronous-relay Model 7.
 
-    The input task buckets are ignored because assignment is endogenous.
-    ``algorithm='partition'`` uses enumeration and relaxation certificates;
-    ``algorithm='benders'`` selects assignments through a lower-bound master.
-    ``benders_options`` configures its master and subproblem time slices.
+    The input task buckets are ignored because assignment is endogenous.  A
+    global certificate is issued only after every assignment partition is
+    proven optimal or proven infeasible.  Otherwise any returned route is a
+    time-limited incumbent and ``proven_optimal`` remains false.
     """
-    if algorithm == "benders":
-        from .benders import solve_benders
-
-        return solve_benders(
-            problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
-            TFp=TFp, time_limit=time_limit, verbose=verbose,
-            return_info=return_info,
-            return_incumbent_on_time_limit=return_incumbent_on_time_limit,
-            gurobi_params=gurobi_params, strengthen=strengthen,
-            use_relaxation_certificate=use_relaxation_certificate,
-            partition_relaxation_screen=partition_relaxation_screen,
-            warm_start_routes=warm_start_routes,
-            warm_start_assignment=warm_start_assignment,
-            warm_start_objective=warm_start_objective,
-            **(benders_options or {}),
-        )
-    if algorithm != "partition":
-        raise ValueError(f"Unknown Model 7 exact algorithm: {algorithm}")
-    if benders_options:
-        raise ValueError("benders_options requires algorithm='benders'")
     del e1_tasks, e2_tasks_by_sat
     if vehicles_per_satellite is None:
         vehicles_per_satellite = problem.fleet.e2_per_sat_count
@@ -477,7 +474,7 @@ def solve_exact(
             TFp,
             certificate_remaining_time,
             gurobi_params,
-            m4_formulation_options or {"prune_e2_arcs": True},
+            m4_formulation_options,
             verbose,
             warm_start_routes=warm_start_routes,
             warm_start_assignment=warm_start_assignment,
@@ -526,7 +523,7 @@ def solve_exact(
                     "service_location_with_endogenous_assignment"
                 ),
                 "external_m4_incumbent": warm_start_routes is not None,
-                "incumbent_source": (
+                "incumbent_source": certificate.get("incumbent_source") or (
                     "external_m4_certificate"
                     if warm_start_routes is not None
                     else "internal_m4_certificate"
@@ -566,8 +563,24 @@ def solve_exact(
             best_assignment = dict(certificate["assignment"])
             best_objective = float(certificate["objective"])
             best_info = dict(certificate.get("direct_info") or {})
-            best_info["incumbent_source"] = "internal_m4"
-            incumbent_source = "internal_m4"
+            best_info["incumbent_source"] = certificate.get('incumbent_source','internal_m4')
+            incumbent_source = best_info['incumbent_source']
+
+    if (use_assignment_master and 7 <= len(problem.customers) <= 20
+            and global_certificate_attempted and certificate is not None):
+        from .screened_partitions import solve_screened_partitions
+        r1, r2, assign, info = solve_screened_partitions(
+            problem, vehicles_per_satellite, TFp=TFp, remaining_time=remaining_time,
+            incumbent_routes=best_routes, incumbent_assignment=best_assignment,
+            incumbent_objective=best_objective, global_bound=global_relaxation_bound,
+            gurobi_params=gurobi_params, partition_time_limit=partition_time_limit,
+            initial_assignment=certificate.get('relaxation_assignment'))
+        info['runtime'] = time.perf_counter()-started
+        info['initial_incumbent_source'] = incumbent_source
+        info['initial_assignment_reused_from_relaxation'] = certificate.get('relaxation_assignment') is not None
+        if not info['proven_optimal'] and not return_incumbent_on_time_limit:
+            r1 = r2 = assign = None
+        return (r1,r2,assign,info) if return_info else (r1,r2,assign)
 
     preferred_assignments = (
         [best_assignment] if best_assignment is not None else None

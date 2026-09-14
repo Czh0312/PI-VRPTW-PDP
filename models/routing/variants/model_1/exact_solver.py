@@ -30,6 +30,8 @@ def _status_name(status_code):
 
 
 def _solve_info(m, solution_type):
+    if solution_type == "proven_optimal" and float(m.Params.MIPGap) != 0.0:
+        solution_type = "feasible_not_proven"
     info = {
         "status_code": m.status,
         "status": _status_name(m.status),
@@ -124,10 +126,20 @@ def _apply_route_warm_start(vars_dict, ctx, warm_start_routes, verbose):
 def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
                 verbose=True, time_limit=300, mip_gap=0.0,
                 return_incumbent_on_time_limit=False, return_info=False,
-                warm_start_routes=None, gurobi_params=None):
+                warm_start_routes=None, gurobi_params=None, backend="indexed"):
     """
     运行精确求解器并解析输出
     """
+    if backend == "commodity_flow":
+        from models.routing.common.commodity_flow import solve_commodity_flow
+        return solve_commodity_flow(problem, 1, vehicles_per_satellite,
+            e1_tasks=e1_tasks, e2_tasks_by_sat=e2_tasks_by_sat,
+            verbose=verbose, time_limit=time_limit, mip_gap=mip_gap,
+            return_incumbent_on_time_limit=return_incumbent_on_time_limit,
+            return_info=return_info, warm_start_routes=warm_start_routes,
+            gurobi_params=gurobi_params)
+    if backend != "indexed":
+        raise ValueError(f"Unknown exact backend: {backend}")
     m, vars_dict, ctx = build_model(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite)
     
     if not verbose:

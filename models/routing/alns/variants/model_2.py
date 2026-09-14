@@ -601,8 +601,11 @@ class Evaluator:
                           c.weight_del + cw, cv, c.tw_del)
             }
         self._reset_maps()
+        from models.routing.alns.evaluation_cache import cache_static_evaluator
+        cache_static_evaluator(self, catalogue=self.catalog)
 
     def _reset_maps(self):
+        self._active_assignment = None
         self.e1_task_map = {}
         self.e2_task_map = {}
         self.e2_task_sat = {}
@@ -629,6 +632,9 @@ class Evaluator:
 
     def rebuild_from_solution(self, sol):
         assign = self.assignment(sol)
+        if assign == self._active_assignment:
+            self._canonicalize_e1_routes(sol)
+            return
         cw = self.problem.fleet.container_weight
         cv = self.problem.fleet.container_volume
 
@@ -670,6 +676,7 @@ class Evaluator:
         for pair in self.catalog.values():
             self.task_to_phys[pair["d"].id] = pair["d"].cust
 
+        self._active_assignment = dict(assign)
         self._canonicalize_e1_routes(sol)
 
     def _canonicalize_e1_routes(self, sol):
@@ -1498,6 +1505,41 @@ def _assignment_local_improve(sol, evaluator, max_rounds=3):
 
 
 class M2Hooks(ALNSHooks):
+    def __init__(self, fixed_route_probability=0.0):
+        self.fixed_route_probability = float(fixed_route_probability)
+        if not 0 <= self.fixed_route_probability <= 1:
+            raise ValueError("fixed_route_probability must be in [0, 1]")
+        self._fixed_evaluators = {}
+        self.neighborhood_attempts = {"fixed_routes": 0, "assignment": 0}
+
+    def apply_operators(self, candidate, evaluator, destroy_op, repair_op,
+                        d_idx, r_idx, num_remove, echelon):
+        if not (self.fixed_route_probability > 0
+                and random.random() < self.fixed_route_probability
+                and len(evaluator.assignment(candidate)) == len(evaluator.catalog)):
+            self.neighborhood_attempts["assignment"] += 1
+            return super().apply_operators(candidate, evaluator, destroy_op,
+                repair_op, d_idx, r_idx, num_remove, echelon)
+        from models.routing.alns.variants import model_1 as fixed_search
+        self.neighborhood_attempts["fixed_routes"] += 1
+        evaluator.rebuild_from_solution(candidate)
+        key = tuple(sorted(evaluator.assignment(candidate).items()))
+        fixed = self._fixed_evaluators.get(key)
+        if fixed is None:
+            fixed = _M1Evaluator(evaluator.problem,
+                list(evaluator.e1_task_map.values()), evaluator.e2_tasks_by_sat,
+                evaluator.vehicles_per_satellite)
+            if len(self._fixed_evaluators) >= 8:
+                self._fixed_evaluators.pop(next(iter(self._fixed_evaluators)))
+            self._fixed_evaluators[key] = fixed
+        fixed._alns_deadline = getattr(evaluator, "_alns_deadline", float("inf"))
+        destroys = (fixed_search.random_removal, fixed_search.worst_removal,
+                    fixed_search.shaw_removal, fixed_search.route_segment_removal)
+        repairs = (fixed_search.greedy_insertion, fixed_search.regret_insertion)
+        removed = destroys[d_idx % len(destroys)](candidate, fixed, num_remove, "e2")
+        repairs[r_idx % len(repairs)](candidate, removed, fixed, "e2")
+        clean_empty_routes(candidate)
+
     def after_operators(self, candidate, evaluator, current_solution,
                         iteration, d_idx, r_idx):
         # On large instances an exhaustive E1 pass after every candidate can
@@ -1518,10 +1560,13 @@ class M2Hooks(ALNSHooks):
 def solve_alns(problem, vehicles_per_satellite=4, max_iterations=5000,
                max_time=120, seed=42, verbose=True, return_info=False,
                initial_solution=None, target_objective=None,
-               target_tolerance=1e-6, alns_config_overrides=None):
+               target_tolerance=1e-6, alns_config_overrides=None,
+               fixed_route_probability=0.0, route_seed_fraction=None):
     """Run M2 ALNS: pure-delivery + free customer-satellite assignment."""
     random.seed(seed)
     start_time = time.time()
+    if route_seed_fraction is None:
+        route_seed_fraction = .2 if len(problem.customers)>20 and max_time>=5 else 0.
 
     evaluator = Evaluator(problem, vehicles_per_satellite)
     sol = (initial_solution.copy() if initial_solution is not None
@@ -1542,6 +1587,39 @@ def solve_alns(problem, vehicles_per_satellite=4, max_iterations=5000,
 
     sol.cost = evaluator.total_cost(sol)
     initial_objective = float(sol.cost)
+    seed_iterations = 0
+    route_seed_seconds = 0.0
+    route_seed_best_found_time = None
+    if not 0 <= route_seed_fraction < 1:
+        raise ValueError("route_seed_fraction must be in [0, 1)")
+    if (route_seed_fraction > 0 and evaluator.is_feasible(sol)
+            and (alns_config_overrides or {}).get('cooling_schedule', 'time') == 'time'):
+        # Improve the chosen complete assignment's routes before spending the
+        # remaining budget on expensive free-assignment repair. Both stages
+        # share the caller's deadline and iteration cap.
+        from models.routing.alns.variants import model_1 as fixed_search
+        evaluator.rebuild_from_solution(sol)
+        fixed = _M1Evaluator(problem, list(evaluator.e1_task_map.values()),
+                             evaluator.e2_tasks_by_sat, vehicles_per_satellite)
+        seed_started = time.time()
+        seed_result = run_alns_search(initial_solution=sol, evaluator=fixed,
+            destroy_ops=[fixed_search.random_removal, fixed_search.worst_removal,
+                         fixed_search.shaw_removal, fixed_search.route_segment_removal],
+            repair_ops=[fixed_search.greedy_insertion, fixed_search.regret_insertion],
+            config=ALNSConfig(max_iterations=int(max_iterations*route_seed_fraction),
+                max_time=max_time*route_seed_fraction, target_cost=target_objective,
+                target_tolerance=target_tolerance, **(alns_config_overrides or {})),
+            start_time=start_time, verbose=False)
+        seed_iterations = seed_result.iterations
+        route_seed_seconds = time.time()-seed_started
+        if seed_result.best_solution is not None:
+            candidate = seed_result.best_solution
+            value, valid = evaluator.evaluate(candidate)
+            if valid and value < sol.cost-FEAS_TOL:
+                candidate.cost = value
+                sol = candidate
+                route_seed_best_found_time = seed_result.best_found_time
+    route_seed_objective = float(sol.cost)
     best_sol = sol.copy()
     best_cost = sol.cost
 
@@ -1559,6 +1637,7 @@ def solve_alns(problem, vehicles_per_satellite=4, max_iterations=5000,
             f"{s}:{sum(1 for v in assign.values() if v == s)}"
             for s in evaluator.sat_ids))
 
+    hooks = M2Hooks(fixed_route_probability)
     result = run_alns_search(
         initial_solution=sol,
         evaluator=evaluator,
@@ -1574,14 +1653,14 @@ def solve_alns(problem, vehicles_per_satellite=4, max_iterations=5000,
                     randomized_satellite_insertion,
                     consolidated_satellite_insertion],
         config=ALNSConfig(
-            max_iterations=max_iterations,
+            max_iterations=max(0, max_iterations-seed_iterations),
             max_time=max_time,
             e2_probability=1.0,
             target_cost=target_objective,
             target_tolerance=target_tolerance,
             **(alns_config_overrides or {}),
         ),
-        hooks=M2Hooks(),
+        hooks=hooks,
         verbose=verbose,
         start_time=start_time,
     )
@@ -1615,16 +1694,23 @@ def solve_alns(problem, vehicles_per_satellite=4, max_iterations=5000,
     feasible = bool(evaluator.is_feasible(best_sol))
     info = {
         "objective": float(best_cost), "runtime": float(elapsed),
-        "iterations": int(result.iterations), "feasible": feasible,
+        "iterations": int(result.iterations+seed_iterations), "feasible": feasible,
         "status": "FEASIBLE" if feasible else "NO_SOLUTION",
         "external_initial_solution": initial_solution is not None,
         "initial_objective": initial_objective,
-        "best_found_time": result.best_found_time,
+        "route_seed_objective": route_seed_objective,
+        "route_seed_iterations": seed_iterations,
+        "route_seed_seconds": route_seed_seconds,
+        "route_seed_best_found_time": route_seed_best_found_time,
+        "best_found_time": (route_seed_best_found_time
+            if route_seed_best_found_time is not None and abs(best_cost-route_seed_objective)<FEAS_TOL
+            else result.best_found_time),
         "target_hit_time": result.target_hit_time,
         "termination_reason": result.termination_reason,
         "restarts": result.restarts,
         "local_search_improvements": result.local_search_improvements,
         "alns_diagnostics": result.diagnostics,
+        "neighborhood_attempts": dict(hooks.neighborhood_attempts),
     }
     return ((e1_routes_out, e2_routes_out, assignment, info) if return_info
             else (e1_routes_out, e2_routes_out, assignment))

@@ -55,6 +55,8 @@ class Evaluator:
             pid, did = f"{s_id}p", f"{s_id}d"
             if pid in self.e1_task_map and did in self.e1_task_map:
                 self.forbidden_e1.add((pid, did))
+        from models.routing.alns.evaluation_cache import cache_static_evaluator
+        cache_static_evaluator(self)
 
     def e2_task_satellite(self, task_id):
         return self.e2_task_sat.get(task_id)

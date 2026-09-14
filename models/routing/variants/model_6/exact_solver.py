@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import math
 from pathlib import Path
 
 from gurobipy import GRB
@@ -115,7 +116,7 @@ def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
                 warm_start_routes=None, gurobi_params=None,
                 strengthen=True, compute_iis_on_infeasible=True,
                 use_relaxation_certificate=True,
-                certificate_time_fraction=0.5):
+                certificate_time_fraction=0.5, objective_lower_bound=None):
     """Solve the complete compact Model 6 MILP.
 
     Unlike the historical two-stage implementation, routes and homogeneous
@@ -157,6 +158,28 @@ def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
     # bound equals a no-transfer Model 3 solution, no relay can improve it.
     direct_e1 = direct_e2 = None
     direct_info = relaxation_info = None
+
+    def retain_direct(routes, info):
+        """A valid no-handoff upper bound survives a poorer limited joint solve."""
+        direct_value = (direct_info or {}).get('objective')
+        joint_value = info.get('objective')
+        if (not info.get('proven_optimal') and direct_e1 is not None
+                and direct_e2 is not None and direct_value is not None
+                and (joint_value is None or direct_value < joint_value-1e-6)):
+            info['joint_incumbent_before_fallback'] = joint_value
+            info.update(objective=direct_value,solution_type='feasible_not_proven',
+                incumbent_source='preserved_no_handoff_upper_bound',sol_count=max(1,info.get('sol_count',0)),
+                transshipments=[],transshipment_count=0,transferred_container_count=0)
+            info.pop('route_vehicle_indices',None)
+            routes = (direct_e1,direct_e2)
+        value = info.get('objective')
+        bounds = [v for v in [info.get('best_bound'),(relaxation_info or {}).get('best_bound')]
+                  if v is not None and math.isfinite(v) and abs(v) < 1e90]
+        if bounds:
+            info['best_bound'] = max(bounds)
+            if value is not None:
+                info['mip_gap'] = max(0.0,(value-info['best_bound'])/max(abs(value),1e-12))
+        return routes,info
     if (use_relaxation_certificate
             and (time_limit is None or certificate_time_fraction > 0.0)
             and _has_metric_distances(problem, e1_tasks, e2_tasks_by_sat)):
@@ -239,6 +262,9 @@ def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         TFp=TFp, strengthen=strengthen,
     )
     statistics = model_statistics(model, variables, ctx)
+    if objective_lower_bound is not None:
+        model.addConstr(model.getObjective() >= float(objective_lower_bound),
+                        'CertifiedRelaxationObjectiveBound')
     if verbose:
         print(
             "模型规模: "
@@ -257,7 +283,10 @@ def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         )
     if seed_routes:
         apply_no_transfer_warm_start(variables, ctx, seed_routes)
-        completed = complete_no_transfer_warm_start(model, variables)
+        completion_budget = remaining_time()
+        completed = complete_no_transfer_warm_start(
+            model, variables, time_limit=min(10.0, completion_budget)
+            if completion_budget is not None else 10.0)
         if verbose:
             state = "完整可行解" if completed else "部分路线初值"
             print(f"[MIPStart] 已加入无中转{state}")
@@ -289,7 +318,7 @@ def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         )
         solution_type = (
             "proven_optimal"
-            if model.status == GRB.OPTIMAL and float(mip_gap) == 0.0
+            if model.status == GRB.OPTIMAL and float(model.Params.MIPGap) == 0.0
             else "feasible_not_proven"
         )
         info = _solve_info(
@@ -298,6 +327,7 @@ def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
         info["compact_mip_runtime"] = info["runtime"]
         info["runtime"] = time.perf_counter() - started
         info["route_vehicle_indices"] = route_vehicles
+        (e1_routes,e2_routes),info = retain_direct((e1_routes,e2_routes),info)
         if verbose:
             print(
                 f"\n状态={info['status']}  objective={info['objective']:.6f}  "
@@ -312,6 +342,8 @@ def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
                     continue
                 print(f"  前置仓 {sat_id}:")
                 vehicle_indices = route_vehicles.get(sat_id, [])
+                if info.get('incumbent_source') == 'preserved_no_handoff_upper_bound':
+                    vehicle_indices = list(range(len(routes)))
                 for pos, route in enumerate(routes):
                     vehicle_idx = vehicle_indices[pos]
                     print(f"    车辆{vehicle_idx}: {' -> '.join(route)}")
@@ -347,6 +379,10 @@ def solve_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
     info = _solve_info(model, "none", statistics)
     info["compact_mip_runtime"] = info["runtime"]
     info["runtime"] = time.perf_counter() - started
+    if return_incumbent_on_time_limit:
+        routes,info = retain_direct((None,None),info)
+        if routes[0] is not None:
+            return (*routes,info) if return_info else routes
     if verbose:
         print(f"\n未找到可返回解，状态={info['status']}")
     if return_info:

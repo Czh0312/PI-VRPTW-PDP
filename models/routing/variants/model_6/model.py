@@ -343,6 +343,8 @@ def build_model(
                 model.addConstr(used[vehicle] == 0)
             continue
 
+        first_pickup = min((events[n].tw[0] for n in nodes if events[n].kind == 'p'),default=0.0)
+
         def incoming(var_dict, node_id, vehicle):
             return gp.quicksum(
                 var_dict[i, node_id, vehicle]
@@ -440,6 +442,17 @@ def build_model(
                     visit_time[node_id, vehicle] <= horizon * visit[node_id, vehicle],
                     f"VisitTimeActive_{node_id}_{idx}",
                 )
+                if strengthen:
+                    event = events[node_id]
+                    latest_service = min(horizon, event.tw[1])
+                    # Convex bounds for the service/non-service visit cases.
+                    # A meet-only visit may occur outside the customer's window.
+                    model.addConstr(visit_time[node_id,vehicle]
+                        >= max(0.0,event.tw[0])*serve_task[node_id,vehicle]
+                        + first_pickup*(visit[node_id,vehicle]-serve_task[node_id,vehicle]))
+                    model.addConstr(visit_time[node_id,vehicle]
+                        <= latest_service*serve_task[node_id,vehicle]
+                        + horizon*(visit[node_id,vehicle]-serve_task[node_id,vehicle]))
                 model.addConstr(
                     visit_time[node_id, vehicle]
                     >= event_time[node_id] - horizon * (1 - serve_task[node_id, vehicle]),
@@ -556,6 +569,9 @@ def build_model(
                             f"ReturnHi_{sat_id}_{idx}_{i}",
                         )
                     else:
+                        if (strengthen and min(events[i].tw[0],first_pickup)
+                                + service(i)+travel[i,j] > events[j].tw[1]+TOL):
+                            model.addConstr(z[key]+serve_task[j,vehicle] <= 1)
                         m_arc = horizon + service(i) + travel[i, j]
                         model.addConstr(
                             visit_time[j, vehicle]
@@ -578,10 +594,11 @@ def build_model(
                     rank[n] * z[sat_id, n, right]
                     for n in nodes if (sat_id, n, right) in z
                 )
-                model.addConstr(
-                    first_left <= first_right + len(nodes) * (1 - used[right]),
-                    f"FirstEventSym_{sat_id}_{idx}",
-                )
+                load_left = outgoing(goods_w,sat_id,left)
+                load_right = outgoing(goods_w,sat_id,right)
+                model.addConstr((len(nodes)+1)*load_left+first_left
+                    >= (len(nodes)+1)*load_right+first_right,
+                    f"DeliveryLoadKeySym_{sat_id}_{idx}")
 
         # Delivery precedes pickup at each original customer.
         by_phys = {}
@@ -699,10 +716,11 @@ def apply_no_transfer_warm_start(variables, ctx, routes):
                     return event_rank[node]
             return len(event_rank) + 1
 
-        # Match the exact model's first-event vehicle-label symmetry.
+        # Match the single load/first-event key used for vehicle symmetry.
         ordered = sorted(
             sat_routes,
-            key=lambda r: (first_event_rank(r), -delivery_load(r, events)),
+            key=lambda r: (len(event_rank)+1)*delivery_load(r,events)+first_event_rank(r),
+            reverse=True,
         )
         for vehicle, route in zip(vehs, ordered):
             clean = [node for node in route if node == sat_id or node in events]

@@ -42,25 +42,17 @@ def solve_routing(
     alns_time=120,
     seed=42,
     TFp=9999.0,
-    stage1_time_ratio=0.75,
+    stage1_time_ratio=None,
     transshipment_min_net_saving=0.01,
     transshipment_max_total=None,
     transshipment_max_per_satellite=None,
-    exact_algorithm="default",
     exact_time=None,
-    benders_options=None,
 ):
     """Run one canonical routing model through its supported solver."""
     model = require_model_number(int(model))
     method = str(method).lower()
     if method not in {"exact", "alns"}:
         raise ValueError(f"求解方法必须为 exact 或 alns，收到: {method}")
-    if exact_algorithm not in {"default", "benders"}:
-        raise ValueError(f"未知精确算法: {exact_algorithm}")
-    if exact_algorithm == "benders" and (model != 7 or method != "exact"):
-        raise ValueError("Benders 当前支持 Model 7 exact；请设置 model=7、method='exact'")
-    if benders_options and exact_algorithm != "benders":
-        raise ValueError("benders_options 需要 exact_algorithm='benders'")
 
     solver = _load_solver(model, method)
     if method == "exact":
@@ -77,8 +69,6 @@ def solve_routing(
         }
         if exact_time is not None:
             kwargs["time_limit"] = exact_time
-        if exact_algorithm == "benders":
-            kwargs.update(algorithm="benders", benders_options=benders_options)
         if model in (3, 4, 6, 7):
             kwargs["TFp"] = TFp
         return solver(**kwargs)

@@ -1312,7 +1312,7 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
                transshipment_sample_locations=None,
                transshipment_sample_carriers=None,
                transshipment_position_top_k=None,
-               stage1_time_ratio=0.75,
+               stage1_time_ratio=None,
                transshipment_min_net_saving=0.01,
                transshipment_max_total=None,
                transshipment_max_per_satellite=None,
@@ -1324,6 +1324,8 @@ def solve_alns(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellite,
                alns_config_overrides=None, fast_stage1=True):
     random.seed(seed)
     start_time = time.time()
+    if stage1_time_ratio is None:
+        stage1_time_ratio = .8
 
     evaluator = Evaluator(problem, e1_tasks, e2_tasks_by_sat, TFp,
                           vehicles_per_satellite=vehicles_per_satellite)

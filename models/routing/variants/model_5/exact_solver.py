@@ -248,19 +248,26 @@ def _solve_joint_exact(problem, e1_tasks, e2_tasks_by_sat, vehicles_per_satellit
 
 
 def _has_metric_distances(problem, e1_tasks, e2_tasks_by_sat, tol=1e-7):
-    """Check the triangle inequality required by the shortcut certificate."""
+    """Shortcut certificates require metric objective distance AND travel time."""
     physical = {problem.depot.id}
     physical.update(s.id for s in problem.satellites)
+    # Free-assignment certificates may be called before every customer has an
+    # input assignment; include them even if no fixed task was built yet.
+    physical.update(c.id for c in getattr(problem, 'customers', []))
     physical.update(t.cust for t in e1_tasks)
     physical.update(
         t.cust for tasks in e2_tasks_by_sat.values() for t in tasks
     )
     physical = sorted(physical)
+    distances = {(i,j):problem.distance(i,j) for i in physical for j in physical}
+    travel = {(i,j):problem.travel_time(i,j) for i in physical for j in physical}
     for i in physical:
         for j in physical:
-            dij = problem.distance(i, j)
+            dij = distances[i,j]
+            tij = travel[i,j]
             for h in physical:
-                if dij > problem.distance(i, h) + problem.distance(h, j) + tol:
+                if (dij > distances[i,h] + distances[h,j] + tol
+                        or tij > travel[i,h] + travel[h,j] + tol):
                     return False
     return True
 
