@@ -29,6 +29,7 @@ MODEL_SPECS = {
         "free_assignment_async_relay",
         "自由分仓、配送与延后回收、同质空箱异步交接",
     ),
+    8: ModelSpec(8, "joint_capacity_cooperation", "固定分仓、两级路径与配送回收及空箱容量协作联合优化"),
 }
 
 # Number stored by old source code/results -> current canonical number.
@@ -39,5 +40,5 @@ CURRENT_TO_LEGACY = {current: legacy for legacy, current in LEGACY_TO_CURRENT.it
 def require_model_number(number: int) -> int:
     """Validate and return a canonical model number."""
     if number not in MODEL_SPECS:
-        raise ValueError(f"模型编号必须为 1–7，收到: {number}")
+        raise ValueError(f"模型编号必须为 1–8，收到: {number}")
     return number

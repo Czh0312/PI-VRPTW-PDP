@@ -91,7 +91,7 @@ def build_tasks_for_model(problem: ProblemInstance, model_type: int):
                         c.tw_del,
                     )
                 )
-    elif model_type in (3, 5, 6):
+    elif model_type in (3, 5, 6, 8):
         for s in problem.satellites:
             if s.delivery_weight > 1e-9:
                 e1_tasks.append(
@@ -128,6 +128,6 @@ def build_tasks_for_model(problem: ProblemInstance, model_type: int):
                     )
                 )
     else:
-        raise ValueError(f"当前仅支持 model 1–7，收到: {model_type}")
+        raise ValueError(f"当前仅支持 model 1–8，收到: {model_type}")
 
     return e1_tasks, e2_tasks_by_sat

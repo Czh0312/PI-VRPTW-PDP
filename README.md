@@ -5,7 +5,7 @@
 - `models/routing/`：路径模型、精确求解器和 ALNS；
 - `models/cost/`：基于路线里程与业务参数计算生命周期成本。
 
-当前正式范围是 Model 1–7。Model 7 在 Model 4 自由分仓的基础上加入 Model 6 的同质空箱异步交接，并提供对应 ALNS。
+当前范围是 Model 1–8。Model 7 在 Model 4 自由分仓的基础上加入 Model 6 的同质空箱异步交接。Model 8 联合优化两级路线、配送回收安排与空箱容量协作，提供完整联合精确求解和无需 MIP 的 ALNS 搜索。
 
 ## 快速开始
 
@@ -36,7 +36,7 @@ python -m pytest -q
 python -m pip install -r requirements.txt
 ```
 
-Gurobi 精确求解需要本机安装 `gurobipy` 并配置有效许可证；ALNS、数据处理与多数成本分析不依赖 Gurobi。
+Gurobi 精确求解需要本机安装 `gurobipy` 并配置有效许可证；多数 ALNS、数据处理与成本分析不依赖 Gurobi。M8 ALNS 为单个联合搜索，无需 Gurobi；精确入口直接求解完整联合 MILP。
 
 ## 当前模型
 
@@ -49,8 +49,9 @@ Gurobi 精确求解需要本机安装 `gurobipy` 并配置有效许可证；ALNS
 | Model 5 | 空容器单次车辆间接力 | `variants/model_5/model.py` | `variants/model_5/exact_solver.py` | `alns/variants/model_5.py` |
 | Model 6 | 同质空箱异步事件地点交接 | `variants/model_6/model.py` | `variants/model_6/exact_solver.py` | `alns/variants/model_6.py` |
 | Model 7 | 自由分仓 + 同质空箱异步交接 | `variants/model_7/model.py` | `variants/model_7/exact_solver.py` | `alns/variants/model_7.py` |
+| Model 8 | 两级路径、配送回收与空箱容量协作联合优化 | `variants/model_8/model.py` | `variants/model_8/exact_solver.py` | `alns/variants/model_8.py` |
 
-表中路径均位于 `models/routing/`。Model 1–7 均按统一结构放置：
+表中路径均位于 `models/routing/`。Model 1–8 均按统一结构放置：
 
 - `model.py` 保存当前完整数学模型；
 - `exact_solver.py` 保存对应的严格精确求解入口；
@@ -80,6 +81,12 @@ Gurobi 精确求解需要本机安装 `gurobipy` 并配置有效许可证；ALNS
 达到时间限制的 incumbent 应报告目标值、下界和 gap，但不能写成精确最优。详细契约见 [精确求解架构](docs/exact_solver_architecture.md)。
 
 Model 7 使用完整分仓枚举、松弛证书和完整 Model 6 子问题进行精确求解。
+
+Model 8 当前为联合优化：E1/E2 路线、配送/回收归属与顺序、用车和空箱交接均参与决策。
+精确入口直接求一个完整 MILP，只有闭合全问题才设置 `proven_optimal`；ALNS 不先求 M3。
+当前交接规则下，精确可行域与 M6 相同，M8 的重点是容量协作联合邻域。
+见 [M8 设计文档](docs/model8_capacity_cooperation.md)。历史两阶段实现位于 `model_8/two_stage_v2/`，
+更早版本位于 `model_8/legacy/`；历史实验不能作为当前联合版本的结果。
 
 ## 最新精确求解与 ALNS 结果
 

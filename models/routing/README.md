@@ -1,8 +1,8 @@
 # 路径求解模型
 
 - `common/`：所有模型共用的领域对象、数据/矩阵读取、任务构建和精确求解工具。
-- `alns/`：公共 ALNS 数据结构、搜索引擎、强初始解，以及 Model 1–7 的专属算子。
-- `variants/model_1` 至 `variants/model_7`：当前完整数学模型与精确求解入口。
+- `alns/`：公共 ALNS 数据结构、搜索引擎、强初始解，以及 Model 1–8 的专属算子。
+- `variants/model_1` 至 `variants/model_8`：当前数学模型与精确求解入口。
 - `catalog.py`：模型编号、slug 与含义的唯一来源。
 - `service.py`：正式入口使用的统一求解分发层；精确求解器按需加载。
 
@@ -14,3 +14,8 @@ M7 可利用全局松弛同时筛除多个不能改善的分仓，仍保留未�
 详见项目 `docs/solver_optimization_20260913.md` 及对应结果总表。
 大型模型的必要约束与目标组件可放入 `formulation/`。过去尝试的列生成、分支定价、
 时间扩展和分解算法已移至 `archive/models/routing/variants/`，不再混入当前主线。
+
+M8 联合优化全部 E1/E2 路线、配送回收安排与同质空箱交接，不再固定基础路线。
+精确入口直接求完整模型；ALNS 在同一搜索循环中处理两级路线和容量协作。
+当前规则下 M8 与 M6 精确可行域相同。历史两阶段版本保留于 `model_8/two_stage_v2/`，
+更早版本位于 `model_8/legacy/`。详见 `docs/model8_capacity_cooperation.md`。

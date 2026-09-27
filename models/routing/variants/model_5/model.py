@@ -38,7 +38,7 @@ def build_model(problem, e1_tasks, e2_tasks_by_sat,
                              max_transshipments=None,
                              relay_fixes=None,
                              handoff_fixes=None,
-                             strengthen=True):
+                             strengthen=True, time_horizon_floor=0.0):
     depot_id = problem.depot.id
     F = [s.id for s in problem.satellites]
     K = list(range(problem.e1_vehicle_count))
@@ -114,7 +114,7 @@ def build_model(problem, e1_tasks, e2_tasks_by_sat,
     # at most TP/TD/RP, so the number of physically visited E2 operations is
     # bounded by deliveries + 3 * pickups rather than by all candidate nodes.
     inf = float("inf")
-    finite_times = [0.0]
+    finite_times = [0.0, float(time_horizon_floor)]
     for task in e1_tasks:
         finite_times.extend(t for t in task.tw if t < inf)
     for tasks in e2_tasks_by_sat.values():

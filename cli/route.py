@@ -41,7 +41,7 @@ def main(argv=None):
         default=str(DEFAULT_CASE),
         help="config/cases/ 下的案例配置文件",
     )
-    parser.add_argument("--model", type=int, choices=range(1, 8))
+    parser.add_argument("--model", type=int, choices=range(1, 9))
     parser.add_argument("--solver", choices=("alns", "exact"))
     parser.add_argument("--exact-time", type=float, help="精确求解总时间限制（秒）")
     parser.add_argument("--data", help="覆盖案例中的数据文件")
@@ -75,8 +75,8 @@ def main(argv=None):
     alns_iter = app_cfg.get("alns_iter", 5000)
     alns_time = app_cfg.get("alns_time", 120)
     seed = app_cfg.get("seed", 42)
-    stage1_time_ratio = (app_cfg.get("model7_stage1_time_ratio")
-                         if model == 7 else app_cfg.get("stage1_time_ratio"))
+    stage1_time_ratio = (app_cfg.get("model7_stage1_time_ratio") if model == 7
+                         else app_cfg.get("stage1_time_ratio") if model == 6 else None)
     transshipment_min_net_saving = app_cfg.get(
         "transshipment_min_net_saving", 0.01)
     transshipment_max_total = app_cfg.get("transshipment_max_total")
@@ -91,7 +91,9 @@ def main(argv=None):
     data_stem = data_path.stem
     # Organized single-run output:
     # output/single_runs/model4_alns/C101/{routes,figures}/...
-    sub_dir = OUTPUT_DIR / "single_runs" / f"model{model}_{solver}" / data_stem
+    # Joint M8 artifacts are separate from historical two-stage results.
+    model_folder = f"model{model}_v3_joint_{solver}" if model == 8 else f"model{model}_{solver}"
+    sub_dir = OUTPUT_DIR / "single_runs" / model_folder / data_stem
     routes_dir = sub_dir / "routes"
     figures_dir = sub_dir / "figures"
     routes_dir.mkdir(parents=True, exist_ok=True)
@@ -159,6 +161,13 @@ def main(argv=None):
             )
     run_time = time.time() - start_time
 
+    if model == 8 and isinstance(solver_result[-1], dict):
+        # Keep the full joint state and independent capacity/timing audit.
+        m8_path = sub_dir / f"{log_path.stem}_joint.json"
+        with open(m8_path, "w", encoding="utf-8") as f:
+            json.dump({"e1_routes": e1_routes, "e2_routes": e2_routes_by_sat_res,
+                       "info": solver_result[-1]}, f, ensure_ascii=False, indent=2)
+
     # 写入日志文件
     log_content = log_buf.getvalue()
     with open(log_path, "w", encoding="utf-8") as f:
@@ -188,6 +197,9 @@ def main(argv=None):
             "assignment": exact_assignment,
             "route_audit": route_audit,
         }
+        if model == 8:
+            for key in ("version", "allow_transfers", "mathematical_equivalent"):
+                certificate[key] = exact_info.get(key)
         with open(certificate_path, "w", encoding="utf-8") as f:
             json.dump(certificate, f, ensure_ascii=False, indent=2)
 
@@ -237,7 +249,7 @@ def main(argv=None):
             e1_routes=e1_routes,
             e2_routes_by_sat=e2_routes_by_sat_res,
             title=f"2E-VRP Solution - Model {model} ({solver.upper()}) - {data_stem}",
-            save_dir=f"single_runs/model{model}_{solver}/{data_stem}/figures",
+            save_dir=f"single_runs/{model_folder}/{data_stem}/figures",
             filename=img_path.name,
         )
     else:

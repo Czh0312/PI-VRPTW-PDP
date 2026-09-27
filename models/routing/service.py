@@ -11,7 +11,7 @@ from .catalog import require_model_number
 
 _EXACT_SOLVERS = {
     number: (f"models.routing.variants.model_{number}", "solve_exact")
-    for number in range(1, 8)
+    for number in range(1, 9)
 }
 
 _ALNS_SOLVERS = {
@@ -20,6 +20,7 @@ _ALNS_SOLVERS = {
         for number in range(1, 7)
     },
     7: ("models.routing.alns.variants.model_7", "solve_alns"),
+    8: ("models.routing.alns.variants.model_8", "solve_alns"),
 }
 
 
@@ -50,6 +51,8 @@ def solve_routing(
 ):
     """Run one canonical routing model through its supported solver."""
     model = require_model_number(int(model))
+    if model == 8 and stage1_time_ratio is not None:
+        raise ValueError('M8 已改为联合优化，不再接受 stage1_time_ratio')
     method = str(method).lower()
     if method not in {"exact", "alns"}:
         raise ValueError(f"求解方法必须为 exact 或 alns，收到: {method}")
@@ -69,7 +72,7 @@ def solve_routing(
         }
         if exact_time is not None:
             kwargs["time_limit"] = exact_time
-        if model in (3, 4, 6, 7):
+        if model in (3, 4, 6, 7, 8):
             kwargs["TFp"] = TFp
         return solver(**kwargs)
 
@@ -94,7 +97,7 @@ def solve_routing(
         kwargs["e2_tasks_by_sat"] = e2_tasks_by_sat
     if model in (1, 3, 6):
         kwargs["strong_initial_solution"] = True
-    if model in (3, 4, 6, 7):
+    if model in (3, 4, 6, 7, 8):
         kwargs["TFp"] = TFp
     if model in (5, 6, 7):
         kwargs.update(
@@ -104,4 +107,6 @@ def solve_routing(
         )
     if model in (6, 7):
         kwargs["stage1_time_ratio"] = stage1_time_ratio
+    if model == 8:
+        kwargs.update(return_info=True)
     return solver(**kwargs)
