@@ -125,11 +125,13 @@ def test_shared_cutoff_moves_never_break_equality():
         child.validated_cutoffs(cuts)
 
 
-def test_multi_satellite_recovery_is_counted_once_per_batch(exact_available):
+def test_multi_satellite_recovery_is_counted_once_per_batch(tmp_path,exact_available):
     from configuration.loader import load_routing_case
     from models.routing.common.cycle import load_instance
-    from models.routing.common.cycle.uniform import attach_uniform_decisions
-    config,fleet=load_routing_case('data/model6/cutoff_v1_20261005/mechanism_cutoff_choice/m6_case.json',use_pool_config=False)
+    from tools.data.build_model6_static_suite import build_suite
+    manifest=build_suite(tmp_path/'data',families=['mechanism_cutoff_choice'])
+    case=json.loads(manifest.read_text(encoding='utf-8'))['cases'][0]['m6_case']
+    config,fleet=load_routing_case(case,use_pool_config=False)
     config['joint_batch_options']={'schedule_mode':'uniform_cycle','batch_count_candidates':[1]}
     problem=load_instance(config,fleet)
     result=solve_exact(problem,time_limit=5)

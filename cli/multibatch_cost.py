@@ -7,7 +7,7 @@ from models.cost.multibatch import evaluate_cycle_cost
 
 
 def run_cost(config, fleet, args):
-    economic = args.economic_config or config.get('economic_config' if config['model']==6 else 'cost_config')
+    economic = args.economic_config or config.get('economic_config') or config.get('cost_config')
     if not args.route_result or not economic:
         raise ValueError('Multibatch cost requires --route-result and an explicit economic configuration')
     if any(getattr(args, key, None) is not None for key in ('data', 'time', 'extension_time', 'seed', 'fleet_config',
@@ -17,16 +17,10 @@ def run_cost(config, fleet, args):
     source = resolve_project_path(args.route_result)
     result = json.loads(source.read_text(encoding='utf-8'))
     parameters = load_json(economic) if isinstance(economic, str) else economic
-    if getattr(problem, 'joint_batch', False):
-        from models.cost.joint_batch import JointCostProfile
-        from models.routing.common.cycle.audit import audit_solution
-        profile = JointCostProfile(parameters)
-        if profile.hash != problem.cost_profile.hash:
-            raise ValueError('M6 replay requires the same economic profile as the saved solution')
-        audited = audit_solution(problem, result)
-        if not audited['valid']:
-            raise ValueError(f'Cannot price invalid M6 result: {audited["errors"]}')
-        cost = audited['cost']
+    if getattr(problem, 'joint_batch', False) or (
+            problem.model_number == 5 and 'container_pool_cost_per_period' in parameters):
+        from models.cost.comparison import evaluate_comparison_cost
+        cost = evaluate_comparison_cost(problem, result, parameters)
     else:
         cost = evaluate_cycle_cost(problem, result, parameters)
     out = resolve_project_path(args.output) if args.output else PROJECT_ROOT/'output/economic_analysis_multibatch'/datetime.now().strftime('%Y%m%dT%H%M%S_%f')
@@ -35,6 +29,6 @@ def run_cost(config, fleet, args):
     out.mkdir(parents=True, exist_ok=True)
     (out/'cost.json').write_text(json.dumps(dict(route_result=str(source), parameters=parameters, cost=cost),
                                           ensure_ascii=False, indent=2, allow_nan=False), encoding='utf-8')
-    total = cost['total'] if getattr(problem, 'joint_batch', False) else cost['period_operating_cost']
+    total = cost['total'] if 'total' in cost else cost['period_operating_cost']
     print(f"Cycle cost: {total:.6f} {cost['currency']}; initial pool investment: {cost['initial_pool_investment']:.6f}. {out}")
     return cost

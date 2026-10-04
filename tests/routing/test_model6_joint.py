@@ -168,7 +168,7 @@ def test_release_is_independent_of_customer_ready_and_empty_domain_is_proven():
     lambda r:r['info'].update(objective=0),
     lambda r:r['cost_components'].update(e1_distance=0),
     lambda r:r.update(economic_profile_hash='forged'),
-    lambda r:r['delivery_batch_activation'].update(b1=False),
+    lambda r:r['delivery_batch_activation'].update(b1=not r['delivery_batch_activation']['b1']),
     lambda r:r['candidate_schedule'][0].update(cutoff=999),
 ])
 def test_saved_joint_decisions_and_cost_tampering_are_rejected(mutation):

@@ -12,6 +12,7 @@ from datetime import datetime
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import shutil
 import statistics
@@ -63,7 +64,7 @@ def freeze_case(source, out, prefix):
         config[key] = str(target)
     economics = config.get('economic_config')
     if economics:
-        profile = json.loads(Path(economics).read_text()) if isinstance(economics, str) else deepcopy(economics)
+        profile = json.loads(Path(economics).read_text(encoding='utf-8')) if isinstance(economics, str) else deepcopy(economics)
         if profile.get('evidence_file'):
             original = resolve_project_path(profile['evidence_file']).resolve()
             payload = original.read_bytes()
@@ -110,9 +111,13 @@ def run_job(job, out, overhead):
     row.update(valid=False, status='ERROR', proven_optimal=False, cost=None, distance=None,
                pool=None, batches=None, e1_trips=None, e2_trips=None, best_bound=None, mip_gap=None,
                economic_profile_hash=None, runtime=None, wall_time=None, error='',
-               order_count=None,total_container_uses=None,minimum_pool_for_schedule=None)
+               order_count=None,total_container_uses=None,minimum_pool_for_schedule=None,
+               currency=None,source_type=None,cost_with_schedule_minimum_pool=None,
+               e1_vehicles=None,e2_vehicles=None,e1_work_minutes=None,e2_work_minutes=None)
     try:
         process = subprocess.run(command, cwd=PROJECT_ROOT, capture_output=True, text=True,
+                                 encoding='utf-8', errors='replace',
+                                 env={**os.environ, 'PYTHONIOENCODING':'utf-8', 'PYTHONUTF8':'1'},
                                  timeout=job['budget']+overhead)
         (out/'logs'/f'{job["run"]}.log').write_text(process.stdout+'\n'+process.stderr, encoding='utf-8')
         if process.returncode:
@@ -129,17 +134,21 @@ def run_job(job, out, overhead):
         if not audit['valid']:
             row['error'] = json.dumps(audit['errors'], ensure_ascii=False)
         else:
-            from models.cost.joint_batch import JointCostProfile
-            economic = config['economic_config']
-            profile = JointCostProfile(json.loads(Path(economic).read_text()) if isinstance(economic, str) else economic)
-            pool = result['container_pool_size'] if problem.model_number==6 else problem.operating_policy.container_pool_size
-            cost = audit['cost'] if problem.model_number==6 else profile.evaluate(audit, pool)
+            from models.cost.comparison import evaluate_comparison_cost
+            cost = evaluate_comparison_cost(problem, result, config['economic_config'], audit=audit)
+            pool = cost['container_pool_size']
             write_json(target/'comparison_cost.json', cost)
-            row.update(cost=cost['total'], economic_profile_hash=profile.hash, pool=pool,
+            reference = cost.get('schedule_minimum_pool_reference')
+            row.update(cost=cost['total'], economic_profile_hash=cost['economic_profile_hash'], pool=pool,
+                       currency=cost['currency'],source_type=cost['source_type'],
+                       cost_with_schedule_minimum_pool=reference['total'] if reference else None,
                        distance=sum(audit['distances'].values()),
                        minimum_pool_for_schedule=audit['minimum_pool_for_schedule'],
                        batches=result['delivery_batch_count'] if problem.model_number==6 else sum(bool(v) for v in problem.batch_demands.values()),
-                       e1_trips=audit['e1_trip_count'], e2_trips=audit['e2_trip_count'])
+                       e1_trips=audit['e1_trip_count'], e2_trips=audit['e2_trip_count'],
+                       e1_vehicles=audit['e1_vehicle_count'],e2_vehicles=audit['e2_vehicle_count'],
+                       e1_work_minutes=audit['time_metrics']['working_minutes']['e1'],
+                       e2_work_minutes=audit['time_metrics']['working_minutes']['e2'])
     except subprocess.TimeoutExpired as exc:
         row.update(status='OUTER_TIMEOUT', error=f'Worker exceeded {job["budget"]+overhead:g}s')
         def decode(value):
