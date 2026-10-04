@@ -56,7 +56,7 @@ def load_routing_case(path: str | Path, *, use_pool_config=True) -> tuple[dict[s
             raise ValueError('Multibatch cases require schema_version=2 and orders')
     elif case.get('schema_version', 1) != 1 or case.get('orders'):
         raise ValueError('schema_version=2/orders requires multi_batch_cutoff_v1')
-    if version == 'multi_batch_cutoff_v1' and use_pool_config:
+    if version == 'multi_batch_cutoff_v1' and use_pool_config and case['model'] != 6:
         from .container_pools import apply_pool_config
         run_config, fleet_config = apply_pool_config(run_config, fleet_config)
     elif 'container_pool_size' in run_config:

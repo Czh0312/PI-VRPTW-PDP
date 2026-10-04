@@ -135,6 +135,10 @@ def repair_orders(problem, original, removed, deadline, *, screen=True, cache_sc
     tasks = [(o.id, kind) for kind in problem.task_kinds
              for o in sorted(removed, key=lambda o: (o.delivery_window if kind == 'd' else o.pickup_window)[1])]
     score_route = _route_score
+    if scorer is not None and len(p.batches) > 1:
+        score_route = scorer
+        # A distance floor cannot screen an externally supplied cost score.
+        screen = False
     distance = problem.distance
     prefix_enabled = False
     if tasks and fast_scores and len(p.batches) == 1:

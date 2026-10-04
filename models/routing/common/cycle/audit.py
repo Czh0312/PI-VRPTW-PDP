@@ -38,6 +38,12 @@ def replay_ledger(events, pool, satellites, repetitions=1, period=0):
 
 def audit_solution(problem, result, repeat=True):
     try:
+        if getattr(problem, 'joint_batch', False):
+            if getattr(problem, 'uniform_cycle', False):
+                from .uniform import audit_uniform_solution
+                return audit_uniform_solution(problem, result, repeat)
+            from .joint import audit_joint_solution
+            return audit_joint_solution(problem, result, repeat)
         if problem.free_assignment:
             from .assignment import assigned_problem, validate_assignment
             assignment = validate_assignment(problem, result.get('assignment'))

@@ -9,6 +9,11 @@
 | M3 | 固定分仓、容器配送与回收 | 单批次 B=1 | `models/routing/variants/model_3/` |
 | M4 | 自由选仓、容器配送与回收 | 单批次 B=1 | `models/routing/variants/model_4/` |
 | M5 | 固定分仓、有限容器跨批周转 | 多批次 B>1 | `models/routing/variants/model_5/` |
+| M6 | 静态分批、容器池与两级路径成本联合优化 | 均匀周期分批、统一分界；保留历史候选时段模式 | `models/routing/variants/model_6/` |
+
+2026-10-04 已实现并注册 M6：固定候选时段，联合优化配送启用、订单分批、容器和路线，分为独立联合 MILP 与 ALNS。见 [模型6设计](model6_joint_batch_cost_design.md)、[程序机制对比](../output/model6_comparison/20261004_mechanism_v1_final/report.md) 与 [较大LaDe派生场景箱数/批次对比](../output/model6_comparison/20261004_lade_static_v2/resources.md)。下文关于五个模型和旧验证的历史记录仍指 M1–M5。
+
+2026-10-05 的基础版新增均匀周期模式：联合优化周期划分数 K，并使各批共用相对分界时长；原固定候选时段及逐批截点模式保留供历史对照。
 
 M1/M2 在经济对照中使用一次性包装，不承担容器逆向任务。M3/M4 负责单批次闭环。
 M5 使用固定日程和订单批次，通过回收、回运、清洗支持跨批复用，并在大周期末恢复全池清洁状态。
@@ -21,7 +26,8 @@ models/routing/
 │   ├── model_2/
 │   ├── model_3/
 │   ├── model_4/
-│   └── model_5/
+│   ├── model_5/
+│   └── model_6/       完整联合 MILP 与成本 ALNS
 ├── common/
 │   └── cycle/          输入、业务规则、结果格式与独立审计
 ├── solvers/
@@ -32,7 +38,7 @@ models/routing/
 └── service.py          按编号调用对应模型入口
 ```
 
-五个模型目录均包含：
+六个模型目录均包含：
 
 ```text
 model.py               模型定义、范围校验；保留旧建模 API 的按需转发
@@ -48,6 +54,7 @@ README.md              本模型说明
 ```
 
 求解服务实际调用这些入口，各入口检查模型身份和批次数。M3 不能接收多批输入，M5 不能接收单批输入。
+M6 可以接收一个或多个候选时段，但要求显式订单释放时刻、允许批次和经济配置。它不继承固定分批模型的默认容器池比例。
 结果记录 `model`、`batch_mode`、`model_module`、`solver` 和 `solver_module`，可追溯模型与实际求解实现。
 
 ## 精确求解与 ALNS 的分离
@@ -62,6 +69,7 @@ README.md              本模型说明
 
 两套实现不互相导入。各模型的公共入口按需加载选定方法，调用 ALNS 时不加载精确求解代码或 Gurobi。
 共同层 `common/cycle/` 不含求解算法；其中 `assignment.py` 只做分仓校验、实例转换与结果恢复。
+M6的共同层 `joint.py` 负责分批域、输入投影和联合结果审计；成本定义位于 `models/cost/joint_batch.py`。其完整 MILP 与 ALNS 分别位于 `variants/model_6/exact/` 与 `variants/model_6/alns/`，ALNS 仅复用公共物理传播和路线工具。
 输入、日程、容器规则和结果格式共用；两种方法输出的方案都接受相同的独立审计与周期重放。
 
 M1/M3/M5 构建固定分仓 MILP；M2/M4 的精确算法枚举顾客分仓，其 `exact/model.py` 提供 `build_subproblem`，
@@ -93,6 +101,10 @@ Zhou 主对比集按小型 7/10/12、中型 20/30、大型 50/100 顾客划分�
 
 # 当前多批次模型 M5
 .venv/bin/python main.py route --case config/cases/multibatch_demo.json --model 5 --time 2
+
+# M6 已附合成机制案例，费用不代表真实人民币
+.venv/bin/python main.py route --case data/model6/mechanism_v1/consolidation_low_pool/m6_case.json --solver exact --exact-time 20
+.venv/bin/python -m experiments.runs.run_model6_comparison
 
 # 单批包装与选仓对照仍是 M1–M4
 .venv/bin/python main.py compare-single-batch --time 1 --exact-time 10

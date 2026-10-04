@@ -11,7 +11,7 @@ import shutil
 import sys
 import time
 
-from configuration.loader import PROJECT_ROOT, resolve_project_path
+from configuration.loader import PROJECT_ROOT, resolve_project_path, load_json
 from models.routing.service import solve_routing
 from models.routing.common.cycle import load_instance
 from models.routing.common.cycle.audit import audit_solution
@@ -66,7 +66,7 @@ def plot_result(problem, result, path):
         for b in p.batches:
             ax.axvline(p.minutes(b.cutoff), color='#d9534f', ls='--', alpha=.5)
         ax.set_xlim(p.minutes(p.cycle_start), p.minutes(p.cycle_end))
-        ax.set_xlabel('Minutes (dashed = delivery phase end / collection cutoff)')
+        ax.set_xlabel('Minutes (dashed = eligibility cutoff for E1 recovery)')
     fig.savefig(path, dpi=160)
     plt.close(fig)
     # Two maps per wave: E1 assigned to that wave; E2 departures in its interval.
@@ -106,11 +106,13 @@ def run_case(config, fleet, *, case_path=None, output=None):
         raise ValueError(f'Refusing to overwrite nonempty output directory: {out}')
     out.mkdir(parents=True, exist_ok=True)
     input_paths = [resolve_project_path(config[key]) for key in (
-        'data', 'orders', 'routing_config', 'operating_policy', 'algorithm_config', 'distance_matrix', 'duration_matrix', 'dataset_metadata', 'pool_config')
+        'data', 'orders', 'routing_config', 'operating_policy', 'algorithm_config', 'distance_matrix', 'duration_matrix', 'dataset_metadata', 'pool_config', 'economic_config', 'initial_joint_result')
                    if isinstance(config.get(key), str)]
     if case_path:
         input_paths.append(resolve_project_path(case_path))
-    sources = [path for name in ('models/routing', 'configuration', 'cli')
+    if getattr(instance, 'joint_batch', False) and instance.cost_profile.config.get('evidence_file'):
+        input_paths.append(resolve_project_path(instance.cost_profile.config['evidence_file']))
+    sources = [path for name in ('models/routing', 'models/cost', 'configuration', 'cli')
                for path in (PROJECT_ROOT/name).rglob('*.py')]
     sources += [PROJECT_ROOT/'main.py']
     for source in sources:
@@ -131,6 +133,18 @@ def run_case(config, fleet, *, case_path=None, output=None):
                                            min_use_time=o.min_use_time) for o in instance.orders],
                     converted_travel_ticks={a: {b: instance.travel(a, b) for b in instance.network.nodes}
                                             for a in instance.network.nodes})
+    if getattr(instance, 'joint_batch', False):
+        manifest.update(economic_profile=instance.cost_profile.config,
+                        economic_profile_hash=instance.cost_profile.hash,
+                        evidence_hash=instance.cost_profile.evidence_hash,
+                        joint_batch_options=instance.options,
+                        cutoff_bounds_ticks=instance.cutoff_bounds,
+                        legal_order_batches=instance.legal_batches,
+                        release_times={o.id:o.release_time for o in instance.orders})
+        if getattr(instance,'uniform_cycle',False):
+            manifest.update(uniform_cycle_config=instance.uniform_contract,
+                            cutoff_bounds_ticks=None,legal_order_batches=None,
+                            source_calendar_note='Reference only; solver rebuilds the entire cycle for each K')
     _json(out/'manifest.json', manifest)
     print(f'M{instance.model_number} {"single_batch" if len(instance.operating_policy.batches) == 1 else "multi_batch"} {config["solver"]}: {out}')
     log, begun = io.StringIO(), time.perf_counter()
@@ -139,7 +153,8 @@ def run_case(config, fleet, *, case_path=None, output=None):
             result = solve_routing(model=config['model'], method=config['solver'], problem=instance,
                                    alns_time=config.get('alns_time', 10), alns_iter=config.get('alns_iter', 5000),
                                    exact_time=config.get('exact_time', 60),
-                                   exact_backend=config.get('exact_backend'), seed=config.get('seed', 42))
+                                   exact_backend=config.get('exact_backend'), seed=config.get('seed', 42),
+                                   initial_result=load_json(config['initial_joint_result']) if config.get('initial_joint_result') else None)
         if result['info'].get('objective') is not None:
             result['audit'] = audit_solution(instance, result)
             if not result['audit']['valid']:
@@ -149,11 +164,14 @@ def run_case(config, fleet, *, case_path=None, output=None):
         _json(out/'result.json', result)
         (out/'solver.log').write_text(log.getvalue(), encoding='utf-8')
         audit = result.get('audit', {})
-        lines = [f'M{instance.model_number} 固定批次运行结果', '',
-                 f"包装：{'循环' if instance.reusable else '一次性'}；批次数：{len(instance.operating_policy.batches)}。",
+        joint = getattr(instance, 'joint_batch', False)
+        pool = result.get('container_pool_size', instance.operating_policy.container_pool_size)
+        objective_label = '总成本' if joint else '距离'
+        lines = [f'M{instance.model_number} {"联合分批成本" if joint else "固定批次"}运行结果', '',
+                 f"包装：{'循环' if instance.reusable else '一次性'}；批次数：{result.get('cycle_batch_count',len(instance.operating_policy.batches))}。",
                  f"状态：{result['info']['status']}。",
                  f"独立审计：{audit.get('valid', False)}；已证明最优：{result['info']['proven_optimal']}。",
-                 f"距离：{result['info']['objective']}；循环箱池：{instance.operating_policy.container_pool_size if instance.reusable else '不适用'}。",
+                 f"{objective_label}：{result['info']['objective']}；循环箱池：{pool if instance.reusable else '不适用'}。",
                  f"已证明不可行：{result['info'].get('proven_infeasible', False)}；"
                  f"证明范围：{result['info'].get('proof_scope') or '无'}。",
                  f"必要容器池下界：{result.get('precheck', {}).get('pool_lower_bound', '未计算')}；"
@@ -167,6 +185,28 @@ def run_case(config, fleet, *, case_path=None, output=None):
             lines += ['一次性包装的重放检查车辆与配送服务；每个周期重新购入包装，不声明容器闭环。']
         if instance.free_assignment:
             lines += ['自由分仓按顾客选择，每个顾客的全部订单保持同仓。精确枚举的全局证明状态以 info 为准。']
+        if joint:
+            lines += ['', f"启用配送批次数：{result.get('delivery_batch_count')}；总距离：{result.get('total_distance')}。",
+                      f"成本来源类型：{instance.cost_profile.config['source_type']}；单位：{instance.cost_profile.config['currency']}。",
+                      '关闭配送批次仍保留回收义务；纯回收趟次显式计费。初始箱体投资单列。',
+                      '截点仅决定本轮回运资格；二级车辆在第二阶段仍可配送和回收。', '']
+            if result.get('batch_cutoffs'):
+                lines += [f"截点模式：{result.get('cutoff_mode', 'fixed')}。", '',
+                          '| 批次 | 开始/分钟 | 回运截点/分钟 | 第一窗/分钟 | 第二窗/分钟 | 结束/分钟 |',
+                          '| --- | ---: | ---: | ---: | ---: | ---: |']
+                for b in result['batches']:
+                    minutes=instance.operating_policy.minutes
+                    lines.append(f"| {b['id']} | {minutes(b['start']):g} | {minutes(b['cutoff']):g} | "
+                                 f"{minutes(b['cutoff']-b['start']):g} | {minutes(b['end']-b['cutoff']):g} | {minutes(b['end']):g} |")
+                lines.append('')
+            lines.extend(f"- {key}: {value}" for key, value in result.get('cost_components', {}).items())
+            if getattr(instance,'uniform_cycle',False):
+                lines += ['',f"均匀分批搜索范围：{list(instance.batch_count_candidates)}；选定周期批次数：{result.get('cycle_batch_count')}。",
+                          f"每批时长/分钟：{instance.operating_policy.minutes(result['batch_duration_ticks']) if result.get('batch_duration_ticks') is not None else None}；"
+                          f"统一分界比例：{result.get('shared_cutoff_ratio')}；实际空箱回运轮数：{result.get('actual_recovery_round_count')}。",
+                          '所有配置批次数均解决，才能声明整个均匀分批模型的成本最优；单个K最优不足以证明全局最优。',
+                          '', '| K | 状态 | 有效成本 | 箱数 | 该K成本最优已证明 |', '| --- | --- | ---: | ---: | --- |']
+                lines.extend(f"| {r['batch_count']} | {r['status']} | {r['objective']} | {r.get('container_pool_size')} | {r['proven_optimal']} |" for r in result['count_search'])
         if audit.get('errors'):
             lines += ['', '审计错误：', '```json', json.dumps(audit['errors'], ensure_ascii=False, indent=2), '```']
         if result.get('precheck', {}).get('errors'):
@@ -174,8 +214,10 @@ def run_case(config, fleet, *, case_path=None, output=None):
                       json.dumps(result['precheck']['errors'], ensure_ascii=False, indent=2), '```']
         (out/'report.md').write_text('\n'.join(lines)+'\n', encoding='utf-8')
         if audit.get('valid') and config.get('save_plots', True):
-            plot_result(instance, result, out/'timeline.png')
-        print(f"{result['info']['status']} | valid={audit.get('valid', False)} | distance={result['info']['objective']}")
+            selected = instance.for_count(result['cycle_batch_count']) if getattr(instance,'uniform_cycle',False) else instance
+            plotted = selected.project(result['order_batch_assignment'], pool,result.get('batch_cutoffs')) if joint else instance
+            plot_result(plotted, result, out/'timeline.png')
+        print(f"{result['info']['status']} | valid={audit.get('valid', False)} | {objective_label}={result['info']['objective']}")
         return result
     except Exception as exc:
         _json(out/'error.json', dict(error=f'{type(exc).__name__}: {exc}', wall_time=time.perf_counter()-begun))

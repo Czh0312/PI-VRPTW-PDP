@@ -12,27 +12,35 @@ def _load_solver(model, method):
 
 def solve_routing(*, model, method, problem, e1_tasks=None, e2_tasks_by_sat=None,
                   alns_iter=5000, alns_time=120, seed=42, TFp=9999.0,
-                  exact_time=None, exact_backend=None, allow_baseline=False):
+                  exact_time=None, exact_backend=None, allow_baseline=False, initial_result=None):
     model = require_model_number(int(model))
     policy = policy_for(problem)
     policy.require_model(model)
     method = str(method).lower()
     if method not in {"exact", "alns"}:
         raise ValueError(f"Expected exact or alns, got {method}")
+    if initial_result is not None and (model!=6 or method!='alns'):
+        raise ValueError('Initial joint solution requires M6 ALNS')
     if getattr(policy, "multi_batch", False):
         if problem.model_number != model:
             raise ValueError("Requested model does not match the loaded instance")
         if e1_tasks or e2_tasks_by_sat:
             raise ValueError("Multibatch quantities must be derived from return events, not static tasks")
-        if exact_backend not in (None, "multibatch_indexed"):
-            raise ValueError("multi_batch_cutoff_v1 requires multibatch_indexed, not a legacy backend")
+        expected_backend = 'joint_batch_indexed' if model == 6 else 'multibatch_indexed'
+        if exact_backend not in (None, expected_backend):
+            raise ValueError(f'Model {model} requires {expected_backend}; incompatible or legacy backend: {exact_backend}')
         from .common.cycle.scope import batch_mode_for
         module = import_module(MODEL_SPECS[model].module_path(batch_mode_for(problem)))
         if method == "exact":
             return module.solve_exact(problem, time_limit=exact_time if exact_time is not None else 60, seed=seed)
-        return module.solve_alns(problem, max_time=alns_time, max_iterations=alns_iter, seed=seed)
+        kwargs=dict(max_time=alns_time,max_iterations=alns_iter,seed=seed)
+        if initial_result is not None:
+            kwargs['initial_result']=initial_result
+        return module.solve_alns(problem, **kwargs)
     if model == 5:
         raise ValueError('Current M5 requires multi_batch_cutoff_v1 with B>1; historical M5 was retired')
+    if model == 6:
+        raise ValueError('Current M6 requires multi_batch_cutoff_v1 and explicit joint batch/cost inputs')
     if not allow_baseline:
         raise ValueError("Historical policy: use route --baseline / allow_baseline=True explicitly. "
                          "Current M1/M2/M4 require the unified single-batch policy.")

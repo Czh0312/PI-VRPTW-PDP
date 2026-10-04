@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "model": 6,
+  "reviewed_on": "2026-10-04",
+  "status": "uncalibrated_evidence_register_not_executable_cost_profile",
+  "scope": "Fixed candidate dispatch slots; joint delivery-batch activation, order assignment, container pool and two-echelon routing",
+  "ready_for_matched_empirical_cost_claims": false,
+  "ready_for_calibrated_CNY_optimization": false,
+  "missing_value_policy": "null means uncalibrated, never zero; factual references are not executable coefficients",
+  "sources": {
+    "M6_S1": {
+      "title": "可循环快递包装最后一公里如何打通",
+      "publisher": "新华社",
+      "url": "https://www.news.cn/politics/2022-06/28/c_1128783518.htm",
+      "publication_date": "2022-06-28",
+      "checked_on": "2026-10-04",
+      "verification": "primary_interview_article_text_reopened",
+      "locator": "回收成本高，实现循环难；中通快递山西负责人举例",
+      "facts": {"historical_container_price_CNY": 36.5, "illustrative_use_count": 50},
+      "applicability": "historical_cross_SKU_proxy_not_calibrated",
+      "limitations": ["Exact modeled SKU is unknown", "Not a current procurement quote", "Fifty uses is an example, not a measured mean survival", "Purchase allocation excludes reverse transport and cleaning"]
+    },
+    "M6_S2": {
+      "title": "杭州市2023年企业薪酬调查信息",
+      "publisher": "杭州企业薪酬调查公开附件，浙江政务云",
+      "url": "https://zjjcmspublic.oss-cn-hangzhou-zwynet-d01-a.internet.cloud.zj.gov.cn/jcms_files/jcms1/web3163/site/attach/0/8de07211fbc54b69b37cb7c62f3ddc47.pdf",
+      "data_year": 2023,
+      "checked_on": "2026-10-04",
+      "verification": "official_pdf_reopened_and_searchable_rows_checked; screenshot_requested_but_no_pixels_returned",
+      "locators": {"driver": "PDF page 10, intermediate road freight driver", "courier": "PDF page 4, postal and courier services", "method_and_scope": "PDF pages 1 and 17-19"},
+      "facts": {
+        "driver_annual_CNY_p25_p50_p75": [86299, 103002, 114030],
+        "courier_annual_CNY_p25_p50_p75": [55009, 70606, 128650]
+      },
+      "applicability": "local_occupation_reference_not_operator_payroll",
+      "limitations": ["2023 wages are not current operator payroll", "Paid minutes and employer expenses require separate evidence", "Includes wage components that must not be added twice"]
+    }
+  },
+  "parameter_register": {
+    "container_price": {"calibrated_value": null, "unit": "CNY/container", "sources": ["M6_S1"], "status": "historical_reference_only", "requires": ["matched_SKU", "procurement_quantity", "price_date", "tax_and_delivery_scope"]},
+    "container_pool_cost_per_period": {"calibrated_value": null, "unit": "CNY/container/evaluation_period", "sources": [], "status": "missing", "requires": ["matched_pool_lease_or_owned_capital_charge", "holding_period", "included_services", "no_wear_or_capital_double_count"]},
+    "container_lifetime_uses": {"calibrated_value": null, "unit": "uses/container", "sources": ["M6_S1"], "status": "illustration_is_not_observed_lifetime", "requires": ["matched_life_history_or_durability_evidence", "retirement_definition"]},
+    "e1_distance_cost_per_km": {"calibrated_value": null, "unit": "CNY/km", "sources": [], "status": "missing_matched_fleet_evidence", "requires": ["vehicle_class", "energy_per_km", "energy_price_date", "maintenance_scope"]},
+    "e2_distance_cost_per_km": {"calibrated_value": null, "unit": "CNY/km", "sources": [], "status": "missing_matched_fleet_evidence", "requires": ["vehicle_class", "energy_per_km", "energy_price_date", "maintenance_scope"]},
+    "e1_work_cost_per_minute": {"calibrated_value": null, "unit": "CNY/occupied_vehicle_minute", "sources": ["M6_S2"], "status": "wage_reference_conversion_inputs_missing", "requires": ["paid_time_basis", "employer_cost_scope", "crew_count", "date_alignment"]},
+    "e2_work_cost_per_minute": {"calibrated_value": null, "unit": "CNY/occupied_vehicle_minute", "sources": ["M6_S2"], "status": "wage_reference_conversion_inputs_missing", "requires": ["paid_time_basis", "employer_cost_scope", "crew_count", "date_alignment"]},
+    "e1_vehicle_cost_per_cycle": {"calibrated_value": null, "unit": "CNY/activated_vehicle/evaluation_period", "sources": [], "status": "missing", "requires": ["vehicle_class", "avoidable_cost_or_declared_allocation", "lease_or_asset_records", "included_components"]},
+    "e2_vehicle_cost_per_cycle": {"calibrated_value": null, "unit": "CNY/activated_vehicle/evaluation_period", "sources": [], "status": "missing", "requires": ["vehicle_class", "avoidable_cost_or_declared_allocation", "lease_or_asset_records", "included_components"]},
+    "e1_trip_cost": {"calibrated_value": null, "unit": "CNY/trip", "sources": [], "status": "optional_only_with_disjoint_contract_or_cost_evidence"},
+    "e2_trip_cost": {"calibrated_value": null, "unit": "CNY/trip", "sources": [], "status": "optional_only_with_disjoint_contract_or_cost_evidence"},
+    "cleaning_cost_per_return": {"calibrated_value": null, "unit": "CNY/returned_container_use", "sources": [], "status": "missing", "requires": ["matched_cleaning_process", "labor_and_utilities", "equipment_and_throughput", "nonoverlap_with_lease"]},
+    "tracking_cost_per_use": {"calibrated_value": null, "unit": "CNY/container_issue", "sources": [], "status": "missing", "requires": ["label_and_IT_costs", "scan_labor_boundary", "nonoverlap_with_work_time"]},
+    "distance_scale_to_km": {"calibrated_value": null, "unit": "km/matrix_unit", "sources": [], "status": "must_read_each_case_provenance_not_universal"}
+  },
+  "cost_rules": {
+    "transport": "Use disjoint distance, time, vehicle and evidenced optional trip costs; remove components already inside full-cost tariffs",
+    "pool_cost": "Matched rental per physical container and period OR owned capital holding charge; declare included services",
+    "wear": "Q*P/U under no loss and no calendar aging; constant for fixed Q; rental-included wear must not be counted again",
+    "initial_investment": "N*P reported separately; do not add the same purchase to its full allocated depreciation",
+    "vehicle_count": "Distinct activated physical vehicles, not sum of per-batch counts",
+    "empty_delivery_slot": "Retains fixed recovery cutoff; pure collection trips remain explicit and costed",
+    "derived_parameters": "Every assumption in conversion inputs propagates to the derived coefficient's evidence class"
+  },
+  "legacy_parameters_not_adopted_as_calibrated": {
+    "reference_file": "reference/cost/lade_hangzhou_v2_evidence_20260930.json",
+    "illustrative_vehicle_CNY_per_day": [100, 60],
+    "illustrative_cleaning_CNY_per_return": 0.8,
+    "illustrative_tracking_CNY_per_use": 0.1,
+    "illustrative_maintenance_CNY_per_km": 0.15,
+    "reason": "Existing files explicitly identify these as unmeasured scenario assumptions"
+  },
+  "unresolved": [
+    "Matched container SKU purchase or pool rental evidence",
+    "E1 and E2 actual vehicle and fuel/electricity records",
+    "Avoidable vehicle costs and paid-time attribution",
+    "Cleaning process, delay, cost and throughput",
+    "Physical container lifetime history",
+    "Compatible price year, tax scope and evaluation horizon"
+  ],
+  "experiments_executed": false
+}

@@ -59,6 +59,8 @@ class MultiBatchPolicy:
 
     def require_model(self, model):
         number = integer(model, 'model', 1)
+        if number == 6:
+            return
         if len(self.batches) == 1 and number in (1, 2, 3, 4):
             return
         if len(self.batches) > 1 and number == 5:

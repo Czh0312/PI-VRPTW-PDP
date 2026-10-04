@@ -25,17 +25,22 @@ class Order:
     pickup_window: tuple
     service_time: int
     min_use_time: int = 0
+    release_time: int | None = None
+    allowed_batch_ids: tuple | None = None
 
 
 class MultiBatchInstance:
-    def __init__(self, network, orders, policy, model=None):
+    def __init__(self, network, orders, policy, model=None, *, _physical_source=None):
+        if _physical_source is not None and (
+                not isinstance(_physical_source,MultiBatchInstance) or _physical_source.network is not network):
+            raise ValueError('Physical cache source must be a validated instance of the same network')
         self.network = network
         self.operating_policy = MultiBatchPolicy.from_config(policy)
         if model is None:
             model = 3 if len(self.operating_policy.batches) == 1 else 5
         self.operating_policy.require_model(model)
         self.model_number = int(model)
-        self.reusable = self.model_number in (3, 4, 5)
+        self.reusable = self.model_number in (3, 4, 5, 6)
         self.free_assignment = self.model_number in (2, 4)
         self.task_kinds = ('d', 'p') if self.reusable else ('d',)
         # Direct Python callers can supply an integral float, just as JSON/CSV
@@ -80,10 +85,11 @@ class MultiBatchInstance:
                     integer(t, 'time window')
                 if tw[0] < p.cycle_start or tw[1] > p.cycle_end:
                     raise ValueError(f'{o.id}: time window outside cycle')
-        for a in network.nodes:
-            for b in network.nodes:
-                nonnegative(network.distance(a, b), 'distance')
-                nonnegative(network.travel_time(a, b), 'travel_time')
+        if _physical_source is None:
+            for a in network.nodes:
+                for b in network.nodes:
+                    nonnegative(network.distance(a, b), 'distance')
+                    nonnegative(network.travel_time(a, b), 'travel_time')
         self.total = sum(o.count for o in self.orders)
         self.demands = {(s, b.id): sum(o.count for o in self.orders if o.satellite == s and o.batch == b.id)
                         for s in self.satellites for b in p.batches}
@@ -91,9 +97,15 @@ class MultiBatchInstance:
                                       for o in self.orders if o.satellite == s and o.batch == b.id)
                         for s in self.satellites for b in p.batches}
         self.batch_demands = {b.id: sum(o.count for o in self.orders if o.batch == b.id) for b in p.batches}
-        self._travel = {(a, b): p.ticks(network.travel_time(a, b))
-                        for a in network.nodes for b in network.nodes}
-        self._service_ticks = {}
+        if _physical_source is not None and p.time_tick_seconds==_physical_source.operating_policy.time_tick_seconds:
+            # M6 changes batches, quantities and cutoffs, not the road matrix
+            # or time precision. Reuse validated immutable physical metrics.
+            self._travel = _physical_source._travel
+            self._service_ticks = _physical_source._service_ticks
+        else:
+            self._travel = {(a, b): p.ticks(network.travel_time(a, b))
+                            for a in network.nodes for b in network.nodes}
+            self._service_ticks = {}
 
     def travel(self, a, b):
         return self._travel[a, b]
@@ -116,7 +128,7 @@ class MultiBatchInstance:
         return o, weight, o.count*self.fleet.container_volume
 
 
-def load_orders(path, policy):
+def load_orders(path, policy, *, joint=False):
     path = Path(path)
     if path.suffix == '.json':
         rows = json.loads(path.read_text(encoding='utf-8'))
@@ -133,7 +145,7 @@ def load_orders(path, policy):
             raise ValueError('Each order must be an object')
         if required-row.keys():
             raise ValueError(f'Missing order fields: {sorted(required-set(row))}')
-        extras = set(row)-required-{'pickup_container_count', 'min_use_time'}
+        extras = set(row)-required-{'pickup_container_count', 'min_use_time', 'release_time', 'allowed_batch_ids'}
         if extras:
             raise ValueError(f'Unknown order fields: {sorted(extras)}')
         for key in ('order_id', 'customer_id', 'satellite_id', 'delivery_batch_id'):
@@ -147,11 +159,23 @@ def load_orders(path, policy):
         count = integer(number('container_count'), 'container_count', 1)
         if integer(number('pickup_container_count', count), 'pickup_container_count') != count:
             raise ValueError('UNBALANCED_ORDER_COUNTS: delivery and pickup counts must match')
+        release, allowed = None, None
+        if joint and ('release_time' not in row or 'allowed_batch_ids' not in row):
+            raise ValueError('M6 orders require explicit release_time and allowed_batch_ids')
+        if 'release_time' in row:
+            release = policy.ticks(number('release_time'))
+        if 'allowed_batch_ids' in row:
+            raw = row['allowed_batch_ids']
+            if isinstance(raw, str):
+                raw = json.loads(raw)
+            if not isinstance(raw, list) or any(not isinstance(b, str) or not b for b in raw):
+                raise ValueError('allowed_batch_ids must be a list of batch IDs')
+            allowed = tuple(raw)
         result.append(Order(str(row['order_id']), str(row['customer_id']), str(row['satellite_id']),
                             str(row['delivery_batch_id']), count, number('goods_weight'),
                             (policy.ticks(number('delivery_ready')), policy.ticks(number('delivery_due'), 'floor')),
                             (policy.ticks(number('pickup_ready')), policy.ticks(number('pickup_due'), 'floor')),
-                            policy.ticks(number('service_time')), policy.ticks(number('min_use_time', 0))))
+                            policy.ticks(number('service_time')), policy.ticks(number('min_use_time', 0)), release, allowed))
     return result
 
 
@@ -187,5 +211,14 @@ def load_instance(config, fleet_config):
         raise ValueError('duration_matrix requires distance_matrix')
     network = ProblemInstance(nodes, {k: v for k, v in fleet_config.items() if k != 'operating_policy'},
                               speed=speed, distance_matrix=distance, travel_time_matrix=duration)
-    orders = load_orders(resolve_project_path(config['orders']), policy)
+    orders = load_orders(resolve_project_path(config['orders']), policy, joint=config['model']==6)
+    if config['model']==6:
+        from .joint import JointBatchInstance
+        from .uniform import UniformCycleInstance
+        if not config.get('economic_config'):
+            raise ValueError('M6 requires economic_config')
+        options = config.get('joint_batch_options', {})
+        factory = UniformCycleInstance if options.get('schedule_mode') == 'uniform_cycle' else JointBatchInstance
+        return factory(network, orders, policy, options,
+                                  config['economic_config'])
     return MultiBatchInstance(network, orders, policy, model=config['model'])

@@ -6,7 +6,7 @@ from .route import DEFAULT_CASE
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--case", default=str(DEFAULT_CASE))
-    parser.add_argument("--model", type=int, choices=range(1, 6))
+    parser.add_argument("--model", type=int, choices=range(1, 7))
     parser.add_argument("--route-result", required=True)
     parser.add_argument("--economic-config")
     parser.add_argument("--output")
