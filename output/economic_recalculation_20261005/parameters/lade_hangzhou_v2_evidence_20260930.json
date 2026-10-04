@@ -1,0 +1,156 @@
+{
+  "schema_version": 1,
+  "reviewed_on": "2026-09-30",
+  "scope": "LaDe Hangzhou V2 conditional economic analysis; not empirical profitability validation",
+  "workflow": "ARS scoped source verification, continuous execution; no new field observations",
+  "dataset_manifest": "data/manifest.json",
+  "dataset_manifest_sha256": "253fccbf665e3822859b07c432f8023a53d68c54166c26ec94ea814ef3ba0cae",
+  "profiles": {
+    "single_batch": "config/cost/cases/lade_hangzhou_v2_single_batch.json",
+    "multibatch": "config/cost/cases/lade_hangzhou_v2_multibatch.json"
+  },
+  "price_basis": "Nominal CNY from explicitly dated sources. No inflation adjustment, tax-credit normalization or common-year deflator. This is not a constant-2026-price forecast.",
+  "sources": {
+    "S1": {
+      "title": "顺丰：包装服务—常规包装收费标准",
+      "publisher": "顺丰速运",
+      "url": "https://www.sf-express.com/chn/sc/express/add-service/pkg-normal",
+      "observation_date": "2026-09-30",
+      "source_kind": "primary_vendor_public_tariff",
+      "locator": "纸箱收费标准，F4/F5",
+      "facts": {"F4_CNY": 4, "F4_dimensions_cm": [40, 30, 20], "F5_CNY": 5, "F5_dimensions_cm": [40, 30, 30]},
+      "limits": "Retail packaging-service tariff, not bulk procurement invoice. 24/36 L external geometries bracket the model's assumed 30 L; neither proves an identical SKU. Local availability/prices may vary."
+    },
+    "S2": {
+      "title": "可循环快递包装“最后一公里”如何打通？",
+      "publisher": "新华社",
+      "url": "https://www.news.cn/politics/2022-06/28/c_1128783518.htm",
+      "publication_date": "2022-06-28",
+      "source_kind": "primary_reporting_company_interview",
+      "locator": "中通快递山西管理中心负责人对循环箱的价格和次数举例",
+      "facts": {"container_CNY": 36.5, "illustrative_uses": 50, "purchase_only_CNY_per_use": 0.73},
+      "limits": "Historical company interview; exact 30 L/2 kg SKU unconfirmed. Fifty uses is an illustrative/design reference, not observed average survival. Purchase allocation excludes cleaning, reverse transport and handling."
+    },
+    "S3": {
+      "title": "杭州市2023年企业薪酬调查信息",
+      "publisher": "杭州市人力资源和社会保障部门，浙江政务云公开附件",
+      "url": "https://zjjcmspublic.oss-cn-hangzhou-zwynet-d01-a.internet.cloud.zj.gov.cn/jcms_files/jcms1/web3163/site/attach/0/8de07211fbc54b69b37cb7c62f3ddc47.pdf",
+      "data_year": 2023,
+      "source_kind": "primary_official_sample_survey",
+      "locator": "PDF p.10 中级道路货运汽车驾驶员；p.4 邮政和快递服务人员；p.18-19 工资统计口径",
+      "download_sha256": "c9aa2aad22438d461d546b838ecbdcc59abc34c2fab1b1640a26cd979a6f85a1",
+      "facts": {
+        "driver_intermediate_annual_CNY_p25_p50_p75": [86299, 103002, 114030],
+        "postal_courier_annual_CNY_p25_p50_p75": [55009, 70606, 128650]
+      },
+      "limits": "Occupational wage statistics, not this operator's payroll. Includes bonuses/allowances/overtime. The conversion to productive minutes and employer-cost multiplier below are assumptions, not prescribed rates."
+    },
+    "S4": {
+      "title": "中国商用车电动化发展研究报告",
+      "publisher": "能源与交通创新中心（iCET）",
+      "url": "https://www.icet.org.cn/admin/upload/2021081652142545.pdf",
+      "publication_date": "2021-07",
+      "source_kind": "primary_research_report_model_inputs",
+      "locator": "附表2，印刷p.79/PDF p.82",
+      "download_sha256": "8e6a4a6a98ccd26ea3792f19db21605c604101eeaafbca5462dbcb2bbe77d140",
+      "facts": {"light_truck_2019_L_per_100km": 8.9, "medium_truck_2019_L_per_100km": 20.2, "light_truck_2025_forecast_L_per_100km": 8.2, "medium_truck_2025_forecast_L_per_100km": 18.6},
+      "limits": "Class-average research input, not matched-fleet fuel logs. 2019 is the report's historical baseline; do not relabel it as Hangzhou telemetry. 2025 entries are forecasts. Both layers use a light-diesel proxy pending actual vehicle identification; E2 might instead be electric."
+    },
+    "S5": {
+      "title": "浙江省丽水市2026年5月份成品油市场运行情况",
+      "publisher": "丽水市商务局／商务部浙江商务预报",
+      "url": "https://cif.mofcom.gov.cn/newsite/html/zhejiangsheng/html/1086127/2026/6/15/1781515022016.html",
+      "publication_date": "2026-06-15",
+      "effective_date": "2026-05-21 24:00",
+      "source_kind": "primary_official_market_report",
+      "locator": "零售方面：0#柴油（VI）",
+      "facts": {"diesel_CNY_per_liter": 8.45, "diesel_CNY_per_tonne": 9870},
+      "limits": "Dated Zhejiang-city retail reference, not current Hangzhou transaction price or annual average. Chosen because the primary source explicitly provides CNY/L."
+    },
+    "S6": {
+      "title": "2026年9月24日国家继续实施调控，成品油价格适当调整",
+      "publisher": "国家发展和改革委员会",
+      "url": "https://www.ndrc.gov.cn/xwdt/xwfb/202609/t20260924_1407824.html",
+      "attachment_url": "https://www.ndrc.gov.cn/xwdt/xwfb/202609/W020260924535183752075_r75.jpg",
+      "effective_date": "2026-09-24 24:00",
+      "source_kind": "primary_official_price_notice",
+      "locator": "附件，浙江省，柴油（标准品），单位元/吨",
+      "attachment_sha256": "24029c46dd584d9608d9cd92f5ef5c6a2c0deb9335e3c202cfacd060b097831f",
+      "facts": {"zhejiang_diesel_max_retail_CNY_per_tonne": 9675},
+      "limits": "Newest verified official mass price in this search. Not inserted into the CNY/L field; no undocumented tonne-to-liter conversion. Base S5 is deliberately dated, not presented as the latest price."
+    },
+    "S7": {
+      "title": "可循环快递包装规模化应用研究",
+      "publisher": "摆脱塑缚、广东省循环经济和资源综合利用协会",
+      "url": "https://plasticfreechn.org.cn/upload/ueditor/20231121/202311211538169465.pdf",
+      "publication_year": 2023,
+      "source_kind": "secondary_trial_summary_in_research_report",
+      "locator": "PDF p.45，表2-5/2-6及脚注",
+      "download_sha256": "65e44faefcd0dfffddba57ab5b4e013467ee56f67d24461a0f9d23ae1e87415f",
+      "facts": {"reported_turnaround_days": 5.63, "reported_return_fraction": 0.949, "issues": 12331, "returns": 11706, "zhejiang_trial_uses_range": [10, 50], "zhejiang_trial_return_fraction_range": [0.95, 0.999], "reported_circulation_CNY_range": [1, 3]},
+      "limits": "Original draft-standard trial files were not obtained. Secondary evidence only, outside the current AOI/day closed-loop scenario. Nonreturn at a reporting cutoff is not established permanent loss. The report itself cautions that 1–3 CNY is likely box purchase allocation, not cleaning or total circulation cost. Excluded from executable baseline."
+    }
+  },
+  "inputs": {
+    "diesel_CNY_per_liter": {"value": 8.45, "unit": "CNY/L", "evidence_type": "dated_public_reference", "sources": ["S5"]},
+    "e1_fuel_L_per_100km": {"value": 8.9, "unit": "L/100km", "evidence_type": "cross_fleet_proxy", "sources": ["S4"]},
+    "e2_fuel_L_per_100km": {"value": 8.9, "unit": "L/100km", "evidence_type": "cross_fleet_proxy", "sources": ["S4"]},
+    "e1_maintenance_CNY_per_km": {"value": 0.15, "unit": "CNY/km", "evidence_type": "unmeasured_scenario_assumption", "sources": []},
+    "e2_maintenance_CNY_per_km": {"value": 0.15, "unit": "CNY/km", "evidence_type": "unmeasured_scenario_assumption", "sources": []},
+    "e1_annual_wage_CNY": {"value": 103002, "unit": "CNY/person/year", "evidence_type": "local_occupation_proxy", "sources": ["S3"]},
+    "e2_annual_wage_CNY": {"value": 70606, "unit": "CNY/person/year", "evidence_type": "local_occupation_proxy", "sources": ["S3"]},
+    "productive_days_per_year": {"value": 250, "unit": "days/year", "evidence_type": "conversion_assumption", "sources": []},
+    "productive_hours_per_day": {"value": 8, "unit": "hours/day", "evidence_type": "conversion_assumption", "sources": []},
+    "employer_cost_multiplier": {"value": 1.25, "unit": "ratio", "evidence_type": "conversion_assumption_not_statutory_rate", "sources": []}
+  },
+  "parameter_register": {
+    "distance_scale_to_km": {"value": 1, "unit": "km/matrix_unit", "evidence_type": "local_dataset_metadata", "sources": [], "note": "LaDe V2 provenance distance_unit=km; does not apply to Zhou coordinates."},
+    "e1_distance_cost_per_km": {"value": 0.90205, "unit": "CNY/km", "evidence_type": "derived_proxy_plus_assumption", "sources": ["S4", "S5"], "formula": "8.45 * 8.9 / 100 + 0.15", "note": "Fuel and maintenance only. No wage, depreciation, insurance, toll or rent here."},
+    "e2_distance_cost_per_km": {"value": 0.90205, "unit": "CNY/km", "evidence_type": "derived_proxy_plus_assumption", "sources": ["S4", "S5"], "formula": "8.45 * 8.9 / 100 + 0.15", "note": "Same class-average fuel proxy as E1; not evidence of identical measured consumption."},
+    "e1_work_cost_per_minute": {"value": 1.0729375, "unit": "CNY/person/minute", "evidence_type": "derived_local_wage_plus_assumption", "sources": ["S3"], "formula": "103002 * 1.25 / (250 * 8 * 60)"},
+    "e2_work_cost_per_minute": {"value": 0.7354791666666667, "unit": "CNY/person/minute", "evidence_type": "derived_local_wage_plus_assumption", "sources": ["S3"], "formula": "70606 * 1.25 / (250 * 8 * 60)"},
+    "e1_vehicle_cost_per_cycle": {"value": 100, "unit": "CNY/used_vehicle/day", "evidence_type": "unmeasured_scenario_assumption", "sources": [], "note": "Illustrative non-labor fixed vehicle allocation; includes assumed depreciation/insurance, excludes fuel/maintenance. Not a rental quote."},
+    "e2_vehicle_cost_per_cycle": {"value": 60, "unit": "CNY/used_vehicle/day", "evidence_type": "unmeasured_scenario_assumption", "sources": [], "note": "Same boundary as E1; amount is uncalibrated."},
+    "container_price": {"value": 36.5, "unit": "CNY/container", "evidence_type": "historical_price_proxy", "sources": ["S2"]},
+    "single_use_package_price": {"value": 4, "unit": "CNY/delivery", "evidence_type": "retail_price_proxy", "sources": ["S1"], "note": "F4 reference, not a matched-volume procurement price; 1-3 CNY stress cases have no verified matching procurement source."},
+    "cleaning_cost_per_return": {"value": 0.8, "unit": "CNY/returned_container", "evidence_type": "unmeasured_scenario_assumption", "sources": [], "note": "Retained scenario allowance for warehouse sorting/cleaning, with warehouse labor included. Do not add warehouse wages again."},
+    "tracking_cost_per_use": {"value": 0.1, "unit": "CNY/container_issue", "evidence_type": "unmeasured_scenario_assumption", "sources": [], "note": "Assumed non-labor IT/label allocation only; driver scan labor must not be counted twice with trip work time."},
+    "single_use_disposal_cost_per_package": {"value": 0, "unit": "CNY/delivery", "evidence_type": "boundary_assumption", "sources": [], "note": "No extra operator payment or resale credit claimed without an invoice. Zero is not a claim of zero social/environmental disposal cost."},
+    "pool_lifetime_cycles": {"value": 50, "unit": "operating_cycles", "evidence_type": "B1_conditional_lifetime_scenario", "sources": ["S2"], "note": "Whole-pool replacement every 50 repeated B1 cycles. Equivalent to 50 issues per box only when N=Q. Never copy to M5 as a 50-day physical lifetime."},
+    "container_lifetime_uses": {"value": 50, "unit": "issues/container", "evidence_type": "illustrative_design_lifetime_scenario", "sources": ["S2"], "note": "M5 wear allocation = issued * price / uses; no random losses, aging or replacement cash scheduling."},
+    "evaluation_cycles": {"value": 300, "unit": "operating_cycles", "evidence_type": "analysis_horizon_assumption", "sources": [], "note": "Repeated-demand scenario; not 300 observed days and not the annual wage conversion denominator."}
+  },
+  "sensitivity": {
+    "interpretation": "Scenario grids, not confidence intervals or empirical distributions. Only B1 packaging-price and lifetime grids are automatically swept by run_single_batch_comparison.py. Other grids require regenerated profiles and explicit runs.",
+    "single_use_package_price_CNY": [1, 2, 3, 4, 5],
+    "container_price_CNY": [25, 36.5, 50, 60],
+    "container_lifetime_uses": [10, 20, 30, 50],
+    "cleaning_CNY_per_return": [0.3, 0.8, 1.5],
+    "tracking_nonlabor_CNY_per_use": [0, 0.1, 0.3],
+    "disposal_operator_CNY_per_delivery": [0, 0.1, 0.3],
+    "diesel_CNY_per_liter": [7, 8.45, 9],
+    "fuel_L_per_100km": [6, 8.9, 12],
+    "maintenance_CNY_per_km": [0, 0.15, 0.3],
+    "productive_hours_per_year": [1800, 2000, 2400],
+    "employer_cost_multiplier": [1, 1.25, 1.5],
+    "e1_fixed_CNY_per_used_vehicle_day": [0, 50, 100, 150],
+    "e2_fixed_CNY_per_used_vehicle_day": [0, 30, 60, 100],
+    "e1_annual_wage_CNY": [86299, 103002, 114030],
+    "e2_annual_wage_CNY": [55009, 70606, 128650]
+  },
+  "excluded_external_calibration": {
+    "source": "S7",
+    "turnaround_days": 5.63,
+    "return_fraction": 0.949,
+    "exclusion_reason": "Cross-day consumer-return trial summary, not the modeled same-day transport-box service. Original trial documentation and observation horizon unverified. Requires a different inventory/late-return/loss model; do not insert 0.051 as permanent per-use loss.",
+    "legacy_loss_rate_0_03": "Unverified assumption; not a live field of the current full-return model."
+  },
+  "unresolved_measurements": [
+    "Matched-SKU container and carton procurement invoice; container tare/usable volume and parcel packing ratio",
+    "Actual E1/E2 vehicle model, fuel/energy logs, lease/depreciation/insurance, and route tolls",
+    "Employer payroll burden, paid shift time and inter-trip idle-time attribution",
+    "Warehouse cleaning throughput, delay, utilities, labor and equipment cost",
+    "Per-container use history, late-return distribution, permanent loss and retirement causes",
+    "Verified depot/satellite locations and original LaDe raw-file availability"
+  ]
+}

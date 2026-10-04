@@ -38,3 +38,8 @@ python experiments/analysis/recalculate_economics.py `
 输出含逐次成本、单批配对、300 周期现金表、纸箱价格×寿命网格、
 清洗/箱价/柴油/雇主人工乘数的单因素敏感性、多批费用及 SHA256 核验。
 同种子公平配对，不选择经济上最有利的种子。全部数值仅对这些路线和声明参数成立。
+
+Git 存档保留 `lade_runs/source_snapshot/` 的共享冻结源码，以及全部逐次结果、输入、日志和 manifest。
+378 次运行的 68,040 个源码引用均已核验与共享快照一致；重复源码副本仅在本地保留。
+使用 `python tools/data/restore_benchmark_sources.py --study output/economic_recalculation_20261005/lade_runs`
+可再次核验哈希，追加 `--restore` 可恢复逐次源码副本。
