@@ -1,0 +1,27 @@
+--- before/construction.py
+
++++ after/construction.py
+
+@@ -8,9 +8,19 @@
+
+     A projected state is only a proposal: new inbound quantities can make old
+     routes infeasible, so the fixed solver must decode and audit it afresh.
+     """
++    from .neighborhoods import state_from_result
++    return repair_assignment_state(problem, state_from_result(problem, result), deadline)
++
++
++def repair_assignment_state(problem, original, deadline):
++    """Project complete search tasks, even when the current schedule is infeasible.
++
++    Work from the search state rather than a partial decoder result. Customer
++    reassignment must preserve every order and both delivery/pickup tasks.
++    """
+     from .evaluator import _e1_trip, route_distance
+-    from .neighborhoods import state_from_result, repair_orders
+-    state = state_from_result(problem, result)
++    from .neighborhoods import clone_state, repair_orders
++    state = clone_state(original)
+     moved = {oid for route in state['e2'] for oid, _ in route['tasks']
+              if problem.order_map[oid].satellite != route['satellite']}
+     for batch in problem.operating_policy.batches:

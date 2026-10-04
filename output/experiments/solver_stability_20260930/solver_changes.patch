@@ -1,0 +1,802 @@
+--- before/models/routing/common/cycle/instance.py
++++ after/models/routing/common/cycle/instance.py
+@@ -93,6 +93,7 @@
+         self.batch_demands = {b.id: sum(o.count for o in self.orders if o.batch == b.id) for b in p.batches}
+         self._travel = {(a, b): p.ticks(network.travel_time(a, b))
+                         for a in network.nodes for b in network.nodes}
++        self._service_ticks = {}
+ 
+     def travel(self, a, b):
+         return self._travel[a, b]
+@@ -101,7 +102,11 @@
+         return self.network.distance(a, b)
+ 
+     def service(self, satellite):
+-        return self.operating_policy.ticks(self.network.nodes[satellite].service_time)
++        raw = self.network.nodes[satellite].service_time
++        key = (type(raw), raw, self.operating_policy.time_tick_seconds)
++        if key not in self._service_ticks:
++            self._service_ticks[key] = self.operating_policy.ticks(raw)
++        return self._service_ticks[key]
+ 
+     def task(self, order_id, kind):
+         o = self.order_map[order_id]
+--- before/models/routing/common/cycle/precheck.py
++++ after/models/routing/common/cycle/precheck.py
+@@ -27,15 +27,21 @@
+     return distances
+ 
+ 
+-def check_necessary_conditions(problem):
++def travel_lower_bounds(problem):
++    """A per-solve context: assignments share travel, but later solves may edit it."""
++    return dict(outward={s: _shortest_times(problem, s) for s in (problem.depot,) + problem.satellites},
++                inward={s: _shortest_times(problem, s, reverse=True) for s in problem.satellites})
++
++
++def check_necessary_conditions(problem, travel_bounds=None):
+     p, f = problem.operating_policy, problem.fleet
+     errors, order_bounds = [], []
+ 
+     def fail(code, **details):
+         errors.append(dict(code=code, **details))
+ 
+-    outward = {s: _shortest_times(problem, s) for s in (problem.depot,) + problem.satellites}
+-    inward = {s: _shortest_times(problem, s, reverse=True) for s in problem.satellites}
++    travel_bounds = travel_bounds or travel_lower_bounds(problem)
++    outward, inward = travel_bounds['outward'], travel_bounds['inward']
+     for batch in p.batches:
+         total_weight = total_volume = 0
+         for satellite in problem.satellites:
+--- before/models/routing/solvers/alns/assignment.py
++++ after/models/routing/solvers/alns/assignment.py
+@@ -6,6 +6,8 @@
+ 
+ from models.routing.common.cycle.assignment import assigned_problem, input_assignment, lift_result
+ from models.routing.common.cycle.state import empty_result
++from models.routing.common.cycle.precheck import travel_lower_bounds
++from .construction import reassigned_state
+ 
+ 
+ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42):
+@@ -13,11 +15,13 @@
+         raise ValueError('Invalid assignment-search budget')
+     from .solver import solve_alns as solve_fixed
+     start, rng = time.perf_counter(), random.Random(seed)
++    travel_bounds = travel_lower_bounds(problem)
+     current = input_assignment(problem)
+     customers = sorted(current)
+     nearest = {c: min(problem.satellites, key=lambda s: problem.distance(s, c)) for c in customers}
+     best, best_cost, attempts, iterations = None, math.inf, 0, 0
+-    incumbents, reused = OrderedDict(), 0
++    incumbents, reused, projected = OrderedDict(), 0, 0
++    first_feasible = last_improvement = None
+     while time.perf_counter()-start < max_time:
+         if attempts and (iterations >= max_iterations or not customers):
+             break
+@@ -25,6 +29,10 @@
+             candidate = dict(current)
+         elif attempts == 1:
+             candidate = nearest
++        elif attempts % 3 == 0 and best is not None:
++            # Periodically deepen the incumbent partition instead of spending
++            # the whole budget on many shallow, cold assignment attempts.
++            candidate = dict(current)
+         else:
+             candidate = dict(current)
+             if len(customers) > 1 and rng.random() < .3:
+@@ -32,17 +40,28 @@
+                 candidate[a], candidate[b] = candidate[b], candidate[a]
+             else:
+                 customer = rng.choice(customers)
+-                candidate[customer] = rng.choice(problem.satellites)
++                sites = [s for s in problem.satellites if s != candidate[customer]]
++                if sites:
++                    candidate[customer] = rng.choice(sites)
+         fixed = assigned_problem(problem, candidate)
+         remaining = max_time-(time.perf_counter()-start)
+         if remaining <= 0:
+             break
+-        iteration_budget = min(max_iterations-iterations, max(1, max_iterations//10)) if max_iterations else 0
++        share = .4 if attempts == 0 and len(customers) > 8 else .1
++        iteration_budget = min(max_iterations-iterations, max(1, int(max_iterations*share))) if max_iterations else 0
+         key = tuple(sorted(candidate.items()))
+         warm = incumbents.get(key)
++        seed_state = None
++        if warm is None and best is not None:
++            seed_state = reassigned_state(fixed, best, min(start+max_time, time.perf_counter()+max_time/20))
++            projected += int(seed_state is not None)
++        remaining = max_time-(time.perf_counter()-start)
++        if remaining <= 0:
++            break
+         reused += int(warm is not None)
+-        solved = solve_fixed(fixed, max_time=min(remaining, max(.01, max_time/10)),
+-                             max_iterations=iteration_budget, seed=seed+attempts, initial_result=warm)
++        solved = solve_fixed(fixed, max_time=min(remaining, max(.01, max_time*share)),
++                             max_iterations=iteration_budget, seed=seed+attempts, initial_result=warm,
++                             seed_state=seed_state, _travel_bounds=travel_bounds)
+         attempts += 1
+         used = solved['info'].get('iterations', 0)
+         # A precheck-rejected partition still consumes a proposal budget.
+@@ -55,10 +74,16 @@
+             lifted = lift_result(problem, solved, candidate)
+             if lifted['audit']['valid'] and solved['info']['objective'] < best_cost:
+                 best, best_cost, current = lifted, solved['info']['objective'], dict(candidate)
++                last_improvement = time.perf_counter()-start
++                if first_feasible is None:
++                    first_feasible = last_improvement
+     result = best if best is not None else empty_result(problem, 'alns')
+     result['info'].update(status='FEASIBLE' if best else 'HEURISTIC_NO_SOLUTION', proven_optimal=False,
+                           proven_infeasible=False, best_bound=None, mip_gap=None, proof_scope=None,
+                           algorithm='customer_assignment_search_with_cycle_alns',
+                           runtime=time.perf_counter()-start, seed=seed, iterations=iterations,
+-                          assignment_attempts=attempts, assignment_warm_starts=reused)
++                          assignment_attempts=attempts, assignment_warm_starts=reused,
++                          assignment_route_projections=projected,
++                          time_to_first_feasible=first_feasible, time_to_best=last_improvement,
++                          assignment_budget_policy='initial_40pct_then_project_and_refine')
+     return result
+--- before/models/routing/solvers/alns/construction.py
++++ after/models/routing/solvers/alns/construction.py
+@@ -1,5 +1,36 @@
+ """Alternative starting schedule for orders spread across a long static cycle."""
+ from .evaluator import initial_state
++
++
++def reassigned_state(problem, result, deadline):
++    """Keep unaffected routes when customer ownership changes, then repair.
++
++    A projected state is only a proposal: new inbound quantities can make old
++    routes infeasible, so the fixed solver must decode and audit it afresh.
++    """
++    from .evaluator import _e1_trip, route_distance
++    from .neighborhoods import state_from_result, repair_orders
++    state = state_from_result(problem, result)
++    moved = {oid for route in state['e2'] for oid, _ in route['tasks']
++             if problem.order_map[oid].satellite != route['satellite']}
++    for batch in problem.operating_policy.batches:
++        rows = state['deliveries'][batch.id]
++        for row in rows:
++            row[:] = [s for s in row if problem.demands[s, batch.id]]
++        existing = {s for row in rows for s in row}
++        for site in problem.satellites:
++            if not problem.demands[site, batch.id] or site in existing:
++                continue
++            choices = []
++            for vehicle, row in enumerate(rows):
++                for pos in range(len(row)+1):
++                    candidate = row[:pos]+[site]+row[pos:]
++                    trip, issues = _e1_trip(problem, batch, vehicle, candidate, [], {},
++                                            problem.operating_policy.cycle_start)
++                    choices.append((len(issues), route_distance(problem, trip, 'e1'), vehicle, pos))
++            _, _, vehicle, pos = min(choices)
++            rows[vehicle].insert(pos, site)
++    return repair_orders(problem, state, [problem.order_map[oid] for oid in sorted(moved)], deadline)
+ 
+ 
+ def chronological_state(problem, rng):
+--- before/models/routing/solvers/alns/neighborhoods.py
++++ after/models/routing/solvers/alns/neighborhoods.py
+@@ -99,7 +99,6 @@
+ def destroy_repair(problem, original, rng, mode, deadline):
+     if not problem.orders:
+         return clone_state(original)
+-    state = clone_state(original)
+     orders = list(problem.orders)
+     count = min(len(orders), max(2, min(5, len(orders)//5)))
+     if mode == 'related':
+@@ -110,6 +109,18 @@
+         removed = orders[:count]
+     else:
+         removed = rng.sample(orders, count)
++    repaired = repair_orders(problem, original, removed, deadline)
++    return repaired if repaired is not None else clone_state(original)
++
++
++def repair_orders(problem, original, removed, deadline, *, screen=True):
++    """Reinsert complete requests; interruption never exposes a partial state.
++
++    The distance-only bound safely screens this *local ranking score* because
++    all its time/capacity penalties are nonnegative, including nonmetric arcs.
++    It does not screen the global feasible set or certify infeasibility.
++    """
++    state = clone_state(original)
+     ids = {o.id for o in removed}
+     for route in state['e2']:
+         route['tasks'] = [t for t in route['tasks'] if t[0] not in ids]
+@@ -122,16 +133,18 @@
+              for o in sorted(removed, key=lambda o: (o.delivery_window if kind == 'd' else o.pickup_window)[1])]
+     for task in tasks:
+         if time.perf_counter() >= deadline:
+-            return clone_state(original)
++            return None
+         oid, kind = task
+         order, routes = problem.order_map[oid], state['e2']
+-        ready, before, scores = {}, {}, {}
++        ready, before, scores, distances = {}, {}, {}, {}
+         counts = Counter((r['satellite'], r['vehicle']) for r in routes)
+         for index, route in enumerate(routes):
+             key = route['satellite'], route['vehicle']
+             before[index] = ready.get(key, p.cycle_start)
+             scores[index], end = _route_score(problem, route, goods, before[index])
+             ready[key] = end+p.e2_turnaround_time
++            locations = [route['satellite']]+[problem.order_map[o].customer for o, _ in route['tasks']]+[route['satellite']]
++            distances[index] = sum(problem.distance(a, b) for a, b in zip(locations, locations[1:]))
+         best = None
+         for index, route in enumerate(routes):
+             if route['satellite'] != order.satellite:
+@@ -141,11 +154,19 @@
+                 continue
+             for pos in range(len(existing)+1):
+                 if time.perf_counter() >= deadline:
+-                    return clone_state(original)
++                    return None
+                 if kind == 'd' and (oid, 'p') in existing[:pos]:
+                     continue
+                 if kind == 'p' and (oid, 'd') in existing[pos:]:
+                     continue
++                if screen and best is not None:
++                    left = route['satellite'] if pos == 0 else problem.order_map[existing[pos-1][0]].customer
++                    right = route['satellite'] if pos == len(existing) else problem.order_map[existing[pos][0]].customer
++                    bound = (distances[index]+problem.distance(left, order.customer)
++                             +problem.distance(order.customer, right)-problem.distance(left, right)-scores[index])
++                    tolerance = 1e-9*max(1, abs(bound), abs(best[0]), abs(scores[index]))
++                    if bound > best[0]+tolerance:
++                        continue
+                 candidate = {**route, 'tasks': existing[:pos]+[task]+existing[pos:]}
+                 score, _ = _route_score(problem, candidate, goods, before[index])
+                 option = (score-scores[index], index, candidate, False)
+@@ -165,7 +186,7 @@
+             if best is None or score < best[0]:
+                 best = (score, pos, candidate, True)
+         if best is None:
+-            return clone_state(original)
++            return None
+         _, index, candidate, new_route = best
+         if new_route:
+             routes.insert(index, candidate)
+--- before/models/routing/solvers/alns/solver.py
++++ after/models/routing/solvers/alns/solver.py
+@@ -9,7 +9,7 @@
+ from models.routing.common.cycle.state import empty_result
+ from .evaluator import initial_state, evaluate
+ from models.routing.common.cycle.audit import audit_solution
+-from models.routing.common.cycle.precheck import check_necessary_conditions, rejected_result
++from models.routing.common.cycle.precheck import check_necessary_conditions, rejected_result, travel_lower_bounds
+ from .construction import chronological_state
+ from .neighborhoods import EvaluationCache, clone_state, destroy_repair, state_key, state_from_result
+ 
+@@ -84,11 +84,12 @@
+     return state
+ 
+ 
+-def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_result=None):
++def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_result=None,
++               seed_state=None, _travel_bounds=None):
+     if not math.isfinite(max_time) or max_time <= 0 or max_iterations < 0:
+         raise ValueError('Invalid ALNS time/iteration budget')
+     begun = time.perf_counter()
+-    precheck = check_necessary_conditions(problem)
++    precheck = check_necessary_conditions(problem, _travel_bounds or travel_lower_bounds(problem))
+     if not precheck['passed']:
+         return rejected_result(problem, 'alns', precheck, time.perf_counter()-begun)
+     rng = random.Random(seed)
+@@ -103,6 +104,11 @@
+             current, score, decoded, issues = alternative, alt_score, alt_result, alt_issues
+             initial_strategy = 'chronological_paired_trips'
+     best, best_cost = None, math.inf
++    if seed_state is not None:
++        alt_score, alt_result, alt_issues = cached(seed_state)
++        if alt_score < score:
++            current, score, decoded, issues = seed_state, alt_score, alt_result, alt_issues
++            initial_strategy = 'repaired_assignment_routes'
+     if initial_result is not None and audit_solution(problem, initial_result)['valid']:
+         best, best_cost = deepcopy(initial_result), initial_result['info']['objective']
+         alternative = state_from_result(problem, initial_result)
+@@ -114,6 +120,8 @@
+         audited = audit_solution(problem, decoded)
+         if audited['valid'] and decoded['info']['objective'] < best_cost:
+             best, best_cost = decoded, decoded['info']['objective']
++    first_feasible = time.perf_counter()-begun if best is not None else None
++    last_improvement = first_feasible
+     operators = ['relocate', 'split_merge', 'vehicle', 'e1_delivery', 'reverse', 'destroy_random', 'destroy_related']
+     if problem.reusable:
+         operators += ['pair', 'e1_pickup']
+@@ -148,6 +156,9 @@
+             audited = audit_solution(problem, candidate)
+             if audited['valid']:
+                 best, best_cost = candidate, candidate['info']['objective']
++                last_improvement = time.perf_counter()-begun
++                if first_feasible is None:
++                    first_feasible = last_improvement
+                 reward = 8
+                 improved[op] += 1
+             else:
+@@ -170,6 +181,7 @@
+                           proven_optimal=False, proof_scope=None, best_bound=None, mip_gap=None,
+                           runtime=time.perf_counter()-begun, seed=seed, iterations=iterations,
+                           initial_strategy=initial_strategy,
++                          time_to_first_feasible=first_feasible, time_to_best=last_improvement,
+                           algorithm='adaptive_destroy_repair_cycle_search', cooling_schedule='max_time_and_iteration_progress',
+                           evaluation_cache_hits=cached.hits, evaluation_cache_misses=cached.misses,
+                           operator_noops=noops,
+--- before/models/routing/solvers/exact/assignment.py
++++ after/models/routing/solvers/exact/assignment.py
+@@ -7,6 +7,7 @@
+ from models.routing.common.cycle.assignment import assigned_problem, input_assignment, lift_result
+ from models.routing.common.cycle.state import empty_result
+ from .bounds import distance_lower_bound
++from models.routing.common.cycle.precheck import travel_lower_bounds
+ 
+ 
+ def _assignment_stream(problem):
+@@ -28,6 +29,7 @@
+         raise ValueError('time_limit must be finite and positive')
+     from .solver import solve_exact as solve_fixed
+     start = time.perf_counter()
++    travel_bounds = travel_lower_bounds(problem)
+     total = len(problem.satellites)**len({o.customer for o in problem.orders})
+     best, best_cost, records = None, math.inf, []
+     incumbents = OrderedDict()
+@@ -36,7 +38,7 @@
+         nonlocal best, best_cost
+         key = tuple(sorted(assignment.items()))
+         solved = solve_fixed(fixed, time_limit=budget, seed=seed, verbose=verbose,
+-                             initial_result=incumbents.get(key))
++                             initial_result=incumbents.get(key), _travel_bounds=travel_bounds)
+         info = solved['info']
+         valid = bool(solved.get('audit', {}).get('valid'))
+         if valid:
+--- before/models/routing/solvers/exact/formulation.py
++++ after/models/routing/solvers/exact/formulation.py
+@@ -4,18 +4,20 @@
+ import time
+ 
+ 
+-def build_model(problem, *, verbose=False, deadline=None):
++def build_model(problem, *, verbose=False, deadline=None, share_e2=True, travel_bounds=None):
+     import gurobipy as gp
+     from gurobipy import GRB
+     p, f = problem.operating_policy, problem.fleet
+     single = len(p.batches) == 1
++    compact = single and share_e2
+     windows = {}
+     if single:
+-        from models.routing.common.cycle.precheck import _shortest_times
+-        outward = _shortest_times(problem, problem.depot)
++        from models.routing.common.cycle.precheck import travel_lower_bounds
++        travel_bounds = travel_bounds or travel_lower_bounds(problem)
++        outward = travel_bounds['outward'][problem.depot]
+         for s in problem.satellites:
+-            travel_out = _shortest_times(problem, s)
+-            travel_in = _shortest_times(problem, s, reverse=True)
++            travel_out = travel_bounds['outward'][s]
++            travel_in = travel_bounds['inward'][s]
+             supplied = p.batches[0].start+p.e1_load_time+outward[s]+problem.service(s)+p.e2_dispatch_prep_time
+             for o in problem.orders:
+                 if o.satellite != s:
+@@ -35,6 +37,12 @@
+                   for (s, bid), n in problem.demands.items() for b in p.batches if bid == b.id and n}
+     order_times = {(o.id, k): m.addVar(vtype=GRB.INTEGER, ub=H, name=f'{o.id}_{k}')
+                    for o in problem.orders for k in problem.task_kinds}
++    # Each task is visited exactly once across all vehicles and trip slots.
++    # Its time and post-service load therefore have one well-defined value.
++    # Keep route-indexed boundary arcs, but share internal propagation once.
++    task_load_w = {key: m.addVar(ub=f.e2_weight_cap) for key in order_times} if compact else {}
++    task_load_v = {key: m.addVar(ub=f.e2_volume_cap) for key in order_times} if compact else {}
++    shared_arcs = {}
+     causal_limit = max(10, 4*len(problem.orders)+4*len(problem.satellites)*f.e2_per_sat_count*p.e2_max_trips_per_vehicle)
+     order_steps = {(o.id, k): m.addVar(ub=causal_limit) for o in problem.orders for k in problem.task_kinds}
+ 
+@@ -51,11 +59,16 @@
+         start = m.addVar(vtype=GRB.INTEGER, ub=H, name=label+'_start')
+         end = m.addVar(vtype=GRB.INTEGER, ub=H, name=label+'_end')
+         visit = m.addVars(count, vtype=GRB.BINARY, name=label+'_visit')
+-        times = m.addVars(count, vtype=GRB.INTEGER, ub=H, name=label+'_time')
++        shared = compact and layer == 'e2'
++        keys = [(n['order'].id, n['kind']) for n in nodes] if shared else []
++        times = ({i: order_times[key] for i, key in enumerate(keys)} if shared else
++                 m.addVars(count, vtype=GRB.INTEGER, ub=H, name=label+'_time'))
+         # E2 already has strictly increasing global causal steps below.
+         rank = m.addVars(count, lb=0, ub=max(1, count), name=label+'_rank') if layer == 'e1' else None
+-        load_w = m.addVars(count, ub=cap_w, name=label+'_weight')
+-        load_v = m.addVars(count, ub=cap_v, name=label+'_volume')
++        load_w = ({i: task_load_w[key] for i, key in enumerate(keys)} if shared else
++                  m.addVars(count, ub=cap_w, name=label+'_weight'))
++        load_v = ({i: task_load_v[key] for i, key in enumerate(keys)} if shared else
++                  m.addVars(count, ub=cap_v, name=label+'_volume'))
+         # -1 = source, -2 = sink. There is no empty source-to-sink route.
+         end_limit = min(H-p.e1_turnaround_time, batch.end) if layer == 'e1' else H-p.e2_turnaround_time
+         arcs = [(-1, j) for j in range(count)
+@@ -94,12 +107,14 @@
+             m.addConstr(gp.quicksum(incoming[i]) == visit[i])
+             m.addConstr(gp.quicksum(outgoing[i]) == visit[i])
+             m.addConstr(visit[i] <= used)
+-            m.addConstr(times[i] <= H*visit[i])
++            if not shared:
++                m.addConstr(times[i] <= H*visit[i])
+             if n['kind'] == 'p' and layer == 'e1' and not single:
+                 m.addConstr(n['quantity'] <= total*visit[i])
+                 m.addConstr(n['quantity'] >= visit[i])
+-            m.addConstr((visit[i] == 1) >> (times[i] >= n['window'][0]))
+-            m.addConstr((visit[i] == 1) >> (times[i] <= n['window'][1]))
++            if not shared:
++                m.addConstr((visit[i] == 1) >> (times[i] >= n['window'][0]))
++                m.addConstr((visit[i] == 1) >> (times[i] <= n['window'][1]))
+         for arc_index, (a, b) in enumerate(arcs):
+             if arc_index % 64 == 0:
+                 check_budget()
+@@ -116,6 +131,9 @@
+             elif b == -2:
+                 m.addConstr((x[a, b] == 1) >> (end >= times[a]+nodes[a]['service']+problem.travel(left, right)+unload))
+             else:
++                if shared:
++                    shared_arcs.setdefault((keys[a], keys[b]), []).append(x[a, b])
++                    continue
+                 m.addConstr((x[a, b] == 1) >> (times[b] >= times[a]+nodes[a]['service']+problem.travel(left, right)))
+                 if rank is not None:
+                     m.addConstr((x[a, b] == 1) >> (rank[b] >= rank[a]+1))
+@@ -227,7 +245,8 @@
+                     m.addConstr(selects[b] <= gp.quicksum(dvis))
+                 for i, n in enumerate(nodes):
+                     o = n['order']
+-                    m.addConstr((r['visit'][i] == 1) >> (order_times[o.id, n['kind']] == r['times'][i]))
++                    if not compact:
++                        m.addConstr((r['visit'][i] == 1) >> (order_times[o.id, n['kind']] == r['times'][i]))
+                     if n['kind'] == 'd':
+                         m.addConstr(r['visit'][i] <= selects[o.batch])
+                         m.addConstr((r['visit'][i] == 1) >> (r['start'] >= deliveries[s, o.batch]+p.e2_dispatch_prep_time))
+@@ -236,6 +255,8 @@
+                     elif single:
+                         m.addConstr((r['visit'][i] == 1) >> (r['end'] <= p.batches[0].cutoff))
+                 for (i, j), arc in r['x'].items():
++                    if compact and i >= 0 and j >= 0:
++                        continue
+                     left = r['step_start'] if i == -1 else order_steps[nodes[i]['order'].id, nodes[i]['kind']]
+                     right = r['step_end'] if j == -2 else order_steps[nodes[j]['order'].id, nodes[j]['kind']]
+                     m.addConstr((arc == 1) >> (right >= left+1))
+@@ -264,6 +285,21 @@
+                         allocated.append(w)
+                     m.addConstr(gp.quicksum(allocated) == r['visit'][i])
+                 routes2.append(r)
++    if compact:
++        for key, variable in order_times.items():
++            variable.LB, variable.UB = windows[key]
++        for (left, right), indexed in shared_arcs.items():
++            check_budget()
++            active = m.addVar(vtype=GRB.BINARY)
++            m.addConstr(active == gp.quicksum(indexed))
++            a, b = problem.order_map[left[0]], problem.order_map[right[0]]
++            m.addConstr((active == 1) >> (order_times[right] >= order_times[left]
++                        +a.service_time+problem.travel(a.customer, b.customer)))
++            _, weight, volume = problem.task(*right)
++            sign = -1 if right[1] == 'd' else 1
++            m.addConstr((active == 1) >> (task_load_w[right] == task_load_w[left]+sign*weight))
++            m.addConstr((active == 1) >> (task_load_v[right] == task_load_v[left]+sign*volume))
++            m.addConstr((active == 1) >> (order_steps[right] >= order_steps[left]+1))
+     for o in problem.orders:
+         for kind in problem.task_kinds:
+             m.addConstr(gp.quicksum(r['visit'][i] for r in routes2 if r['satellite'] == o.satellite
+@@ -303,4 +339,4 @@
+         m.addConstr(p.container_pool_size+gp.quicksum(released) >= cumulative, f'clean_stock_{b.id}')
+     m.setObjective(objective, GRB.MINIMIZE)
+     m.update()
+-    return m, dict(e1=routes1, e2=routes2)
++    return m, dict(e1=routes1, e2=routes2, shared_e2=compact, shared_e2_arcs=len(shared_arcs))
+--- before/models/routing/solvers/exact/primal.py
++++ after/models/routing/solvers/exact/primal.py
+@@ -0,0 +1,149 @@
++"""Bounded, deterministic B=1 primal seed, independent of the ALNS solver.
++
++Only independently audited schedules become incumbents. Failure of this
++restricted construction says nothing about feasibility of the full MILP.
++"""
++import time
++
++from models.routing.common.cycle.audit import audit_solution
++from models.routing.common.cycle.state import empty_result
++
++
++def construct_incumbent(problem, deadline):
++    p, f = problem.operating_policy, problem.fleet
++    if len(p.batches) != 1 or not problem.orders or time.perf_counter() >= deadline:
++        return None
++    batch = p.batches[0]
++    sites = [s for s in problem.satellites if problem.demands[s, batch.id]]
++    sites.sort(key=lambda s: (min(o.delivery_window[1] for o in problem.orders if o.satellite == s), s))
++
++    def inbound(rows):
++        trips, supply, distance, violations = [], {}, 0.0, 0
++        for vehicle, row in enumerate(rows):
++            if not row:
++                continue
++            weight = sum(problem.weights[s, batch.id] for s in row)
++            volume = sum(problem.demands[s, batch.id]*f.container_volume for s in row)
++            violations += int(weight > f.e1_weight_cap+1e-6 or volume > f.e1_volume_cap+1e-6)
++            now, previous, events = batch.start+p.e1_load_time, problem.depot, []
++            for kind in problem.task_kinds:
++                if kind == 'p':
++                    now = max(now, batch.cutoff)
++                for site in row:
++                    now += problem.travel(previous, site)
++                    distance += problem.distance(previous, site)
++                    events.append(dict(kind=kind, site_id=site, start=now, quantity=problem.demands[site, batch.id]))
++                    now += problem.service(site)
++                    if kind == 'd':
++                        supply[site] = now
++                        violations += int(now > batch.cutoff)
++                    previous = site
++            end = now+problem.travel(previous, problem.depot)+p.depot_return_unload_time
++            distance += problem.distance(previous, problem.depot)
++            violations += int(end > batch.end or end+p.e1_turnaround_time > p.cycle_end or
++                              (problem.reusable and end+p.cleaning_duration > p.cycle_end))
++            trips.append(dict(trip_id=f'seed_e1_{vehicle}', batch_id=batch.id, vehicle_id=vehicle,
++                              departure=batch.start+p.e1_load_time, return_complete=end, events=events))
++        return trips, supply, distance, violations
++
++    rows = [[] for _ in range(f.e1_count)]
++    for site in sites:
++        if time.perf_counter() >= deadline:
++            return None
++        options = []
++        for vehicle, row in enumerate(rows):
++            trial = [list(r) for r in rows]
++            trial[vehicle].append(site)
++            _, supply, distance, violations = inbound(trial)
++            # Earlier supplies improve the chance of meeting customer windows.
++            options.append((violations, sum(supply.values()), distance, vehicle))
++        rows[min(options)[-1]].append(site)
++    e1, supply, _, violations = inbound(rows)
++    if violations:
++        return None
++    def schedule(site, depart, tasks):
++        now, previous, events, done, distance = depart, site, [], {}, 0.0
++        weight = sum(problem.task(oid, kind)[1] for oid, kind in tasks if kind == 'd')
++        volume = sum(problem.task(oid, kind)[2] for oid, kind in tasks if kind == 'd')
++        if weight > f.e2_weight_cap+1e-6 or volume > f.e2_volume_cap+1e-6:
++            return None
++        for oid, kind in tasks:
++            order, w, vol = problem.task(oid, kind)
++            window = order.delivery_window if kind == 'd' else order.pickup_window
++            now = max(now+problem.travel(previous, order.customer), window[0])
++            if kind == 'p':
++                now = max(now, done[oid]+order.min_use_time)
++            if now > window[1] or (kind == 'd' and now+order.service_time > batch.cutoff):
++                return None
++            events.append(dict(order_id=oid, kind=kind, start=now, quantity=order.count))
++            now += order.service_time
++            if kind == 'd':
++                done[oid] = now
++            weight += w if kind == 'p' else -w
++            volume += vol if kind == 'p' else -vol
++            if weight > f.e2_weight_cap+1e-6 or volume > f.e2_volume_cap+1e-6:
++                return None
++            distance += problem.distance(previous, order.customer)
++            previous = order.customer
++        end = now+problem.travel(previous, site)+p.e2_return_unload_time
++        if end+p.e2_turnaround_time > p.cycle_end or (problem.reusable and end > batch.cutoff):
++            return None
++        return end, events, distance+problem.distance(previous, site)
++
++    best = None
++    strategies = [(merge, key) for merge in (True, False) for key in (
++        lambda o: (o.pickup_window[0] if problem.reusable else o.delivery_window[0], o.id),
++        lambda o: (o.delivery_window[1], o.id))]
++    for merge, sort_key in strategies:
++        result = empty_result(problem, 'exact')
++        result['e1_trips'] = e1
++        failed = False
++        for site in sites:
++            ready, slots = [p.cycle_start]*f.e2_per_sat_count, [0]*f.e2_per_sat_count
++            last = {}
++            for order in sorted((o for o in problem.orders if o.satellite == site), key=sort_key):
++                if time.perf_counter() >= deadline:
++                    return best
++                choices = []
++                new_tasks = [(order.id, kind) for kind in problem.task_kinds]
++                for vehicle in range(f.e2_per_sat_count):
++                    proposals = []
++                    if merge and vehicle in last:
++                        old_index, old_tasks, old_distance = last[vehicle]
++                        depart = result['e2_trips'][old_index]['departure']
++                        proposals.append((old_index, depart, old_tasks+new_tasks, old_distance))
++                        if problem.reusable:
++                            before_pickups = next((i for i, (_, k) in enumerate(old_tasks) if k == 'p'), len(old_tasks))
++                            combined = old_tasks[:before_pickups]+[(order.id, 'd')]+old_tasks[before_pickups:]+[(order.id, 'p')]
++                            proposals.append((old_index, depart, combined, old_distance))
++                    if slots[vehicle] < p.e2_max_trips_per_vehicle:
++                        proposals.append((None, max(supply[site], ready[vehicle])+p.e2_dispatch_prep_time, new_tasks, 0.0))
++                    for index, depart, tasks, old_distance in proposals:
++                        timed = schedule(site, depart, tasks)
++                        if timed is not None:
++                            end, events, distance = timed
++                            choices.append((distance-old_distance, end, vehicle, depart, events, index, tasks, distance))
++                if not choices:
++                    failed = True
++                    break
++                _, end, vehicle, depart, events, index, tasks, distance = min(choices, key=lambda x: x[:4])
++                if index is None:
++                    index = len(result['e2_trips'])
++                    result['e2_trips'].append(dict(trip_id=f'seed_e2_{site}_{vehicle}_{slots[vehicle]}',
++                        satellite_id=site, vehicle_id=vehicle, trip_index=slots[vehicle],
++                        departure=depart, return_complete=end, events=events))
++                    slots[vehicle] += 1
++                else:
++                    result['e2_trips'][index].update(return_complete=end, events=events)
++                ready[vehicle], last[vehicle] = end+p.e2_turnaround_time, (index, tasks, distance)
++            if failed:
++                break
++        if failed:
++            continue
++        audit = audit_solution(problem, result)
++        if audit['valid']:
++            result.update(audit=audit, cutoff_snapshots=audit['cutoff_snapshots'], depot_releases=audit['depot_releases'])
++            result['info'].update(objective=audit['objective'], status='FEASIBLE', incumbent_source='deterministic_primal_seed')
++            if best is None or result['info']['objective'] < best['info']['objective']:
++                best = result
++    return best
+--- before/models/routing/solvers/exact/solver.py
++++ after/models/routing/solvers/exact/solver.py
+@@ -3,19 +3,36 @@
+ 
+ import math
+ import time
++from copy import deepcopy
++from collections import defaultdict
+ 
+ from models.routing.common.cycle.state import empty_result
+ from .formulation import build_model
++from .primal import construct_incumbent
+ from models.routing.common.cycle.audit import audit_solution
+-from models.routing.common.cycle.precheck import check_necessary_conditions, rejected_result
++from models.routing.common.cycle.precheck import check_necessary_conditions, rejected_result, travel_lower_bounds
+ 
+ 
+ def _set_start(problem, model, ctx, result):
+-    """Load a partial MIP start only after independent validation."""
++    """Audit, relabel identical vehicles to satisfy symmetry, then load a start."""
+     if result is None or not audit_solution(problem, result)['valid']:
+         return False
++    scheduled = {}
+     for layer in ('e1', 'e2'):
++        groups = defaultdict(list)
+         for trip in result[layer+'_trips']:
++            groups[trip.get('satellite_id', problem.depot)].append(trip)
++        trips = []
++        for rows in groups.values():
++            vehicles = {v: i for i, v in enumerate(sorted({r['vehicle_id'] for r in rows}))}
++            slots = defaultdict(int)
++            for trip in sorted(rows, key=lambda r: (r['vehicle_id'], r.get('trip_index', 0))):
++                copied = {**trip, 'vehicle_id': vehicles[trip['vehicle_id']]}
++                if layer == 'e2':
++                    copied['trip_index'] = slots[copied['vehicle_id']]
++                    slots[copied['vehicle_id']] += 1
++                trips.append(copied)
++        for trip in trips:
+             matches = [r for r in ctx[layer] if r['vehicle'] == trip['vehicle_id'] and
+                        (r['batch'].id == trip['batch_id'] if layer == 'e1' else
+                         r['satellite'] == trip['satellite_id'] and r['slot'] == trip['trip_index'])]
+@@ -24,41 +41,82 @@
+             r = matches[0]
+             order = []
+             for event in trip['events']:
+-                index = next(i for i, n in enumerate(r['nodes']) if n['kind'] == event['kind'] and
++                index = next((i for i, n in enumerate(r['nodes']) if n['kind'] == event['kind'] and
+                              (n['site'] == event['site_id'] if layer == 'e1' else
+-                              n['order'].id == event['order_id']))
++                              n['order'].id == event['order_id'])), None)
++                if index is None:
++                    return False
+                 order.append(index)
++            arcs = set(zip([-1]+order, order+[-2]))
++            if not arcs.issubset(r['x']):
++                return False
++            scheduled[r['label']] = trip, order, arcs
++    # Set absent visits and arcs too; a partial start should not ask the solver
++    # to rediscover that every covered task excludes all other route copies.
++    for layer in ('e1', 'e2'):
++        for r in ctx[layer]:
++            entry = scheduled.get(r['label'])
++            trip, order, arcs = entry if entry else (None, [], set())
++            r['used'].Start = int(entry is not None)
++            r['start'].Start = trip['departure'] if trip else 0
++            r['end'].Start = trip['return_complete'] if trip else 0
++            for arc, variable in r['x'].items():
++                variable.Start = int(arc in arcs)
++            for i, variable in r['visit'].items():
++                variable.Start = int(i in order)
++            for index, event in zip(order, trip['events'] if trip else []):
+                 r['times'][index].Start = event['start']
+                 quantity = r['nodes'][index]['quantity']
+                 if layer == 'e1' and event['kind'] == 'p' and not isinstance(quantity, int):
+                     quantity.Start = event['quantity']
+-            arcs = set(zip([-1]+order, order+[-2]))
+-            r['used'].Start, r['start'].Start, r['end'].Start = 1, trip['departure'], trip['return_complete']
+-            for arc, variable in r['x'].items():
+-                variable.Start = int(arc in arcs)
+-            for i, variable in r['visit'].items():
+-                variable.Start = int(i in order)
+     return True
+ 
+ 
+-def solve_exact(problem, time_limit=60, seed=42, verbose=False, initial_result=None):
++def solve_exact(problem, time_limit=60, seed=42, verbose=False, initial_result=None, _travel_bounds=None):
+     if not math.isfinite(time_limit) or time_limit <= 0:
+         raise ValueError('time_limit must be finite and positive')
+     begun = time.perf_counter()
+-    precheck = check_necessary_conditions(problem)
++    travel_bounds = _travel_bounds or travel_lower_bounds(problem)
++    precheck = check_necessary_conditions(problem, travel_bounds)
+     if not precheck['passed']:
+         return rejected_result(problem, 'exact', precheck, time.perf_counter()-begun)
+     import gurobipy as gp
+     from gurobipy import GRB
+     result = empty_result(problem, 'exact')
+     result['precheck'] = precheck
++    supplied = initial_result if initial_result is not None and audit_solution(problem, initial_result)['valid'] else None
++    generated = construct_incumbent(problem, min(begun+time_limit, time.perf_counter()+min(.05, time_limit*.05)))
++    if generated is not None and (supplied is None or generated['info']['objective'] < supplied['info']['objective']):
++        supplied = generated
++    result['info']['primal_seed_found'] = generated is not None
++
++    def preserve_incumbent():
++        """A timeout or failed start completion must never discard a valid input."""
++        info = result['info']
++        if supplied is None or (result.get('audit', {}).get('valid') and
++                info['objective'] <= supplied['info']['objective']+1e-9):
++            return result
++        kept = deepcopy(supplied)
++        objective = supplied['info']['objective']
++        bound = info.get('best_bound')
++        conflict = info.get('proven_infeasible') or info.get('proven_optimal')
++        if conflict:
++            bound = None
++        kept.update(solver='exact', precheck=precheck)
++        kept['info'] = {**info, 'objective': objective, 'proven_optimal': False,
++                        'proven_infeasible': False, 'incumbent_source': supplied['info'].get('incumbent_source', 'audited_start'),
++                        'best_bound': bound, 'runtime': time.perf_counter()-begun,
++                        'mip_gap': max(0, objective-bound)/max(1e-9, abs(objective)) if bound is not None else None}
++        if conflict:
++            kept['info']['status'] = 'MODEL_START_CONFLICT'
++        return kept
+     try:
+-        model, ctx = build_model(problem, verbose=verbose, deadline=begun+time_limit)
++        model, ctx = build_model(problem, verbose=verbose, deadline=begun+time_limit, travel_bounds=travel_bounds)
+     except TimeoutError:
+         result['info'].update(status='TIME_LIMIT_BUILD', runtime=time.perf_counter()-begun)
+-        return result
++        return preserve_incumbent()
+     try:
+-        result['info']['mip_start_supplied'] = _set_start(problem, model, ctx, initial_result)
++        result['info']['mip_start_supplied'] = _set_start(problem, model, ctx, supplied)
+         build_time = time.perf_counter()-begun
+         model.Params.TimeLimit = max(0, time_limit-build_time)
+         model.Params.Seed = int(seed)
+@@ -74,7 +132,9 @@
+                     variables=model.NumVars, constraints=model.NumConstrs+model.NumGenConstrs,
+                     time_tick_seconds=problem.operating_policy.time_tick_seconds,
+                     formulation_features=['sparse_time_arcs', 'vehicle_symmetry', 'causal_steps']+
+-                        (['fixed_B1_pickup_quantities'] if len(problem.operating_policy.batches) == 1 else []),
++                        (['fixed_B1_pickup_quantities'] if len(problem.operating_policy.batches) == 1 else [])+
++                        (['shared_E2_task_states_and_internal_arcs'] if ctx['shared_e2'] else []),
++                    shared_e2_arcs=ctx['shared_e2_arcs'],
+                     e2_max_trips_per_vehicle=problem.operating_policy.e2_max_trips_per_vehicle)
+         try:
+             info['best_bound'] = float(model.ObjBound) if math.isfinite(model.ObjBound) else None
+@@ -82,7 +142,7 @@
+             pass
+         if not model.SolCount:
+             info['proven_optimal'] = False
+-            return result
++            return preserve_incumbent()
+         info.update(objective=model.ObjVal, mip_gap=model.MIPGap)
+ 
+         def int_value(var):
+@@ -122,6 +182,6 @@
+                       depot_releases=audit.get('depot_releases', []))
+         if not audit['valid']:
+             info.update(status='AUDIT_FAILED', proven_optimal=False)
+-        return result
++        return preserve_incumbent()
+     finally:
+         model.dispose()

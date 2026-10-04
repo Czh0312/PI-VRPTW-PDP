@@ -1,0 +1,82 @@
+........................................................................ [ 16%]
+......................F................................................. [ 33%]
+........................................................................ [ 49%]
+........................................................................ [ 66%]
+........................................................................ [ 82%]
+........................................................................ [ 99%]
+....                                                                     [100%]
+=================================== FAILURES ===================================
+_____ test_tree_timeout_keeps_every_unresolved_assignment_in_global_bound ______
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x106daaa60>
+
+    def test_tree_timeout_keeps_every_unresolved_assignment_in_global_bound(monkeypatch):
+        from models.routing.solvers.exact import assignment_tree, solver
+        from models.routing.solvers.exact.bounds import free_assignment_lower_bound
+        from models.routing.solvers.exact.primal import construct_incumbent
+        from models.routing.common.cycle.state import empty_result
+        from tests.routing.test_single_batch_comparison import problem
+        import time
+        p = problem(4)
+        travel = travel_lower_bounds(p)
+        check = assignment_domains(p, travel)
+        bound = free_assignment_lower_bound(p, check['domains'])
+        fixed = assigned_problem(p, input_assignment(p))
+        incumbent = construct_incumbent(fixed, time.perf_counter()+1)
+        assert incumbent and incumbent['audit']['valid']
+        assert incumbent['info']['objective'] > enumerate_tiny(p)
+        now = [0.0]
+        calls = []
+        def limited(node, **kwargs):
+            calls.append(node.free_assignment)
+            if not node.free_assignment:
+                now[0] += kwargs['time_limit']
+                copied = deepcopy(incumbent)
+                copied['info'].update(proven_optimal=True, best_bound=copied['info']['objective'])
+                return copied
+            now[0] = 10
+            assert kwargs['initial_result']['assignment'] == input_assignment(p)
+            result = empty_result(node, 'exact')
+            result['info'].update(status='TIME_LIMIT', best_bound=bound)
+            return result
+        monkeypatch.setattr(solver, 'solve_exact', limited)
+        monkeypatch.setattr(assignment_tree, 'time', SimpleNamespace(perf_counter=lambda: now[0]))
+        result = assignment_tree.solve_domain_tree(p, 10, 42, False, travel, check, bound, 100000)
+>       assert calls == [False, True]
+E       assert [False] == [False, True]
+E         
+E         Right contains one more item: True
+E         Use -v to get more diff
+
+tests/routing/test_exact_strengthening.py:142: AssertionError
+=============================== warnings summary ===============================
+tests/routing/test_model_scope.py::test_explicit_baseline_cli_remains_usable[1]
+  /Users/chenzeheng/Desktop/2E-VRPTW-PDD/.venv/lib/python3.9/site-packages/matplotlib/_fontconfig_pattern.py:64: PyparsingDeprecationWarning: 'oneOf' deprecated - use 'one_of'
+    prop = Group((name + Suppress("=") + comma_separated(value)) | oneOf(_CONSTANTS))
+
+tests/routing/test_model_scope.py::test_explicit_baseline_cli_remains_usable[1]
+tests/routing/test_model_scope.py::test_explicit_baseline_cli_remains_usable[1]
+tests/routing/test_model_scope.py::test_explicit_baseline_cli_remains_usable[1]
+tests/routing/test_model_scope.py::test_explicit_baseline_cli_remains_usable[1]
+tests/routing/test_model_scope.py::test_explicit_baseline_cli_remains_usable[1]
+tests/routing/test_model_scope.py::test_explicit_baseline_cli_remains_usable[1]
+  /Users/chenzeheng/Desktop/2E-VRPTW-PDD/.venv/lib/python3.9/site-packages/matplotlib/_fontconfig_pattern.py:85: PyparsingDeprecationWarning: 'parseString' deprecated - use 'parse_string'
+    parse = parser.parseString(pattern)
+
+tests/routing/test_model_scope.py::test_explicit_baseline_cli_remains_usable[1]
+tests/routing/test_model_scope.py::test_explicit_baseline_cli_remains_usable[1]
+tests/routing/test_model_scope.py::test_explicit_baseline_cli_remains_usable[1]
+tests/routing/test_model_scope.py::test_explicit_baseline_cli_remains_usable[1]
+tests/routing/test_model_scope.py::test_explicit_baseline_cli_remains_usable[1]
+tests/routing/test_model_scope.py::test_explicit_baseline_cli_remains_usable[1]
+  /Users/chenzeheng/Desktop/2E-VRPTW-PDD/.venv/lib/python3.9/site-packages/matplotlib/_fontconfig_pattern.py:89: PyparsingDeprecationWarning: 'resetCache' deprecated - use 'reset_cache'
+    parser.resetCache()
+
+tests/routing/test_model_scope.py::test_explicit_baseline_cli_remains_usable[1]
+  /Users/chenzeheng/Desktop/2E-VRPTW-PDD/.venv/lib/python3.9/site-packages/matplotlib/_mathtext.py:45: PyparsingDeprecationWarning: 'enablePackrat' deprecated - use 'enable_packrat'
+    ParserElement.enablePackrat()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/routing/test_exact_strengthening.py::test_tree_timeout_keeps_every_unresolved_assignment_in_global_bound
+1 failed, 435 passed, 14 warnings in 52.91s

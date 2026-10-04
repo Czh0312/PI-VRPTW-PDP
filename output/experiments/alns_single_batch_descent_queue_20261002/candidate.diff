@@ -1,0 +1,54 @@
+--- before/models/routing/solvers/alns/single_batch.py
++++ after/models/routing/solvers/alns/single_batch.py
+@@ -88,11 +88,13 @@
+ 
+ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_result=None,
+                seed_state=None, _travel_bounds=None, _assignment_search=None, _begun=None,
+-               _context=None, _late_pickup_greedy=True):
++               _context=None, _late_pickup_greedy=True, _descent_capacity=1024):
+     if len(problem.operating_policy.batches) != 1:
+         raise ValueError('Single-batch search requires B=1')
+     if not math.isfinite(max_time) or max_time <= 0 or max_iterations < 0:
+         raise ValueError('Invalid ALNS time/iteration budget')
++    if isinstance(_descent_capacity, bool) or not isinstance(_descent_capacity, int) or _descent_capacity < 1:
++        raise ValueError('Descent capacity must be a positive integer')
+     begun = time.perf_counter() if _begun is None else _begun
+     travel_bounds = _travel_bounds or travel_lower_bounds(problem)
+     precheck = check_necessary_conditions(problem, travel_bounds)
+@@ -163,11 +165,13 @@
+     # Free delivery/pickup assignment retains its original continuous search:
+     # incumbent descent competed with partition exploration in paired pilots.
+     descent_enabled = _assignment_search is None
+-    descent = SingleBatchDescent(best_problem, cache_sites=not best_problem.reusable,
++    descent_capacity = (_descent_capacity if problem.model_number == 3 and descent_enabled else 256)
++    descent = SingleBatchDescent(best_problem, capacity=descent_capacity, cache_sites=not best_problem.reusable,
+                                  score_route=best_cache.score_route, cache_distances=best_problem.reusable)
+     descent_seconds = 0.0
+     descent_generated = descent_filtered = descent_cache_hits = descent_enumerations = 0
+     descent_deferred = descent_recovered = 0
++    descent_e2_queue_peak = 0
+     seen_issues, iterations, audit_rejections = set(issues), 0, 0
+     for iteration in range(max_iterations if problem.orders else 0):
+         if time.perf_counter()-begun >= max_time:
+@@ -190,10 +194,11 @@
+                 descent_enumerations += descent.enumerations
+                 descent_deferred += descent.deferred_count
+                 descent_recovered += descent.recovered
+-                descent = SingleBatchDescent(best_problem, cache_sites=not best_problem.reusable,
++                descent = SingleBatchDescent(best_problem, capacity=descent_capacity, cache_sites=not best_problem.reusable,
+                                              score_route=best_cache.score_route, cache_distances=best_problem.reusable)
+             descent_start = time.perf_counter()
+             proposed = descent.propose(best_state, best_decoded, begun+max_time)
++            descent_e2_queue_peak = max(descent_e2_queue_peak, len(descent.e2_options))
+             descent_seconds += time.perf_counter()-descent_start
+             if proposed is not None:
+                 descent_move = True
+@@ -284,6 +289,8 @@
+                           evaluation_cache_hits=cached.hits, evaluation_cache_misses=cached.misses,
+                           descent_seconds=descent_seconds,
+                           descent_enabled=descent_enabled,
++                          descent_queue_capacity=descent_capacity,
++                          descent_e2_queue_peak=descent_e2_queue_peak,
+                           descent_budget_policy='last_20pct_of_either_budget' if descent_enabled else 'disabled',
+                           descent_candidates=descent_generated+descent.generated,
+                           descent_filtered=descent_filtered+descent.filtered,

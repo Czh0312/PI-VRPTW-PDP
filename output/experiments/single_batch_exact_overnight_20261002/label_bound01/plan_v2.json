@@ -1,0 +1,38 @@
+{
+  "created_utc": "2026-10-01T17:10:21.729665+00:00",
+  "candidate": "v2: batch-aware frontier closure under existing optional label_bound_pruning flag",
+  "reason": "v1 reduced labels but root20 iterations rose21->35 and became slower; root30 completed16s versus30s incomplete and improved both incumbents slightly. Preserve all v1 observations.",
+  "change": "For stop_after_columns discovery, close only when frontier >= max(best,0), retaining possible negative columns up to the original batch limit. For ordinary complete minimum pricing frontier closure remains >=best.",
+  "proof": "The new threshold is at least best; closure is more conservative. If frontier>=0 and best<0, no unexplored negative column remains and no unexplored improvement of best remains. No domains/resources/objective/pricing certificate weakened.",
+  "v1_sha256": {
+    "models/routing/solvers/exact/single_batch_route_pricing.py": "bfc446dc7f7c9ad1157605935d5167db2a2233aa1206c9a5f64fb42cd975646b",
+    "models/routing/solvers/exact/single_batch_columns.py": "6c093c47fa596e588eb281731a11fa6c1d357886fa914029f32d1c0f6e8fed32",
+    "models/routing/solvers/exact/single_batch_label_bound.py": "18e28fe4f7b4be5754971535d07b37ddacb95d15558eecc0e322f937b298f947",
+    "tests/routing/test_single_batch_label_bound.py": "f248f708bf685739a3993d159d2c5798a7ecab940678f930010f4b4a7e82edb7"
+  },
+  "primary": {
+    "customers": [
+      20,
+      30
+    ],
+    "models": [
+      2
+    ],
+    "seeds": [
+      42,
+      43
+    ],
+    "budget": 60,
+    "root": 30,
+    "pool": 5,
+    "methods": [
+      "baseline",
+      "bounded"
+    ],
+    "output": "full60_v2",
+    "reverse_seed43": true
+  },
+  "after_primary": "If stable improvement persists, register independent case sources, third seed and short/long budgets; v1 andv2 distinct frozen comparisons, no cross-batch favored baseline.",
+  "default": false,
+  "adoption_gate": "Same registered night gate; primary one-source only cannot promote default."
+}

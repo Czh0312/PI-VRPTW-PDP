@@ -1,0 +1,22 @@
+--- models/routing/solvers/exact/multibatch_route_cg.py (turn-start)
++++ models/routing/solvers/exact/multibatch_route_cg.py (before our edits)
+@@ -241,12 +241,18 @@
+                        bound=max(row['bound'], old_sites.get(row['satellite'], 0.0))) for row in site_rows]
+     raw = e1+math.fsum(row['bound'] for row in components)
+     bound = max(baseline['bound'], max(0.0, raw-1e-7*max(1.0, raw)))
++    integer_complete = integer_cover_time_limit > 0 and all(
++        row['status'] == 'EMPTY' or (row.get('integer_cover') or {}).get('relaxation_optimal', False)
++        for row in site_rows)
+     return dict(bound=bound, raw_bound=raw, e1_bound=e1, distance_e1_bound=distance_e1,
+                 e1_certificate=e1_certificate, components=components, sites=site_rows,
+                 distance_certificate=baseline, scope='M5_relaxed_E2_route_cover_plus_E1_certificate',
+                 pricing_backend=pricing_backend,
+                 integer_cover_time_limit=integer_cover_time_limit,
+-                status='LP_CONVERGED' if all(row['lp_converged'] for row in site_rows) else 'PARTIAL_CERTIFIED_BOUND',
++                integer_cover_complete=integer_complete,
++                status=('INTEGER_RELAXATION_OPTIMAL' if integer_complete else 'PARTIAL_INTEGER_RELAXATION_BOUND')
++                    if integer_cover_time_limit > 0 else
++                    ('LP_CONVERGED' if all(row['lp_converged'] for row in site_rows) else 'PARTIAL_CERTIFIED_BOUND'),
+                 runtime=time.perf_counter()-begun, proven_optimal=False, proven_infeasible=False,
+                 relaxed_constraints=['actual_E1_supply_times', 'cross_trip_delivery_pickup_use_times',
+                     'physical_vehicle_trip_sequencing', 'cutoff_inventory_and_clean_container_reuse'])

@@ -1,0 +1,15 @@
+First new-test run: 6 failed, 52 passed in 0.85s.
+All six failures were the M2 variants of:
+test_every_fixed_assignment_tour_and_vehicle_sequence_keeps_feasibility
+(directed/waiting/zero x compact False/True).
+Failure at test_single_batch_pool_bounds.py:113: assert not oracle.
+
+Cause: the exhaustive test reused one master, fixed unused route UB=0 for
+each previous combination, then mistook that temporary bound for a route
+intrinsically disabled during construction. A later feasible combination
+correctly selected the route. The production formulation was unchanged.
+
+Correction: record the intrinsically blocked route indices immediately
+after construction, before any combination is pinned; use that immutable
+set on all later combinations. Do not skip or weaken the raw oracle.
+Corrected targeted run: 507 passed in 10.76s (targeted.log).

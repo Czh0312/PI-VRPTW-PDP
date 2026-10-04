@@ -1,14 +1,18 @@
-"""Model 5 public interface: exact single-relay container model."""
+"""Current M5: 固定分仓、多批次有限容器循环."""
+from .model import MODEL_NUMBER, BATCH_MODE, PACKAGING, ASSIGNMENT
 
-MODEL_NUMBER = 5
 SUPPORTS_EXACT = True
+__all__ = ['MODEL_NUMBER', 'BATCH_MODE', 'PACKAGING', 'ASSIGNMENT',
+           'SUPPORTS_EXACT', 'solve_exact', 'solve_alns']
 
 
 def solve_exact(*args, **kwargs):
-    """Load and run the exact solver lazily."""
-    from .exact_solver import solve_exact as _solve_exact
+    """Load only this model's exact entry."""
+    from .exact import solve_exact as solve
+    return solve(*args, **kwargs)
 
-    return _solve_exact(*args, **kwargs)
 
-
-__all__ = ["MODEL_NUMBER", "SUPPORTS_EXACT", "solve_exact"]
+def solve_alns(*args, **kwargs):
+    """Load only this model's ALNS entry."""
+    from .alns import solve_alns as solve
+    return solve(*args, **kwargs)

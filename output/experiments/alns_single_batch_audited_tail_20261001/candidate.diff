@@ -1,0 +1,246 @@
+--- before/models/routing/solvers/alns/partitioned_assignment.py
++++ after/models/routing/solvers/alns/partitioned_assignment.py
+@@ -9,9 +9,145 @@
+ from models.routing.common.cycle.precheck import travel_lower_bounds
+ from .construction import reassigned_state
+ from .single_batch_cache import SingleBatchCache
+-
+-
+-def solve_alns(problem, max_time=10, max_iterations=5000, seed=42):
++from .neighborhoods import clone_state, state_from_result
++from models.routing.common.cycle.audit import audit_solution
++
++
++def _tail_route_cost(problem, site, orders):
++    """Rank a hypothetical E2 sequence under optimistic local readiness."""
++    if not orders:
++        return 0.0
++    f, p = problem.fleet, problem.operating_policy
++    if sum(o.goods_weight+o.count*f.container_weight for o in orders) > f.e2_weight_cap:
++        return None
++    if sum(o.count*f.container_volume for o in orders) > f.e2_volume_cap:
++        return None
++    current, previous, distance = p.cycle_start+p.e2_dispatch_prep_time, site, 0.0
++    for order in orders:
++        current = max(current+problem.travel(previous, order.customer), order.delivery_window[0])
++        if current > min(order.delivery_window[1], problem.batch_map[order.batch].cutoff-order.service_time):
++            return None
++        current += order.service_time
++        distance += problem.distance(previous, order.customer)
++        previous = order.customer
++    if current+problem.travel(previous, site)+p.e2_return_unload_time+p.e2_turnaround_time > p.cycle_end:
++        return None
++    return distance+problem.distance(previous, site)
++
++
++def _tail_options(problem, current, state, deadline):
++    """Enumerate only suffixes containing every order of each moved customer."""
++    customer_orders = {}
++    for order in problem.orders:
++        customer_orders.setdefault(order.customer,set()).add(order.id)
++    routes = []
++    for index, route in enumerate(state['e2']):
++        if not route['tasks'] or any(kind != 'd' for _,kind in route['tasks']):
++            continue
++        site = route['satellite']
++        orders = tuple(problem.order_map[oid] for oid,_ in route['tasks'])
++        if any(current[o.customer] != site for o in orders):
++            continue
++        distance = _tail_route_cost(problem,site,orders)
++        if distance is None:
++            continue
++        cuts = []
++        for cut in range(len(orders)+1):
++            suffix = orders[cut:];members = {o.customer for o in suffix};ids = {o.id for o in suffix}
++            if all(customer_orders[c] <= ids for c in members):
++                cuts.append((cut,members))
++        routes.append((index,site,orders,distance,cuts))
++    options = []
++    for index, (ia,sa,a,da,cuts_a) in enumerate(routes):
++        for ib,sb,b,db,cuts_b in routes[index+1:]:
++            if time.perf_counter() >= deadline:
++                return None
++            if sa == sb:
++                continue
++            for ca,ma in cuts_a:
++                for cb,mb in cuts_b:
++                    if len(ma)+len(mb) < 2:
++                        continue
++                    cost_a = _tail_route_cost(problem,sa,a[:ca]+b[cb:])
++                    if cost_a is None:
++                        continue
++                    cost_b = _tail_route_cost(problem,sb,b[:cb]+a[ca:])
++                    if cost_b is None:
++                        continue
++                    delta = cost_a+cost_b-da-db
++                    if delta < -1e-9:
++                        options.append((delta,ia,ib,ca,cb,ma,mb))
++    return sorted(options,key=lambda row:row[0])
++
++
++def _tail_state(problem, current, original, option):
++    """Preserve exchanged task sequences; full decoding checks new supply."""
++    _,ia,ib,ca,cb,ma,mb = option
++    state = clone_state(original)
++    a,b = state['e2'][ia],state['e2'][ib]
++    assignment = dict(current)
++    assignment.update((c,b['satellite']) for c in ma)
++    assignment.update((c,a['satellite']) for c in mb)
++    a['tasks'],b['tasks'] = a['tasks'][:ca]+b['tasks'][cb:],b['tasks'][:cb]+a['tasks'][ca:]
++    state['e2'] = [r for r in state['e2'] if r['tasks']]
++    fixed = assigned_problem(problem,assignment)
++    # Both destinations already have a route; no new site needs inserting.
++    for batch,rows in state['deliveries'].items():
++        for row in rows:
++            row[:] = [s for s in row if fixed.demands[s,batch]]
++    return assignment,fixed,state
++
++
++def _audited_tail_seed(problem, current, incumbent, deadline, statistics):
++    """Compare preserved and repaired routes, retaining audited improvement.
++
++    Geometry only ranks up to three options. A complete decode and independent
++    audit must succeed before a result can become the fixed solver's warm start.
++    A failed or expired search leaves the parent's random proposal stream intact.
++    """
++    statistics.update(geometric_options=0,decoded_candidates=0,audited_candidates=0,
++                      improving_candidates=0,timed_out=0)
++    if time.perf_counter() >= deadline:
++        statistics['timed_out'] = 1
++        return None
++    original = state_from_result(problem,incumbent)
++    options = _tail_options(problem,current,original,deadline)
++    if options is None:
++        statistics['timed_out'] = 1
++        return None
++    statistics['geometric_options'] = len(options)
++    best, best_cost = None,incumbent['info']['objective']
++    for option in options[:3]:
++        if time.perf_counter() >= deadline:
++            statistics['timed_out'] = 1
++            break
++        assignment,fixed,state = _tail_state(problem,current,original,option)
++        context = SingleBatchCache(fixed)
++        for mode in ('direct','repaired'):
++            if time.perf_counter() >= deadline:
++                statistics['timed_out'] = 1
++                break
++            if mode == 'repaired':
++                state = reassigned_state(fixed,incumbent,deadline,scorer=context.route_scorer)
++                if state is None:
++                    continue
++            score,result,issues = context(state)
++            statistics['decoded_candidates'] += 1
++            if issues or score >= best_cost-1e-9:
++                continue
++            audit = audit_solution(fixed,result)
++            statistics['audited_candidates'] += 1
++            if not audit['valid']:
++                continue
++            statistics['improving_candidates'] += 1
++            best_cost = score
++            result['audit'] = audit
++            best = dict(assignment=assignment,fixed=fixed,context=context,result=result,
++                        geometry_delta=option[0],gain=incumbent['info']['objective']-score,mode=mode)
++    return best
++
++
++def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, *, audited_route_seeds=True):
+     if not math.isfinite(max_time) or max_time <= 0 or max_iterations < 0:
+         raise ValueError('Invalid assignment-search budget')
+     from .single_batch import solve_alns as solve_fixed
+@@ -22,6 +158,10 @@
+     nearest = {c: min(problem.satellites, key=lambda s: problem.distance(s, c)) for c in customers}
+     best, best_cost, attempts, iterations = None, math.inf, 0, 0
+     incumbents, reused, projected = OrderedDict(), 0, 0
++    seed_checks, seed_starts, direct_starts, repaired_starts = 0, 0, 0, 0
++    seed_totals = {key: 0 for key in ('geometric_options','decoded_candidates','audited_candidates',
++                                   'improving_candidates','timed_out')}
++    seed_gains = []
+     first_feasible = last_improvement = None
+     history, initial_objective = [], None
+     operator_totals = {k: {} for k in ('operator_attempts', 'operator_improvements', 'operator_noops')}
+@@ -29,6 +169,7 @@
+                                     'descent_site_cache_hits', 'descent_site_enumerations',
+                                     'descent_deferred', 'descent_recovered')}
+     while time.perf_counter()-start < max_time:
++        route_seed = None
+         if attempts and (iterations >= max_iterations or not customers):
+             break
+         if attempts == 0:
+@@ -40,24 +181,34 @@
+             # the whole budget on many shallow, cold assignment attempts.
+             candidate = dict(current)
+         else:
+-            candidate = dict(current)
+-            if len(customers) > 1 and rng.random() < .3:
+-                a, b = rng.sample(customers, 2)
+-                candidate[a], candidate[b] = candidate[b], candidate[a]
++            if audited_route_seeds and best is not None and attempts % 4 == 2:
++                seed_checks += 1
++                statistics = {}
++                route_seed = _audited_tail_seed(problem, current, best,
++                    min(start+max_time, time.perf_counter()+max_time/20), statistics)
++                for field, count in statistics.items():
++                    seed_totals[field] += count
++            if route_seed is not None:
++                candidate = route_seed['assignment']
+             else:
+-                customer = rng.choice(customers)
+-                sites = [s for s in problem.satellites if s != candidate[customer]]
+-                if sites:
+-                    candidate[customer] = rng.choice(sites)
+-        fixed = assigned_problem(problem, candidate)
+-        context = SingleBatchCache(fixed)
++                candidate = dict(current)
++                if len(customers) > 1 and rng.random() < .3:
++                    a, b = rng.sample(customers, 2)
++                    candidate[a], candidate[b] = candidate[b], candidate[a]
++                else:
++                    customer = rng.choice(customers)
++                    sites = [s for s in problem.satellites if s != candidate[customer]]
++                    if sites:
++                        candidate[customer] = rng.choice(sites)
++        fixed = route_seed['fixed'] if route_seed is not None else assigned_problem(problem, candidate)
++        context = route_seed['context'] if route_seed is not None else SingleBatchCache(fixed)
+         remaining = max_time-(time.perf_counter()-start)
+         if remaining <= 0:
+             break
+         share = .4 if attempts == 0 and len(customers) > 8 else .1
+         iteration_budget = min(max_iterations-iterations, max(1, int(max_iterations*share))) if max_iterations else 0
+         key = tuple(sorted(candidate.items()))
+-        warm = incumbents.get(key)
++        warm = route_seed['result'] if route_seed is not None else incumbents.get(key)
+         seed_state = None
+         if warm is None and best is not None:
+             seed_state = reassigned_state(fixed, best, min(start+max_time, time.perf_counter()+max_time/20),
+@@ -66,7 +217,12 @@
+         remaining = max_time-(time.perf_counter()-start)
+         if remaining <= 0:
+             break
+-        reused += int(warm is not None)
++        reused += int(warm is not None and route_seed is None)
++        if route_seed is not None:
++            seed_starts += 1
++            direct_starts += int(route_seed['mode'] == 'direct')
++            repaired_starts += int(route_seed['mode'] == 'repaired')
++            seed_gains.append(route_seed['gain'])
+         subproblem_start = time.perf_counter()-start
+         solved = solve_fixed(fixed, max_time=min(remaining, max(.01, max_time*share)),
+                              max_iterations=iteration_budget, seed=seed+attempts, initial_result=warm,
+@@ -101,6 +257,15 @@
+                           runtime=time.perf_counter()-start, seed=seed, iterations=iterations,
+                           assignment_attempts=attempts, assignment_warm_starts=reused,
+                           assignment_route_projections=projected,
++                          assignment_route_seed_checks=seed_checks, assignment_route_seed_starts=seed_starts,
++                          assignment_route_seed_direct_starts=direct_starts,
++                          assignment_route_seed_repaired_starts=repaired_starts,
++                          assignment_route_seed_options=seed_totals['geometric_options'],
++                          assignment_route_seed_decodes=seed_totals['decoded_candidates'],
++                          assignment_route_seed_audits=seed_totals['audited_candidates'],
++                          assignment_route_seed_improvements=seed_totals['improving_candidates'],
++                          assignment_route_seed_timeouts=seed_totals['timed_out'],
++                          assignment_route_seed_gains=seed_gains,
+                           time_to_first_feasible=first_feasible, time_to_best=last_improvement,
+                           initial_objective=initial_objective, incumbent_history=history,
+                           operator_statistics_scope='all_partition_subsolves',

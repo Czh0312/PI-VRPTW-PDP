@@ -1,0 +1,3 @@
+#!/bin/sh
+set -eu
+.venv/bin/python -m pytest -q tests/routing/test_multibatch_*.py tests/routing/test_numbered_model_entries.py tests/routing/test_solver_isolation.py tests/routing/test_model_scope.py tests/routing/test_container_pool_config.py tests/routing/test_solver_stability.py tests/routing/test_exact_strengthening.py tests/routing/test_static_multibatch_study.py > output/experiments/m5_e1_polish_20261001/pytest.log 2>&1

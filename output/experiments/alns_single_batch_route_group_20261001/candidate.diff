@@ -1,0 +1,90 @@
+--- before/models/routing/solvers/alns/partitioned_assignment.py
++++ after/models/routing/solvers/alns/partitioned_assignment.py
+@@ -11,7 +11,41 @@
+ from .single_batch_cache import SingleBatchCache
+ 
+ 
+-def solve_alns(problem, max_time=10, max_iterations=5000, seed=42):
++def _route_group_assignment(problem, current, incumbent, rng):
++    """Rank whole-route customer transfers by directed access arcs only.
++
++    The ranking is a proposal heuristic. Projection, full decoding and audit
++    still determine feasibility and the actual objective of a new partition.
++    """
++    groups = []
++    for trip in incumbent['e2_trips']:
++        events, source = trip['events'], trip['satellite_id']
++        if not events or any(e['kind'] != 'd' for e in events):
++            continue
++        customers = tuple(dict.fromkeys(problem.order_map[e['order_id']].customer for e in events))
++        if len(customers) < 2 or any(current[c] != source for c in customers):
++            continue
++        first = problem.order_map[events[0]['order_id']].customer
++        last = problem.order_map[events[-1]['order_id']].customer
++        groups.append((source, customers, first, last))
++    if not groups or len(problem.satellites) < 2:
++        return None
++    options = []
++    for source, customers, first, last in rng.sample(groups, min(8, len(groups))):
++        old = problem.distance(source, first)+problem.distance(last, source)
++        for target in problem.satellites:
++            if target != source:
++                delta = problem.distance(target, first)+problem.distance(last, target)-old
++                options.append((delta, customers, target))
++    options.sort(key=lambda option: option[0])
++    _, customers, target = rng.choice(options[:3])
++    candidate = dict(current)
++    for customer in customers:
++        candidate[customer] = target
++    return candidate
++
++
++def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, *, route_group_moves=True):
+     if not math.isfinite(max_time) or max_time <= 0 or max_iterations < 0:
+         raise ValueError('Invalid assignment-search budget')
+     from .single_batch import solve_alns as solve_fixed
+@@ -23,6 +57,7 @@
+     best, best_cost, attempts, iterations = None, math.inf, 0, 0
+     incumbents, reused, projected = OrderedDict(), 0, 0
+     first_feasible = last_improvement = None
++    group_attempts = 0
+     history, initial_objective = [], None
+     operator_totals = {k: {} for k in ('operator_attempts', 'operator_improvements', 'operator_noops')}
+     descent_totals = {k: 0 for k in ('descent_seconds', 'descent_candidates', 'descent_filtered',
+@@ -40,15 +75,19 @@
+             # the whole budget on many shallow, cold assignment attempts.
+             candidate = dict(current)
+         else:
+-            candidate = dict(current)
+-            if len(customers) > 1 and rng.random() < .3:
+-                a, b = rng.sample(customers, 2)
+-                candidate[a], candidate[b] = candidate[b], candidate[a]
+-            else:
+-                customer = rng.choice(customers)
+-                sites = [s for s in problem.satellites if s != candidate[customer]]
+-                if sites:
+-                    candidate[customer] = rng.choice(sites)
++            candidate = (_route_group_assignment(problem, current, best, rng)
++                         if route_group_moves and attempts % 4 == 2 and best is not None else None)
++            group_attempts += int(candidate is not None)
++            if candidate is None:
++                candidate = dict(current)
++                if len(customers) > 1 and rng.random() < .3:
++                    a, b = rng.sample(customers, 2)
++                    candidate[a], candidate[b] = candidate[b], candidate[a]
++                else:
++                    customer = rng.choice(customers)
++                    sites = [s for s in problem.satellites if s != candidate[customer]]
++                    if sites:
++                        candidate[customer] = rng.choice(sites)
+         fixed = assigned_problem(problem, candidate)
+         context = SingleBatchCache(fixed)
+         remaining = max_time-(time.perf_counter()-start)
+@@ -101,6 +140,7 @@
+                           runtime=time.perf_counter()-start, seed=seed, iterations=iterations,
+                           assignment_attempts=attempts, assignment_warm_starts=reused,
+                           assignment_route_projections=projected,
++                          assignment_group_attempts=group_attempts,
+                           time_to_first_feasible=first_feasible, time_to_best=last_improvement,
+                           initial_objective=initial_objective, incumbent_history=history,
+                           operator_statistics_scope='all_partition_subsolves',

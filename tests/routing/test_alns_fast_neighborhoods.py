@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from models.routing.alns.variants import model_2, model_3, model_4, model_6, model_7
+from models.routing.baselines.alns import model_2, model_3, model_4
 from models.routing.common.data_loader import parse_dataset
 from models.routing.common.domain.instance import ProblemInstance
 from models.routing.common.task_builder import build_tasks_for_model
@@ -82,36 +82,15 @@ def test_m2_route_seed_keeps_incumbent_and_shares_iteration_budget(problem):
                                 objective=info['objective'])['valid']
 
 
-@pytest.mark.parametrize('module',[model_4,model_7])
+@pytest.mark.parametrize('module',[model_4])
 def test_free_seed_search_respects_total_iteration_cap(problem,module):
     from models.routing.common.solution_audit import audit_exact_solution
-    extra = dict(transshipment_time_budget=0,refill_unused_time=False) if module is model_7 else {}
     r1,r2,assignment,info = module.solve_alns(problem,
         vehicles_per_satellite=problem.fleet.e2_per_sat_count,
         max_iterations=120,max_time=5,seed=42,verbose=False,return_info=True,
-        seed_search_fraction=.2,**extra)
+        seed_search_fraction=.2)
     assert 0 < info['initial_seed_iterations'] <= 24
     assert info['iterations'] <= 120
     assert info['objective'] <= info['initial_objective']+1e-6
     assert audit_exact_solution(problem,4,r1,r2,assignment=assignment,
                                 objective=info['objective'])['valid']
-
-
-@pytest.mark.parametrize("fast", [False, True])
-def test_no_relay_m6_matches_m3_under_iteration_budget(problem, fast):
-    e1, e2 = build_tasks_for_model(problem, 3)
-    common = dict(max_iterations=120, max_time=20, seed=42,
-                  verbose=False, return_info=True,
-                  alns_config_overrides=dict(cooling_schedule="iteration",
-                      stagnation_fraction=None, segment_time=None,
-                      reward_time_exponent=0, intensification_fraction=0))
-    routes1, routes2, base = model_3.solve_alns(
-        problem, e1, e2, problem.fleet.e2_per_sat_count, **common)
-    actual1, actual2, actual = model_6.solve_alns(
-        problem, e1, e2, problem.fleet.e2_per_sat_count,
-        transshipment_time_budget=0, refill_unused_time=False,
-        fast_stage1=fast, **common)
-    assert actual["feasible"]
-    assert actual["objective"] == pytest.approx(base["objective"])
-    assert (actual1, actual2) == (routes1, routes2)
-    assert actual["transshipment_count"] == 0

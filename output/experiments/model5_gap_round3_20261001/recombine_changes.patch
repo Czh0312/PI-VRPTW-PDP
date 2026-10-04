@@ -1,0 +1,106 @@
+--- models/routing/solvers/exact/multibatch_route_pool.py
++++ models/routing/solvers/exact/multibatch_route_pool.py
+@@ -20,15 +20,17 @@
+ from .multibatch_route_pricing import evaluate_column, route_context
+ 
+ 
+-def candidate_pools(problem, initial, *, deadline=None, max_columns=128, transfers=True, exchanges=False):
++def candidate_pools(problem, initial, *, deadline=None, max_columns=128, transfers=True, exchanges=False, recombinations=False):
+     """Keep original routes, reorder tasks, and transfer tasks/whole orders.
+ 
+     Each domain belongs to one existing physical trip slot. Empty slots are
+     allowed by the master, but no new slots are introduced. The original
+     sequence is always retained. Pruning is heuristic, never a proof.
+     """
++    ordinary_deadline = (time.perf_counter()+max(0,deadline-time.perf_counter())*.5
++                         if recombinations and deadline is not None else deadline)
+     def expired():
+-        return deadline is not None and time.perf_counter() >= deadline
++        return ordinary_deadline is not None and time.perf_counter() >= ordinary_deadline
+     contexts = {s: route_context(problem, s) for s in sorted({t['satellite_id'] for t in initial['e2_trips']})}
+     trips = initial['e2_trips']
+     originals = [tuple((e['order_id'], e['kind']) for e in t['events']) for t in trips]
+@@ -124,6 +126,40 @@
+                         if ci is not None and cj is not None:
+                             pools[i][ci['tasks']] = ci
+                             pools[j][cj['tasks']] = cj
++    if recombinations:
++        from .multibatch_route_enumeration import enumerate_route_universe
++        pairs = [(i,j) for i in range(len(trips)) for j in range(i+1,len(trips))
++            if trips[i]['satellite_id'] == trips[j]['satellite_id']]
++        # Start with pairs whose two original paths are costly. Enumeration
++        # is only a source of feasible candidates; partial runs prove nothing.
++        pairs.sort(key=lambda ij: (-sum(evaluate(k,originals[k])['cost'] for k in ij),ij))
++        for number,(i,j) in enumerate(pairs):
++            if deadline is not None and time.perf_counter() >= deadline:
++                break
++            site = trips[i]['satellite_id']; union = set(originals[i])|set(originals[j])
++            context = contexts[site]
++            sub = {**context,'nodes':[n for n in context['nodes'] if n['key'] in union],
++                'lookup':{k:context['lookup'][k] for k in union}}
++            remaining = (deadline-time.perf_counter()) if deadline is not None else 30.0
++            allowance = min(.25,max(.005,remaining/max(1,len(pairs)-number)))
++            universe = enumerate_route_universe(problem,sub,
++                deadline=time.perf_counter()+allowance,max_states=20000)
++            by_set = {}
++            for group in universe['groups']:
++                for column in group['columns']:
++                    key = frozenset(column['tasks'])
++                    if key not in by_set or column['cost'] < by_set[key]['cost']:
++                        by_set[key] = column
++            proposals = []
++            old_cost = evaluate(i,originals[i])['cost']+evaluate(j,originals[j])['cost']
++            for subset,left in by_set.items():
++                right = by_set.get(frozenset(union-subset))
++                if right is not None and left['cost']+right['cost'] < old_cost-1e-6:
++                    proposals.append((left['cost']+right['cost'],left,right))
++            for _,left,right in sorted(proposals,key=lambda row:(row[0],row[1]['tasks']))[:16]:
++                # Either existing slot may host either complementary path.
++                for index in (i,j):
++                    add(index,left['tasks']);add(index,right['tasks'])
+     output = []
+     for original, pool in zip(originals, pools):
+         # Preserve both a cheap path and an early-return path for each task
+@@ -264,7 +300,7 @@
+ 
+ 
+ def _reoptimize_once(problem, initial_result, *, time_limit=10, seed=42, verbose=False,
+-                     max_columns=128, transfers=True, exchanges=False, e1_backend='auto', diagnostics_dir=None):
++                     max_columns=128, transfers=True, exchanges=False, recombinations=False, e1_backend='auto', diagnostics_dir=None):
+     if not math.isfinite(time_limit) or time_limit <= 0:
+         raise ValueError('time_limit must be finite and positive')
+     if not isinstance(max_columns, int) or isinstance(max_columns, bool) or max_columns < 1:
+@@ -291,13 +327,13 @@
+         proven_optimal=False, proven_infeasible=False, proof_scope='restricted_E2_route_pool_primal',
+         upper_before=before['objective'], route_pool_backend=backend, route_pool_subproblem_optimal=False,
+         route_pool_subproblem_bound=None, route_pool_complete=False, route_pool_transfers=bool(transfers),
+-        route_pool_exchanges=bool(exchanges))
++        route_pool_exchanges=bool(exchanges), route_pool_recombinations=bool(recombinations))
+     status = 'TIME_LIMIT_BUILD'
+     try:
+         import gurobipy as gp
+         from gurobipy import GRB
+         pools = candidate_pools(problem, initial_result, deadline=begun+time_limit*.2,
+-                                max_columns=max_columns, transfers=transfers, exchanges=exchanges)
++                                max_columns=max_columns, transfers=transfers, exchanges=exchanges, recombinations=recombinations)
+         result['info'].update(route_pool_columns=sum(map(len, pools)), route_pool_candidates=[len(row) for row in pools])
+         if time.perf_counter() >= deadline:
+             raise TimeoutError
+@@ -356,7 +392,7 @@
+ 
+ 
+ def reoptimize_route_pool(problem, initial_result, *, time_limit=10, seed=42, verbose=False,
+-                          max_columns=128, transfers=True, exchanges=False, e1_backend='auto', max_passes=4, diagnostics_dir=None):
++                          max_columns=128, transfers=True, exchanges=False, recombinations=False, e1_backend='auto', max_passes=4, diagnostics_dir=None):
+     """Rebuild the candidate neighborhood after each audited improvement.
+ 
+     All passes share the original total budget. Stop at an unchanged upper
+@@ -370,7 +406,7 @@
+     for index in range(max_passes):
+         remaining = max(1e-12, time_limit-(time.perf_counter()-begun))
+         result = _reoptimize_once(problem, result, time_limit=remaining, seed=seed,
+-            verbose=verbose, max_columns=max_columns, transfers=transfers, exchanges=exchanges, e1_backend=e1_backend,
++            verbose=verbose, max_columns=max_columns, transfers=transfers, exchanges=exchanges, recombinations=recombinations, e1_backend=e1_backend,
+             diagnostics_dir=Path(diagnostics_dir)/f'pass_{index}' if diagnostics_dir is not None else None)
+         info = result['info']
+         trace.append(dict(pass_index=index, upper_before=info['upper_before'], upper_after=info['objective'],

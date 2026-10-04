@@ -1,0 +1,93 @@
+............FFFF........................................................ [ 87%]
+..........                                                               [100%]
+=================================== FAILURES ===================================
+_ test_global_arcs_match_indexed_routes_with_multiple_vehicles_and_slots[3-1] __
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10767ec40>, model = 1
+seed = 3
+
+    @pytest.mark.parametrize('model', [1, 2, 3, 4])
+    @pytest.mark.parametrize('seed', range(6))
+    def test_global_arcs_match_indexed_routes_with_multiple_vehicles_and_slots(monkeypatch, model, seed):
+        pytest.importorskip('gurobipy')
+        p = tiny_problem(model, seed)
+        p.fleet.e1_count = 2
+        p.fleet.e2_per_sat_count = 3
+        p.operating_policy = replace(p.operating_policy, e2_max_trips_per_vehicle=3)
+        results = []
+        for compressed in (False, True):
+            monkeypatch.setattr(solver, 'build_model', lambda *a, **kw: build_model(*a, compress_routes=compressed, **kw))
+            r = solver.solve_exact(p, time_limit=5)
+>           if r['audit']['valid']:
+E           KeyError: 'audit'
+
+tests/routing/test_compact_route_identity.py:26: KeyError
+_ test_global_arcs_match_indexed_routes_with_multiple_vehicles_and_slots[3-2] __
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1075e2610>, model = 2
+seed = 3
+
+    @pytest.mark.parametrize('model', [1, 2, 3, 4])
+    @pytest.mark.parametrize('seed', range(6))
+    def test_global_arcs_match_indexed_routes_with_multiple_vehicles_and_slots(monkeypatch, model, seed):
+        pytest.importorskip('gurobipy')
+        p = tiny_problem(model, seed)
+        p.fleet.e1_count = 2
+        p.fleet.e2_per_sat_count = 3
+        p.operating_policy = replace(p.operating_policy, e2_max_trips_per_vehicle=3)
+        results = []
+        for compressed in (False, True):
+            monkeypatch.setattr(solver, 'build_model', lambda *a, **kw: build_model(*a, compress_routes=compressed, **kw))
+            r = solver.solve_exact(p, time_limit=5)
+>           if r['audit']['valid']:
+E           KeyError: 'audit'
+
+tests/routing/test_compact_route_identity.py:26: KeyError
+_ test_global_arcs_match_indexed_routes_with_multiple_vehicles_and_slots[3-3] __
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x107d102b0>, model = 3
+seed = 3
+
+    @pytest.mark.parametrize('model', [1, 2, 3, 4])
+    @pytest.mark.parametrize('seed', range(6))
+    def test_global_arcs_match_indexed_routes_with_multiple_vehicles_and_slots(monkeypatch, model, seed):
+        pytest.importorskip('gurobipy')
+        p = tiny_problem(model, seed)
+        p.fleet.e1_count = 2
+        p.fleet.e2_per_sat_count = 3
+        p.operating_policy = replace(p.operating_policy, e2_max_trips_per_vehicle=3)
+        results = []
+        for compressed in (False, True):
+            monkeypatch.setattr(solver, 'build_model', lambda *a, **kw: build_model(*a, compress_routes=compressed, **kw))
+            r = solver.solve_exact(p, time_limit=5)
+>           if r['audit']['valid']:
+E           KeyError: 'audit'
+
+tests/routing/test_compact_route_identity.py:26: KeyError
+_ test_global_arcs_match_indexed_routes_with_multiple_vehicles_and_slots[3-4] __
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1076a5b20>, model = 4
+seed = 3
+
+    @pytest.mark.parametrize('model', [1, 2, 3, 4])
+    @pytest.mark.parametrize('seed', range(6))
+    def test_global_arcs_match_indexed_routes_with_multiple_vehicles_and_slots(monkeypatch, model, seed):
+        pytest.importorskip('gurobipy')
+        p = tiny_problem(model, seed)
+        p.fleet.e1_count = 2
+        p.fleet.e2_per_sat_count = 3
+        p.operating_policy = replace(p.operating_policy, e2_max_trips_per_vehicle=3)
+        results = []
+        for compressed in (False, True):
+            monkeypatch.setattr(solver, 'build_model', lambda *a, **kw: build_model(*a, compress_routes=compressed, **kw))
+            r = solver.solve_exact(p, time_limit=5)
+>           if r['audit']['valid']:
+E           KeyError: 'audit'
+
+tests/routing/test_compact_route_identity.py:26: KeyError
+=========================== short test summary info ============================
+FAILED tests/routing/test_compact_route_identity.py::test_global_arcs_match_indexed_routes_with_multiple_vehicles_and_slots[3-1]
+FAILED tests/routing/test_compact_route_identity.py::test_global_arcs_match_indexed_routes_with_multiple_vehicles_and_slots[3-2]
+FAILED tests/routing/test_compact_route_identity.py::test_global_arcs_match_indexed_routes_with_multiple_vehicles_and_slots[3-3]
+FAILED tests/routing/test_compact_route_identity.py::test_global_arcs_match_indexed_routes_with_multiple_vehicles_and_slots[3-4]
+4 failed, 78 passed in 2.00s

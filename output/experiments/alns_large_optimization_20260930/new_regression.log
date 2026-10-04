@@ -1,0 +1,21 @@
+.............F...                                                        [100%]
+=================================== FAILURES ===================================
+_______ test_partition_evaluation_cache_never_reuses_another_assignment ________
+
+    def test_partition_evaluation_cache_never_reuses_another_assignment():
+        p = tiny_problem(4, 2)
+        search = AssignmentSearch(p, 42)
+        fixed, first = search.context(input_assignment(p))
+        state = initial_state(fixed, random.Random(1))
+        a = first(state)
+        changed = {c: p.satellites[0] for c in search.customers}
+        other, second = search.context(changed)
+        assert first is not second and fixed is not other
+        b = second(state)
+>       assert 'E2_TASK_COVERAGE' in b[2]
+E       AssertionError: assert 'E2_TASK_COVERAGE' in ['E1_DELIVERY_COVERAGE']
+
+tests/routing/test_single_batch_alns_optimization.py:77: AssertionError
+=========================== short test summary info ============================
+FAILED tests/routing/test_single_batch_alns_optimization.py::test_partition_evaluation_cache_never_reuses_another_assignment
+1 failed, 16 passed in 0.13s

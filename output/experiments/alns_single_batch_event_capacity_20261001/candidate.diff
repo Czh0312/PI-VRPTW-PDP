@@ -1,0 +1,119 @@
+--- before/models/routing/solvers/alns/single_batch.py
++++ after/models/routing/solvers/alns/single_batch.py
+@@ -101,7 +101,9 @@
+     rng = random.Random(seed)
+     if _context is not None and _context.problem is not problem:
+         raise ValueError('Single-batch context belongs to one problem instance')
+-    cached = _context if _context is not None else SingleBatchCache(problem)
++    cached = (_context if _context is not None else
++              SingleBatchCache(problem, capacity_profile_capacity=512)
++              if problem.reusable and _assignment_search is None else SingleBatchCache(problem))
+     if _assignment_search is not None:
+         from models.routing.common.cycle.assignment import input_assignment
+         _assignment_search.travel_bounds = travel_bounds
+--- before/models/routing/solvers/alns/evaluator.py
++++ after/models/routing/solvers/alns/evaluator.py
+@@ -90,6 +90,7 @@
+     p, f = problem.operating_policy, problem.fleet
+     task = problem.task if _prepared is None else _prepared.task
+     summary_of = getattr(_prepared, 'load_summary', None)
++    capacity_of = getattr(_prepared, 'capacity_profile', None)
+     result = empty_result(problem, 'alns')
+     violations, goods_ready = [], {}
+     # E1 deliveries do not depend on reverse flow; delivery times are explicit.
+@@ -144,7 +145,11 @@
+             load_v = sum(task(o, kind)[2] for o, kind in r['tasks'] if kind == 'd')
+         else:
+             _, load_w, load_v = loads
+-        if load_w > f.e2_weight_cap+1e-6 or load_v > f.e2_volume_cap+1e-6:
++        capacity_checks = (capacity_of(tuple(r['tasks']), f.e2_weight_cap, f.e2_volume_cap)
++                           if capacity_of is not None else None)
++        initial_overload = (capacity_checks[0] if capacity_checks is not None else
++                            load_w > f.e2_weight_cap+1e-6 or load_v > f.e2_volume_cap+1e-6)
++        if initial_overload:
+             violations.append('E2_CAPACITY')
+         previous, site, service = begin, s, 0
+         for j, (oid, kind) in enumerate(r['tasks']):
+@@ -159,9 +164,14 @@
+                 upper[node] = min(upper[node], p.batches[0].cutoff-o.service_time)
+             edges.append((previous, node, service+problem.travel(site, o.customer)))
+             previous, site, service = node, o.customer, o.service_time
+-            load_w += w if kind == 'p' else -w
+-            load_v += vol if kind == 'p' else -vol
+-            if min(load_w, load_v) < -1e-6 or load_w > f.e2_weight_cap+1e-6 or load_v > f.e2_volume_cap+1e-6:
++            if capacity_checks is None:
++                load_w += w if kind == 'p' else -w
++                load_v += vol if kind == 'p' else -vol
++                overload = (min(load_w, load_v) < -1e-6 or load_w > f.e2_weight_cap+1e-6 or
++                            load_v > f.e2_volume_cap+1e-6)
++            else:
++                overload = capacity_checks[j+1]
++            if overload:
+                 violations.append('E2_CAPACITY')
+         edges.append((previous, finish, service+problem.travel(site, s)+p.e2_return_unload_time))
+         parsed.append((r, ri, slot))
+--- before/models/routing/solvers/alns/single_batch_cache.py
++++ after/models/routing/solvers/alns/single_batch_cache.py
+@@ -12,7 +12,8 @@
+ class SingleBatchEvaluator(CycleEvaluator):
+     """Prepare task attributes and reuse distances, while decoding times afresh."""
+     propagate = staticmethod(propagate_times)
+-    def __init__(self, problem, capacity=128, *, distance_capacity=512, load_capacity=512):
++    def __init__(self, problem, capacity=128, *, distance_capacity=512, load_capacity=512,
++                 capacity_profile_capacity=0):
+         if len(problem.operating_policy.batches) != 1:
+             raise ValueError('Single-batch cache requires B=1')
+         super().__init__(problem, capacity)
+@@ -23,6 +24,10 @@
+             raise ValueError('Load-summary capacity must be a nonnegative integer')
+         self.load_summary = (lru_cache(maxsize=load_capacity)(self._load_summary)
+                              if load_capacity else None)
++        if not isinstance(capacity_profile_capacity, int) or capacity_profile_capacity < 0:
++            raise ValueError('Capacity-profile capacity must be a nonnegative integer')
++        self.capacity_profile = (lru_cache(maxsize=capacity_profile_capacity)(self._capacity_profile)
++                                 if capacity_profile_capacity else None)
+         self.distance_capacity = distance_capacity
+         self.distances = OrderedDict()
+         self.distance_hits = self.distance_misses = 0
+@@ -50,6 +55,27 @@
+             raise ValueError('Single-batch evaluator belongs to one problem instance')
+         return evaluate(problem, state, _memo=self, _prepared=self)
+ 
++    def _capacity_profile(self, tasks, weight_cap, volume_cap):
++        """Immutable capacity checks, with the decoder's exact arithmetic.
++
++        Task attributes belong to this fixed context. Capacities are explicit
++        keys; times, route ownership and coverage are never part of this cache.
++        Invalid external tasks fall back to the original decoder error order.
++        """
++        try:
++            rows = [self.task_data[t] for t in tasks]
++        except KeyError:
++            return None
++        weight = sum(t[1] for t, (_, kind) in zip(rows, tasks) if kind == 'd')
++        volume = sum(t[2] for t, (_, kind) in zip(rows, tasks) if kind == 'd')
++        checks = [weight > weight_cap+1e-6 or volume > volume_cap+1e-6]
++        for (_, w, vol), (_, kind) in zip(rows, tasks):
++            weight += w if kind == 'p' else -w
++            volume += vol if kind == 'p' else -vol
++            checks.append(min(weight, volume) < -1e-6 or
++                          weight > weight_cap+1e-6 or volume > volume_cap+1e-6)
++        return tuple(checks)
++
+     def route_distance(self, problem, trip, layer):
+         if problem is not self.problem:
+             raise ValueError('Prepared distance belongs to one problem instance')
+@@ -69,9 +95,11 @@
+ 
+ 
+ class SingleBatchCache(EvaluationCache):
+-    def __init__(self, problem, capacity=256, *, e1_capacity=128, load_capacity=512):
++    def __init__(self, problem, capacity=256, *, e1_capacity=128, load_capacity=512,
++                 capacity_profile_capacity=0):
+         super().__init__(problem, SingleBatchEvaluator(problem, capacity=e1_capacity,
+-                         load_capacity=load_capacity), capacity)
++                         load_capacity=load_capacity,
++                         capacity_profile_capacity=capacity_profile_capacity), capacity)
+         self._route_scorer = None
+ 
+     @property

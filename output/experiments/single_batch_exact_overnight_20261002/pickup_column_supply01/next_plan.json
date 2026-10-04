@@ -1,0 +1,27 @@
+{
+  "candidate": "M3 independent E1 all-task routing floor",
+  "status": "registered_design_only_not_implemented",
+  "hypothesis": "M3 fixed-assignment E1 has few warehouse tasks; an independently enumerated capacity-feasible E1 route cover can provide a substantially stronger component floor than the current shortest-visit relaxation at modest cost.",
+  "correctness_boundary": [
+    "B1 M3 only. Retain original active warehouse delivery and recovery quantities, raw directed depot/warehouse arcs, weight/volume capacity, and nonempty route definition.",
+    "Prove every original E1 trip projects at unchanged cost. Derive physical vehicle/route count from the actual original formulation before adding an aggregate count constraint. Do not infer a one-trip rule.",
+    "The actual single_batch_formulation delegates E1 geometry to strengthening.route_arcs, which explicitly excludes pickup-to-delivery arcs. Therefore delivery-first E1 route enumeration is allowed for this original B1 M3 model, including zero-time cases. Do not infer it only from windows.",
+    "The E1 subproblem may relax E2 synchronization and inventory for a lower bound, but the complete integer kernel remains unchanged. Add independent E1 floor only to an independent E2 floor, never twice to total-distance cuts.",
+    "Never transfer this fixed-assignment E1 floor to M4. M4 requires a shared customer/warehouse assignment-coupled relaxation.",
+    "An enumerated route universe must be complete for the stated relaxed domain; a restricted pool objective cannot certify the floor. Interrupted search uses only proven complete-subproblem lower bounds or earlier safe floor."
+  ],
+  "validation_gate": "Review original E1 formulation and extraction; independent tiny integer enumeration and all prior frozen M3 schedule/raw arc projections before large measurements. Register seeds, sources, same total root/kernel budgets and snapshots before timing.",
+  "adoption_gate": "No default from component/root bound strength alone. Stable end-to-end original integer comparisons across independent sources and seeds, short/long total budgets, independent audits and regression required.",
+  "not_allowed": "Do not repeat failed cheap-column or Big-M/cycle trials without a new registered mechanism. Do not change business data or physical vehicle rules.",
+  "created_utc": "2026-10-01T18:55:27.290366+00:00",
+  "reviewed_original_facts": {
+    "E1_route_count": "Exactly one route slot per batch/physical E1 vehicle; B1 nonempty routes at most f.e1_count (single_batch_formulation.py:337).",
+    "warehouse_tasks": "Every active site exactly one delivery and one complete pickup task, fixed quantity n and both resource profiles; delivery coverage:385 and pickup coverage:597. They need not use the same physical vehicle.",
+    "ordering": "Explicit E1 p->d arc exclusion in strengthening.py:38. Capacity profile initial sum D, subtract deliveries/add empty recovery; raw directed distance objective.",
+    "source_sha256": {
+      "models/routing/solvers/exact/single_batch_formulation.py": "5e06a38417e3286d6117a82f60ab7fd766301454d3667cd7f2d7b1074dad891c",
+      "models/routing/solvers/exact/strengthening.py": "0bd8da42e8797b64904ace43732367ca39d3f4ca38a879adb1caa38e2b934b42"
+    },
+    "first_candidate": "Complete relaxed E1 route universe and cover LP (or exact integer partition bound) for few active fixed warehouses; relax clocks first unless their safe projection is independently proved. Never price a restricted pool as full lower bound."
+  }
+}

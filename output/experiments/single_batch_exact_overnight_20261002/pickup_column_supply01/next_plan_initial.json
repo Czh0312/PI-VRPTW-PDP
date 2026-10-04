@@ -1,0 +1,16 @@
+{
+  "candidate": "M3 independent E1 all-task routing floor",
+  "status": "registered_design_only_not_implemented",
+  "hypothesis": "M3 fixed-assignment E1 has few warehouse tasks; an independently enumerated capacity-feasible E1 route cover can provide a substantially stronger component floor than the current shortest-visit relaxation at modest cost.",
+  "correctness_boundary": [
+    "B1 M3 only. Retain original active warehouse delivery and recovery quantities, raw directed depot/warehouse arcs, weight/volume capacity, and nonempty route definition.",
+    "Prove every original E1 trip projects at unchanged cost. Derive physical vehicle/route count from the actual original formulation before adding an aggregate count constraint. Do not infer a one-trip rule.",
+    "Original E1 may interleave delivery/recovery tasks: do not impose all deliveries first unless proved from the original model. Preserve local precedence wherever necessary, or explicitly relax it.",
+    "The E1 subproblem may relax E2 synchronization and inventory for a lower bound, but the complete integer kernel remains unchanged. Add independent E1 floor only to an independent E2 floor, never twice to total-distance cuts.",
+    "Never transfer this fixed-assignment E1 floor to M4. M4 requires a shared customer/warehouse assignment-coupled relaxation.",
+    "An enumerated route universe must be complete for the stated relaxed domain; a restricted pool objective cannot certify the floor. Interrupted search uses only proven complete-subproblem lower bounds or earlier safe floor."
+  ],
+  "validation_gate": "Review original E1 formulation and extraction; independent tiny integer enumeration and all prior frozen M3 schedule/raw arc projections before large measurements. Register seeds, sources, same total root/kernel budgets and snapshots before timing.",
+  "adoption_gate": "No default from component/root bound strength alone. Stable end-to-end original integer comparisons across independent sources and seeds, short/long total budgets, independent audits and regression required.",
+  "not_allowed": "Do not repeat failed cheap-column or Big-M/cycle trials without a new registered mechanism. Do not change business data or physical vehicle rules."
+}

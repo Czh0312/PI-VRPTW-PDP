@@ -1,0 +1,50 @@
+....................................................................F... [ 54%]
+...........................................................              [100%]
+=================================== FAILURES ===================================
+___________ test_new_solve_reprepares_same_problem_after_input_edit ____________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1068ae910>
+
+    def test_new_solve_reprepares_same_problem_after_input_edit(monkeypatch):
+        from models.routing.solvers.alns import single_batch
+        from models.routing.solvers.alns.single_batch_cache import SingleBatchCache
+        contexts = []
+        def context(problem):
+            cache = SingleBatchCache(problem)
+            contexts.append(cache)
+            return cache
+        monkeypatch.setattr(single_batch, 'SingleBatchCache', context)
+        p = tiny_problem(1, 1)
+>       first = single_batch.solve_alns(p, max_time=10, max_iterations=40)
+
+tests/routing/test_single_batch_prepared_scoring.py:101: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+problem = <models.routing.common.cycle.instance.MultiBatchInstance object at 0x1057d4bb0>
+max_time = 10, max_iterations = 40, seed = 42, initial_result = None
+seed_state = None, _travel_bounds = None, _assignment_search = None
+_begun = None, _context = None
+
+    def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_result=None,
+                   seed_state=None, _travel_bounds=None, _assignment_search=None, _begun=None,
+                   _context=None):
+        if len(problem.operating_policy.batches) != 1:
+            raise ValueError('Single-batch search requires B=1')
+        if not math.isfinite(max_time) or max_time <= 0 or max_iterations < 0:
+            raise ValueError('Invalid ALNS time/iteration budget')
+        begun = time.perf_counter() if _begun is None else _begun
+        travel_bounds = _travel_bounds or travel_lower_bounds(problem)
+        precheck = check_necessary_conditions(problem, travel_bounds)
+        if not precheck['passed'] and _assignment_search is None:
+            return rejected_result(problem, 'alns', precheck, time.perf_counter()-begun)
+        rng = random.Random(seed)
+        if _context is not None and _context.problem is not problem:
+            raise ValueError('Single-batch context belongs to one problem instance')
+>       cached = (_context if _context is not None else SingleBatchCache(problem,
+                  capacity_profile_capacity=512 if problem.reusable and _assignment_search is None else 0))
+E       TypeError: context() got an unexpected keyword argument 'capacity_profile_capacity'
+
+models/routing/solvers/alns/single_batch.py:104: TypeError
+=========================== short test summary info ============================
+FAILED tests/routing/test_single_batch_prepared_scoring.py::test_new_solve_reprepares_same_problem_after_input_edit
+1 failed, 130 passed in 1.77s

@@ -1,0 +1,141 @@
+{
+  "material_passport": {
+    "origin_skill": "academic-research-suite / experiment-agent",
+    "mode": "validate",
+    "verification_status": "VERIFIED_FOR_EXECUTED_CHECKS_ONLY"
+  },
+  "scope": "B=1 M1-M4 current declared finite-fleet finite-trip integer-time distance formulation",
+  "production_code_modified_by_this_review": false,
+  "regression": {
+    "command": [
+      ".venv/bin/python",
+      "-m",
+      "pytest",
+      "-q",
+      "tests/routing/test_single_batch_solver_audit.py",
+      "tests/routing/test_joint_assignment_exact.py",
+      "tests/routing/test_solver_stability.py",
+      "tests/routing/test_single_batch_comparison.py",
+      "tests/routing/test_multibatch_cycle.py",
+      "tests/routing/test_model_scope.py",
+      "tests/routing/test_solver_isolation.py"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 21.867779667
+  },
+  "oracle_cases": 24,
+  "ablation_pairs": 8,
+  "ablation_per_run_budget_seconds": 10,
+  "inputs_inspected": 93,
+  "models_built": 16,
+  "concurrent_source_change": "Shared formulation/solver changed during review to extend compact E2 to multibatch. 16 B1 model fingerprints match saved pre-change source exactly.",
+  "limitations": [
+    "Not an exhaustive proof for arbitrary instances.",
+    "Single seed and one timing observation per variant; no statistical speedup claim.",
+    "Tightening remains in the diagnostic script; not installed in production."
+  ],
+  "source_hashes_at_close": {
+    "models/routing/solvers/exact/solver.py": "4f52af38923d2b2224e78364072fd5a0d7f5ed96bf6a1551d49a9f9ad4ff3d5e",
+    "models/routing/solvers/exact/multibatch_primal.py": "e8669e1acfd97cffcedf721d64c33a5844a9fca90b6796cdb909d573d92a8a6b",
+    "models/routing/solvers/exact/domains.py": "d4fb9d1c7d7e5d22f7c76fcbf6f4b8885a3dcfbae787edc6e3d3618edf45320c",
+    "models/routing/solvers/exact/__init__.py": "2a6170a3727e71785aa4125079b637055e840c769f167e5d4406b9223c6b0e1e",
+    "models/routing/solvers/exact/formulation.py": "6a057b77a01d3b81b6e97bc0fb1c2452d17de7bdfe1326fdd5009f330c9f981f",
+    "models/routing/solvers/exact/assignment.py": "bd472ba20195cb5f227c64734bb8a725f98d83e15e0abe5bc733b3d7de6a0074",
+    "models/routing/solvers/exact/primal.py": "b43a9d972b64ef6b5eff2b62187d27c61624919c40d397957a8e5de923c45e8c",
+    "models/routing/solvers/exact/bounds.py": "381e7e32462ab6b0e99cb6eb4e648289de8737bfecf7a5551a4b4c1e4e4b28bb",
+    "models/routing/common/cycle/instance.py": "dbf95488d3a36361462d200272ebef23be968cf2f86d31d402ce1532b32c1ccc",
+    "models/routing/common/cycle/audit.py": "ce1a3a0565b8e818d81f1cc16a3d2c4c17f443e1b68e82c578d74f1b6d1d890e",
+    "models/routing/common/cycle/policy.py": "755063a1d034a0cd45cb3bbd244d871bd685969bb275dc879e9d5d41981ad57e",
+    "models/routing/common/cycle/__init__.py": "2f2c0c3a398716d5ca25a705c7ab764240ee11cb2a8fb5fd310aac6a202650ea",
+    "models/routing/common/cycle/precheck.py": "577750400dc174f9436f1b2eef31161825cb07deaa532662992292cb6146f8de",
+    "models/routing/common/cycle/timing.py": "1d20446dc5d4cfda05768d46dba1aed9b9fd4a1c8d389c1e67f7ba847b8642d8",
+    "models/routing/common/cycle/assignment.py": "3d31ccab95d47f05d4c4f1d87226e9410b2ac05f76a0b16509639aab1b27d5ac",
+    "models/routing/common/cycle/migration.py": "6423c498c6a1253b85693e636bd1f0c86463b70619eec00abf10df5f81524a24",
+    "models/routing/common/cycle/scope.py": "92b87930bd80f9acf638a05e5bfddcc4b5e63b5250e99debd4fb89d76cae96fa",
+    "models/routing/common/cycle/state.py": "ba5c8b4858fcdc09b73277239bba53c5743f122be8b9ce4e3b43e58a53471f9f",
+    "data/manifest.json": "253fccbf665e3822859b07c432f8023a53d68c54166c26ec94ea814ef3ba0cae",
+    "config/routing/container_pools.json": "30c9df2dce2931b75f54936e2c726b9a8b6ec8b3d872f2f5e14bb11b62dba3e8"
+  },
+  "pair_results": [
+    {
+      "case": "data/single_batch/small/zhou_Set1_7-2-1/case.json",
+      "model": 1,
+      "before_seconds": 0.01784983299999998,
+      "after_seconds": 0.01849995900000001,
+      "objective_before": 325.9232425779155,
+      "objective_after": 325.9232425779155,
+      "both_proven_optimal": true,
+      "both_audited": true
+    },
+    {
+      "case": "data/single_batch/small/zhou_Set1_7-2-1/case.json",
+      "model": 2,
+      "before_seconds": 0.1125214590000001,
+      "after_seconds": 0.12048775000000012,
+      "objective_before": 269.03141280674146,
+      "objective_after": 269.03141280674146,
+      "both_proven_optimal": true,
+      "both_audited": true
+    },
+    {
+      "case": "data/single_batch/small/zhou_Set1_7-2-1/case.json",
+      "model": 3,
+      "before_seconds": 0.07324225000000006,
+      "after_seconds": 0.07790708299999993,
+      "objective_before": 326.33116170074476,
+      "objective_after": 326.33116170074476,
+      "both_proven_optimal": true,
+      "both_audited": true
+    },
+    {
+      "case": "data/single_batch/small/zhou_Set1_7-2-1/case.json",
+      "model": 4,
+      "before_seconds": 2.14267225,
+      "after_seconds": 1.8288562080000004,
+      "objective_before": 311.40611004079716,
+      "objective_after": 311.40611004079716,
+      "both_proven_optimal": true,
+      "both_audited": true
+    },
+    {
+      "case": "data/single_batch/small/zhou_Set1_10-2-1/case.json",
+      "model": 1,
+      "before_seconds": 0.11218583299999985,
+      "after_seconds": 0.09756004200000046,
+      "objective_before": 222.13217990810432,
+      "objective_after": 222.13217990810432,
+      "both_proven_optimal": true,
+      "both_audited": true
+    },
+    {
+      "case": "data/single_batch/small/zhou_Set1_10-2-1/case.json",
+      "model": 2,
+      "before_seconds": 1.2874567910000003,
+      "after_seconds": 1.787356333,
+      "objective_before": 222.13217990810432,
+      "objective_after": 222.13217990810432,
+      "both_proven_optimal": true,
+      "both_audited": true
+    },
+    {
+      "case": "data/single_batch/small/zhou_Set1_10-2-1/case.json",
+      "model": 3,
+      "before_seconds": 0.36164383300000047,
+      "after_seconds": 0.3751814590000002,
+      "objective_before": 242.01400554761886,
+      "objective_after": 242.01400554761886,
+      "both_proven_optimal": true,
+      "both_audited": true
+    },
+    {
+      "case": "data/single_batch/small/zhou_Set1_10-2-1/case.json",
+      "model": 4,
+      "before_seconds": 7.340279208999998,
+      "after_seconds": 6.194573875,
+      "objective_before": 242.01400554761886,
+      "objective_after": 242.01400554761886,
+      "both_proven_optimal": true,
+      "both_audited": true
+    }
+  ]
+}

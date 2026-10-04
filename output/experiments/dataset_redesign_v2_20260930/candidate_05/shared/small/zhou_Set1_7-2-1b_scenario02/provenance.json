@@ -1,0 +1,229 @@
+{
+  "selection_profile": "zhou_10_per_customer_count_v4",
+  "design_version": "operational_scenarios_v2",
+  "business_assumption": "Static same-day distribution of reusable transport boxes; unloading/short use followed by collection. Scenario assumptions, not measured consumer packaging returns.",
+  "source_instance": "Set1_7-2-1b",
+  "base_family_id": "zhou_Set1_7-2-1b",
+  "scenario_index": 2,
+  "scenario_rule": "Paired use-duration/collection profiles; identical customer subset, territories, demand and fleet.",
+  "scale_pair_id": null,
+  "selection_rule": "Five source blocks; source-keyed SHA256 ordering; nested 20/30/50 subsets; identical subsets within both profiles; no solver filtering.",
+  "territory_rule": "Choose source satellite subset by minimum summed nearest distance; assign distant customers first to nearest available territory with a published count cap.",
+  "territory_customer_cap": 6,
+  "cohort_rule": "Per-territory customer hash rank modulo three, independent of use/return hash streams.",
+  "time_unit": "scenario_minutes",
+  "distance_unit": "benchmark_coordinate_units_not_km",
+  "preserved_fields": [
+    "selected_source_locations",
+    "goods_weight",
+    "customer_service_time"
+  ],
+  "scenario_fields": [
+    "satellite_subset",
+    "territories",
+    "satellite_service",
+    "travel_speed",
+    "box_count",
+    "windows",
+    "use_duration",
+    "fleet",
+    "calendar"
+  ],
+  "original_windows": {
+    "C4_order": {
+      "delivery_ready": "58.0",
+      "delivery_due": "78.0",
+      "pickup_ready": "448.0",
+      "pickup_due": "688.0",
+      "assigned_sat": "S1"
+    },
+    "C5_order": {
+      "delivery_ready": "212.0",
+      "delivery_due": "232.0",
+      "pickup_ready": "602.0",
+      "pickup_due": "842.0",
+      "assigned_sat": "S0"
+    },
+    "C0_order": {
+      "delivery_ready": "170.0",
+      "delivery_due": "190.0",
+      "pickup_ready": "560.0",
+      "pickup_due": "800.0",
+      "assigned_sat": "S1"
+    },
+    "C6_order": {
+      "delivery_ready": "112.0",
+      "delivery_due": "132.0",
+      "pickup_ready": "502.0",
+      "pickup_due": "742.0",
+      "assigned_sat": "S0"
+    },
+    "C1_order": {
+      "delivery_ready": "191.0",
+      "delivery_due": "211.0",
+      "pickup_ready": "581.0",
+      "pickup_due": "821.0",
+      "assigned_sat": "S1"
+    },
+    "C2_order": {
+      "delivery_ready": "58.0",
+      "delivery_due": "78.0",
+      "pickup_ready": "448.0",
+      "pickup_due": "688.0",
+      "assigned_sat": "S0"
+    },
+    "C3_order": {
+      "delivery_ready": "63.0",
+      "delivery_due": "83.0",
+      "pickup_ready": "453.0",
+      "pickup_due": "693.0",
+      "assigned_sat": "S1"
+    }
+  },
+  "reference_e2_routes": [
+    {
+      "satellite": "S0",
+      "vehicle": 0,
+      "depart_after": 499.93333333,
+      "tasks": [
+        [
+          "C5_order",
+          "d"
+        ],
+        [
+          "C5_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S0",
+      "vehicle": 0,
+      "depart_after": 739.93333333,
+      "tasks": [
+        [
+          "C2_order",
+          "d"
+        ],
+        [
+          "C2_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S0",
+      "vehicle": 0,
+      "depart_after": 979.93333333,
+      "tasks": [
+        [
+          "C6_order",
+          "d"
+        ],
+        [
+          "C6_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S1",
+      "vehicle": 0,
+      "depart_after": 491.71666667,
+      "tasks": [
+        [
+          "C1_order",
+          "d"
+        ],
+        [
+          "C3_order",
+          "d"
+        ],
+        [
+          "C1_order",
+          "p"
+        ],
+        [
+          "C3_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S1",
+      "vehicle": 0,
+      "depart_after": 731.71666667,
+      "tasks": [
+        [
+          "C4_order",
+          "d"
+        ],
+        [
+          "C4_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S1",
+      "vehicle": 0,
+      "depart_after": 971.71666667,
+      "tasks": [
+        [
+          "C0_order",
+          "d"
+        ],
+        [
+          "C0_order",
+          "p"
+        ]
+      ]
+    }
+  ],
+  "reference_time_unit": "minutes",
+  "reference_purpose": "Feasibility construction only; no objective optimization or performance filtering.",
+  "reference_rule": "Per-territory hash cohorts; nearest feasible capacity groups; earliest available vehicle; delivery then collection.",
+  "usage_profile": 2,
+  "appointment_rule": "Separate hash streams for cohort, use and collection delay; window slack around disclosed constructive service times.",
+  "window_rule": "One operating day; delivery and return appointment windows around disclosed feasible reference tours.",
+  "limitation": "Derived short-use transport-box scenarios, not original benchmark windows or observed operations.",
+  "family_id": "zhou_Set1_7-2-1b_scenario02",
+  "source_kind": "zhou_derived_scenario",
+  "size": "small",
+  "input_source_sha256": {
+    "data/zhou_later_pickup/small/standard_same_day/Set1_7-2-1b.csv": "0583aae4aa20a1c49bddf4f1416a91e681da8d24c6ed576253ea26b688ae85f6",
+    "config/datasets/static_batch_v2.json": "e0cc2d2dc3dff66771f5cdb6038bda557b17becfdf712ce344c8799847b5fdae",
+    "tools/data/design_static_scenarios.py": "1fe395af69c63e66dfc9794b4351f303c7b4910e3537e66916584bbd90c1e79c"
+  },
+  "original_fleet": {
+    "schema_version": 1,
+    "source_type": "scenario_assumption",
+    "parameter_scope": "operational_scenarios_v2_zhou",
+    "units": {
+      "weight": "benchmark demand units",
+      "volume": "benchmark volume units",
+      "speed": "benchmark coordinate units per minute"
+    },
+    "E1_vehicle_count": 2,
+    "E1_Qk": 210,
+    "E1_Ck": 14,
+    "vehicles_per_satellite": 1,
+    "E2_Qv": 180,
+    "E2_Cv": 6,
+    "container_weight": 2,
+    "container_volume": 1,
+    "speed": 2.0
+  },
+  "fleet_rule": "Published size-based fleet and capacities; identical across paired profiles and B1/B2/B3; no demand-driven expansion.",
+  "cohort_by_order": {
+    "C5_order": 0,
+    "C2_order": 1,
+    "C6_order": 2,
+    "C3_order": 0,
+    "C4_order": 1,
+    "C0_order": 2,
+    "C1_order": 0
+  },
+  "pairing_contract": "All order fields except delivery_batch_id are identical; same network, fleet, pool, cycle and final cutoff.",
+  "return_batch": "Not an input. Derived by the solver/auditor from actual unload times."
+}

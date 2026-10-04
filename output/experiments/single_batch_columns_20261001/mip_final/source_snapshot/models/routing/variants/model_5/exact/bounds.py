@@ -1,0 +1,8 @@
+"""Optional route-cover lower-bound experiment; no integer solution output."""
+from ..model import validate_problem
+
+
+def route_cover_certificate(problem, **options):
+    validate_problem(problem)
+    from models.routing.solvers.exact.multibatch_route_cg import route_cover_certificate as compute
+    return compute(problem, **options)

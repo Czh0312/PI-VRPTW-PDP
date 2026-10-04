@@ -1,0 +1,20 @@
+....F.....................                                               [100%]
+=================================== FAILURES ===================================
+______ test_optimistic_screen_does_not_override_full_vehicle_constraints _______
+
+    def test_optimistic_screen_does_not_override_full_vehicle_constraints():
+        problem, state = sequential_trips()
+        # Delaying the unchanged preceding trip makes the second trip
+        # infeasible. The optimistic screen can pass it; the decoder must reject it.
+        state['e2'][0]['return_after'] = 25
+        descent = CycleDescent(problem)
+        descent.key = state_key(state)
+        descent.queue = [('e2', ((1, state['e2'][1]['tasks']),))]
+        candidate = descent.propose(state, {'e2_trips': []}, time.perf_counter()+1)
+>       assert candidate is not None
+E       assert None is not None
+
+tests/routing/test_model5_readiness_filter.py:121: AssertionError
+=========================== short test summary info ============================
+FAILED tests/routing/test_model5_readiness_filter.py::test_optimistic_screen_does_not_override_full_vehicle_constraints
+1 failed, 25 passed in 2.67s

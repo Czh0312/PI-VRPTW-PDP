@@ -1,0 +1,26 @@
+{
+  "recorded": "2026-10-01T00:10:22",
+  "selection_made_before_validation": true,
+  "development_cases": [
+    "zhou_Set2_100-5-1b_subset50",
+    "zhou_Set2_100-5-1b"
+  ],
+  "seeds": [
+    42,
+    43
+  ],
+  "budget": 5,
+  "chosen": {
+    "M1": "cached descent",
+    "M2": "cached descent",
+    "M3": "global enumeration descent",
+    "M4": "retain previous search; descent disabled"
+  },
+  "rationale": "Two full pilot variants retained. Select by model using all pilot seeds; no per-seed version selection. Validation results are not used to tune parameters.",
+  "provenance": "SingleBatchDescent derives from the workspace CycleDescent design, including concurrent per-site cache work, with a dedicated B=1 module, delivery-only exchange and removal of pickup-only proposals for pure delivery.",
+  "validation_gate": "Initial descent failed broad validation, especially M3; it is retained as a rejected candidate.",
+  "followup_candidate": "No parameter sweep: defer descent until the last 20% of either budget; retain M4 unchanged. Previously reserved cases now become development/recheck for this variant; source 100-5-3 was newly reserved before results.",
+  "recheck_completed": "Tail policy mean paired distance changes: M1 -1.1096%, M2 -1.7288%, M3 -0.7003%; all 27 feasible. Tail policy retained uniformly for M1-M3 before viewing new-source results.",
+  "adopted_source_note": "Same tail algorithm; adds only descriptive descent_budget_policy result metadata. Fixed-iteration source equality checked after performance runs.",
+  "final_decision": "Adopt tail polishing for M1-M3; M2 novel-source average is effectively flat, so no stable M2 quality-gain claim. Preserve M4. All 45 final candidate runs audited; full regression and frozen/live equality passed."
+}

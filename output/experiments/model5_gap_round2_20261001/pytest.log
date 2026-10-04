@@ -1,0 +1,55 @@
+..F..................................................................... [ 72%]
+............................                                             [100%]
+=================================== FAILURES ===================================
+____ test_explicit_pattern_primal_rejects_unrepresented_physical_turnaround ____
+
+    def test_explicit_pattern_primal_rejects_unrepresented_physical_turnaround():
+        from dataclasses import replace
+        p,initial=five_site_fixture()
+        p.operating_policy=replace(p.operating_policy,e1_turnaround_time=1)
+        with pytest.raises(ValueError,match='zero E1 turnaround'):
+>           reoptimize_route_pool(p,initial,time_limit=1,e1_backend='patterns')
+
+tests/routing/test_multibatch_joint_exchanges.py:110: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+models/routing/solvers/exact/multibatch_route_pool.py:371: in reoptimize_route_pool
+    result = _reoptimize_once(problem, result, time_limit=remaining, seed=seed,
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+problem = <models.routing.common.cycle.instance.MultiBatchInstance object at 0x108a0ccd0>
+initial_result = {'batches': [{'container_demand': 5, 'cutoff': 30, 'end': 60, 'id': 'b1', ...}, {'container_demand': 0, 'cutoff': 90, ...d': 'S4', ...}], 'info': {'best_bound': None, 'mip_gap': None, 'objective': 0.0, 'proven_infeasible': False, ...}, ...}
+
+    def _reoptimize_once(problem, initial_result, *, time_limit=10, seed=42, verbose=False,
+                         max_columns=128, transfers=True, exchanges=False, e1_backend='auto', diagnostics_dir=None):
+        if not math.isfinite(time_limit) or time_limit <= 0:
+            raise ValueError('time_limit must be finite and positive')
+        if not isinstance(max_columns, int) or isinstance(max_columns, bool) or max_columns < 1:
+            raise ValueError('max_columns must be a positive integer')
+        if (problem.model_number != 5 or problem.free_assignment or not problem.reusable
+                or len(problem.operating_policy.batches) <= 1):
+            raise ValueError('Route-pool reoptimization requires fixed reusable multibatch M5')
+        begun, model = time.perf_counter(), None
+        deadline = begun+time_limit
+        before = audit_solution(problem, initial_result)
+        if not before['valid']:
+>           raise ValueError('Initial result must pass the full M5 independent audit')
+E           ValueError: Initial result must pass the full M5 independent audit
+
+models/routing/solvers/exact/multibatch_route_pool.py:278: ValueError
+
+During handling of the above exception, another exception occurred:
+
+    def test_explicit_pattern_primal_rejects_unrepresented_physical_turnaround():
+        from dataclasses import replace
+        p,initial=five_site_fixture()
+        p.operating_policy=replace(p.operating_policy,e1_turnaround_time=1)
+        with pytest.raises(ValueError,match='zero E1 turnaround'):
+>           reoptimize_route_pool(p,initial,time_limit=1,e1_backend='patterns')
+E           AssertionError: Regex pattern did not match.
+E            Regex: 'zero E1 turnaround'
+E            Input: 'Initial result must pass the full M5 independent audit'
+
+tests/routing/test_multibatch_joint_exchanges.py:110: AssertionError
+=========================== short test summary info ============================
+FAILED tests/routing/test_multibatch_joint_exchanges.py::test_explicit_pattern_primal_rejects_unrepresented_physical_turnaround
+1 failed, 99 passed in 2.50s

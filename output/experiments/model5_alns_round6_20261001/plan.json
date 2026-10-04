@@ -1,0 +1,17 @@
+{
+  "families": {
+    "zhou_Set2_100-5-2_subset50": "development",
+    "zhou_Set2_100-5-3": "development",
+    "zhou_Set2_100-10-2_subset50_scenario02": "held_out",
+    "zhou_Set2_100-10-2_scenario02": "held_out"
+  },
+  "seeds": [
+    42,
+    43,
+    44
+  ],
+  "scope": "Round 6: M5-only bounded regret repair. Development uses 30 previously observed 50/100 customer jobs; hold-out uses scenario02 of 100-10-2 and its nested 50-customer subset. Mother-instance and subset dependencies prevent independent-sample inference. Equal 5s budgets and extra 15s on 100-customer B3. Descriptive engineering experiment.",
+  "selection_rule": "Freeze the baseline before edits. Compare all 30 development jobs for each candidate, retaining failures. Select at most one complete candidate before viewing held-out objectives. Candidate development gate: all audited/replayed valid, mean paired distance decreases, average seed CV does not increase, and the 100-customer B3 full-pool 15s group mean does not increase. Final default gate: all 60 valid, mean paired distance decreases, average seed CV does not increase and mean paired distance among all 100-customer B3 15s jobs decreases. Otherwise leave experimental or withdraw; no per-job best selection. No bound strengthening credited as UB improvement.",
+  "max_candidates": 3,
+  "candidate_policy": "Candidate 1 applies regret-2 to related removal and retains random greedy repair; alternative bounded regret policies only if development justifies. No change to removal size, annealing, restart cadence, arc-cache default or decoder/audit semantics."
+}

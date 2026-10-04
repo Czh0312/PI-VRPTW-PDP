@@ -1,0 +1,48 @@
+{
+  "schema_version": 2,
+  "case_name": "multibatch_cutoff_demo",
+  "description": "Two satellites, two serial batches, four container uses. Pool size comes from the shared config. Synthetic mechanism data.",
+  "model": 5,
+  "solver": "alns",
+  "data": "/Users/chenzeheng/Desktop/2E-VRPTW-PDD/output/experiments/m5_exact_primal_20260930/benchmark_5s/inputs/0/data.csv",
+  "orders": "/Users/chenzeheng/Desktop/2E-VRPTW-PDD/output/experiments/m5_exact_primal_20260930/benchmark_5s/inputs/0/orders.json",
+  "routing_config": "/Users/chenzeheng/Desktop/2E-VRPTW-PDD/output/experiments/m5_exact_primal_20260930/benchmark_5s/inputs/0/fleet.json",
+  "operating_policy": {
+    "policy_version": "multi_batch_cutoff_v1",
+    "description": "Synthetic mechanism example, not observed operating hours. A1 returns after the first cutoff.",
+    "source_type": "scenario_assumption",
+    "time_unit": "minutes",
+    "time_tick_seconds": 1,
+    "cycle_start": 0,
+    "cycle_end": 130,
+    "batches": [
+      {
+        "id": "b1",
+        "delivery_duration": 30,
+        "return_duration": 30
+      },
+      {
+        "id": "b2",
+        "delivery_duration": 30,
+        "return_duration": 30
+      }
+    ],
+    "container_pool_size": 4,
+    "cleaning_duration": 5,
+    "e1_load_time": 2,
+    "e2_dispatch_prep_time": 1,
+    "e2_return_unload_time": 1,
+    "depot_return_unload_time": 1,
+    "e1_turnaround_time": 0,
+    "e2_turnaround_time": 1,
+    "e2_max_trips_per_vehicle": 3,
+    "terminal_policy": "all_clean_at_depot"
+  },
+  "exact_backend": "multibatch_indexed",
+  "exact_time": 60,
+  "alns_time": 3,
+  "alns_iter": 5000,
+  "seed": 42,
+  "pool_config": "/Users/chenzeheng/Desktop/2E-VRPTW-PDD/config/routing/container_pools.json",
+  "container_pool_size": 4
+}

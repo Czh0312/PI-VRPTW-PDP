@@ -1,0 +1,38 @@
+..........................F............................................. [ 78%]
+....................                                                     [100%]
+=================================== FAILURES ===================================
+_ test_changes_in_one_site_remap_global_indices_and_keep_other_site_cached[reorder] _
+
+change = 'reorder'
+
+    @pytest.mark.parametrize('change', ['reverse', 'remove', 'reorder', 'waits', 'vehicle', 'e1'])
+    def test_changes_in_one_site_remap_global_indices_and_keep_other_site_cached(change):
+        p, state = interleaved(1)
+        reference, cached = engines(p, 16)
+        cached._e2_candidates(state, time.perf_counter()+20)
+        before = cached.enumerations
+        changed = deepcopy(state)
+        if change == 'reverse':
+            changed['e2'][0]['tasks'].reverse()
+        elif change == 'remove':
+            changed['e2'].pop(0)
+        elif change == 'reorder':
+            changed['e2'] = changed['e2'][2:]+changed['e2'][:2]
+        elif change == 'waits':
+            changed['e2'][0].update(depart_after=23, return_after=70)
+        elif change == 'vehicle':
+            changed['e2'][0]['vehicle'] = 1
+        else:
+            changed['deliveries']['b1'][0].reverse()
+            changed['pickup_order']['b1'].reverse()
+            changed['pickup_vehicle']['b1']['S'] = 0
+        assert cached._e2_candidates(changed, time.perf_counter()+20) == reference._e2_candidates(
+            changed, time.perf_counter()+20)
+>       assert cached.site_cache_hits > 0
+E       assert 0 > 0
+E        +  where 0 = <models.routing.solvers.alns.single_batch_descent.SingleBatchDescent object at 0x106540c70>.site_cache_hits
+
+tests/routing/test_single_batch_site_cache.py:76: AssertionError
+=========================== short test summary info ============================
+FAILED tests/routing/test_single_batch_site_cache.py::test_changes_in_one_site_remap_global_indices_and_keep_other_site_cached[reorder]
+1 failed, 91 passed in 0.36s

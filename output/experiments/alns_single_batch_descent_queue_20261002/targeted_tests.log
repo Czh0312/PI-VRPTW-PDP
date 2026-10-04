@@ -1,0 +1,39 @@
+....F............................................................        [100%]
+=================================== FAILURES ===================================
+_______________ test_public_model_scope_and_fresh_full_audit[5] ________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x109892f70>, model = 5
+
+    @pytest.mark.parametrize('model',[1,2,3,4,5])
+    def test_public_model_scope_and_fresh_full_audit(monkeypatch,model):
+        caps=[]
+        class Probe(SingleBatchDescent):
+            def __init__(self,*args,**kwargs):
+                super().__init__(*args,**kwargs);caps.append(self.capacity)
+        monkeypatch.setattr(single_batch,'SingleBatchDescent',Probe)
+>       p=tiny_problem(model,1);saved=deepcopy(p.orders)
+
+tests/routing/test_single_batch_descent_queue.py:22: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/routing/test_single_batch_solver_audit.py:126: in tiny_problem
+    return MultiBatchInstance(ProblemInstance(nodes, fleet, distance_matrix=distance,
+models/routing/common/cycle/instance.py:36: in __init__
+    self.operating_policy.require_model(model)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = MultiBatchPolicy(cycle_start=0, cycle_end=100, batches=(Batch(id='b1', start=0, cutoff=65, end=95),), container_pool_s..._turnaround_time=0, e2_turnaround_time=0, policy_version='multi_batch_cutoff_v1', terminal_policy='all_clean_at_depot')
+model = 5
+
+    def require_model(self, model):
+        number = integer(model, 'model', 1)
+        if len(self.batches) == 1 and number in (1, 2, 3, 4):
+            return
+        if len(self.batches) > 1 and number == 5:
+            return
+>       raise ValueError('M1-M4 require B=1; current Model 5 requires B>1 (multi_batch_cutoff_v1)')
+E       ValueError: M1-M4 require B=1; current Model 5 requires B>1 (multi_batch_cutoff_v1)
+
+models/routing/common/cycle/policy.py:66: ValueError
+=========================== short test summary info ============================
+FAILED tests/routing/test_single_batch_descent_queue.py::test_public_model_scope_and_fresh_full_audit[5]
+1 failed, 64 passed in 0.32s

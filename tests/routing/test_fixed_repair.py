@@ -9,7 +9,7 @@ import pytest
 from models.routing.alns.fixed_repair import FixedRouteInsertionCache
 from models.routing.alns.initial_solution import build_strong_initial_solution
 from models.routing.alns.types import Route
-from models.routing.alns.variants import model_3, model_6
+from models.routing.baselines.alns import model_3
 from models.routing.common.data_loader import parse_dataset
 from models.routing.common.domain.instance import ProblemInstance
 from models.routing.common.task_builder import build_tasks_for_model
@@ -26,7 +26,7 @@ def problem():
     return result
 
 
-@pytest.mark.parametrize("module,model", [(model_3, 3), (model_6, 6)])
+@pytest.mark.parametrize("module,model", [(model_3, 3)])
 @pytest.mark.parametrize("seed", [11, 23, 42])
 @pytest.mark.parametrize("destroy_name", ["random_removal", "paired_customer_removal"])
 def test_cached_regret_matches_exhaustive_repair(problem, module, model, seed, destroy_name, monkeypatch):

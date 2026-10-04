@@ -1,0 +1,17 @@
+......F.......                                                           [100%]
+=================================== FAILURES ===================================
+______ test_fixed_order_cycle_cannot_be_lifted_to_unordered_group_no_good ______
+
+    def test_fixed_order_cycle_cannot_be_lifted_to_unordered_group_no_good():
+        pytest.importorskip('gurobipy')
+        p,_=three_slot_case(zero=True)
+        cyclic={'S':[[('extra','p'),('o1','d')],[('o1','p'),('extra','d')],[('o2','d'),('o2','p')]]}
+        assert conditional_cover_schedule(p,cyclic,time_limit=3)['certificate']['conditional_infeasible']
+        trial=conditional_group_schedule(p,cyclic,time_limit=3)
+>       assert trial['certificate']['conditional_optimal'] and not trial['certificate']['conditional_infeasible']
+E       assert (False)
+
+tests/routing/test_multibatch_group_schedule.py:33: AssertionError
+=========================== short test summary info ============================
+FAILED tests/routing/test_multibatch_group_schedule.py::test_fixed_order_cycle_cannot_be_lifted_to_unordered_group_no_good
+1 failed, 13 passed in 0.40s

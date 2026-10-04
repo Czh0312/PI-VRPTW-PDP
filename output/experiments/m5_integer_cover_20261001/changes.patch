@@ -1,0 +1,729 @@
+--- a/models/routing/solvers/exact/multibatch_route_cg.py
++++ b/models/routing/solvers/exact/multibatch_route_cg.py
+@@ -31,7 +31,8 @@
+ 
+ def site_route_cover(problem, context, *, deadline, initial_result=None, seed=42,
+                      pricing_time_limit=2.0, verbose=False, pricing_export_path=None, heuristic_pricing=True,
+-                     pricing_backend='milp', enumeration_time_limit=15.0, enumeration_max_states=2000000):
++                     pricing_backend='milp', enumeration_time_limit=15.0, enumeration_max_states=2000000,
++                     integer_cover_time_limit=0.0):
+     import gurobipy as gp
+     from gurobipy import GRB
+     begun = time.perf_counter()
+@@ -49,7 +50,8 @@
+         enumeration = enumeration_stats(universe)
+         if universe['complete']:
+             result = enumerated_route_cover(problem, context, universe, deadline=deadline,
+-                verbose=verbose, export_path=pricing_export_path)
++                verbose=verbose, export_path=pricing_export_path, integer_cover_time_limit=integer_cover_time_limit,
++                initial_result=initial_result, seed=seed)
+             result['runtime'] = time.perf_counter()-begun
+             return result
+         # An incomplete pool cannot certify min reduced cost. Retain the
+@@ -171,7 +173,8 @@
+ def route_cover_certificate(problem, *, time_limit=30, initial_result=None, seed=42,
+                             pricing_time_limit=2.0, verbose=False, diagnostics_dir=None, heuristic_pricing=True,
+                             e1_time_limit=0.0, e1_inventory=True, e1_backend='auto', pricing_backend='milp',
+-                            enumeration_time_limit=15.0, enumeration_max_states=2000000):
++                            enumeration_time_limit=15.0, enumeration_max_states=2000000,
++                            integer_cover_time_limit=0.0):
+     if not math.isfinite(time_limit) or time_limit <= 0:
+         raise ValueError('time_limit must be finite and positive')
+     if not math.isfinite(pricing_time_limit) or pricing_time_limit <= 0:
+@@ -186,6 +189,10 @@
+         raise ValueError('enumeration_time_limit must be finite and positive')
+     if not isinstance(enumeration_max_states, int) or isinstance(enumeration_max_states, bool) or enumeration_max_states < 1:
+         raise ValueError('enumeration_max_states must be a positive integer')
++    if not math.isfinite(integer_cover_time_limit) or integer_cover_time_limit < 0:
++        raise ValueError('integer_cover_time_limit must be finite and nonnegative')
++    if integer_cover_time_limit > 0 and pricing_backend != 'hybrid':
++        raise ValueError('integer_cover_time_limit requires hybrid complete enumeration')
+     if (problem.model_number != 5 or problem.free_assignment or not problem.reusable
+             or len(problem.operating_policy.batches) <= 1):
+         raise ValueError('Route-cover certificates require fixed, reusable multibatch M5')
+@@ -223,6 +230,7 @@
+             initial_result=initial_result, seed=seed, pricing_time_limit=pricing_time_limit, verbose=verbose,
+             heuristic_pricing=heuristic_pricing, pricing_backend=pricing_backend,
+             enumeration_time_limit=enumeration_time_limit, enumeration_max_states=enumeration_max_states,
++            integer_cover_time_limit=integer_cover_time_limit,
+             pricing_export_path=Path(diagnostics_dir)/f'site_{index}_best_pricing.mps' if diagnostics_dir else None))
+     distance_e1 = math.fsum(max(0.0, row['bound']-1e-7*max(1.0, row['bound'])) for row in baseline['components'] if row['echelon'] == 'E1')
+     e1 = max(distance_e1, e1_certificate['bound'] if e1_certificate else 0.0)
+@@ -233,11 +241,18 @@
+                        bound=max(row['bound'], old_sites.get(row['satellite'], 0.0))) for row in site_rows]
+     raw = e1+math.fsum(row['bound'] for row in components)
+     bound = max(baseline['bound'], max(0.0, raw-1e-7*max(1.0, raw)))
++    integer_complete = integer_cover_time_limit > 0 and all(
++        row['status'] == 'EMPTY' or (row.get('integer_cover') or {}).get('relaxation_optimal', False)
++        for row in site_rows)
+     return dict(bound=bound, raw_bound=raw, e1_bound=e1, distance_e1_bound=distance_e1,
+                 e1_certificate=e1_certificate, components=components, sites=site_rows,
+                 distance_certificate=baseline, scope='M5_relaxed_E2_route_cover_plus_E1_certificate',
+                 pricing_backend=pricing_backend,
+-                status='LP_CONVERGED' if all(row['lp_converged'] for row in site_rows) else 'PARTIAL_CERTIFIED_BOUND',
++                integer_cover_time_limit=integer_cover_time_limit,
++                integer_cover_complete=integer_complete,
++                status=('INTEGER_RELAXATION_OPTIMAL' if integer_complete else 'PARTIAL_INTEGER_RELAXATION_BOUND')
++                    if integer_cover_time_limit > 0 else
++                    ('LP_CONVERGED' if all(row['lp_converged'] for row in site_rows) else 'PARTIAL_CERTIFIED_BOUND'),
+                 runtime=time.perf_counter()-begun, proven_optimal=False, proven_infeasible=False,
+                 relaxed_constraints=['actual_E1_supply_times', 'cross_trip_delivery_pickup_use_times',
+                     'physical_vehicle_trip_sequencing', 'cutoff_inventory_and_clean_container_reuse'])
+--- a/models/routing/solvers/exact/multibatch_route_enumeration.py
++++ b/models/routing/solvers/exact/multibatch_route_enumeration.py
+@@ -156,7 +156,8 @@
+                         'columns': len(g['columns'])} for g in universe['groups']]}
+ 
+ 
+-def enumerated_route_cover(problem, context, universe, *, deadline, verbose=False, export_path=None):
++def enumerated_route_cover(problem, context, universe, *, deadline, verbose=False, export_path=None,
++                           integer_cover_time_limit=0.0, initial_result=None, seed=42):
+     """Solve the full route-cover LP, then certify all route dual inequalities."""
+     import gurobipy as gp
+     from gurobipy import GRB
+@@ -169,7 +170,7 @@
+     model.Params.Method = 1
+     model.Params.DualReductions = 0
+     columns = [c for g in universe['groups'] for c in g['columns']]
+-    variables, witness, kept, status, bound = [], None, [], 'TIME_LIMIT_BUILD', 0.0
++    variables, witness, kept, status, bound, integer_cover = [], None, [], 'TIME_LIMIT_BUILD', 0.0, None
+     try:
+         rows = {n['key']: model.addConstr(gp.LinExpr() == 1, name=f'cover_{i}') for i, n in enumerate(context['nodes'])}
+         fleet = model.addConstr(gp.LinExpr() <= K, name='aggregate_trip_limit')
+@@ -195,12 +196,19 @@
+                 path.parent.mkdir(parents=True, exist_ok=True)
+                 pricer.write(path)
+                 model.write(str(path.with_name(path.stem+'_master.mps.gz')))
++            if integer_cover_time_limit > 0:
++                from .multibatch_route_integer_cover import integer_route_cover
++                integer_cover = integer_route_cover(problem, context, universe, model,
++                    lp_bound=bound, deadline=min(deadline, time.perf_counter()+integer_cover_time_limit),
++                    initial_result=initial_result, seed=seed, export_path=export_path)
++                bound = integer_cover['bound']
+         else:
+             status = 'RELAXATION_INFEASIBLE' if model.Status == GRB.INFEASIBLE else 'MASTER_TIME_LIMIT'
+         return dict(satellite=site, bound=bound, status=status, lp_converged=status == 'LP_CONVERGED',
+             best_witness=0 if witness is not None else None, iterations=[witness] if witness else [], columns=kept,
+             variables=model.NumVars, pricing_variables=0, runtime=time.perf_counter()-begun,
+             enumeration=enumeration_stats(universe), columns_generated=len(columns),
++            lp_bound=witness['candidate_bound'] if witness else 0.0, integer_cover=integer_cover,
+             pricing_backend='complete_enumeration', columns_retained='positive_LP_variables')
+     except TimeoutError:
+         return dict(satellite=site, bound=0.0, status='TIME_LIMIT_BUILD', lp_converged=False,
+--- /dev/null
++++ b/models/routing/solvers/exact/multibatch_route_integer_cover.py
+@@ -0,0 +1,90 @@
++"""Integer coverage over a COMPLETE E2 route universe gives a M5 lower bound.
++
++Physical vehicle sequencing, E1 supply, stocks and cross-route use times
++remain relaxed. This never returns a full-M5 feasible solution or proof.
++"""
++from __future__ import annotations
++
++import math
++from pathlib import Path
++import time
++
++
++def integer_route_cover(problem, context, universe, model, *, lp_bound, deadline,
++                        initial_result=None, seed=42, export_path=None):
++    """Convert the full LP to binary coverage; keep its bound on interruption."""
++    from gurobipy import GRB
++    if not universe['complete'] or not all(g['complete'] for g in universe['groups']):
++        raise ValueError('Integer coverage needs a complete route universe')
++    columns = [c for g in universe['groups'] for c in g['columns']]
++    model.update()
++    if len(columns) != model.NumVars or len(columns) != universe['columns']:
++        raise ValueError('Integer coverage needs all complete-universe LP columns')
++    begun = time.perf_counter()
++    result = dict(scope='M5_relaxed_integer_E2_route_cover', complete_route_universe=True,
++        bound=lp_bound, lp_bound=lp_bound, raw_bound=None, margin=0.0,
++        status='TIME_LIMIT_BUILD', relaxation_optimal=False, relaxation_infeasible=False,
++        proven_optimal=False, proven_infeasible=False, variables=len(columns),
++        constraints=model.NumConstrs, maximum_trips=context['maximum_trips'],
++        relaxed_objective=None, selected_columns=[], initial_projection=None,
++        runtime=0.0, nodes=0.0)
++    def check():
++        if time.perf_counter() >= deadline:
++            raise TimeoutError
++    try:
++        check()
++        # Every nonempty route includes a task covered exactly once, so its
++        # integer multiplicity is automatically at most one. Binary bounds
++        # preserve every full-M5 trip cover after task-set cost dominance.
++        selected = None
++        if initial_result is not None:
++            selected = {frozenset((e['order_id'], e['kind']) for e in t['events'])
++                for t in initial_result['e2_trips'] if t['satellite_id'] == context['satellite']}
++        mapped, mapped_sets = [], set()
++        variables = model.getVars()
++        for i, (variable, column) in enumerate(zip(variables, columns)):
++            if i % 256 == 0:
++                check()
++            variable.VType = GRB.BINARY
++            variable.LB, variable.UB = 0, 1
++            if selected is not None:
++                tasks = frozenset(tuple(k) for k in column['tasks'])
++                chosen = tasks in selected
++                variable.Start = int(chosen)
++                if chosen:
++                    if tasks in mapped_sets:
++                        raise ValueError('Duplicate task-set columns in the complete universe')
++                    mapped.append(column)
++                    mapped_sets.add(tasks)
++        if selected is not None:
++            expected = {n['key'] for n in context['nodes']}
++            covered = [tuple(k) for c in mapped for k in c['tasks']]
++            if mapped_sets != selected or set(covered) != expected or len(covered) != len(expected) or len(mapped) > context['maximum_trips']:
++                raise ValueError('Audited full-M5 trips failed to project to integer coverage')
++            result['initial_projection'] = dict(mapped_trips=len(mapped),
++                objective=math.fsum(c['cost'] for c in mapped), exact_task_cover=True)
++        check()
++        model.Params.Seed = int(seed)
++        model.Params.MIPGap = model.Params.MIPGapAbs = 0
++        model.Params.IntFeasTol = model.Params.FeasibilityTol = 1e-9
++        model.Params.TimeLimit = max(0, deadline-time.perf_counter())
++        model.optimize()
++        raw = float(model.ObjBound)
++        if math.isfinite(raw):
++            margin = 1e-7*max(1.0, abs(raw))
++            result.update(raw_bound=raw, margin=margin, bound=max(lp_bound, max(0, raw-margin)))
++        result.update(status='INTEGER_RELAXATION_OPTIMAL' if model.Status == GRB.OPTIMAL else
++            ('INTEGER_RELAXATION_INFEASIBLE' if model.Status == GRB.INFEASIBLE else f'INTEGER_RELAXATION_{model.Status}'),
++            relaxation_optimal=model.Status == GRB.OPTIMAL,
++            relaxation_infeasible=model.Status == GRB.INFEASIBLE, nodes=model.NodeCount)
++        if model.SolCount:
++            result['relaxed_objective'] = float(model.ObjVal)
++            result['selected_columns'] = [{**c, 'integer_value': v.X}
++                for c, v in zip(columns, variables) if v.X > .5]
++        if export_path is not None:
++            path = Path(export_path)
++            model.write(str(path.with_name(path.stem+'_integer_master.mps.gz')))
++    except TimeoutError:
++        pass
++    result['runtime'] = time.perf_counter()-begun
++    return result
+--- /dev/null
++++ b/tests/routing/test_multibatch_integer_cover.py
+@@ -0,0 +1,215 @@
++"""All-path integer oracles, partial-domain guards and budget/proof separation."""
++from copy import deepcopy
++from types import SimpleNamespace
++import gzip
++import json
++import math
++import time
++
++import pytest
++
++from models.routing.common.cycle import MultiBatchInstance, Order
++from models.routing.common.cycle.audit import audit_solution
++from models.routing.common.domain.instance import ProblemInstance
++from models.routing.common.domain.node import Depot, Satellite, Customer
++from models.routing.solvers.exact.multibatch_route_cg import route_cover_certificate
++from models.routing.solvers.exact.multibatch_route_enumeration import enumerate_route_universe
++from models.routing.solvers.exact.multibatch_route_integer_cover import integer_route_cover
++from models.routing.solvers.exact.multibatch_route_pricing import route_context
++from tests.routing.test_multibatch_cycle import fixture, hand_solution
++from tests.routing.test_multibatch_departure_loads import nonmetric_problem
++from tests.routing.test_multibatch_route_cg import enumerate_trips, enumerated_lp
++
++
++def integer_oracle(problem, site, columns):
++    gp = pytest.importorskip('gurobipy')
++    model = gp.Model()
++    model.Params.OutputFlag = 0
++    model.Params.MIPGap = model.Params.MIPGapAbs = 0
++    try:
++        x = model.addVars(len(columns), vtype=gp.GRB.BINARY, obj={i: c for i, (_, c) in enumerate(columns)})
++        for order in problem.orders:
++            if order.satellite == site:
++                for kind in ('d', 'p'):
++                    model.addConstr(gp.quicksum(x[i] for i, (seq, _) in enumerate(columns) if (order.id, kind) in seq) == 1)
++        model.addConstr(x.sum() <= problem.fleet.e2_per_sat_count*problem.operating_policy.e2_max_trips_per_vehicle)
++        model.optimize()
++        assert model.Status == gp.GRB.OPTIMAL
++        return model.ObjVal
++    finally:
++        model.dispose()
++
++
++def fractional_problem():
++    base = fixture(pool=4)
++    nodes = {'D': Depot('D', 0, 0), 'S': Satellite('S', 0, 0)}
++    nodes.update({k: Customer(k, i, 0, 0, 0, (0, 125), (0, 125), 'S') for i, k in enumerate(('A', 'B', 'C'))})
++    arcs = {a: {b: int(a != b) for b in nodes} for a in nodes}
++    fleet = dict(E1_vehicle_count=1, vehicles_per_satellite=1, E1_Qk=500, E1_Ck=500,
++                 E2_Qv=4, E2_Cv=2, container_weight=1, container_volume=1)
++    network = ProblemInstance(nodes, fleet, distance_matrix=arcs, travel_time_matrix=arcs)
++    orders = [Order(k.lower(), k, 'S', 'b1', 1, 1, (0, 10), (0, 25), 0) for k in ('A', 'B', 'C')]
++    return MultiBatchInstance(network, orders, base.operating_policy)
++
++
++@pytest.mark.parametrize('seed', range(6))
++def test_integer_cover_matches_independent_all_path_mip_and_bounds_full_m5(seed):
++    pytest.importorskip('gurobipy')
++    from models.routing.solvers.exact.solver import solve_exact
++    p = nonmetric_problem(seed)
++    cert = route_cover_certificate(p, pricing_backend='hybrid', integer_cover_time_limit=1,
++                                   e1_time_limit=1, time_limit=5)
++    for site in cert['sites']:
++        if site['status'] == 'EMPTY':
++            continue
++        oracle = integer_oracle(p, site['satellite'], enumerate_trips(p, site['satellite']))
++        integer = site['integer_cover']
++        assert integer['relaxation_optimal'] and integer['complete_route_universe']
++        assert integer['raw_bound'] == pytest.approx(oracle, abs=1e-6)
++        assert oracle-1e-3 <= site['bound'] <= oracle+1e-6
++        assert site['bound'] >= site['lp_bound']
++        assert not integer['proven_optimal'] and not integer['proven_infeasible']
++    full = solve_exact(p, time_limit=5)
++    assert full['info']['proven_optimal'] and audit_solution(p, full)['valid']
++    assert cert['bound'] <= full['info']['objective']+1e-6
++    assert not cert['proven_optimal'] and not cert['proven_infeasible']
++
++
++def test_fractional_lp_is_strictly_strengthened_by_complete_integer_cover():
++    pytest.importorskip('gurobipy')
++    p = fractional_problem()
++    paths = enumerate_trips(p, 'S')
++    assert enumerated_lp(p, 'S', paths) == pytest.approx(4.5)
++    assert integer_oracle(p, 'S', paths) == pytest.approx(5)
++    cert = route_cover_certificate(p, time_limit=5, pricing_backend='hybrid', integer_cover_time_limit=1)
++    site = cert['sites'][0]
++    assert site['lp_bound'] == pytest.approx(4.5, abs=1e-4)
++    assert site['bound'] == pytest.approx(5, abs=1e-4)
++    assert site['lp_converged'] and site['integer_cover']['relaxation_optimal']
++    cover = [tuple(k) for c in site['integer_cover']['selected_columns'] for k in c['tasks']]
++    assert len(cover) == len(set(cover)) == 6
++    assert not cert['proven_optimal']
++
++
++def test_full_schedule_maps_to_dominated_integer_columns_without_mutation():
++    pytest.importorskip('gurobipy')
++    p = fixture(pool=2)
++    initial = hand_solution(p)
++    before = deepcopy(initial)
++    cert = route_cover_certificate(p, time_limit=5, initial_result=initial,
++        pricing_backend='hybrid', integer_cover_time_limit=1)
++    projected = cert['sites'][0]['integer_cover']['initial_projection']
++    assert projected['exact_task_cover'] and projected['mapped_trips'] == len(initial['e2_trips'])
++    assert projected['objective'] <= audit_solution(p, initial)['distances']['e2']+1e-6
++    assert initial == before
++
++
++def test_partial_enumeration_never_runs_restricted_integer_bound():
++    pytest.importorskip('gurobipy')
++    p = fixture(pool=2)
++    cert = route_cover_certificate(p, time_limit=5, initial_result=hand_solution(p),
++        pricing_backend='hybrid', integer_cover_time_limit=1, enumeration_max_states=1)
++    site = cert['sites'][0]
++    assert site['pricing_backend'] == 'milp' and not site['enumeration']['complete']
++    assert site.get('integer_cover') is None
++    assert cert['bound'] <= audit_solution(p, hand_solution(p))['objective']+1e-6
++
++
++def test_integer_stage_deadline_keeps_lp_bound_and_rejects_partial_domains():
++    gp = pytest.importorskip('gurobipy')
++    p = fixture(pool=2)
++    ctx = route_context(p, 'S')
++    universe = enumerate_route_universe(p, ctx)
++    model = gp.Model()
++    model.Params.OutputFlag = 0
++    try:
++        model.addVars(universe['columns'])
++        model.update()
++        result = integer_route_cover(p, ctx, universe, model, lp_bound=3.5, deadline=0)
++        assert result['bound'] == 3.5 and result['raw_bound'] is None
++        assert result['status'] == 'TIME_LIMIT_BUILD' and not result['relaxation_optimal']
++        partial = {**universe, 'complete': False}
++        with pytest.raises(ValueError, match='complete'):
++            integer_route_cover(p, ctx, partial, model, lp_bound=0, deadline=time.perf_counter()+1)
++        wrong = {**universe, 'columns': universe['columns']+1}
++        with pytest.raises(ValueError, match='all'):
++            integer_route_cover(p, ctx, wrong, model, lp_bound=0, deadline=time.perf_counter()+1)
++    finally:
++        model.dispose()
++
++
++def test_timed_out_integer_stage_uses_solver_lower_bound_without_incumbent():
++    gp = pytest.importorskip('gurobipy')
++    p = fractional_problem()
++    ctx = route_context(p, 'S')
++    universe = enumerate_route_universe(p, ctx)
++    class TimedOut:
++        NumVars, NumConstrs = universe['columns'], 7
++        Status, ObjBound, SolCount, NodeCount = gp.GRB.TIME_LIMIT, 4.75, 0, 3
++        Params = SimpleNamespace()
++        def update(self):
++            pass
++        def getVars(self):
++            return [SimpleNamespace() for _ in range(self.NumVars)]
++        def optimize(self):
++            pass
++        @property
++        def ObjVal(self):
++            raise AssertionError('No incumbent objective is available')
++    result = integer_route_cover(p, ctx, universe, TimedOut(), lp_bound=4.5,
++        deadline=time.perf_counter()+1)
++    assert result['raw_bound'] == 4.75 and result['bound'] == pytest.approx(4.75-4.75e-7)
++    assert result['relaxed_objective'] is None and not result['relaxation_optimal']
++    assert not result['proven_optimal'] and not result['proven_infeasible']
++
++
++def test_negligible_integer_budget_preserves_completed_lp_certificate():
++    pytest.importorskip('gurobipy')
++    cert = route_cover_certificate(fractional_problem(), time_limit=5,
++        pricing_backend='hybrid', integer_cover_time_limit=1e-12)
++    site = cert['sites'][0]
++    assert site['lp_converged'] and site['bound'] == site['lp_bound']
++    assert site['integer_cover']['status'] == 'TIME_LIMIT_BUILD'
++    assert cert['status'] == 'PARTIAL_INTEGER_RELAXATION_BOUND' and not cert['integer_cover_complete']
++
++
++@pytest.mark.parametrize('value', [-1, math.inf, math.nan])
++def test_invalid_integer_budget(value):
++    with pytest.raises(ValueError, match='integer_cover_time_limit'):
++        route_cover_certificate(fixture(pool=2), integer_cover_time_limit=value, pricing_backend='hybrid')
++
++
++def test_integer_budget_requires_complete_enumeration_backend():
++    with pytest.raises(ValueError, match='hybrid'):
++        route_cover_certificate(fixture(pool=2), integer_cover_time_limit=1)
++
++
++def test_default_keeps_lp_only_path():
++    pytest.importorskip('gurobipy')
++    cert = route_cover_certificate(fractional_problem(), time_limit=5, pricing_backend='hybrid')
++    assert cert['sites'][0]['integer_cover'] is None
++    assert cert['sites'][0]['bound'] == pytest.approx(4.5, abs=1e-4)
++
++
++def test_public_entry_exports_full_binary_cover_and_separate_lp(tmp_path):
++    gp = pytest.importorskip('gurobipy')
++    from models.routing.variants.model_5.exact import route_cover_certificate as public
++    p = fractional_problem()
++    cert = public(p, time_limit=5, pricing_backend='hybrid', integer_cover_time_limit=1, diagnostics_dir=tmp_path)
++    binary = list(tmp_path.glob('*_integer_master.mps.gz'))
++    lp = list(tmp_path.glob('*_best_pricing_master.mps.gz'))
++    assert len(binary) == len(lp) == 1
++    for path, vtype, objective in ((binary[0], gp.GRB.BINARY, 5), (lp[0], gp.GRB.CONTINUOUS, 4.5)):
++        m = gp.read(str(path))
++        try:
++            assert all(v.VType == vtype for v in m.getVars())
++            m.Params.OutputFlag = 0
++            m.Params.MIPGap = m.Params.MIPGapAbs = 0
++            m.optimize()
++            assert m.Status == gp.GRB.OPTIMAL and m.ObjVal == pytest.approx(objective)
++        finally:
++            m.dispose()
++    with gzip.open(next(tmp_path.glob('*_best_pricing.json.gz')), 'rt') as stream:
++        universe = json.load(stream)
++    assert universe['complete'] and universe['columns'] == cert['sites'][0]['variables']
++    assert cert['sites'][0]['integer_cover']['raw_bound'] == pytest.approx(5)
+--- /dev/null
++++ b/tools/audit/benchmark_multibatch_integer_cover.py
+@@ -0,0 +1,166 @@
++"""Sequential frozen M5 complete route-cover LP versus integer coverage.
++
++All variants use the same audited upper bound and original total budget.
++Integer coverage certifies a stronger E2 relaxation only; partial
++universes fall back to the full original integer pricing domain.
++"""
++from __future__ import annotations
++
++import argparse
++import hashlib
++import json
++import math
++import os
++from pathlib import Path
++import platform
++import shutil
++import subprocess
++import sys
++import time
++
++ROOT = Path(__file__).resolve().parents[2]
++sys.path.insert(0, str(ROOT))
++
++
++def write(path, value):
++    path.write_text(json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False)+'\n')
++
++
++def worker(job, destination):
++    from configuration.loader import load_routing_case
++    from models.routing.common.cycle import load_instance
++    from models.routing.common.cycle.audit import audit_solution
++    problem = load_instance(*load_routing_case(job['case']))
++    initial = json.loads(Path(job['initial_result']).read_text())
++    independent = audit_solution(problem, initial)
++    if not independent['valid']:
++        raise ValueError('Frozen incumbent failed audit')
++    started = time.perf_counter()
++    from models.routing.solvers.exact.multibatch_route_cg import route_cover_certificate
++    certificate = route_cover_certificate(problem, time_limit=job['budget'], initial_result=initial,
++        seed=job['seed'], pricing_time_limit=job['pricing_time_limit'], verbose=True,
++        e1_time_limit=job['e1_time_limit'],
++        pricing_backend='hybrid',
++        integer_cover_time_limit=0 if job['variant'] == 'lp' else job['integer_cover_time_limit'],
++        enumeration_time_limit=job['enumeration_time_limit'],
++        enumeration_max_states=1 if job['variant'] == 'fallback' else job['enumeration_max_states'],
++        diagnostics_dir=destination.parent/(job['id']+'_pricing_models'))
++    lower = certificate['bound']
++    payload, valid = dict(certificate=certificate), None
++    upper = independent['objective']
++    write(destination, dict(job=job, wall_seconds=time.perf_counter()-started,
++        frozen_incumbent_audit=independent, bound=lower,
++        fixed_incumbent_gap=max(0, upper-lower)/max(1e-9, abs(upper)) if lower is not None else None,
++        result_valid=valid, **payload))
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--output', type=Path, required=True)
++    parser.add_argument('--cases', nargs='+')
++    parser.add_argument('--initial-results', nargs='+')
++    parser.add_argument('--time', type=float, default=30)
++    parser.add_argument('--pricing-time', type=float, default=2)
++    parser.add_argument('--e1-time', type=float, default=10, help='E1 time cap inside the CG budget, further capped at one third of remaining time')
++    parser.add_argument('--integer-time', type=float, default=15)
++    parser.add_argument('--enumeration-time', type=float, default=15)
++    parser.add_argument('--enumeration-states', type=int, default=2000000)
++    parser.add_argument('--seeds', nargs='+', type=int, default=[42])
++    parser.add_argument('--variants', nargs='+', choices=['lp', 'integer', 'fallback'], default=['lp', 'integer'])
++    parser.add_argument('--worker', help=argparse.SUPPRESS)
++    args = parser.parse_args()
++    if args.worker:
++        worker(json.loads(args.worker), args.output)
++        return
++    if not args.cases or not args.initial_results or len(args.cases) != len(args.initial_results):
++        parser.error('one --initial-results file is required per case')
++    if any(not math.isfinite(v) or v <= 0 for v in (args.time, args.pricing_time, args.e1_time, args.enumeration_time, args.integer_time)):
++        parser.error('budgets must be finite and positive')
++    if args.enumeration_states < 1:
++        parser.error('enumeration-states must be positive')
++    if len(set(args.variants)) != len(args.variants):
++        parser.error('variants must be distinct')
++    from configuration.loader import load_routing_case, resolve_project_path
++    from models.routing.common.cycle import load_instance
++    from models.routing.common.cycle.audit import audit_solution
++    output = args.output.resolve()
++    output.mkdir(parents=True, exist_ok=False)
++    jobs = []
++    for index, source in enumerate(args.cases):
++        config, fleet = load_routing_case(source)
++        problem = load_instance(config, fleet)
++        if problem.model_number != 5:
++            raise ValueError('M5 inputs required')
++        frozen = output/'inputs'/str(index)
++        frozen.mkdir(parents=True)
++        for field in ('data', 'orders', 'distance_matrix', 'duration_matrix', 'dataset_metadata'):
++            if config.get(field):
++                path = resolve_project_path(config[field])
++                target = frozen/(field+path.suffix)
++                shutil.copy2(path, target)
++                config[field] = str(target)
++        write(frozen/'fleet.json', fleet)
++        config['routing_config'], config['operating_policy'] = str(frozen/'fleet.json'), fleet['operating_policy']
++        for field in ('algorithm_config', 'container_pool_config'):
++            config.pop(field, None)
++        write(frozen/'case.json', config)
++        payload = json.loads(resolve_project_path(args.initial_results[index]).read_text())
++        initial = payload.get('result', payload)
++        independent = audit_solution(problem, initial)
++        if not independent['valid']:
++            raise ValueError('Initial result failed independent M5 audit')
++        write(frozen/'initial_result.json', initial)
++        write(frozen/'initial_audit.json', independent)
++        for seed in args.seeds:
++            for variant in args.variants:
++                jobs.append(dict(id=f'{index:02d}_{seed}_{variant}', variant=variant,
++                    case=str(frozen/'case.json'), source_case=source, initial_result=str(frozen/'initial_result.json'),
++                    frozen_upper_bound=independent['objective'], budget=args.time, seed=seed,
++                    pricing_time_limit=args.pricing_time, e1_time_limit=args.e1_time,
++                    integer_cover_time_limit=args.integer_time, enumeration_time_limit=args.enumeration_time, enumeration_max_states=args.enumeration_states, orders=len(problem.orders),
++                    customers=len({o.customer for o in problem.orders})))
++    for source in [*ROOT.glob('models/**/*.py'), *ROOT.glob('configuration/*.py'), Path(__file__).resolve()]:
++        target = output/'source_snapshot'/source.relative_to(ROOT)
++        target.parent.mkdir(parents=True, exist_ok=True)
++        shutil.copy2(source, target)
++    for name in ('multibatch_route_integer_cover.py', 'multibatch_route_enumeration.py', 'multibatch_route_cg.py', 'multibatch_route_pricing.py', 'multibatch_bounds.py', 'solver.py', 'formulation.py'):
++        path = output/'source_snapshot/models/routing/solvers/exact'/name
++        compile(path.read_text(), str(path), 'exec')
++    hashes = {str(p.relative_to(output)): hashlib.sha256(p.read_bytes()).hexdigest()
++              for p in sorted(output.rglob('*')) if p.is_file()}
++    write(output/'manifest.json', dict(jobs=jobs, artifact_sha256=hashes, python=sys.version,
++        platform=platform.platform(), python_hash_seed=0,
++        note='Same audited frozen upper bound. Enumeration, full LP, integer cover and fallback all share the original budget. No integer M5 proof.'))
++    summary = []
++    frozen_worker = output/'source_snapshot/tools/audit/benchmark_multibatch_integer_cover.py'
++    for job in jobs:
++        destination = output/(job['id']+'.json')
++        started = time.perf_counter()
++        with (output/(job['id']+'.log')).open('w') as log:
++            try:
++                run = subprocess.run([sys.executable, str(frozen_worker), '--worker', json.dumps(job),
++                    '--output', str(destination)], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
++                    timeout=args.time+20, env={**os.environ, 'PYTHONHASHSEED': '0'})
++                failure = f'EXIT_{run.returncode}' if run.returncode else None
++            except subprocess.TimeoutExpired:
++                failure = 'OUTER_TIMEOUT'
++        row = dict(job=job, failure=failure, outer_seconds=time.perf_counter()-started)
++        if destination.exists():
++            payload = json.loads(destination.read_text())
++            row.update(bound=payload['bound'], fixed_incumbent_gap=payload['fixed_incumbent_gap'],
++                       wall_seconds=payload['wall_seconds'], result_valid=payload['result_valid'])
++            if job['variant'] in ('lp', 'integer', 'fallback'):
++                row.update(status=payload['certificate']['status'],
++                    e1_bound=payload['certificate']['e1_bound'],
++                    e1_certificate=payload['certificate'].get('e1_certificate'),
++                    sites=[{key: s[key] for key in ('satellite', 'bound', 'status', 'lp_converged', 'runtime')}
++                           for s in payload['certificate']['sites']])
++            else:
++                row['info'] = payload['result']['info']
++        summary.append(row)
++        write(output/'summary.json', summary)
++        print(json.dumps(row, ensure_ascii=False), flush=True)
++
++
++if __name__ == '__main__':
++    main()
+--- /dev/null
++++ b/docs/m5_integer_cover_20261001.md
+@@ -0,0 +1,97 @@
++# M5 第十四步：完整路线域的整数覆盖下界
++
++日期：2026-10-01。
++
++本轮将上一轮完整二层路线覆盖 LP 的变量改为二元变量，计算更强的整数松弛下界。50 顾客完整可行上界保持 **2261.8315**，组合下界从 **2195.3268 提高到 2209.4973**，gap 从 **2.9403% 降至 2.3138%**。三个种子得到相同下界，在原 60 秒总预算内用时 25.35–27.93 秒。
++
++20 顾客的 gap 从 1.0605% 降至 0.7531%。30 顾客的原覆盖 LP 已有整数最优解，本轮没有实质提高其数学下界，仅减少保守数值修正造成的损失。
++
++这些结果证明的是**完整二层整数覆盖松弛**的最优值。实际一级供应、跨趟使用时长、物理车辆串行与清洗库存连接仍被放松，不能将其路线选择当作完整 M5 可行日程，也不能据此声明完整 M5 最优。
++
++## 1. 使用入口
++
++```python
++from models.routing.variants.model_5.exact import route_cover_certificate
++
++certificate = route_cover_certificate(
++    problem,
++    initial_result=audited_result,
++    time_limit=60,
++    e1_time_limit=10,
++    pricing_backend='hybrid',
++    integer_cover_time_limit=15,
++    diagnostics_dir='output/experiments/my_m5_integer_certificate',
++)
++```
++
++新实现位于 [`multibatch_route_integer_cover.py`](../models/routing/solvers/exact/multibatch_route_integer_cover.py)，由 [`multibatch_route_enumeration.py`](../models/routing/solvers/exact/multibatch_route_enumeration.py) 在完整路线域 LP 完成后调用。公开入口仍为 `route_cover_certificate`。
++
++`integer_cover_time_limit` 默认是 **0**，保持上一轮行为；开启时要求 `pricing_backend='hybrid'`。每个仓的整数阶段最多占用指定上限与该仓原剩余预算的较小值。完整枚举、LP、整数转换、整数求解、一级证书和诊断导出共用原总预算。
++
++如果枚举未完成，继续原完整 MILP 定价，**不**对部分路线池求整数下界。整数阶段建模或求解达到预算时，至少保留已经有效的 LP 对偶证书，并在有有限求解器下界时取更强的界。受限候选池整数最优值不具有本轮的全域下界资格。
++
++## 2. 为什么整数覆盖仍是有效下界
++
++完整 M5 的每条二层趟次可投影到上一轮保留的松弛任务路径。对于相同任务集合，可以替换成枚举域中成本最低的可行顺序；这个替换不保证真实跨趟日程，因此只用于构造松弛覆盖。
++
++完整方案中每项配送/回收任务恰好服务一次，所有趟次对应整数路线选择，并满足有限总趟数上限。每条路线非空，覆盖至少一项恰好覆盖一次的任务，所以整数路线使用量不可能超过 1，二元变量不会排除完整方案的覆盖投影。
++
++因此，所有完整可行方案的二层成本均不低于该仓完整整数覆盖的最优值。各仓二层界与独立一级成本界相加，仍是完整 M5 的下界。这不同于上一轮非完备候选池优化：本轮只接受已经穷尽的完整任务集合路线域。
++
++提供已审计完整初解时，按原二层趟次的任务集合映射到最低成本列，作为整数松弛的热启动。该映射必须恰好覆盖所有任务、符合有限趟数，并且替代成本不高于原趟次成本；原方案本身不被修改。
++
++## 3. 限时与证明字段
++
++整数求解使用完整模型的 `ObjBound`，按 `1e-7 * max(1, abs(ObjBound))` 扣除数值余量，再与已有 LP 界取最大值。求解器的当前整数解目标只能作为该松弛的目标，不能作为完整 M5 上界，更不能在尚未最优时充当下界。
++
++每仓新增 `lp_bound` 与 `integer_cover`。后者保存完整域状态、整数求解器原始下界、余量、松弛目标、选中列、初解投影和用时。原 LP 对偶迭代及正值 LP 列继续单独保存。
++
++顶层 `INTEGER_RELAXATION_OPTIMAL` 表示所有非空仓的完整整数覆盖已完成；`PARTIAL_INTEGER_RELAXATION_BOUND` 表示整数阶段或完整枚举未完成。`integer_cover_complete` 明确记录这个状态。完整 M5 的 `proven_optimal`、`proven_infeasible` 仍为 `False`。
++
++诊断保留三类文件：完整路线域 `*_best_pricing.json.gz`、连续主问题 `*_best_pricing_master.mps.gz`、完整二元主问题 `*_best_pricing_integer_master.mps.gz`。二元主问题沿用全部原列、成本、精确覆盖行和有限趟数行，只有变量域改变。
++
++## 4. 同总预算、多种子对照
++
++两组共用同一冻结输入和经过完整审计的上界；都现场完整枚举路线并启用同样的一级证书，没有加载上一轮的路线域或主问题。`lp` 只计算连续覆盖，`integer` 在原 60 秒内再计算完整整数覆盖，每仓上限 15 秒。种子为 42、43、44，共 18 次。
++
++| 顾客数 | 冻结可行上界 | 连续组合下界 | 整数组合下界 | 连续 gap | 整数 gap |
++|---:|---:|---:|---:|---:|---:|
++| 20 | 1437.4738 | 1422.2295 | **1426.6488** | 1.0605% | **0.7531%** |
++| 30 | 1654.8221 | 1623.9767 | 1623.9782 | 1.8640% | 1.8639% |
++| 50 | 2261.8315 | 2195.3268 | **2209.4973** | 2.9403% | **2.3138%** |
++
++| 50 顾客种子 | 连续组总用时 | 整数组总用时 | 整数覆盖状态 |
++|---:|---:|---:|---|
++| 42 | 21.79 秒 | 25.35 秒 | 全部仓最优 |
++| 43 | 20.29 秒 | 27.93 秒 | 全部仓最优 |
++| 44 | 24.02 秒 | 27.84 秒 | 全部仓最优 |
++
++这轮用更多计算时间取得更强下界，未声称降低求解时间。数值结果仅描述本组输入，见 [正式多种子汇总](../output/experiments/m5_integer_cover_20261001/final_60s/summary.json)。
++
++50 顾客的实质收益来自 S1：连续覆盖原始目标为 **437.5473**，完整整数覆盖最优值为 **451.7143**，提高 14.1671。其他三个仓的连续与整数最优目标相同。20 顾客在 S3 增加约 4.4184；30 顾客所有仓的原 LP 都存在整数最优解。
++
++## 5. 测试与独立复核
++
++新增 [18 项测试](../tests/routing/test_multibatch_integer_cover.py)，以六种有向非度量小例的全部可行任务排列，独立建立整数主问题，核对本轮成本并与完整 M5 已知最优值比较。一个三订单案例的覆盖 LP 最优值为 4.5，完整整数覆盖为 5，专门验证严格的整数下界提升。
++
++其他测试覆盖完整初解投影与输入不变、部分枚举禁用整数证书、建模期限保留 LP 下界、求解器限时且没有整数解时使用原始下界、极小整数预算、参数校验、默认关闭，以及公开入口的连续/二元 MPS 分离导出。
++
++相关回归 **470 项通过**，14 条警告来自原 Matplotlib/PyParsing 依赖；该总数包含共享目录中同期新增的一级后端测试。见 [测试日志](../output/experiments/m5_integer_cover_20261001/pytest.log) 与 [回归命令](../output/experiments/m5_integer_cover_20261001/run_regression.sh)。
++
++另对 7 个已知精确小例运行 `lp`、`integer` 两组，共 14 次，所有证书均不超过已审计的完整整数最优值，见 [小例汇总](../output/experiments/m5_integer_cover_20261001/final_small_5s/summary.json)。对 30/50 顾客强制枚举状态上限为 1，共两次，确认不完整列域不会进入整数证书，见 [回退汇总](../output/experiments/m5_integer_cover_20261001/final_fallback_60s/summary.json)。
++
++总计 34 次正式运行均冻结输入、源码、参数、已审计上界和日志。工具为 [`benchmark_multibatch_integer_cover.py`](../tools/audit/benchmark_multibatch_integer_cover.py)，执行脚本为 [run_formal.py](../output/experiments/m5_integer_cover_20261001/run_formal.py)。
++
++[总复核脚本](../output/experiments/m5_integer_cover_20261001/validate.py) 独立审计上界、全部路线、上下界组合和 LP 对偶证书。[路线域复核器](../output/experiments/m5_integer_cover_20261001/validation_enumeration.py) 从头重算每个候选前缀的载荷和完整时间线，核对完整任务集合最低成本，并检查全部连续 LP 矩阵。[整数复核器](../output/experiments/m5_integer_cover_20261001/validation_integer.py) 对比连续与二元 MPS 的全部成本、覆盖矩阵和有限趟数行，确认只有变量域改变，重新求解二元主问题，并从其变量值独立重建任务覆盖和成本；另核对每条原完整趟次到最低成本列的投影。
++
++最终复核记录见 [validation.json](../output/experiments/m5_integer_cover_20261001/validation.json)，本轮定向改动见 [changes.patch](../output/experiments/m5_integer_cover_20261001/changes.patch)。
++
++最终复核通过全部 **34** 次正式运行，重读求解 **90** 份连续 LP、**45** 份完整整数覆盖模型和 **34** 份一级模型，核对连续 LP 的 **1,862,754** 条列和 **304** 份对偶证书。去重后的 **25** 个仓级完整路线域均与独立前缀重枚举一致；全部整数模型的覆盖矩阵与对应连续模型逐项一致。
++
++正式实验之后，共享列生成代码又增加了默认关闭的分批定价和对偶修复选项。本轮完整枚举与整数求解实现及接入分支未变，正式结果按冻结源码复核；另对当前公开入口运行定向兼容回归，记录见 [补充测试日志](../output/experiments/m5_integer_cover_20261001/post_concurrent_api.log)。本轮改动补丁不包含同期定价功能。
++
++## 6. 下一步
++
++50 顾客仍有约 **52.33** 的可行上界与证书差额。所有仓的完整整数覆盖现已达到最优，继续求解同一个二层覆盖松弛不会再实质提高其界。后续需要将真实供应、回收截止、清洗或物理车辆串行连接加入更强的松弛，或继续改善完整可行方案。
++
++当前完整方案的一级/二层成本分别为 1056.4382、1205.3933，对应下界为 1021.3394、1188.1581；两部分差额约为 **35.10** 和 **17.24**，另有极小的最终数值余量。下一轮优先检查一级清洗库存与二层回收截止的联合连接。
+--- a/models/routing/variants/model_5/exact/README.md
++++ b/models/routing/variants/model_5/exact/README.md
+@@ -53,3 +53,9 @@
+ 枚举受时间/状态上限保护，未完成时回退到原完整 MILP 定价；默认仍为 `'milp'`。
+ 50 顾客本组多种子均得到约 2.94% 的上下界 gap，LP 收敛仍不证明完整整数最优。
+ 见 [完整二层枚举与定价收敛](../../../../../docs/m5_enumerated_pricing_20261001.md)。
++
++第十四步可在上述完整路线域证书中增加 `integer_cover_time_limit=15`，
++在原总预算内求解完整二元路线覆盖，取更强的整数松弛下界；默认仍为 0。
++只有完整枚举域可以进入整数证书，限时保留已验证的 LP 界。
++本组 50 顾客 gap 进一步降到约 2.31%，完整 M5 最优性标志仍为 False。
++见 [完整整数覆盖下界](../../../../../docs/m5_integer_cover_20261001.md)。
+--- a/tools/README.md
++++ b/tools/README.md
+@@ -44,3 +44,8 @@
+ 比较 `cg` 原 MILP 定价、`hybrid` 完整路线枚举/回退，以及 `fallback` 强制中断枚举。
+ 支持 `--enumeration-time`、`--enumeration-states`；完整路线域和完整覆盖 LP 压缩导出，
+ 见 [二层完整枚举与独立复核](../docs/m5_enumerated_pricing_20261001.md)。
++
++`audit/benchmark_multibatch_integer_cover.py` 冻结相同输入、完整可行上界与源码，
++在原总预算内比较完整路线覆盖 `lp` 与 `integer`，另提供强制中断枚举的 `fallback`。
++`--integer-time 15` 是每仓整数阶段上限；完整二元模型和连续模型分别压缩导出。
++见 [完整整数覆盖与全矩阵复核](../docs/m5_integer_cover_20261001.md)。
+--- a/docs/exact_solver_architecture.md
++++ b/docs/exact_solver_architecture.md
+@@ -86,6 +86,11 @@
+ 只有完整路线域可以提供枚举定价证书；枚举达到状态/时间上限时回退到原完整 MILP 定价。
+ 该选项默认关闭，LP 收敛不产生完整 M5 整数证明，见 [完整二层枚举与定价收敛](m5_enumerated_pricing_20261001.md)。
+ 
++M5 完整二层路线域还可通过 `integer_cover_time_limit` 在原预算内求解二元覆盖，
++保留全部覆盖行和有限车队总趟数行，用完整整数松弛的求解器下界加强 LP 证书。
++部分枚举不进入整数证书，限时保留已有有效界；默认关闭。
++整数覆盖仍放松真实跨层日程，见 [完整整数覆盖下界](m5_integer_cover_20261001.md)。
++
+ 历史 M1–M4 的 indexed 和 commodity_flow 后端保存在 `models/routing/baselines/`，需要 `--baseline` 或 `allow_baseline=True`。这些证明只针对历史业务规则，不能作为新版四模型的证明。
+ 
+ 第四轮将 B=1 建模隔离到 `single_batch_formulation.py`。`strengthening.py` 提供一级供货截止的

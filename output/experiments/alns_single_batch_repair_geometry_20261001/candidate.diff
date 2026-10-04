@@ -1,0 +1,37 @@
+--- before/models/routing/solvers/alns/neighborhoods.py
++++ after/models/routing/solvers/alns/neighborhoods.py
+@@ -133,9 +133,14 @@
+     tasks = [(o.id, kind) for kind in problem.task_kinds
+              for o in sorted(removed, key=lambda o: (o.delivery_window if kind == 'd' else o.pickup_window)[1])]
+     score_route = _route_score
++    distance = problem.distance
+     if tasks and fast_scores and len(p.batches) == 1:
+         from .single_batch_scoring import SingleBatchRouteScorer
+         score_route = scorer if scorer is not None else SingleBatchRouteScorer(problem)
++        if isinstance(score_route, SingleBatchRouteScorer):
++            # Static directed arcs belong to the same fixed problem as the
++            # scorer. Reuse its bounded cache; scores and ready times stay fresh.
++            distance = score_route.distance
+     # Scoped to this repair: goods-ready times and the problem stay fixed.
+     # Keep the route object alive with its score to prevent object-id reuse.
+     route_scores = {}
+@@ -158,7 +163,7 @@
+             else:
+                 scores[index], end = score_route(problem, route, goods, before[index])
+                 locations = [route['satellite']]+[problem.order_map[o].customer for o, _ in route['tasks']]+[route['satellite']]
+-                distances[index] = sum(problem.distance(a, b) for a, b in zip(locations, locations[1:]))
++                distances[index] = sum(distance(a, b) for a, b in zip(locations, locations[1:]))
+                 if cache_scores:
+                     route_scores[id(route)] = (route, before[index], scores[index], end, distances[index])
+             ready[key] = end+p.e2_turnaround_time
+@@ -179,8 +184,8 @@
+                 if screen and best is not None:
+                     left = route['satellite'] if pos == 0 else problem.order_map[existing[pos-1][0]].customer
+                     right = route['satellite'] if pos == len(existing) else problem.order_map[existing[pos][0]].customer
+-                    bound = (distances[index]+problem.distance(left, order.customer)
+-                             +problem.distance(order.customer, right)-problem.distance(left, right)-scores[index])
++                    bound = (distances[index]+distance(left, order.customer)
++                             +distance(order.customer, right)-distance(left, right)-scores[index])
+                     tolerance = 1e-9*max(1, abs(bound), abs(best[0]), abs(scores[index]))
+                     if bound > best[0]+tolerance:
+                         continue

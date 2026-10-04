@@ -2,9 +2,9 @@
 import json
 import time
 
-from experiments.runs.run_model12346_alns_scaling import ROOT, load_problem, as_solution
+from tests.routing.baseline_helpers import ROOT, load_problem, as_solution
 from models.routing.alns.route_exchange import improve_route_exchanges
-from models.routing.alns.variants.model_4 import Evaluator
+from models.routing.baselines.alns.model_4 import Evaluator
 from models.routing.common.solution_audit import audit_exact_solution
 
 

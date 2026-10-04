@@ -1,0 +1,157 @@
+--- before/models/routing/solvers/alns/evaluator.py
++++ candidate/models/routing/solvers/alns/evaluator.py
+@@ -165,22 +165,26 @@
+         return 1e12, result, ['E2_TASK_COVERAGE']
+     for o in problem.orders if problem.reusable else ():
+         edges.append((tasks[o.id, 'd'], tasks[o.id, 'p'], o.service_time+o.min_use_time))
+-    indegree = {n: 0 for n in bounds}
+-    children = defaultdict(list)
+-    for a, b, delta in edges:
+-        indegree[b] += 1
+-        children[a].append((b, delta))
+-    queue = [n for n in bounds if not indegree[n]]
+-    visited = 0
+-    while queue:
+-        node = queue.pop()
+-        visited += 1
+-        for child, delta in children[node]:
+-            bounds[child] = max(bounds[child], bounds[node]+delta)
+-            indegree[child] -= 1
+-            if not indegree[child]:
+-                queue.append(child)
+-    if visited != len(bounds):
++    if _prepared is not None and problem.reusable:
++        acyclic = _prepared.propagate(bounds, edges)
++    else:
++        indegree = {n: 0 for n in bounds}
++        children = defaultdict(list)
++        for a, b, delta in edges:
++            indegree[b] += 1
++            children[a].append((b, delta))
++        queue = [n for n in bounds if not indegree[n]]
++        visited = 0
++        while queue:
++            node = queue.pop()
++            visited += 1
++            for child, delta in children[node]:
++                bounds[child] = max(bounds[child], bounds[node]+delta)
++                indegree[child] -= 1
++                if not indegree[child]:
++                    queue.append(child)
++        acyclic = visited == len(bounds)
++    if not acyclic:
+         return 1e12, result, ['TIMING_CYCLE']
+     if any(t > upper.get(node, p.cycle_end) for node, t in bounds.items()):
+         violations.append('E2_TIME_WINDOW')
+--- before/models/routing/solvers/alns/single_batch_cache.py
++++ candidate/models/routing/solvers/alns/single_batch_cache.py
+@@ -5,10 +5,12 @@
+ from .evaluator import evaluate, route_distance
+ from .neighborhoods import EvaluationCache
+ from .single_batch_scoring import SingleBatchRouteScorer
++from .single_batch_timing import propagate_times
+ 
+ 
+ class SingleBatchEvaluator(CycleEvaluator):
+     """Prepare task attributes and reuse distances, while decoding times afresh."""
++    propagate = staticmethod(propagate_times)
+     def __init__(self, problem, capacity=128, *, distance_capacity=512):
+         if len(problem.operating_policy.batches) != 1:
+             raise ValueError('Single-batch cache requires B=1')
+--- before/models/routing/solvers/alns/single_batch_timing.py
++++ candidate/models/routing/solvers/alns/single_batch_timing.py
+@@ -0,0 +1,31 @@
++"""Exact DAG propagation using dense indices; no schedule inputs are cached."""
++
++
++def propagate_times(bounds, edges):
++    """Update lower bounds in place; return False for any directed timing cycle.
++
++    Preserve node/edge insertion order and the reference max/add arithmetic.
++    Only dictionary access during the graph walk is replaced by list access.
++    """
++    nodes = list(bounds)
++    indices = {node: i for i, node in enumerate(nodes)}
++    values = list(bounds.values())
++    children = [[] for _ in nodes]
++    indegree = [0]*len(nodes)
++    for parent, child, delta in edges:
++        a, b = indices[parent], indices[child]
++        children[a].append((b, delta))
++        indegree[b] += 1
++    queue = [i for i, degree in enumerate(indegree) if not degree]
++    visited = 0
++    while queue:
++        node = queue.pop()
++        visited += 1
++        ready = values[node]
++        for child, delta in children[node]:
++            values[child] = max(values[child], ready+delta)
++            indegree[child] -= 1
++            if not indegree[child]:
++                queue.append(child)
++    bounds.update(zip(nodes, values))
++    return visited == len(nodes)
+--- before/models/routing/solvers/alns/neighborhoods.py
++++ candidate/models/routing/solvers/alns/neighborhoods.py
+@@ -101,7 +101,27 @@
+         return clone_state(original)
+     orders = list(problem.orders)
+     count = min(len(orders), max(2, min(5, len(orders)//5)))
+-    if mode == 'related':
++    if mode == 'worst':
++        # Removal savings rank proposals only. Compute the whole directed
++        # sequence so repeated visits and nonmetric distances remain valid.
++        savings = {o.id: 0.0 for o in orders}
++        for route in original['e2']:
++            if time.perf_counter() >= deadline:
++                return clone_state(original)
++            site, tasks = route['satellite'], route['tasks']
++            def distance(sequence):
++                nodes = [site]+[problem.order_map[oid].customer for oid, _ in sequence]+[site]
++                return sum(problem.distance(a, b) for a, b in zip(nodes, nodes[1:])) if sequence else 0.0
++            base = distance(tasks)
++            for oid in {oid for oid, _ in tasks}:
++                if time.perf_counter() >= deadline:
++                    return clone_state(original)
++                savings[oid] += base-distance([t for t in tasks if t[0] != oid])
++        orders.sort(key=lambda o: -savings[o.id])
++        removed = []
++        for _ in range(count):
++            removed.append(orders.pop(int(rng.random()**2*len(orders))))
++    elif mode == 'related':
+         anchor = rng.choice(orders)
+         orders.sort(key=lambda o: (o.satellite != anchor.satellite,
+                                   problem.distance(anchor.customer, o.customer)+
+--- before/models/routing/solvers/alns/single_batch.py
++++ candidate/models/routing/solvers/alns/single_batch.py
+@@ -88,7 +88,7 @@
+ 
+ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_result=None,
+                seed_state=None, _travel_bounds=None, _assignment_search=None, _begun=None,
+-               _context=None):
++               _context=None, _worst_removal=False):
+     if len(problem.operating_policy.batches) != 1:
+         raise ValueError('Single-batch search requires B=1')
+     if not math.isfinite(max_time) or max_time <= 0 or max_iterations < 0:
+@@ -149,6 +149,8 @@
+     history = ([dict(time=first_feasible, iteration=0, objective=best_cost)]
+                if best is not None else [])
+     operators = ['relocate', 'split_merge', 'vehicle', 'e1_delivery', 'reverse', 'destroy_random', 'destroy_related']
++    if _worst_removal:
++        operators.append('destroy_worst')
+     if problem.reusable:
+         operators += ['pair', 'e1_pickup']
+     weights = [1.0]*len(operators)
+--- before/models/routing/solvers/alns/partitioned_assignment.py
++++ candidate/models/routing/solvers/alns/partitioned_assignment.py
+@@ -69,7 +69,8 @@
+         subproblem_start = time.perf_counter()-start
+         solved = solve_fixed(fixed, max_time=min(remaining, max(.01, max_time*share)),
+                              max_iterations=iteration_budget, seed=seed+attempts, initial_result=warm,
+-                             seed_state=seed_state, _travel_bounds=travel_bounds, _context=context)
++                             seed_state=seed_state, _travel_bounds=travel_bounds, _context=context,
++                             _worst_removal=True)
+         attempts += 1
+         for field, counts in operator_totals.items():
+             for operator, count in solved['info'].get(field, {}).items():

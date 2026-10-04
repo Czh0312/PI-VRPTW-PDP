@@ -1,0 +1,783 @@
+--- a/models/routing/variants/model_5/exact/__init__.py
++++ b/models/routing/variants/model_5/exact/__init__.py
+@@ -1,6 +1,6 @@
+ """M5 exact entry."""
+ from .solver import solve_exact
+ from .bounds import e1_inventory_certificate, route_cover_certificate
+-from .primal import reoptimize_e1
++from .primal import reoptimize_e1, reoptimize_route_pool
+ 
+-__all__ = ["solve_exact", "route_cover_certificate", "e1_inventory_certificate", "reoptimize_e1"]
++__all__ = ["solve_exact", "route_cover_certificate", "e1_inventory_certificate", "reoptimize_e1", "reoptimize_route_pool"]
+--- a/models/routing/variants/model_5/exact/primal.py
++++ b/models/routing/variants/model_5/exact/primal.py
+@@ -6,3 +6,9 @@
+     validate_problem(problem)
+     from models.routing.solvers.exact.multibatch_e1_polish import reoptimize_e1 as polish
+     return polish(problem, initial_result, **options)
++
++
++def reoptimize_route_pool(problem, initial_result, **options):
++    validate_problem(problem)
++    from models.routing.solvers.exact.multibatch_route_pool import reoptimize_route_pool as polish
++    return polish(problem, initial_result, **options)
+--- a/models/routing/variants/model_5/exact/solver.py
++++ b/models/routing/variants/model_5/exact/solver.py
+@@ -4,7 +4,7 @@
+ 
+ 
+ def solve_exact(problem, time_limit=60, seed=42, verbose=False, *, distance_cuts=None,
+-                initial_result=None, e1_polish_time=0):
++                initial_result=None, e1_polish_time=0, route_pool_time=0):
+     validate_problem(problem)
+     import math
+     import time
+@@ -12,24 +12,34 @@
+         raise ValueError('time_limit must be finite and positive')
+     if not math.isfinite(e1_polish_time) or e1_polish_time < 0:
+         raise ValueError('e1_polish_time must be finite and nonnegative')
+-    begun, polish_info = time.perf_counter(), None
+-    if e1_polish_time > 0:
++    if not math.isfinite(route_pool_time) or route_pool_time < 0:
++        raise ValueError('route_pool_time must be finite and nonnegative')
++    begun, polish_info, pool_info = time.perf_counter(), None, None
++    if e1_polish_time > 0 or route_pool_time > 0:
+         if initial_result is None:
+             from models.routing.solvers.exact.primal import construct_incumbent
+             initial_result = construct_incumbent(problem, begun+min(1, time_limit*.05))
+         if initial_result is not None:
+             from .primal import reoptimize_e1
+             remaining = max(0, time_limit-(time.perf_counter()-begun))
+-            if remaining > 0:
++            if remaining > 0 and e1_polish_time > 0:
+                 initial_result = reoptimize_e1(problem, initial_result,
+                     time_limit=min(e1_polish_time, remaining/3), seed=seed, verbose=verbose, retime_e2=True)
+                 polish_info = dict(initial_result['info'])
++            remaining = max(0, time_limit-(time.perf_counter()-begun))
++            if remaining > 0 and route_pool_time > 0:
++                from .primal import reoptimize_route_pool
++                initial_result = reoptimize_route_pool(problem, initial_result,
++                    time_limit=min(route_pool_time, remaining/3), seed=seed, verbose=verbose)
++                pool_info = dict(initial_result['info'])
+     from models.routing.solvers.exact.solver import solve_exact as solve_shared
+     options = dict(distance_cuts=distance_cuts) if distance_cuts is not None else {}
+     if initial_result is not None:
+         options['initial_result'] = initial_result
+-    remaining = max(1e-12, time_limit-(time.perf_counter()-begun)) if e1_polish_time > 0 else time_limit
++    remaining = max(1e-12, time_limit-(time.perf_counter()-begun)) if e1_polish_time > 0 or route_pool_time > 0 else time_limit
+     result = solve_shared(problem, time_limit=remaining, seed=seed, verbose=verbose, **options)
+     if e1_polish_time > 0:
+         result['info'].update(e1_polish=polish_info, runtime=time.perf_counter()-begun)
++    if route_pool_time > 0:
++        result['info'].update(route_pool=pool_info, runtime=time.perf_counter()-begun)
+     return finish_result(problem, result, solver_module=solve_shared.__module__)
+--- /dev/null
++++ b/models/routing/solvers/exact/multibatch_route_pool.py
+@@ -0,0 +1,342 @@
++"""Audited M5 upper bounds from a restricted E2 route-pool integer master.
++
++Candidate generation is bounded and incomplete. The master retains actual
++physical vehicles, task times, E1 supply, common trip returns, cutoff stock
++and cleaning. Its bound and optimality apply ONLY to the candidate pool.
++"""
++from __future__ import annotations
++
++from collections import defaultdict
++from copy import deepcopy
++from itertools import permutations
++import math
++from pathlib import Path
++import time
++
++from models.routing.common.cycle.audit import audit_solution
++from .multibatch_e1_inventory import build_e1_inventory, set_e1_projection
++from .multibatch_e1_routes import build_e1_routes, set_route_projection
++from .multibatch_e1_polish import extract_routes
++from .multibatch_route_pricing import evaluate_column, route_context
++
++
++def candidate_pools(problem, initial, *, deadline=None, max_columns=128, transfers=True):
++    """Keep original routes, reorder tasks, and transfer tasks/whole orders.
++
++    Each domain belongs to one existing physical trip slot. Empty slots are
++    allowed by the master, but no new slots are introduced. The original
++    sequence is always retained. Pruning is heuristic, never a proof.
++    """
++    def expired():
++        return deadline is not None and time.perf_counter() >= deadline
++    contexts = {s: route_context(problem, s) for s in sorted({t['satellite_id'] for t in initial['e2_trips']})}
++    trips = initial['e2_trips']
++    originals = [tuple((e['order_id'], e['kind']) for e in t['events']) for t in trips]
++    pools = [dict() for _ in trips]
++    cache = {}
++    def evaluate(index, sequence):
++        sequence = tuple(sequence)
++        key = trips[index]['satellite_id'], sequence
++        if key not in cache:
++            cache[key] = evaluate_column(problem, contexts[key[0]], sequence)
++        return cache[key]
++    def add(index, sequence):
++        column = evaluate(index, sequence)
++        if column is not None:
++            pools[index][column['tasks']] = column
++        return column
++    for i, sequence in enumerate(originals):
++        if add(i, sequence) is None:
++            raise RuntimeError('Audited original trip did not project to the route pool')
++    for i, sequence in enumerate(originals):
++        if expired():
++            break
++        if len(sequence) <= 6:
++            proposals = permutations(sequence)
++        else:
++            proposals = (sequence[:a]+sequence[a+1:b]+(sequence[a],)+sequence[b:]
++                         if a < b else sequence[:b]+(sequence[a],)+sequence[b:a]+sequence[a+1:]
++                         for a in range(len(sequence)) for b in range(len(sequence)+1) if a != b)
++        for proposed in proposals:
++            if expired():
++                break
++            add(i, proposed)
++    if transfers:
++        for i, source in enumerate(originals):
++            if expired():
++                break
++            units = [(key,) for key in source]
++            units += [tuple(key for key in source if key[0] == oid)
++                      for oid in sorted({key[0] for key in source})
++                      if sum(key[0] == oid for key in source) == 2]
++            for unit in units:
++                if expired():
++                    break
++                rest = tuple(key for key in source if key not in unit)
++                if rest and evaluate(i, rest) is None:
++                    continue
++                for j, target in enumerate(originals):
++                    if i == j or trips[i]['satellite_id'] != trips[j]['satellite_id']:
++                        continue
++                    if expired():
++                        break
++                    for a in range(len(target)+1):
++                        one = target[:a]+(unit[0],)+target[a:]
++                        proposals = [one] if len(unit) == 1 else (
++                            one[:b]+(unit[1],)+one[b:] for b in range(a+1, len(one)+1))
++                        for proposed in proposals:
++                            if expired():
++                                break
++                            if add(j, proposed) is not None and rest:
++                                add(i, rest)
++    output = []
++    for original, pool in zip(originals, pools):
++        # Preserve both a cheap path and an early-return path for each task
++        # subset. Neither criterion dominates actual joint scheduling.
++        subsets = defaultdict(list)
++        for column in pool.values():
++            subsets[frozenset(column['tasks'])].append(column)
++        kept = {original: pool[original]}
++        for rows in subsets.values():
++            for key in (lambda c: (c['cost'], c['return_complete'], c['tasks']),
++                        lambda c: (c['return_complete'], c['cost'], c['tasks'])):
++                column = min(rows, key=key)
++                kept[column['tasks']] = column
++        ranked = sorted((c for key, c in kept.items() if key != original),
++                        key=lambda c: (c['cost']/len(c['tasks']), c['cost'], c['tasks']))
++        output.append([pool[original]]+ranked[:max_columns-1])
++    return output
++
++
++def add_route_pool(problem, model, context, initial, pools, *, deadline=None):
++    """Factor shared task arcs while retaining physical route endpoints."""
++    import gurobipy as gp
++    from gurobipy import GRB
++    p, trips = problem.operating_policy, initial['e2_trips']
++    limit = max(1, 2*len(problem.orders)+2*len(trips))
++    ranks = {key: model.addVar(ub=limit, name=f'pool_task_rank_{key[0]}_{key[1]}')
++             for key in context['order_times']}
++    for o in problem.orders:
++        model.addConstr(ranks[o.id, 'p'] >= ranks[o.id, 'd']+1)
++    cover, internal, slots, choices = defaultdict(list), defaultdict(list), [], []
++    supplies = context.get('supplies', context.get('deliveries'))
++    def check():
++        if deadline is not None and time.perf_counter() >= deadline:
++            raise TimeoutError('Route-pool master construction reached its total budget')
++    for i, (trip, columns) in enumerate(zip(trips, pools)):
++        check()
++        z = model.addVars(len(columns), vtype=GRB.BINARY,
++            obj={j: c['cost'] for j, c in enumerate(columns)}, name=f'pool_choice_{i}')
++        used = model.addVar(vtype=GRB.BINARY, name=f'pool_used_{i}')
++        start = model.addVar(vtype=GRB.INTEGER, ub=p.cycle_end, name=f'pool_start_{i}')
++        end = model.addVar(vtype=GRB.INTEGER, ub=p.cycle_end, name=f'pool_end_{i}')
++        first_rank = model.addVar(ub=limit, name=f'pool_start_rank_{i}')
++        last_rank = model.addVar(ub=limit, name=f'pool_end_rank_{i}')
++        model.addConstr(gp.quicksum(z.values()) == used)
++        delivery = gp.quicksum(z[j] for j, c in enumerate(columns) if any(k == 'd' for _, k in c['tasks']))
++        prep = p.e2_dispatch_prep_time*delivery
++        model.addConstr(start >= p.cycle_start*used+prep)
++        model.addConstr(start <= p.cycle_end*used)
++        model.addConstr(end <= (p.cycle_end-p.e2_turnaround_time)*used)
++        model.addConstr(first_rank >= used)
++        model.addConstr(first_rank <= limit*used)
++        model.addConstr(last_rank <= limit*used)
++        first, last, pickups, batches = defaultdict(list), defaultdict(list), defaultdict(list), defaultdict(list)
++        for j, c in enumerate(columns):
++            if j % 64 == 0:
++                check()
++            z[j].Start = int(j == 0)
++            first[c['tasks'][0]].append(z[j])
++            last[c['tasks'][-1]].append(z[j])
++            bids = set()
++            for key in c['tasks']:
++                cover[key].append(z[j])
++                if key[1] == 'p':
++                    pickups[key[0]].append(z[j])
++                else:
++                    bids.add(problem.order_map[key[0]].batch)
++            assert len(bids) <= 1
++            for bid in bids:
++                batches[bid].append(z[j])
++            for a, b in zip(c['tasks'], c['tasks'][1:]):
++                internal[a, b].append(z[j])
++        def active(rows, name):
++            v = model.addVar(vtype=GRB.BINARY, name=name)
++            model.addConstr(v == gp.quicksum(rows))
++            return v
++        for key, rows in first.items():
++            v = active(rows, f'pool_first_{i}_{key[0]}_{key[1]}')
++            model.addConstr((v == 1) >> (context['order_times'][key] >= start+problem.travel(trip['satellite_id'], problem.order_map[key[0]].customer)))
++            model.addConstr((v == 1) >> (ranks[key] >= first_rank+1))
++        for key, rows in last.items():
++            v = active(rows, f'pool_last_{i}_{key[0]}_{key[1]}')
++            o = problem.order_map[key[0]]
++            model.addConstr((v == 1) >> (end >= context['order_times'][key]+o.service_time+problem.travel(o.customer, trip['satellite_id'])+p.e2_return_unload_time))
++            model.addConstr((v == 1) >> (last_rank >= ranks[key]+1))
++        for oid, rows in pickups.items():
++            v = active(rows, f'pool_pickup_{i}_{oid}')
++            model.addConstr((v == 1) >> (context['returns'][oid] == end))
++        for bid, rows in batches.items():
++            v = active(rows, f'pool_batch_{i}_{bid}')
++            model.addConstr((v == 1) >> (start >= supplies[trip['satellite_id'], bid]+p.e2_dispatch_prep_time))
++        used.Start, start.Start, end.Start = 1, trip['departure'], trip['return_complete']
++        for event in trip['events']:
++            context['order_times'][event['order_id'], event['kind']].Start = event['start']
++        slots.append(dict(used=used, start=start, end=end, prep=prep, first_rank=first_rank, last_rank=last_rank))
++        choices.append(z)
++    for key in context['order_times']:
++        model.addConstr(gp.quicksum(cover[key]) == 1, f'pool_cover_{key[0]}_{key[1]}')
++    for n, ((a, b), rows) in enumerate(internal.items()):
++        check()
++        v = model.addVar(vtype=GRB.BINARY, name=f'pool_link_{n}')
++        model.addConstr(v == gp.quicksum(rows))
++        left, right = problem.order_map[a[0]], problem.order_map[b[0]]
++        model.addConstr((v == 1) >> (context['order_times'][b] >= context['order_times'][a]+left.service_time+problem.travel(left.customer, right.customer)))
++        model.addConstr((v == 1) >> (ranks[b] >= ranks[a]+1))
++    vehicles = defaultdict(list)
++    for i, trip in enumerate(trips):
++        vehicles[trip['satellite_id'], trip['vehicle_id']].append(i)
++    for indices in vehicles.values():
++        indices.sort(key=lambda i: trips[i]['trip_index'])
++        # Inactive intermediate slots must not break a physical vehicle's
++        # timeline. Link every pair of active slots, including across holes.
++        for pos, i in enumerate(indices):
++            for j in indices[pos+1:]:
++                a, b = slots[i], slots[j]
++                inactive = 2-a['used']-b['used']
++                model.addConstr(b['start']-b['prep'] >= a['end']+p.e2_turnaround_time-(p.cycle_end+p.e2_turnaround_time)*inactive)
++                model.addConstr(b['first_rank'] >= a['last_rank']+1-(limit+1)*inactive)
++    context['pool_choices'], context['pool_slots'] = choices, slots
++    model.update()
++    check()
++
++
++def extract_pool(problem, context, initial, pools, backend):
++    trips = []
++    for i, old in enumerate(initial['e2_trips']):
++        selected = [j for j, v in context['pool_choices'][i].items() if v.X > .5]
++        if not selected:
++            continue
++        if len(selected) != 1:
++            raise RuntimeError('Route-pool extraction has multiple routes in one physical slot')
++        row, c = context['pool_slots'][i], pools[i][selected[0]]
++        events = [dict(order_id=oid, kind=kind, quantity=problem.order_map[oid].count,
++                       start=int(round(context['order_times'][oid, kind].X))) for oid, kind in c['tasks']]
++        trips.append(dict(trip_id=old['trip_id'], satellite_id=old['satellite_id'],
++            vehicle_id=old['vehicle_id'], trip_index=old['trip_index'], events=events,
++            departure=int(round(row['start'].X)), return_complete=int(round(row['end'].X))))
++    return extract_routes(problem, context, backend, trips)
++
++
++def _reoptimize_once(problem, initial_result, *, time_limit=10, seed=42, verbose=False,
++                     max_columns=128, transfers=True, diagnostics_dir=None):
++    if not math.isfinite(time_limit) or time_limit <= 0:
++        raise ValueError('time_limit must be finite and positive')
++    if not isinstance(max_columns, int) or isinstance(max_columns, bool) or max_columns < 1:
++        raise ValueError('max_columns must be a positive integer')
++    if (problem.model_number != 5 or problem.free_assignment or not problem.reusable
++            or len(problem.operating_policy.batches) <= 1):
++        raise ValueError('Route-pool reoptimization requires fixed reusable multibatch M5')
++    begun, model = time.perf_counter(), None
++    deadline = begun+time_limit
++    before = audit_solution(problem, initial_result)
++    if not before['valid']:
++        raise ValueError('Initial result must pass the full M5 independent audit')
++    backend = 'patterns' if len({o.satellite for o in problem.orders}) <= 4 and problem.operating_policy.e1_turnaround_time == 0 else 'indexed'
++    result = deepcopy(initial_result)
++    for field in ('audit', 'cutoff_snapshots', 'depot_releases'):
++        result.pop(field, None)
++    result['info'] = dict(status='FEASIBLE', objective=before['objective'], best_bound=None, mip_gap=None,
++        proven_optimal=False, proven_infeasible=False, proof_scope='restricted_E2_route_pool_primal',
++        upper_before=before['objective'], route_pool_backend=backend, route_pool_subproblem_optimal=False,
++        route_pool_subproblem_bound=None, route_pool_complete=False, route_pool_transfers=bool(transfers))
++    status = 'TIME_LIMIT_BUILD'
++    try:
++        import gurobipy as gp
++        from gurobipy import GRB
++        pools = candidate_pools(problem, initial_result, deadline=begun+time_limit*.2,
++                                max_columns=max_columns, transfers=transfers)
++        result['info'].update(route_pool_columns=sum(map(len, pools)), route_pool_candidates=[len(row) for row in pools])
++        if time.perf_counter() >= deadline:
++            raise TimeoutError
++        if backend == 'patterns':
++            model, context = build_e1_routes(problem, deadline=deadline, verbose=verbose)
++            set_route_projection(problem, context, initial_result)
++        else:
++            model, context = build_e1_inventory(problem, deadline=deadline, verbose=verbose)
++            set_e1_projection(problem, context, initial_result)
++        add_route_pool(problem, model, context, initial_result, pools, deadline=deadline)
++        model.Params.Seed = int(seed)
++        model.Params.TimeLimit = max(0, deadline-time.perf_counter())
++        model.optimize()
++        status = int(model.Status)
++        if diagnostics_dir is not None:
++            import json
++            path = Path(diagnostics_dir)
++            path.mkdir(parents=True, exist_ok=True)
++            model.write(str(path/'route_pool.mps'))
++            (path/'columns.json').write_text(json.dumps(pools, ensure_ascii=False, indent=2)+'\n')
++        try:
++            raw = model.ObjBound
++        except (gp.GurobiError, AttributeError):
++            raw = None
++        result['info'].update(route_pool_subproblem_optimal=status == GRB.OPTIMAL,
++            route_pool_subproblem_bound=float(raw) if raw is not None and math.isfinite(raw) else None,
++            route_pool_variables=model.NumVars, route_pool_constraints=model.NumConstrs, route_pool_work=model.Work)
++        if model.SolCount:
++            candidate = extract_pool(problem, context, initial_result, pools, backend)
++            audited = audit_solution(problem, candidate)
++            if not audited['valid']:
++                raise RuntimeError(f'Route pool failed full cycle audit: {audited["errors"]}')
++            if not math.isclose(audited['objective'], model.ObjVal, rel_tol=1e-7, abs_tol=1e-5):
++                raise RuntimeError('Route-pool objective differs from full audited distance')
++            if audited['objective'] < before['objective']-1e-6:
++                candidate['info'] = result['info']
++                result = candidate
++    except TimeoutError:
++        pass
++    finally:
++        if model is not None:
++            model.dispose()
++    audited = audit_solution(problem, {**result, 'info': {**result['info'], 'objective': None}})
++    if not audited['valid']:
++        raise RuntimeError('Returned route-pool incumbent is invalid')
++    result['info'].update(objective=audited['objective'], route_pool_status=status,
++        route_pool_improved=audited['objective'] < before['objective']-1e-6, runtime=time.perf_counter()-begun)
++    result['audit'] = audited
++    if diagnostics_dir is not None:
++        import json
++        path = Path(diagnostics_dir)
++        path.mkdir(parents=True, exist_ok=True)
++        for name, payload in [('initial_result.json', initial_result), ('output_result.json', result)]:
++            (path/name).write_text(json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False)+'\n')
++    return result
++
++
++def reoptimize_route_pool(problem, initial_result, *, time_limit=10, seed=42, verbose=False,
++                          max_columns=128, transfers=True, max_passes=4, diagnostics_dir=None):
++    """Rebuild the candidate neighborhood after each audited improvement.
++
++    All passes share the original total budget. Stop at an unchanged upper
++    bound; absence of improvement proves nothing outside the generated pool.
++    """
++    if not math.isfinite(time_limit) or time_limit <= 0:
++        raise ValueError('time_limit must be finite and positive')
++    if not isinstance(max_passes, int) or isinstance(max_passes, bool) or max_passes < 1:
++        raise ValueError('max_passes must be a positive integer')
++    begun, result, trace = time.perf_counter(), initial_result, []
++    for index in range(max_passes):
++        remaining = max(1e-12, time_limit-(time.perf_counter()-begun))
++        result = _reoptimize_once(problem, result, time_limit=remaining, seed=seed,
++            verbose=verbose, max_columns=max_columns, transfers=transfers,
++            diagnostics_dir=Path(diagnostics_dir)/f'pass_{index}' if diagnostics_dir is not None else None)
++        info = result['info']
++        trace.append(dict(pass_index=index, upper_before=info['upper_before'], upper_after=info['objective'],
++            subproblem_bound=info['route_pool_subproblem_bound'], subproblem_optimal=info['route_pool_subproblem_optimal'],
++            status=info['route_pool_status'], columns=info.get('route_pool_columns'), runtime=info['runtime']))
++        if not info['route_pool_improved'] or time.perf_counter()-begun >= time_limit:
++            break
++    result['info'].update(upper_before=trace[0]['upper_before'],
++        route_pool_improved=result['info']['objective'] < trace[0]['upper_before']-1e-6,
++        route_pool_passes=trace, runtime=time.perf_counter()-begun)
++    return result
+--- /dev/null
++++ b/tests/routing/test_multibatch_route_pool.py
+@@ -0,0 +1,207 @@
++"""Complete-cycle audits of restricted route-pool primal improvements."""
++from copy import deepcopy
++from dataclasses import replace
++import math
++import time
++
++import pytest
++
++from models.routing.common.cycle import MultiBatchInstance
++from models.routing.common.cycle.audit import audit_solution
++from models.routing.solvers.exact.multibatch_route_pool import candidate_pools, reoptimize_route_pool
++from tests.routing.test_multibatch_cycle import fixture, hand_solution
++from tests.routing.test_multibatch_departure_loads import nonmetric_problem
++from tests.routing.test_multibatch_primal_quality import quality_fixture
++
++
++@pytest.mark.parametrize('seed', range(6))
++@pytest.mark.parametrize('transfers', [False, True])
++def test_pool_cannot_beat_known_full_optimum_and_does_not_claim_global_proof(seed, transfers):
++    pytest.importorskip('gurobipy')
++    from models.routing.solvers.exact.solver import solve_exact
++    p = nonmetric_problem(seed)
++    initial = solve_exact(p, time_limit=5)
++    assert initial['info']['proven_optimal']
++    copied = deepcopy(initial)
++    result = reoptimize_route_pool(p, initial, time_limit=2, transfers=transfers)
++    assert initial == copied
++    assert audit_solution(p, result)['valid']
++    assert result['info']['objective'] == pytest.approx(initial['info']['objective'])
++    assert result['info']['best_bound'] is None and result['info']['mip_gap'] is None
++    assert not result['info']['proven_optimal'] and not result['info']['proven_infeasible']
++    assert not result['info']['route_pool_complete']
++
++
++def test_reordering_improves_actual_e2_path_and_matches_full_optimum():
++    pytest.importorskip('gurobipy')
++    from models.routing.solvers.exact.multibatch_primal import construct_multibatch_incumbent
++    from models.routing.solvers.exact.solver import solve_exact
++    p = quality_fixture()
++    initial = construct_multibatch_incumbent(p, time.perf_counter()+2, improve=False)
++    result = reoptimize_route_pool(p, initial, time_limit=2, transfers=False)
++    assert initial['info']['objective'] == 6 and result['info']['objective'] == 4
++    assert audit_solution(p, result)['valid']
++    assert result['info']['route_pool_subproblem_optimal'] and not result['info']['proven_optimal']
++    full = solve_exact(p, time_limit=5, initial_result=result)
++    assert full['info']['proven_optimal'] and full['info']['objective'] == 4
++
++
++@pytest.mark.parametrize('unload', [29, 30, 31])
++def test_cutoff_and_clean_release_boundary(unload):
++    pytest.importorskip('gurobipy')
++    p = fixture(pool=2, cleaning=20)
++    initial = hand_solution(p, unload)
++    result = reoptimize_route_pool(p, initial, time_limit=2)
++    assert result['audit']['valid'] and result['audit']['periodic_replay']['valid']
++    assert result['info']['objective'] <= audit_solution(p, initial)['objective']
++
++
++def test_positive_e1_turnaround_retains_physical_vehicle_model():
++    pytest.importorskip('gurobipy')
++    p = fixture(pool=2, e1_turnaround_time=2, e2_dispatch_prep_time=2)
++    initial = hand_solution(p)
++    for trip in initial['e2_trips']:
++        trip['departure'] += 2
++        trip['events'][0]['start'] += 2
++    result = reoptimize_route_pool(p, initial, time_limit=2)
++    assert result['info']['route_pool_backend'] == 'indexed' and result['audit']['valid']
++
++
++def test_zero_times_remain_causally_valid_and_original_ids_are_not_modified():
++    pytest.importorskip('gurobipy')
++    p = fixture(pool=2, zero=True, cleaning=0)
++    initial = hand_solution(p)
++    initial['e2_trips'][0]['trip_id'] = 'polish_e1_b1_0'
++    result = reoptimize_route_pool(p, initial, time_limit=2)
++    assert result['audit']['valid'] and result['info']['objective'] == 0
++    assert len({t['trip_id'] for t in result['e1_trips']+result['e2_trips']}) == len(result['e1_trips'])+len(result['e2_trips'])
++
++
++def test_pool_pruning_always_keeps_original_and_timeout_preserves_incumbent():
++    p = fixture(pool=2)
++    initial = hand_solution(p)
++    pools = candidate_pools(p, initial, max_columns=1, deadline=0)
++    assert all(len(row) == 1 for row in pools)
++    result = reoptimize_route_pool(p, initial, time_limit=1e-12)
++    assert result['audit']['valid'] and result['info']['objective'] == 44
++    assert result['info']['route_pool_status'] == 'TIME_LIMIT_BUILD'
++    for value in (0, -1, math.inf, math.nan):
++        with pytest.raises(ValueError):
++            reoptimize_route_pool(p, initial, time_limit=value)
++    for value in (0, True, 1.5):
++        with pytest.raises(ValueError):
++            reoptimize_route_pool(p, initial, max_columns=value)
++        with pytest.raises(ValueError):
++            reoptimize_route_pool(p, initial, max_passes=value)
++    with pytest.raises(ValueError, match='independent audit'):
++        reoptimize_route_pool(p, {})
++    with pytest.raises(ValueError, match='multibatch M5'):
++        reoptimize_route_pool(fixture(one_batch=True), {})
++
++
++def three_slot_case(prep=0, zero=False):
++    base = fixture(pool=3, e2_max_trips_per_vehicle=3, e2_dispatch_prep_time=prep, zero=zero)
++    p = MultiBatchInstance(base.network,
++        [base.orders[0], replace(base.orders[0], id='extra'), base.orders[1]], base.operating_policy)
++    initial = hand_solution(base)
++    initial['batches'][0]['container_demand'] = 2
++    for event in initial['e1_trips'][0]['events']:
++        event['quantity'] = 2
++    initial['e2_trips'][1]['trip_index'] = 2
++    initial['e2_trips'].insert(1, dict(trip_id='extra_trip', satellite_id='S', vehicle_id=0,
++        trip_index=1, departure=18, return_complete=23, events=[
++            dict(kind='d', order_id='extra', start=19, quantity=1),
++            dict(kind='p', order_id='extra', start=22, quantity=1)]))
++    for trip in initial['e2_trips']:
++        trip['departure'] += prep
++        trip['events'][0]['start'] += prep
++    assert audit_solution(p, initial)['valid']
++    return p, initial
++
++
++def test_whole_order_transfer_merges_two_trips_without_losing_any_task():
++    pytest.importorskip('gurobipy')
++    p, initial = three_slot_case()
++    result = reoptimize_route_pool(p, initial, time_limit=2)
++    assert result['audit']['valid']
++    assert result['info']['objective'] == 44 < audit_solution(p, initial)['objective']
++    assert len(result['e2_trips']) == 2
++    keys = [(e['order_id'], e['kind']) for t in result['e2_trips'] for e in t['events']]
++    assert len(keys) == len(set(keys)) == 6
++
++
++def test_physical_vehicle_links_survive_inactive_intermediate_slot():
++    gp = pytest.importorskip('gurobipy')
++    from models.routing.solvers.exact.multibatch_e1_routes import build_e1_routes
++    from models.routing.solvers.exact.multibatch_route_pool import add_route_pool
++    p, initial = three_slot_case()
++    # Slot 1 is absent; slot 0 cannot stay out beyond slot 2's departure.
++    initial['e2_trips'].pop(1)
++    p = MultiBatchInstance(p.network, [p.orders[0], p.orders[2]], p.operating_policy)
++    initial['batches'][0]['container_demand'] = 1
++    for event in initial['e1_trips'][0]['events']:
++        event['quantity'] = 1
++    pools = candidate_pools(p, initial, max_columns=1)
++    m, ctx = build_e1_routes(p)
++    try:
++        add_route_pool(p, m, ctx, initial, pools)
++        m.addConstr(ctx['pool_slots'][0]['end'] == 75)
++        m.addConstr(ctx['pool_slots'][1]['start'] == 70)
++        m.optimize()
++        assert m.Status == gp.GRB.INFEASIBLE
++    finally:
++        m.dispose()
++
++
++def test_busy_vehicle_preparation_is_part_of_route_pool_timeline():
++    gp = pytest.importorskip('gurobipy')
++    from models.routing.solvers.exact.multibatch_e1_routes import build_e1_routes
++    from models.routing.solvers.exact.multibatch_route_pool import add_route_pool
++    p, initial = three_slot_case(prep=2)
++    pools = candidate_pools(p, initial, max_columns=1)
++    m, ctx = build_e1_routes(p)
++    try:
++        add_route_pool(p, m, ctx, initial, pools)
++        m.addConstr(ctx['pool_slots'][0]['end'] == 18)
++        m.addConstr(ctx['pool_slots'][1]['start'] == 19)
++        m.optimize()
++        assert m.Status == gp.GRB.INFEASIBLE
++    finally:
++        m.dispose()
++
++
++def test_zero_time_cross_trip_precedence_cycle_is_excluded():
++    gp = pytest.importorskip('gurobipy')
++    from models.routing.solvers.exact.multibatch_e1_routes import build_e1_routes
++    from models.routing.solvers.exact.multibatch_route_pool import add_route_pool
++    from models.routing.solvers.exact.multibatch_route_pricing import evaluate_column, route_context
++    p, initial = three_slot_case(zero=True)
++    context = route_context(p, 'S')
++    pools = [[evaluate_column(p, context, [('extra', 'p'), ('o1', 'd')])],
++             [evaluate_column(p, context, [('o1', 'p'), ('extra', 'd')])],
++             [evaluate_column(p, context, [('o2', 'd'), ('o2', 'p')])]]
++    assert all(row[0] is not None for row in pools)
++    m, ctx = build_e1_routes(p)
++    try:
++        add_route_pool(p, m, ctx, initial, pools)
++        m.optimize()
++        assert m.Status == gp.GRB.INFEASIBLE
++    finally:
++        m.dispose()
++
++
++def test_public_warm_start_preprocessing_shares_original_total_budget():
++    pytest.importorskip('gurobipy')
++    from models.routing.variants.model_5.exact import reoptimize_route_pool as public, solve_exact
++    p = fixture(pool=2)
++    assert public(p, hand_solution(p), time_limit=1)['audit']['valid']
++    result = solve_exact(p, initial_result=hand_solution(p), time_limit=2,
++                         e1_polish_time=.25, route_pool_time=.5)
++    assert result['audit']['valid'] and result['info']['proven_optimal']
++    assert result['info']['route_pool']['route_pool_complete'] is False
++    assert result['info']['runtime'] < 2.25
++    automatic = solve_exact(p, time_limit=2, route_pool_time=.5)
++    assert automatic['audit']['valid'] and automatic['info']['route_pool'] is not None
++    for value in (-1, math.inf, math.nan):
++        with pytest.raises(ValueError, match='route_pool_time'):
++            solve_exact(p, route_pool_time=value)
+--- /dev/null
++++ b/tools/audit/benchmark_multibatch_route_pool.py
+@@ -0,0 +1,152 @@
++"""Frozen M5 restricted E2 route-pool improvements and same-budget comparisons."""
++from __future__ import annotations
++
++import argparse
++import hashlib
++import json
++import math
++import os
++from pathlib import Path
++import platform
++import shutil
++import subprocess
++import sys
++import time
++
++ROOT = Path(__file__).resolve().parents[2]
++sys.path.insert(0, str(ROOT))
++
++
++def write(path, value):
++    path.write_text(json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False)+'\n')
++
++
++def worker(job, destination):
++    from configuration.loader import load_routing_case
++    from models.routing.common.cycle import load_instance
++    from models.routing.common.cycle.audit import audit_solution
++    from models.routing.variants.model_5.exact import reoptimize_route_pool, route_cover_certificate, solve_exact
++    p = load_instance(*load_routing_case(job['case']))
++    initial = json.loads(Path(job['initial_result']).read_text())
++    assert audit_solution(p, initial)['valid']
++    started = time.perf_counter()
++    variant, cert = job['variant'], None
++    if variant in ('milp', 'pool-milp'):
++        result = solve_exact(p, time_limit=job['budget'], seed=job['seed'], verbose=True,
++            initial_result=initial, distance_cuts='components',
++            route_pool_time=job['polish_time'] if variant == 'pool-milp' else 0)
++        bound = result['info']['best_bound']
++    else:
++        result = initial
++        if variant in ('reorder', 'pool', 'pool-cg'):
++            allowance = min(job['polish_time'], job['budget']/3) if variant == 'pool-cg' else job['budget']
++            result = reoptimize_route_pool(p, initial, time_limit=allowance, seed=job['seed'], verbose=True,
++                transfers=variant != 'reorder', diagnostics_dir=destination.parent/(job['id']+'_pool_models'))
++        bound = None
++        if variant in ('cg', 'pool-cg'):
++            cert = route_cover_certificate(p, time_limit=max(1e-12, job['budget']-(time.perf_counter()-started)),
++                initial_result=result, seed=job['seed'], e1_time_limit=10, verbose=True,
++                diagnostics_dir=destination.parent/(job['id']+'_pricing_models'))
++            bound = cert['bound']
++    audited = audit_solution(p, result)
++    assert audited['valid']
++    upper = audited['objective']
++    write(destination, dict(job=job, wall_seconds=time.perf_counter()-started, result=result,
++        independent_audit=audited, certificate=cert, bound=bound,
++        gap=max(0, upper-bound)/max(1e-9, abs(upper)) if bound is not None else None,
++        fixed_initial_gap=max(0, job['initial_upper']-bound)/max(1e-9, abs(job['initial_upper'])) if bound is not None else None))
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--output', type=Path, required=True)
++    parser.add_argument('--cases', nargs='+')
++    parser.add_argument('--initial-results', nargs='+')
++    parser.add_argument('--time', type=float, default=10)
++    parser.add_argument('--polish-time', type=float, default=10)
++    parser.add_argument('--seeds', nargs='+', type=int, default=[42])
++    parser.add_argument('--variants', nargs='+', choices=['reorder', 'pool', 'cg', 'pool-cg', 'milp', 'pool-milp'],
++                        default=['reorder', 'pool'])
++    parser.add_argument('--worker', help=argparse.SUPPRESS)
++    args = parser.parse_args()
++    if args.worker:
++        worker(json.loads(args.worker), args.output)
++        return
++    if not args.cases or not args.initial_results or len(args.cases) != len(args.initial_results):
++        parser.error('one --initial-results file is required per case')
++    if any(not math.isfinite(v) or v <= 0 for v in (args.time, args.polish_time)):
++        parser.error('budgets must be finite and positive')
++    if len(set(args.variants)) != len(args.variants):
++        parser.error('variants must be distinct')
++    from configuration.loader import load_routing_case, resolve_project_path
++    from models.routing.common.cycle import load_instance
++    from models.routing.common.cycle.audit import audit_solution
++    output = args.output.resolve()
++    output.mkdir(parents=True, exist_ok=False)
++    jobs = []
++    for index, source in enumerate(args.cases):
++        config, fleet = load_routing_case(source)
++        p = load_instance(config, fleet)
++        if p.model_number != 5:
++            raise ValueError('M5 inputs required')
++        frozen = output/'inputs'/str(index)
++        frozen.mkdir(parents=True)
++        for field in ('data', 'orders', 'distance_matrix', 'duration_matrix', 'dataset_metadata'):
++            if config.get(field):
++                path = resolve_project_path(config[field])
++                target = frozen/(field+path.suffix)
++                shutil.copy2(path, target)
++                config[field] = str(target)
++        write(frozen/'fleet.json', fleet)
++        config['routing_config'], config['operating_policy'] = str(frozen/'fleet.json'), fleet['operating_policy']
++        for field in ('algorithm_config', 'container_pool_config'):
++            config.pop(field, None)
++        write(frozen/'case.json', config)
++        payload = json.loads(resolve_project_path(args.initial_results[index]).read_text())
++        initial = payload.get('result', payload)
++        a = audit_solution(p, initial)
++        assert a['valid']
++        write(frozen/'initial_result.json', initial)
++        write(frozen/'initial_audit.json', a)
++        for seed in args.seeds:
++            for variant in args.variants:
++                jobs.append(dict(id=f'{index:02d}_{seed}_{variant}', variant=variant,
++                    case=str(frozen/'case.json'), source_case=source, initial_result=str(frozen/'initial_result.json'),
++                    initial_upper=a['objective'], budget=args.time, polish_time=args.polish_time,
++                    seed=seed, customers=len({o.customer for o in p.orders})))
++    for source in [*ROOT.glob('models/**/*.py'), *ROOT.glob('configuration/*.py'), Path(__file__).resolve()]:
++        target = output/'source_snapshot'/source.relative_to(ROOT)
++        target.parent.mkdir(parents=True, exist_ok=True)
++        shutil.copy2(source, target)
++    for name in ('multibatch_route_pool.py', 'multibatch_e1_polish.py', 'multibatch_e1_inventory.py', 'multibatch_e1_routes.py',
++                 'multibatch_route_cg.py', 'multibatch_route_pricing.py', 'solver.py', 'formulation.py'):
++        path = output/'source_snapshot/models/routing/solvers/exact'/name
++        compile(path.read_text(), str(path), 'exec')
++    compile(Path(__file__).read_text(), str(Path(__file__)), 'exec')
++    hashes = {str(p.relative_to(output)): hashlib.sha256(p.read_bytes()).hexdigest()
++              for p in sorted(output.rglob('*')) if p.is_file()}
++    write(output/'manifest.json', dict(jobs=jobs, artifact_sha256=hashes, python=sys.version,
++        platform=platform.platform(), python_hash_seed=0,
++        note='Restricted route-pool primal search retains actual full M5 feasibility. Search is within the original total budget. '
++             'Restricted subproblem bounds/optimality never certify full M5.'))
++    summary = []
++    worker_path = output/'source_snapshot/tools/audit/benchmark_multibatch_route_pool.py'
++    for job in jobs:
++        destination = output/(job['id']+'.json')
++        with (output/(job['id']+'.log')).open('w') as log:
++            run = subprocess.run([sys.executable, str(worker_path), '--worker', json.dumps(job), '--output', str(destination)],
++                cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, timeout=args.time+20,
++                env={**os.environ, 'PYTHONHASHSEED': '0'})
++        row = dict(job=job, failure=None if run.returncode == 0 else f'EXIT_{run.returncode}')
++        if destination.exists():
++            data = json.loads(destination.read_text())
++            row.update(upper=data['independent_audit']['objective'], bound=data['bound'], gap=data['gap'],
++                fixed_initial_gap=data['fixed_initial_gap'], wall_seconds=data['wall_seconds'],
++                valid=data['independent_audit']['valid'], info=data['result']['info'])
++        summary.append(row)
++        write(output/'summary.json', summary)
++        print(json.dumps(row, ensure_ascii=False), flush=True)
++
++
++if __name__ == '__main__':
++    main()

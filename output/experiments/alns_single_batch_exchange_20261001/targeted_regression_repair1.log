@@ -1,0 +1,19 @@
+........F....................................................            [100%]
+=================================== FAILURES ===================================
+_______ test_filter_checks_pickup_load_even_when_both_initial_loads_fit ________
+
+    def test_filter_checks_pickup_load_even_when_both_initial_loads_fit():
+        p, state = fixture()
+        fleet = dict(E1_vehicle_count=1, vehicles_per_satellite=2, E1_Qk=20, E1_Ck=20,
+                     E2_Qv=3, E2_Cv=4, container_weight=1, container_volume=1)
+        orders = [replace(o, count=2, goods_weight=0) if o.id in ('o0', 'o2') else o
+                  for o in p.orders if o.id != 'o3']
+        p = MultiBatchInstance(ProblemInstance(p.network.nodes, fleet,
+>           distance_matrix=p.network._distance_matrix, travel_time_matrix=p.network._travel_time_matrix),
+            orders, replace(p.operating_policy, container_pool_size=5, e2_max_trips_per_vehicle=3), model=3)
+E       AttributeError: 'ProblemInstance' object has no attribute '_distance_matrix'
+
+tests/routing/test_single_batch_exchange.py:117: AttributeError
+=========================== short test summary info ============================
+FAILED tests/routing/test_single_batch_exchange.py::test_filter_checks_pickup_load_even_when_both_initial_loads_fit
+1 failed, 60 passed in 0.46s

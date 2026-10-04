@@ -1,0 +1,681 @@
+{
+  "selection_profile": "zhou_10_per_customer_count_v4",
+  "design_version": "operational_scenarios_v2",
+  "business_assumption": "Static same-day distribution of reusable transport boxes; unloading/short use followed by collection. Scenario assumptions, not measured consumer packaging returns.",
+  "source_instance": "Set2_100-5-1b",
+  "base_family_id": "zhou_Set2_100-5-1b_subset30",
+  "scenario_index": 2,
+  "scenario_rule": "Paired use-duration/collection profiles; identical customer subset, territories, demand and fleet.",
+  "scale_pair_id": "Set2_100-5-1b",
+  "selection_rule": "Five source blocks; source-keyed SHA256 ordering; nested 20/30/50 subsets; identical subsets within both profiles; no solver filtering.",
+  "territory_rule": "Choose source satellite subset by minimum summed nearest distance; assign distant customers first to nearest available territory with a published count cap.",
+  "territory_customer_cap": 15,
+  "cohort_rule": "Per-territory customer hash rank modulo three, independent of use/return hash streams.",
+  "time_unit": "scenario_minutes",
+  "distance_unit": "benchmark_coordinate_units_not_km",
+  "preserved_fields": [
+    "selected_source_locations",
+    "goods_weight",
+    "customer_service_time"
+  ],
+  "scenario_fields": [
+    "satellite_subset",
+    "territories",
+    "satellite_service",
+    "travel_speed",
+    "box_count",
+    "windows",
+    "use_duration",
+    "fleet",
+    "calendar"
+  ],
+  "original_windows": {
+    "C97_order": {
+      "delivery_ready": "547.0",
+      "delivery_due": "559.0",
+      "pickup_ready": "929.0",
+      "pickup_due": "1169.0",
+      "assigned_sat": "S1"
+    },
+    "C52_order": {
+      "delivery_ready": "355.0",
+      "delivery_due": "391.0",
+      "pickup_ready": "761.0",
+      "pickup_due": "1001.0",
+      "assigned_sat": "S1"
+    },
+    "C29_order": {
+      "delivery_ready": "229.0",
+      "delivery_due": "247.0",
+      "pickup_ready": "617.0",
+      "pickup_due": "857.0",
+      "assigned_sat": "S0"
+    },
+    "C88_order": {
+      "delivery_ready": "307.0",
+      "delivery_due": "325.0",
+      "pickup_ready": "695.0",
+      "pickup_due": "935.0",
+      "assigned_sat": "S0"
+    },
+    "C27_order": {
+      "delivery_ready": "454.0",
+      "delivery_due": "492.0",
+      "pickup_ready": "862.0",
+      "pickup_due": "1102.0",
+      "assigned_sat": "S3"
+    },
+    "C46_order": {
+      "delivery_ready": "582.0",
+      "delivery_due": "618.0",
+      "pickup_ready": "988.0",
+      "pickup_due": "1228.0",
+      "assigned_sat": "S1"
+    },
+    "C6_order": {
+      "delivery_ready": "247.0",
+      "delivery_due": "277.0",
+      "pickup_ready": "647.0",
+      "pickup_due": "887.0",
+      "assigned_sat": "S1"
+    },
+    "C95_order": {
+      "delivery_ready": "193.0",
+      "delivery_due": "223.0",
+      "pickup_ready": "593.0",
+      "pickup_due": "833.0",
+      "assigned_sat": "S4"
+    },
+    "C76_order": {
+      "delivery_ready": "258.0",
+      "delivery_due": "268.0",
+      "pickup_ready": "638.0",
+      "pickup_due": "878.0",
+      "assigned_sat": "S3"
+    },
+    "C51_order": {
+      "delivery_ready": "405.0",
+      "delivery_due": "443.0",
+      "pickup_ready": "813.0",
+      "pickup_due": "1053.0",
+      "assigned_sat": "S1"
+    },
+    "C47_order": {
+      "delivery_ready": "453.0",
+      "delivery_due": "485.0",
+      "pickup_ready": "855.0",
+      "pickup_due": "1095.0",
+      "assigned_sat": "S3"
+    },
+    "C25_order": {
+      "delivery_ready": "553.0",
+      "delivery_due": "581.0",
+      "pickup_ready": "951.0",
+      "pickup_due": "1191.0",
+      "assigned_sat": "S3"
+    },
+    "C90_order": {
+      "delivery_ready": "321.0",
+      "delivery_due": "339.0",
+      "pickup_ready": "709.0",
+      "pickup_due": "949.0",
+      "assigned_sat": "S1"
+    },
+    "C39_order": {
+      "delivery_ready": "542.0",
+      "delivery_due": "570.0",
+      "pickup_ready": "940.0",
+      "pickup_due": "1180.0",
+      "assigned_sat": "S1"
+    },
+    "C0_order": {
+      "delivery_ready": "502.0",
+      "delivery_due": "514.0",
+      "pickup_ready": "884.0",
+      "pickup_due": "1124.0",
+      "assigned_sat": "S1"
+    },
+    "C81_order": {
+      "delivery_ready": "278.0",
+      "delivery_due": "300.0",
+      "pickup_ready": "670.0",
+      "pickup_due": "910.0",
+      "assigned_sat": "S1"
+    },
+    "C34_order": {
+      "delivery_ready": "122.0",
+      "delivery_due": "152.0",
+      "pickup_ready": "522.0",
+      "pickup_due": "762.0",
+      "assigned_sat": "S4"
+    },
+    "C21_order": {
+      "delivery_ready": "574.0",
+      "delivery_due": "598.0",
+      "pickup_ready": "968.0",
+      "pickup_due": "1208.0",
+      "assigned_sat": "S1"
+    },
+    "C75_order": {
+      "delivery_ready": "264.0",
+      "delivery_due": "294.0",
+      "pickup_ready": "664.0",
+      "pickup_due": "904.0",
+      "assigned_sat": "S1"
+    },
+    "C85_order": {
+      "delivery_ready": "223.0",
+      "delivery_due": "243.0",
+      "pickup_ready": "613.0",
+      "pickup_due": "853.0",
+      "assigned_sat": "S1"
+    },
+    "C73_order": {
+      "delivery_ready": "211.0",
+      "delivery_due": "223.0",
+      "pickup_ready": "593.0",
+      "pickup_due": "833.0",
+      "assigned_sat": "S4"
+    },
+    "C54_order": {
+      "delivery_ready": "487.0",
+      "delivery_due": "501.0",
+      "pickup_ready": "871.0",
+      "pickup_due": "1111.0",
+      "assigned_sat": "S2"
+    },
+    "C40_order": {
+      "delivery_ready": "197.0",
+      "delivery_due": "229.0",
+      "pickup_ready": "599.0",
+      "pickup_due": "839.0",
+      "assigned_sat": "S1"
+    },
+    "C11_order": {
+      "delivery_ready": "303.0",
+      "delivery_due": "329.0",
+      "pickup_ready": "699.0",
+      "pickup_due": "939.0",
+      "assigned_sat": "S1"
+    },
+    "C14_order": {
+      "delivery_ready": "293.0",
+      "delivery_due": "313.0",
+      "pickup_ready": "683.0",
+      "pickup_due": "923.0",
+      "assigned_sat": "S1"
+    },
+    "C20_order": {
+      "delivery_ready": "549.0",
+      "delivery_due": "559.0",
+      "pickup_ready": "929.0",
+      "pickup_due": "1169.0",
+      "assigned_sat": "S1"
+    },
+    "C8_order": {
+      "delivery_ready": "229.0",
+      "delivery_due": "241.0",
+      "pickup_ready": "611.0",
+      "pickup_due": "851.0",
+      "assigned_sat": "S0"
+    },
+    "C63_order": {
+      "delivery_ready": "186.0",
+      "delivery_due": "204.0",
+      "pickup_ready": "574.0",
+      "pickup_due": "814.0",
+      "assigned_sat": "S4"
+    },
+    "C65_order": {
+      "delivery_ready": "398.0",
+      "delivery_due": "428.0",
+      "pickup_ready": "798.0",
+      "pickup_due": "1038.0",
+      "assigned_sat": "S0"
+    },
+    "C24_order": {
+      "delivery_ready": "316.0",
+      "delivery_due": "328.0",
+      "pickup_ready": "698.0",
+      "pickup_due": "938.0",
+      "assigned_sat": "S4"
+    }
+  },
+  "reference_e2_routes": [
+    {
+      "satellite": "S1",
+      "vehicle": 0,
+      "depart_after": 519.21666667,
+      "tasks": [
+        [
+          "C46_order",
+          "d"
+        ],
+        [
+          "C90_order",
+          "d"
+        ],
+        [
+          "C46_order",
+          "p"
+        ],
+        [
+          "C90_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S1",
+      "vehicle": 1,
+      "depart_after": 519.21666667,
+      "tasks": [
+        [
+          "C75_order",
+          "d"
+        ],
+        [
+          "C52_order",
+          "d"
+        ],
+        [
+          "C75_order",
+          "p"
+        ],
+        [
+          "C52_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S1",
+      "vehicle": 2,
+      "depart_after": 519.21666667,
+      "tasks": [
+        [
+          "C51_order",
+          "d"
+        ],
+        [
+          "C51_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S1",
+      "vehicle": 2,
+      "depart_after": 759.21666667,
+      "tasks": [
+        [
+          "C85_order",
+          "d"
+        ],
+        [
+          "C14_order",
+          "d"
+        ],
+        [
+          "C85_order",
+          "p"
+        ],
+        [
+          "C14_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S1",
+      "vehicle": 0,
+      "depart_after": 759.21666667,
+      "tasks": [
+        [
+          "C20_order",
+          "d"
+        ],
+        [
+          "C0_order",
+          "d"
+        ],
+        [
+          "C20_order",
+          "p"
+        ],
+        [
+          "C0_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S1",
+      "vehicle": 1,
+      "depart_after": 759.21666667,
+      "tasks": [
+        [
+          "C97_order",
+          "d"
+        ],
+        [
+          "C97_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S1",
+      "vehicle": 1,
+      "depart_after": 999.21666667,
+      "tasks": [
+        [
+          "C81_order",
+          "d"
+        ],
+        [
+          "C40_order",
+          "d"
+        ],
+        [
+          "C81_order",
+          "p"
+        ],
+        [
+          "C40_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S1",
+      "vehicle": 2,
+      "depart_after": 999.21666667,
+      "tasks": [
+        [
+          "C11_order",
+          "d"
+        ],
+        [
+          "C21_order",
+          "d"
+        ],
+        [
+          "C11_order",
+          "p"
+        ],
+        [
+          "C21_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S1",
+      "vehicle": 0,
+      "depart_after": 999.21666667,
+      "tasks": [
+        [
+          "C39_order",
+          "d"
+        ],
+        [
+          "C39_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S3",
+      "vehicle": 0,
+      "depart_after": 522.13333333,
+      "tasks": [
+        [
+          "C65_order",
+          "d"
+        ],
+        [
+          "C29_order",
+          "d"
+        ],
+        [
+          "C65_order",
+          "p"
+        ],
+        [
+          "C29_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S3",
+      "vehicle": 1,
+      "depart_after": 522.13333333,
+      "tasks": [
+        [
+          "C27_order",
+          "d"
+        ],
+        [
+          "C6_order",
+          "d"
+        ],
+        [
+          "C27_order",
+          "p"
+        ],
+        [
+          "C6_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S3",
+      "vehicle": 2,
+      "depart_after": 762.13333333,
+      "tasks": [
+        [
+          "C88_order",
+          "d"
+        ],
+        [
+          "C54_order",
+          "d"
+        ],
+        [
+          "C88_order",
+          "p"
+        ],
+        [
+          "C54_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S3",
+      "vehicle": 0,
+      "depart_after": 762.13333333,
+      "tasks": [
+        [
+          "C25_order",
+          "d"
+        ],
+        [
+          "C25_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S3",
+      "vehicle": 1,
+      "depart_after": 1002.13333333,
+      "tasks": [
+        [
+          "C47_order",
+          "d"
+        ],
+        [
+          "C76_order",
+          "d"
+        ],
+        [
+          "C47_order",
+          "p"
+        ],
+        [
+          "C76_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S3",
+      "vehicle": 2,
+      "depart_after": 1002.13333333,
+      "tasks": [
+        [
+          "C8_order",
+          "d"
+        ],
+        [
+          "C8_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S4",
+      "vehicle": 0,
+      "depart_after": 521.35,
+      "tasks": [
+        [
+          "C24_order",
+          "d"
+        ],
+        [
+          "C34_order",
+          "d"
+        ],
+        [
+          "C24_order",
+          "p"
+        ],
+        [
+          "C34_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S4",
+      "vehicle": 1,
+      "depart_after": 761.35,
+      "tasks": [
+        [
+          "C95_order",
+          "d"
+        ],
+        [
+          "C73_order",
+          "d"
+        ],
+        [
+          "C95_order",
+          "p"
+        ],
+        [
+          "C73_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S4",
+      "vehicle": 2,
+      "depart_after": 1001.35,
+      "tasks": [
+        [
+          "C63_order",
+          "d"
+        ],
+        [
+          "C63_order",
+          "p"
+        ]
+      ]
+    }
+  ],
+  "reference_time_unit": "minutes",
+  "reference_purpose": "Feasibility construction only; no objective optimization or performance filtering.",
+  "reference_rule": "Per-territory hash cohorts; nearest feasible capacity groups; earliest available vehicle; delivery then collection.",
+  "usage_profile": 2,
+  "appointment_rule": "Separate hash streams for cohort, use and collection delay; window slack around disclosed constructive service times.",
+  "window_rule": "One operating day; delivery and return appointment windows around disclosed feasible reference tours.",
+  "limitation": "Derived short-use transport-box scenarios, not original benchmark windows or observed operations.",
+  "family_id": "zhou_Set2_100-5-1b_subset30_scenario02",
+  "source_kind": "zhou_derived_scenario",
+  "size": "medium",
+  "input_source_sha256": {
+    "data/zhou_later_pickup/large/standard_same_day/Set2_100-5-1b.csv": "b4e0f43f491844845ef6e8af8b1738b5046e5e07c470c53637f8f9a288e99f5c",
+    "config/datasets/static_batch_v2.json": "fec5ad66fcee47080c8c60b92f4954614433c1effc99008ec6aabaa291c5e1a9",
+    "tools/data/design_static_scenarios.py": "1fe395af69c63e66dfc9794b4351f303c7b4910e3537e66916584bbd90c1e79c"
+  },
+  "original_fleet": {
+    "schema_version": 1,
+    "source_type": "scenario_assumption",
+    "parameter_scope": "operational_scenarios_v2_zhou",
+    "units": {
+      "weight": "benchmark demand units",
+      "volume": "benchmark volume units",
+      "speed": "benchmark coordinate units per minute"
+    },
+    "E1_vehicle_count": 3,
+    "E1_Qk": 900,
+    "E1_Ck": 60,
+    "vehicles_per_satellite": 3,
+    "E2_Qv": 180,
+    "E2_Cv": 6,
+    "container_weight": 2,
+    "container_volume": 1,
+    "speed": 2.0
+  },
+  "fleet_rule": "Published size-based fleet and capacities; identical across paired profiles and B1/B2/B3; no demand-driven expansion.",
+  "cohort_by_order": {
+    "C52_order": 0,
+    "C0_order": 1,
+    "C11_order": 2,
+    "C75_order": 0,
+    "C97_order": 1,
+    "C40_order": 2,
+    "C51_order": 0,
+    "C85_order": 1,
+    "C81_order": 2,
+    "C90_order": 0,
+    "C14_order": 1,
+    "C21_order": 2,
+    "C46_order": 0,
+    "C20_order": 1,
+    "C39_order": 2,
+    "C27_order": 0,
+    "C54_order": 1,
+    "C8_order": 2,
+    "C6_order": 0,
+    "C88_order": 1,
+    "C47_order": 2,
+    "C29_order": 0,
+    "C25_order": 1,
+    "C76_order": 2,
+    "C65_order": 0,
+    "C24_order": 0,
+    "C95_order": 1,
+    "C63_order": 2,
+    "C34_order": 0,
+    "C73_order": 1
+  },
+  "pairing_contract": "All order fields except delivery_batch_id are identical; same network, fleet, pool, cycle and final cutoff.",
+  "return_batch": "Not an input. Derived by the solver/auditor from actual unload times."
+}

@@ -8,7 +8,6 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from models.cost.lifecycle import EconomicParams, RouteMetrics, period_sweep, value_decomposition
-from cli.cost import select_reusable_route
 
 
 PARAMS = EconomicParams(
@@ -27,8 +26,8 @@ PARAMS = EconomicParams(
 def test_value_identity_and_break_even():
     su = RouteMetrics(orders=100, e1_distance_km=10, e2_distance_km=20)
     m3 = RouteMetrics(orders=100, e1_distance_km=12, e2_distance_km=25)
-    m7 = RouteMetrics(orders=100, e1_distance_km=11, e2_distance_km=21)
-    d = value_decomposition(su, m3, m7, PARAMS, 100, 300)
+    optimized = RouteMetrics(orders=100, e1_distance_km=11, e2_distance_km=21)
+    d = value_decomposition(su, m3, optimized, PARAMS, 100, 300)
     identity = (
         d["gross_packaging_saving_per_period"]
         - d["closed_loop_transport_penalty_per_period"]
@@ -51,8 +50,8 @@ def test_no_break_even_when_variable_saving_is_negative():
 def test_period_curve_preserves_route_optimization_value():
     su = RouteMetrics(orders=10, e1_distance_km=5, e2_distance_km=5)
     m3 = RouteMetrics(orders=10, e1_distance_km=8, e2_distance_km=8)
-    m7 = RouteMetrics(orders=10, e1_distance_km=7, e2_distance_km=7)
-    rows = period_sweep(su, m3, m7, PARAMS, 10, [1, 10])
+    optimized = RouteMetrics(orders=10, e1_distance_km=7, e2_distance_km=7)
+    rows = period_sweep(su, m3, optimized, PARAMS, 10, [1, 10])
     assert len(rows) == 2
     assert abs(rows[1]["route_optimization_value"] - 10 * rows[0]["route_optimization_value"]) < 1e-9
 
@@ -71,33 +70,3 @@ def test_cleaning_cost_uses_returned_container_count():
     expected = (90 * (0.8 + 0.1) + 100 * 0.03 * 36.5) / 100
     assert result["returned_container_uses_per_period"] == 90
     assert abs(result["reusable_variable_cost_per_use"] - expected) < 1e-9
-
-
-def test_parallel_reusable_models_are_selected_by_transport_cost():
-    metrics = {
-        "m3": RouteMetrics(100, e1_distance_km=10, e2_distance_km=20),
-        # Shorter total distance, but expensive E1 kilometres make this costlier.
-        "m4": RouteMetrics(100, e1_distance_km=15, e2_distance_km=10),
-        "m6": RouteMetrics(100, e1_distance_km=10, e2_distance_km=16),
-    }
-    assert select_reusable_route(metrics, PARAMS, ["m3", "m4", "m6"]) == "m6"
-
-
-def test_six_model_cost_selection_keeps_packaging_sides_separate():
-    metrics = {
-        "m1": RouteMetrics(100, e1_distance_km=10, e2_distance_km=20),
-        "m2": RouteMetrics(100, e1_distance_km=9, e2_distance_km=18),
-        "m3": RouteMetrics(100, e1_distance_km=12, e2_distance_km=25),
-        "m4": RouteMetrics(100, e1_distance_km=11, e2_distance_km=22),
-        "m6": RouteMetrics(100, e1_distance_km=12, e2_distance_km=24),
-        "m7": RouteMetrics(100, e1_distance_km=10, e2_distance_km=21),
-    }
-    assert select_reusable_route(metrics, PARAMS, ["m1", "m2"]) == "m2"
-    assert select_reusable_route(metrics, PARAMS, ["m3", "m4", "m6", "m7"]) == "m7"
-
-
-if __name__ == "__main__":
-    test_value_identity_and_break_even()
-    test_no_break_even_when_variable_saving_is_negative()
-    test_period_curve_preserves_route_optimization_value()
-    print("economic cost regression: OK")

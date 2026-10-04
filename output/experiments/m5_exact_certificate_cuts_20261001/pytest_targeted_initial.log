@@ -1,0 +1,56 @@
+F.....F.................                                                 [100%]
+=================================== FAILURES ===================================
+___ test_all_distance_cut_modes_preserve_nonmetric_integer_optimum[False-0] ____
+
+seed = 0, compressed = False
+
+    @pytest.mark.parametrize('seed', [0, 1, 2, 3, 4, 5])
+    @pytest.mark.parametrize('compressed', [False, True])
+    def test_all_distance_cut_modes_preserve_nonmetric_integer_optimum(seed, compressed):
+        pytest.importorskip('gurobipy')
+        from models.routing.solvers.exact import solver
+        from models.routing.solvers.exact.formulation import build_model
+        problem = nonmetric_problem(seed)
+        results = []
+        for mode in ('none', 'total', 'components'):
+            with patch.object(solver, 'build_model', side_effect=lambda *a, **kw: build_model(
+                    *a, **kw, compress_multibatch_routes=compressed)):
+                result = solver.solve_exact(problem, time_limit=5, distance_cuts=mode)
+            assert result['info']['proven_optimal'], result['info']
+            assert audit_solution(problem, result)['valid']
+            assert result['info']['distance_cut_mode'] == mode
+>           assert bool(result['info']['distance_cuts_added']) == (mode != 'none')
+E           AssertionError: assert False == ('total' != 'none')
+E            +  where False = bool(0)
+
+tests/routing/test_multibatch_certificate_cuts.py:29: AssertionError
+----------------------------- Captured stdout call -----------------------------
+Set parameter LicenseID to value 2723359
+____ test_all_distance_cut_modes_preserve_nonmetric_integer_optimum[True-0] ____
+
+seed = 0, compressed = True
+
+    @pytest.mark.parametrize('seed', [0, 1, 2, 3, 4, 5])
+    @pytest.mark.parametrize('compressed', [False, True])
+    def test_all_distance_cut_modes_preserve_nonmetric_integer_optimum(seed, compressed):
+        pytest.importorskip('gurobipy')
+        from models.routing.solvers.exact import solver
+        from models.routing.solvers.exact.formulation import build_model
+        problem = nonmetric_problem(seed)
+        results = []
+        for mode in ('none', 'total', 'components'):
+            with patch.object(solver, 'build_model', side_effect=lambda *a, **kw: build_model(
+                    *a, **kw, compress_multibatch_routes=compressed)):
+                result = solver.solve_exact(problem, time_limit=5, distance_cuts=mode)
+            assert result['info']['proven_optimal'], result['info']
+            assert audit_solution(problem, result)['valid']
+            assert result['info']['distance_cut_mode'] == mode
+>           assert bool(result['info']['distance_cuts_added']) == (mode != 'none')
+E           AssertionError: assert False == ('total' != 'none')
+E            +  where False = bool(0)
+
+tests/routing/test_multibatch_certificate_cuts.py:29: AssertionError
+=========================== short test summary info ============================
+FAILED tests/routing/test_multibatch_certificate_cuts.py::test_all_distance_cut_modes_preserve_nonmetric_integer_optimum[False-0]
+FAILED tests/routing/test_multibatch_certificate_cuts.py::test_all_distance_cut_modes_preserve_nonmetric_integer_optimum[True-0]
+2 failed, 22 passed in 1.08s

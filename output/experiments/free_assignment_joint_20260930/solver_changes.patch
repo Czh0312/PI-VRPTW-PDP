@@ -1,0 +1,652 @@
+--- before/models/routing/solvers/exact/assignment.py
++++ after/models/routing/solvers/exact/assignment.py
+@@ -1,4 +1,4 @@
+-"""Exhaustive assignment search; only closed partitions certify global optimality."""
++"""Joint assignment MILP for bounded models; certified enumeration fallback."""
+ import itertools
+ import math
+ import time
+@@ -6,31 +6,124 @@
+ 
+ from models.routing.common.cycle.assignment import assigned_problem, input_assignment, lift_result
+ from models.routing.common.cycle.state import empty_result
+-from .bounds import distance_lower_bound
+-from models.routing.common.cycle.precheck import travel_lower_bounds
+-
+-
+-def _assignment_stream(problem):
++from .bounds import distance_lower_bound, free_assignment_lower_bound
++from .domains import assignment_domains, public_domain_check
++from models.routing.common.cycle.precheck import travel_lower_bounds, rejected_result
++
++
++def _assignment_stream(problem, domains=None):
+     initial = input_assignment(problem)
+-    yield initial
+     customers = sorted(initial)
+-    options = [sorted(problem.satellites, key=lambda s: problem.distance(s, c)) for c in customers]
++    domains = domains or {c: problem.satellites for c in customers}
++    options = [sorted(domains[c], key=lambda s: problem.distance(s, c)+problem.distance(c, s)) for c in customers]
+     nearest = {c: sites[0] for c, sites in zip(customers, options)}
+-    if nearest != initial:
+-        yield nearest
++    initial = {c: s if s in domains[c] else nearest[c] for c, s in initial.items()}
++    preferred = [initial, nearest]
++    moves = []
++    for base in (initial, nearest):
++        for c in customers:
++            for s in domains[c]:
++                if s != base[c]:
++                    change = (problem.distance(s, c)+problem.distance(c, s)
++                              -problem.distance(base[c], c)-problem.distance(c, base[c]))
++                    moves.append((change, c, s, {**base, c: s}))
++    preferred.extend(row[3] for row in sorted(moves, key=lambda row: row[:3]))
++    seen = set()
++    for candidate in preferred:
++        key = tuple(candidate[c] for c in customers)
++        if key not in seen:
++            seen.add(key)
++            yield candidate
+     for values in itertools.product(*options):
+-        candidate = dict(zip(customers, values))
+-        if candidate != initial and candidate != nearest:
+-            yield candidate
+-
+-
+-def solve_exact(problem, time_limit=60, seed=42, verbose=False):
++        if values not in seen:
++            yield dict(zip(customers, values))
++
++
++def solve_exact(problem, time_limit=60, seed=42, verbose=False, strategy='auto'):
++    if not math.isfinite(time_limit) or time_limit <= 0:
++        raise ValueError('time_limit must be finite and positive')
++    if strategy not in ('auto', 'joint', 'enumeration'):
++        raise ValueError('Unknown exact assignment strategy')
++    start = time.perf_counter()
++    travel = travel_lower_bounds(problem)
++    check = assignment_domains(problem, travel)
++    total = len(problem.satellites)**len(check['domains'])
++    if not check['passed']:
++        result = rejected_result(problem, 'exact', public_domain_check(check), time.perf_counter()-start)
++        result['info'].update(assignment_count=total, assignments_closed=total, assignments_visited=0,
++                              assignment_strategy='necessary_domain_proof')
++        return result
++    domain_total = math.prod(len(sites) for sites in check['domains'].values())
++    # Estimate the route-indexed E2 arc expansion before materializing it.
++    f, p = problem.fleet, problem.operating_policy
++    estimate = 0
++    for site in problem.satellites:
++        tasks = sum(site in check['domains'][o.customer] for o in problem.orders)*len(problem.task_kinds)
++        estimate += (tasks*max(0, tasks-1)+2*tasks)*min(f.e2_per_sat_count, tasks)*min(p.e2_max_trips_per_vehicle, tasks)
++    selected = ('joint' if estimate <= 60000 else 'enumeration') if strategy == 'auto' else strategy
++    bound = free_assignment_lower_bound(problem, check['domains'])
++    remaining = time_limit-(time.perf_counter()-start)
++    if remaining <= 0:
++        result = empty_result(problem, 'exact')
++        result['info'].update(status='TIME_LIMIT_PRECHECK', best_bound=bound)
++    elif selected == 'joint':
++        from .solver import solve_exact as solve_joint
++        warm, warm_runtime = None, 0.0
++        if estimate > 5000:
++            # A compact fixed partition often supplies a much better incumbent
++            # before the larger joint model reaches its first search node.
++            initial = input_assignment(problem)
++            initial = {c: s if s in check['domains'][c] else check['domains'][c][0]
++                       for c, s in initial.items()}
++            warm_start = time.perf_counter()
++            fixed = assigned_problem(problem, initial)
++            trial = solve_joint(fixed, time_limit=min(remaining, time_limit*.2), seed=seed,
++                                 verbose=verbose, _travel_bounds=travel)
++            if trial.get('audit', {}).get('valid'):
++                warm = lift_result(problem, trial, initial)
++                # A fixed partition's optimum/bound is not a global certificate.
++                warm['info'].update(proven_optimal=False, proven_infeasible=False,
++                                     best_bound=bound, mip_gap=None, status='TIME_LIMIT')
++            warm_runtime = time.perf_counter()-warm_start
++        remaining = time_limit-(time.perf_counter()-start)
++        if remaining > 0:
++            result = solve_joint(problem, time_limit=remaining, seed=seed, verbose=verbose,
++                                 initial_result=warm, _travel_bounds=travel, _domain_check=check)
++        else:
++            result = warm if warm is not None else empty_result(problem, 'exact')
++            result['info'].update(status='TIME_LIMIT', proven_optimal=False, proven_infeasible=False)
++        result['info'].update(initial_partition_runtime=warm_runtime,
++                            initial_partition_solves=int(estimate > 5000),
++                            initial_partition_objective=warm['info']['objective'] if warm else None)
++        result['info'].update(assignments_visited=0,
++            assignments_closed=domain_total if result['info'].get('proven_optimal') or result['info'].get('proven_infeasible') else 0,
++            subproblem_solves=int(estimate > 5000))
++    else:
++        result = _solve_enumeration(problem, time_limit=remaining, seed=seed, verbose=verbose,
++                                     _travel_bounds=travel, _domain_check=check, _global_bound=bound)
++    info = result['info']
++    if not info.get('proven_infeasible'):
++        info['best_bound'] = max(bound, info.get('best_bound') or 0.0)
++        if info.get('objective') is not None:
++            info['mip_gap'] = max(0, info['objective']-info['best_bound'])/max(1e-9, abs(info['objective']))
++    info.update(runtime=time.perf_counter()-start, assignment_strategy=selected,
++                assignment_count=total, domain_assignment_count=domain_total,
++                domain_assignments_eliminated=total-domain_total, estimated_joint_e2_arcs=estimate,
++                global_assignment_distance_bound=bound,
++                assignments_closed=info.get('assignments_closed', 0)+total-domain_total)
++    result['assignment_precheck'] = public_domain_check(check)
++    return result
++
++
++def _solve_enumeration(problem, time_limit=60, seed=42, verbose=False,
++                       _travel_bounds=None, _domain_check=None, _global_bound=0.0):
+     if not math.isfinite(time_limit) or time_limit <= 0:
+         raise ValueError('time_limit must be finite and positive')
+     from .solver import solve_exact as solve_fixed
+     start = time.perf_counter()
+-    travel_bounds = travel_lower_bounds(problem)
+-    total = len(problem.satellites)**len({o.customer for o in problem.orders})
++    travel_bounds = _travel_bounds or travel_lower_bounds(problem)
++    domains = _domain_check['domains'] if _domain_check else None
++    total = math.prod(len(sites) for sites in domains.values()) if domains is not None else len(problem.satellites)**len({o.customer for o in problem.orders})
+     best, best_cost, records = None, math.inf, []
+     incumbents = OrderedDict()
+ 
+@@ -48,7 +141,7 @@
+                 incumbents.popitem(last=False)
+         closed = bool(info.get('proven_infeasible') or (info.get('proven_optimal') and valid))
+         if record is None:
+-            record = dict(assignment=assignment, lower_bound=distance_lower_bound(fixed), solves=0)
++            record = dict(assignment=assignment, lower_bound=max(_global_bound, distance_lower_bound(fixed)), solves=0)
+             records.append(record)
+         record.update(status=info['status'], closed=closed,
+                       infeasible=bool(info.get('proven_infeasible')), solves=record['solves']+1,
+@@ -59,7 +152,7 @@
+             if candidate.get('audit', {}).get('valid'):
+                 best, best_cost = candidate, info['objective']
+ 
+-    for assignment in _assignment_stream(problem):
++    for assignment in _assignment_stream(problem, domains):
+         remaining = time_limit-(time.perf_counter()-start)
+         if remaining <= 0:
+             break
+@@ -67,7 +160,7 @@
+         remaining = time_limit-(time.perf_counter()-start)
+         if remaining <= 0:
+             break
+-        bound = distance_lower_bound(fixed)
++        bound = max(_global_bound, distance_lower_bound(fixed))
+         if bound >= best_cost:
+             records.append(dict(assignment=assignment, status='BOUND_PRUNED', closed=True,
+                                 infeasible=False, objective=None, lower_bound=bound, solves=0))
+@@ -103,7 +196,7 @@
+     bounds = [r['lower_bound'] if r['lower_bound'] is not None else 0
+               for r in records if not r['infeasible']]
+     if len(records) < total:
+-        bounds.append(0)
++        bounds.append(_global_bound)
+     lower = min(bounds) if bounds else None
+     result = best if best is not None else empty_result(problem, 'exact')
+     result['info'].update(status='OPTIMAL' if best and all_closed else 'INFEASIBLE' if infeasible else 'TIME_LIMIT',
+--- before/models/routing/solvers/exact/bounds.py
++++ after/models/routing/solvers/exact/bounds.py
+@@ -1,5 +1,6 @@
+ """Conservative distance bounds on mandatory visits, including nonmetric arcs."""
+ import math
++import heapq
+ 
+ 
+ def _visit_bound(problem, base, tasks, delivery_first=False):
+@@ -31,3 +32,49 @@
+                                              if o.satellite == site for k in problem.task_kinds])
+     # Round conservatively before using the bound to prune another partition.
+     return max(0.0, bound-1e-7*max(1.0, bound)) if math.isfinite(bound) else 0.0
++
++
++def free_assignment_lower_bound(problem, domains):
++    """Bound every remaining assignment, not only an evaluated partition.
++
++    Task in/out arcs may choose any compatible satellite or task predecessor.
++    E1 must reach the satellite of each customer and return; relaxed shortest
++    distances use only E1-eligible locations and may ignore the phase order.
++    These are lower bounds on separate echelons and can safely be added.
++    """
++    if not problem.orders or any(not sites for sites in domains.values()):
++        return 0.0
++    tasks = [(o, k) for o in problem.orders for k in problem.task_kinds]
++    incoming = outgoing = 0.0
++    for i, (order, kind) in enumerate(tasks):
++        sites = domains[order.customer]
++        incoming += min([problem.distance(s, order.customer) for s in sites]+[
++            problem.distance(other.customer, order.customer) for j, (other, previous) in enumerate(tasks)
++            if i != j and set(sites).intersection(domains[other.customer])
++            and not (other.id == order.id and previous == 'p' and kind == 'd')])
++        outgoing += min([problem.distance(order.customer, s) for s in sites]+[
++            problem.distance(order.customer, other.customer) for j, (other, following) in enumerate(tasks)
++            if i != j and set(sites).intersection(domains[other.customer])
++            and not (other.id == order.id and kind == 'p' and following == 'd')])
++    incoming += min(problem.distance(o.customer, s) for o in problem.orders for s in domains[o.customer])
++    outgoing += min(problem.distance(s, o.customer) for o in problem.orders for s in domains[o.customer])
++
++    def shortest(reverse=False):
++        distances = {node: math.inf for node in (problem.depot,)+problem.satellites}
++        distances[problem.depot] = 0
++        queue = [(0.0, problem.depot)]
++        while queue:
++            value, node = heapq.heappop(queue)
++            if value != distances[node]:
++                continue
++            for other in distances:
++                edge = problem.distance(other, node) if reverse else problem.distance(node, other)
++                candidate = value+edge
++                if candidate < distances[other]:
++                    distances[other] = candidate
++                    heapq.heappush(queue, (candidate, other))
++        return distances
++    outward, inward = shortest(), shortest(True)
++    e1 = max(min(outward[s]+inward[s] for s in sites) for sites in domains.values())
++    value = e1+max(incoming, outgoing)
++    return max(0.0, value-1e-7*max(1.0, value)) if math.isfinite(value) else 0.0
+--- before/models/routing/solvers/exact/domains.py
++++ after/models/routing/solvers/exact/domains.py
+@@ -0,0 +1,77 @@
++"""Safe customer assignment domains for the single-batch free-assignment model.
++
++Every deletion uses a necessary condition with relaxed shortest travel times.
++No nearest-satellite restriction or metric assumption is used.
++"""
++from collections import defaultdict
++
++from models.routing.common.cycle.precheck import travel_lower_bounds
++
++
++def assignment_domains(problem, travel_bounds=None):
++    p, f = problem.operating_policy, problem.fleet
++    if len(p.batches) != 1:
++        raise ValueError('Assignment domains require B=1')
++    batch = p.batches[0]
++    travel_bounds = travel_bounds or travel_lower_bounds(problem)
++    outward, inward = travel_bounds['outward'], travel_bounds['inward']
++    grouped = defaultdict(list)
++    for order in problem.orders:
++        grouped[order.customer].append(order)
++    errors, domains, excluded, windows = [], {}, [], {}
++    weight = sum(o.goods_weight+o.count*f.container_weight for o in problem.orders)
++    volume = problem.total*f.container_volume
++    if weight > f.e1_count*(f.e1_weight_cap+1e-6) or volume > f.e1_count*(f.e1_volume_cap+1e-6):
++        errors.append(dict(code='TOTAL_E1_DELIVERY_CAPACITY'))
++    if problem.reusable and p.container_pool_size < problem.total:
++        errors.append(dict(code='POOL_BELOW_NECESSARY_BOUND', lower_bound=problem.total))
++    for customer, orders in sorted(grouped.items()):
++        domains[customer] = []
++        for site in problem.satellites:
++            reasons = set()
++            if (sum(o.goods_weight+o.count*f.container_weight for o in orders) > f.e1_weight_cap+1e-6 or
++                    sum(o.count*f.container_volume for o in orders) > f.e1_volume_cap+1e-6):
++                reasons.add('UNSPLIT_CUSTOMER_E1_CAPACITY')
++            supply = batch.start+p.e1_load_time+outward[problem.depot][site]+problem.service(site)
++            if supply > batch.cutoff:
++                reasons.add('E1_DELIVERY_DEADLINE')
++            for o in orders:
++                _, w, v = problem.task(o.id, 'd')
++                if w > f.e2_weight_cap+1e-6 or v > f.e2_volume_cap+1e-6:
++                    reasons.add('UNSPLIT_E2_ORDER_CAPACITY')
++                delivered = max(o.delivery_window[0], supply+p.e2_dispatch_prep_time+outward[site][customer])
++                due = min(o.delivery_window[1], batch.cutoff-o.service_time)
++                windows[site, o.id, 'd'] = (delivered, due)
++                if delivered > due:
++                    reasons.add('DELIVERY_WINDOW_UNREACHABLE')
++                if problem.reusable:
++                    picked = max(o.pickup_window[0], delivered+o.service_time+o.min_use_time)
++                    latest = min(o.pickup_window[1], batch.cutoff-o.service_time-inward[site][customer]-p.e2_return_unload_time)
++                    windows[site, o.id, 'p'] = (picked, latest)
++                    if picked > latest:
++                        reasons.add('PICKUP_OR_CUTOFF_UNREACHABLE')
++                    returned = picked+o.service_time+inward[site][customer]+p.e2_return_unload_time
++                else:
++                    returned = delivered+o.service_time+inward[site][customer]+p.e2_return_unload_time
++                if returned+p.e2_turnaround_time > p.cycle_end:
++                    reasons.add('E2_TERMINAL_UNREACHABLE')
++            if problem.reusable:
++                returned = batch.cutoff+problem.service(site)+outward[site][problem.depot]+p.depot_return_unload_time
++                if (returned > batch.end or returned+p.e1_turnaround_time > p.cycle_end
++                        or returned+p.cleaning_duration > p.cycle_end):
++                    reasons.add('NO_POSSIBLE_CLEAN_RETURN')
++            if reasons:
++                excluded.append(dict(customer=customer, satellite=site, reasons=sorted(reasons)))
++            else:
++                domains[customer].append(site)
++        if not domains[customer]:
++            errors.append(dict(code='NO_FEASIBLE_SATELLITE_DOMAIN', customer=customer))
++    return dict(passed=not errors, proven_infeasible=bool(errors), errors=errors,
++                proof_scope='single_batch_customer_assignment_necessary_conditions',
++                domains=domains, excluded=excluded, windows=windows,
++                limitation='Nonempty domains do not prove joint feasibility.')
++
++
++def public_domain_check(check):
++    """Keep tuple-key internal windows out of the JSON result contract."""
++    return {k: v for k, v in check.items() if k != 'windows'}
+--- before/models/routing/solvers/exact/formulation.py
++++ after/models/routing/solvers/exact/formulation.py
+@@ -4,14 +4,28 @@
+ import time
+ 
+ 
+-def build_model(problem, *, verbose=False, deadline=None, share_e2=True, travel_bounds=None):
++def build_model(problem, *, verbose=False, deadline=None, share_e2=True, travel_bounds=None, domain_check=None):
+     import gurobipy as gp
+     from gurobipy import GRB
+     p, f = problem.operating_policy, problem.fleet
+     single = len(p.batches) == 1
++    free = problem.free_assignment
++    if free and not single:
++        raise ValueError('Joint assignment is supported only for B=1')
+     compact = single and share_e2
+-    windows = {}
+-    if single:
++    windows, site_windows = {}, {}
++    if free:
++        from .domains import assignment_domains
++        domain_check = domain_check or assignment_domains(problem, travel_bounds)
++        if not domain_check['passed']:
++            raise ValueError('Joint model requires nonempty necessary assignment domains')
++        domains = domain_check['domains']
++        site_windows = domain_check['windows']
++        for o in problem.orders:
++            for kind in problem.task_kinds:
++                choices = [site_windows[s, o.id, kind] for s in domains[o.customer]]
++                windows[o.id, kind] = (min(w[0] for w in choices), max(w[1] for w in choices))
++    if single and not free:
+         from models.routing.common.cycle.precheck import travel_lower_bounds
+         travel_bounds = travel_bounds or travel_lower_bounds(problem)
+         outward = travel_bounds['outward'][problem.depot]
+@@ -33,8 +47,26 @@
+     m.Params.MIPGapAbs = 0
+     m.Params.Threads = 1
+     routes1, routes2, objective = [], [], gp.LinExpr()
++    assignments, active_sites, counts, weights = {}, {}, {}, {}
++    if free:
++        assignments = {(c, s): m.addVar(vtype=GRB.BINARY, name=f'assign_{c}_{s}')
++                       for c, sites in domains.items() for s in sites}
++        for c, sites in domains.items():
++            m.addConstr(gp.quicksum(assignments[c, s] for s in sites) == 1)
++        for s in problem.satellites:
++            active_sites[s] = m.addVar(vtype=GRB.BINARY, name=f'active_{s}')
++            members = [z for (c, site), z in assignments.items() if site == s]
++            for z in members:
++                m.addConstr(z <= active_sites[s])
++            m.addConstr(active_sites[s] <= gp.quicksum(members))
++            counts[s] = gp.quicksum(o.count*assignments[o.customer, s]
++                                    for o in problem.orders if s in domains[o.customer])
++            weights[s] = gp.quicksum((o.goods_weight+o.count*f.container_weight)*assignments[o.customer, s]
++                                     for o in problem.orders if s in domains[o.customer])
++            m.addConstr(weights[s] <= f.e1_weight_cap)
++            m.addConstr(counts[s]*f.container_volume <= f.e1_volume_cap)
+     deliveries = {(s, b.id): m.addVar(vtype=GRB.INTEGER, ub=H, name=f'delivery_{s}_{b.id}')
+-                  for (s, bid), n in problem.demands.items() for b in p.batches if bid == b.id and n}
++                  for (s, bid), n in problem.demands.items() for b in p.batches if bid == b.id and (n or free)}
+     order_times = {(o.id, k): m.addVar(vtype=GRB.INTEGER, ub=H, name=f'{o.id}_{k}')
+                    for o in problem.orders for k in problem.task_kinds}
+     # Each task is visited exactly once across all vehicles and trip slots.
+@@ -97,8 +129,10 @@
+         m.addConstr((used == 1) >> (start >= p.cycle_start))
+         m.addConstr(gp.quicksum(x[a, b] for a, b in arcs if a == -1) == used)
+         m.addConstr(gp.quicksum(x[a, b] for a, b in arcs if b == -2) == used)
+-        initial_w = gp.quicksum(n['w']*visit[i] for i, n in enumerate(nodes) if n['kind'] == 'd')
+-        initial_v = gp.quicksum(n['v']*visit[i] for i, n in enumerate(nodes) if n['kind'] == 'd')
++        initial_w = gp.quicksum(n['w'] if free and layer == 'e1' else n['w']*visit[i]
++                                for i, n in enumerate(nodes) if n['kind'] == 'd')
++        initial_v = gp.quicksum(n['v'] if free and layer == 'e1' else n['v']*visit[i]
++                                for i, n in enumerate(nodes) if n['kind'] == 'd')
+         m.addConstr(initial_w <= cap_w)
+         m.addConstr(initial_v <= cap_v)
+         for i, n in enumerate(nodes):
+@@ -107,12 +141,21 @@
+             m.addConstr(gp.quicksum(incoming[i]) == visit[i])
+             m.addConstr(gp.quicksum(outgoing[i]) == visit[i])
+             m.addConstr(visit[i] <= used)
++            if free and layer == 'e1':
++                # Quantity and weight belong to the unique vehicle visiting
++                # this satellite; linearize assignment totals without products.
++                m.addConstr(visit[i] <= active_sites[n['site']])
++                m.addConstr(n['quantity'] <= total*visit[i])
++                m.addConstr((visit[i] == 1) >> (n['quantity'] == counts[n['site']]))
++                if n['kind'] == 'd':
++                    m.addConstr(n['w'] <= f.e1_weight_cap*visit[i])
++                    m.addConstr((visit[i] == 1) >> (n['w'] == weights[n['site']]))
+             if not shared:
+                 m.addConstr(times[i] <= H*visit[i])
+             if n['kind'] == 'p' and layer == 'e1' and not single:
+                 m.addConstr(n['quantity'] <= total*visit[i])
+                 m.addConstr(n['quantity'] >= visit[i])
+-            if not shared:
++            if not shared or free:
+                 m.addConstr((visit[i] == 1) >> (times[i] >= n['window'][0]))
+                 m.addConstr((visit[i] == 1) >> (times[i] <= n['window'][1]))
+         for arc_index, (a, b) in enumerate(arcs):
+@@ -150,14 +193,19 @@
+             nodes = []
+             for s in problem.satellites:
+                 n = problem.demands[s, b.id]
+-                if n:
++                if free:
++                    q = m.addVar(vtype=GRB.INTEGER, ub=total)
++                    w = m.addVar(ub=f.e1_weight_cap)
++                    nodes.append(dict(site=s, kind='d', quantity=q, w=w, v=q*f.container_volume,
++                                      service=problem.service(s), window=(b.start, b.cutoff-problem.service(s))))
++                elif n:
+                     nodes.append(dict(site=s, kind='d', quantity=n, w=problem.weights[s, b.id],
+                                       v=n*f.container_volume, service=problem.service(s),
+                                       window=(b.start, b.cutoff-problem.service(s))))
+-                if problem.reusable and (not single or n):
++                if problem.reusable and (not single or n or free):
+                     # B=1: all orders must be unloaded by its sole cutoff, so
+                     # every satellite's pickup quantity is known in advance.
+-                    q = n if single else m.addVar(vtype=GRB.INTEGER, ub=total, name=f'q_{b.id}_{k}_{s}')
++                    q = n if single and not free else m.addVar(vtype=GRB.INTEGER, ub=total, name=f'q_{b.id}_{k}_{s}')
+                     nodes.append(dict(site=s, kind='p', quantity=q, w=q*f.container_weight,
+                                       v=q*f.container_volume, service=problem.service(s),
+                                       window=(b.cutoff, b.end)))
+@@ -175,7 +223,7 @@
+             m.addConstr((only_pick == 1) >> (r['start'] >= b.cutoff))
+             m.addConstr((r['used'] == 1) >> (r['end'] <= b.end))
+             m.addConstr((r['used'] == 1) >> (r['end']+p.e1_turnaround_time <= H))
+-            r['quantity'] = gp.quicksum(n['quantity']*r['visit'][i] if single else n['quantity']
++            r['quantity'] = gp.quicksum(n['quantity']*r['visit'][i] if single and not free else n['quantity']
+                                        for i, n in enumerate(nodes) if n['kind'] == 'p')
+             for i, n in enumerate(nodes):
+                 if n['kind'] == 'd':
+@@ -194,13 +242,14 @@
+             if single and k:
+                 m.addConstr(r['used'] <= routes1[-2]['used'])
+     for (s, bid), count in problem.demands.items():
+-        if count:
++        if count or free:
+             m.addConstr(gp.quicksum(r['visit'][i] for r in routes1 if r['batch'].id == bid
+-                                   for i, n in enumerate(r['nodes']) if n['site'] == s and n['kind'] == 'd') == 1)
++                                   for i, n in enumerate(r['nodes']) if n['site'] == s and n['kind'] == 'd')
++                        == (active_sites[s] if free else 1))
+ 
+     q_expected = {(s, b.id): gp.LinExpr() for s in problem.satellites for b in p.batches}
+     for s in problem.satellites:
+-        orders = [o for o in problem.orders if o.satellite == s]
++        orders = [o for o in problem.orders if (s in domains[o.customer] if free else o.satellite == s)]
+         if not orders:
+             continue
+         first_slots = []
+@@ -213,7 +262,7 @@
+                         _, w, volume = problem.task(o.id, kind)
+                         nodes.append(dict(site=o.customer, order=o, kind=kind, quantity=o.count,
+                                           w=w, v=volume, service=o.service_time,
+-                                          window=windows[o.id, kind] if single else
++                                          window=site_windows[s, o.id, kind] if free else windows[o.id, kind] if single else
+                                               (o.delivery_window if kind == 'd' else o.pickup_window)))
+                 r = route(nodes, s, f.e2_weight_cap, f.e2_volume_cap,
+                           p.e2_return_unload_time, f'e2_{s}_{v}_{slot}', 'e2')
+@@ -302,8 +351,10 @@
+             m.addConstr((active == 1) >> (order_steps[right] >= order_steps[left]+1))
+     for o in problem.orders:
+         for kind in problem.task_kinds:
+-            m.addConstr(gp.quicksum(r['visit'][i] for r in routes2 if r['satellite'] == o.satellite
+-                                   for i, n in enumerate(r['nodes']) if n['order'].id == o.id and n['kind'] == kind) == 1)
++            for site in (domains[o.customer] if free else [o.satellite]):
++                m.addConstr(gp.quicksum(r['visit'][i] for r in routes2 if r['satellite'] == site
++                                       for i, n in enumerate(r['nodes']) if n['order'].id == o.id and n['kind'] == kind)
++                            == (assignments[o.customer, site] if free else 1))
+         if problem.reusable:
+             m.addConstr(order_times[o.id, 'p'] >= order_times[o.id, 'd']+o.service_time+o.min_use_time)
+             m.addConstr(order_steps[o.id, 'p'] >= order_steps[o.id, 'd']+1)
+@@ -314,7 +365,8 @@
+                      for i, n in enumerate(r['nodes']) if n['site'] == s and n['kind'] == 'p']
+             if single:
+                 m.addConstr(gp.quicksum(r['visit'][i] for r, i, n in nodes)
+-                            == (1 if problem.reusable and problem.demands[s, b.id] else 0))
++                            == (active_sites[s] if free and problem.reusable else
++                                1 if problem.reusable and problem.demands[s, b.id] else 0))
+             else:
+                 m.addConstr(gp.quicksum(n['quantity'] for r, i, n in nodes) == q_expected[s, b.id])
+             m.addConstr(gp.quicksum(r['visit'][i] for r, i, n in nodes) <= 1)
+@@ -339,4 +391,5 @@
+         m.addConstr(p.container_pool_size+gp.quicksum(released) >= cumulative, f'clean_stock_{b.id}')
+     m.setObjective(objective, GRB.MINIMIZE)
+     m.update()
+-    return m, dict(e1=routes1, e2=routes2, shared_e2=compact, shared_e2_arcs=len(shared_arcs))
++    return m, dict(e1=routes1, e2=routes2, shared_e2=compact, shared_e2_arcs=len(shared_arcs),
++                   assignments=assignments)
+--- before/models/routing/solvers/exact/solver.py
++++ after/models/routing/solvers/exact/solver.py
+@@ -17,6 +17,10 @@
+     """Audit, relabel identical vehicles to satisfy symmetry, then load a start."""
+     if result is None or not audit_solution(problem, result)['valid']:
+         return False
++    if ctx.get('assignments'):
++        assignment = result.get('assignment', {})
++        if any((c, s) not in ctx['assignments'] for c, s in assignment.items()):
++            return False
+     scheduled = {}
+     for layer in ('e1', 'e2'):
+         groups = defaultdict(list)
+@@ -53,6 +57,8 @@
+             scheduled[r['label']] = trip, order, arcs
+     # Set absent visits and arcs too; a partial start should not ask the solver
+     # to rediscover that every covered task excludes all other route copies.
++    for (customer, site), variable in ctx.get('assignments', {}).items():
++        variable.Start = int(result['assignment'][customer] == site)
+     for layer in ('e1', 'e2'):
+         for r in ctx[layer]:
+             entry = scheduled.get(r['label'])
+@@ -72,12 +78,19 @@
+     return True
+ 
+ 
+-def solve_exact(problem, time_limit=60, seed=42, verbose=False, initial_result=None, _travel_bounds=None):
++def solve_exact(problem, time_limit=60, seed=42, verbose=False, initial_result=None, _travel_bounds=None,
++                _domain_check=None):
+     if not math.isfinite(time_limit) or time_limit <= 0:
+         raise ValueError('time_limit must be finite and positive')
+     begun = time.perf_counter()
+     travel_bounds = _travel_bounds or travel_lower_bounds(problem)
+-    precheck = check_necessary_conditions(problem, travel_bounds)
++    domain_check = None
++    if problem.free_assignment:
++        from .domains import assignment_domains, public_domain_check
++        domain_check = _domain_check or assignment_domains(problem, travel_bounds)
++        precheck = public_domain_check(domain_check)
++    else:
++        precheck = check_necessary_conditions(problem, travel_bounds)
+     if not precheck['passed']:
+         return rejected_result(problem, 'exact', precheck, time.perf_counter()-begun)
+     import gurobipy as gp
+@@ -85,7 +98,24 @@
+     result = empty_result(problem, 'exact')
+     result['precheck'] = precheck
+     supplied = initial_result if initial_result is not None and audit_solution(problem, initial_result)['valid'] else None
+-    generated = construct_incumbent(problem, min(begun+time_limit, time.perf_counter()+min(.05, time_limit*.05)))
++    primal_deadline = min(begun+time_limit, time.perf_counter()+min(.05, time_limit*.05))
++    if problem.free_assignment:
++        from models.routing.common.cycle.assignment import assigned_problem, input_assignment, lift_result
++        domains = domain_check['domains']
++        original = input_assignment(problem)
++        nearest = {c: min(sites, key=lambda s: problem.distance(s, c)+problem.distance(c, s))
++                   for c, sites in domains.items()}
++        original = {c: original[c] if original[c] in sites else nearest[c] for c, sites in domains.items()}
++        generated = None
++        for assignment in (original, nearest):
++            candidate = construct_incumbent(assigned_problem(problem, assignment), primal_deadline)
++            if candidate is not None:
++                candidate = lift_result(problem, candidate, assignment)
++                if candidate['audit']['valid'] and (generated is None or
++                        candidate['info']['objective'] < generated['info']['objective']):
++                    generated = candidate
++    else:
++        generated = construct_incumbent(problem, primal_deadline)
+     if generated is not None and (supplied is None or generated['info']['objective'] < supplied['info']['objective']):
+         supplied = generated
+     result['info']['primal_seed_found'] = generated is not None
+@@ -111,7 +141,8 @@
+             kept['info']['status'] = 'MODEL_START_CONFLICT'
+         return kept
+     try:
+-        model, ctx = build_model(problem, verbose=verbose, deadline=begun+time_limit, travel_bounds=travel_bounds)
++        model, ctx = build_model(problem, verbose=verbose, deadline=begun+time_limit,
++                                 travel_bounds=travel_bounds, domain_check=domain_check)
+     except TimeoutError:
+         result['info'].update(status='TIME_LIMIT_BUILD', runtime=time.perf_counter()-begun)
+         return preserve_incumbent()
+@@ -126,14 +157,17 @@
+         info = result['info']
+         info.update(status=status, proven_optimal=model.Status == GRB.OPTIMAL,
+                     proven_infeasible=model.Status == GRB.INFEASIBLE,
+-                    proof_scope='full_integer_time_multibatch_indexed',
++                    proof_scope='joint_customer_assignment_integer_time_cycle' if problem.free_assignment else
++                                'full_integer_time_multibatch_indexed',
+                     build_time=build_time, mip_runtime=model.Runtime,
+                     runtime=time.perf_counter()-begun, sol_count=model.SolCount,
+                     variables=model.NumVars, constraints=model.NumConstrs+model.NumGenConstrs,
+                     time_tick_seconds=problem.operating_policy.time_tick_seconds,
+                     formulation_features=['sparse_time_arcs', 'vehicle_symmetry', 'causal_steps']+
+-                        (['fixed_B1_pickup_quantities'] if len(problem.operating_policy.batches) == 1 else [])+
+-                        (['shared_E2_task_states_and_internal_arcs'] if ctx['shared_e2'] else []),
++                        (['B1_all_take_assignment_quantities' if problem.free_assignment else
++                          'fixed_B1_pickup_quantities'] if len(problem.operating_policy.batches) == 1 else [])+
++                        (['shared_E2_task_states_and_internal_arcs'] if ctx['shared_e2'] else [])+
++                        (['joint_customer_assignment'] if problem.free_assignment else []),
+                     shared_e2_arcs=ctx['shared_e2_arcs'],
+                     e2_max_trips_per_vehicle=problem.operating_policy.e2_max_trips_per_vehicle)
+         try:
+@@ -144,6 +178,8 @@
+             info['proven_optimal'] = False
+             return preserve_incumbent()
+         info.update(objective=model.ObjVal, mip_gap=model.MIPGap)
++        if problem.free_assignment:
++            result['assignment'] = {c: s for (c, s), variable in ctx['assignments'].items() if variable.X > .5}
+ 
+         def int_value(var):
+             raw = var if isinstance(var, int) else var.X
+--- before/models/routing/variants/model_2/exact/model.py
++++ after/models/routing/variants/model_2/exact/model.py
+@@ -1,5 +1,12 @@
+ """MILP construction entry for this numbered model."""
+ from ..model import validate_problem
++
++
++def build_joint_model(problem, **kwargs):
++    """Build the full joint assignment/routing MILP for this numbered model."""
++    validate_problem(problem)
++    from models.routing.solvers.exact.formulation import build_model
++    return build_model(problem, **kwargs)
+ 
+ 
+ def build_subproblem(problem, assignment, **kwargs):
+--- before/models/routing/variants/model_4/exact/model.py
++++ after/models/routing/variants/model_4/exact/model.py
+@@ -1,5 +1,12 @@
+ """MILP construction entry for this numbered model."""
+ from ..model import validate_problem
++
++
++def build_joint_model(problem, **kwargs):
++    """Build the full joint assignment/routing MILP for this numbered model."""
++    validate_problem(problem)
++    from models.routing.solvers.exact.formulation import build_model
++    return build_model(problem, **kwargs)
+ 
+ 
+ def build_subproblem(problem, assignment, **kwargs):

@@ -1,0 +1,74 @@
+FF.                                                                      [100%]
+=================================== FAILURES ===================================
+__ test_deleted_preceding_trip_does_not_screen_out_audited_improvement[False] __
+
+cache_distances = False
+
+    @pytest.mark.parametrize('cache_distances', [False, True])
+    def test_deleted_preceding_trip_does_not_screen_out_audited_improvement(cache_distances):
+        problem, state = sequential_trips()
+        original = deepcopy(state)
+        score, decoded, issues = evaluate(problem, state)
+        assert not issues and audit_solution(problem, decoded)['periodic_replay']['valid']
+        merged = [('b1_B', 'd'), ('b1_A', 'd'), ('b1_B', 'p'), ('b1_A', 'p')]
+        route = {**state['e2'][1], 'tasks': merged}
+        goods = _goods_ready(problem, state)
+        stale_ready = decoded['e2_trips'][0]['return_complete']+problem.operating_policy.e2_turnaround_time
+        distance = task_distance(problem, 'S', merged)
+        assert stale_ready == 22
+        assert _route_score(problem, route, goods, stale_ready)[0] > distance
+        assert _route_score(problem, route, goods, problem.operating_policy.cycle_start)[0] == distance
+    
+        complete = deepcopy(state)
+        complete['e2'] = [route]+complete['e2'][2:]
+        improved_score, improved, issues = evaluate(problem, complete)
+        assert not issues and improved_score == score-17
+        audit = audit_solution(problem, improved)
+        assert audit['valid'] and audit['periodic_replay']['valid']
+    
+        descent = CycleDescent(problem, cache_distances=cache_distances)
+        descent.key = state_key(state)
+        descent.queue = [('e2', ((0, []), (1, merged)))]
+        candidate = descent.propose(state, decoded, time.perf_counter()+1)
+>       assert candidate == complete
+E       AssertionError: assert None == {'deliveries': {'b1': [['S']], 'b2': [['S']]}, 'e2': [{'satellite': 'S', 'tasks': [('b1_B', 'd'), ('b1_A', 'd'), ('b1_...'), ('b2_B', 'p')], 'vehicle': 0}], 'pickup_order': {'b1': ['S'], 'b2': ['S']}, 'pickup_vehicle': {'b1': {}, 'b2': {}}}
+
+tests/routing/test_model5_readiness_filter.py:71: AssertionError
+__ test_deleted_preceding_trip_does_not_screen_out_audited_improvement[True] ___
+
+cache_distances = True
+
+    @pytest.mark.parametrize('cache_distances', [False, True])
+    def test_deleted_preceding_trip_does_not_screen_out_audited_improvement(cache_distances):
+        problem, state = sequential_trips()
+        original = deepcopy(state)
+        score, decoded, issues = evaluate(problem, state)
+        assert not issues and audit_solution(problem, decoded)['periodic_replay']['valid']
+        merged = [('b1_B', 'd'), ('b1_A', 'd'), ('b1_B', 'p'), ('b1_A', 'p')]
+        route = {**state['e2'][1], 'tasks': merged}
+        goods = _goods_ready(problem, state)
+        stale_ready = decoded['e2_trips'][0]['return_complete']+problem.operating_policy.e2_turnaround_time
+        distance = task_distance(problem, 'S', merged)
+        assert stale_ready == 22
+        assert _route_score(problem, route, goods, stale_ready)[0] > distance
+        assert _route_score(problem, route, goods, problem.operating_policy.cycle_start)[0] == distance
+    
+        complete = deepcopy(state)
+        complete['e2'] = [route]+complete['e2'][2:]
+        improved_score, improved, issues = evaluate(problem, complete)
+        assert not issues and improved_score == score-17
+        audit = audit_solution(problem, improved)
+        assert audit['valid'] and audit['periodic_replay']['valid']
+    
+        descent = CycleDescent(problem, cache_distances=cache_distances)
+        descent.key = state_key(state)
+        descent.queue = [('e2', ((0, []), (1, merged)))]
+        candidate = descent.propose(state, decoded, time.perf_counter()+1)
+>       assert candidate == complete
+E       AssertionError: assert None == {'deliveries': {'b1': [['S']], 'b2': [['S']]}, 'e2': [{'satellite': 'S', 'tasks': [('b1_B', 'd'), ('b1_A', 'd'), ('b1_...'), ('b2_B', 'p')], 'vehicle': 0}], 'pickup_order': {'b1': ['S'], 'b2': ['S']}, 'pickup_vehicle': {'b1': {}, 'b2': {}}}
+
+tests/routing/test_model5_readiness_filter.py:71: AssertionError
+=========================== short test summary info ============================
+FAILED tests/routing/test_model5_readiness_filter.py::test_deleted_preceding_trip_does_not_screen_out_audited_improvement[False]
+FAILED tests/routing/test_model5_readiness_filter.py::test_deleted_preceding_trip_does_not_screen_out_audited_improvement[True]
+2 failed, 1 passed in 0.05s

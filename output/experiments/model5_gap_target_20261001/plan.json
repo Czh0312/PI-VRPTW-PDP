@@ -1,0 +1,112 @@
+{
+  "target_gap_percent": 5.0,
+  "acceptance": "Every large case/pool must have an independently audited feasible UB and a valid full-M5 LB with 100*(UB-LB)/abs(UB)<=5. No average-only or restricted-subproblem optimality acceptance.",
+  "diagnostic_cases": [
+    {
+      "case": "/Users/chenzeheng/Desktop/2E-VRPTW-PDD/output/experiments/model5_gap_target_20261001/prepared_inputs/50_full/case.json",
+      "initial_result": "/Users/chenzeheng/Desktop/2E-VRPTW-PDD/output/experiments/model5_gap_target_20261001/prepared_inputs/50_full/initial_result.json",
+      "case_id": "zhou_Set2_100-5-2_subset50_b3",
+      "customers": 50,
+      "pool_label": "full",
+      "pool": 72,
+      "upper": 1545.084283993897,
+      "source_result": "/Users/chenzeheng/Desktop/2E-VRPTW-PDD/output/experiments/model5_alns_round5_20261001/after/007_zhou_Set2_100-5-2_subset50_b3_full_5s_seed43.json",
+      "source_seed": 43,
+      "source_time_budget": 5.0,
+      "existing_incumbent_runs": 3,
+      "existing_incumbent_total_solver_budget": 15.0
+    },
+    {
+      "case": "/Users/chenzeheng/Desktop/2E-VRPTW-PDD/output/experiments/model5_gap_target_20261001/prepared_inputs/50_tight/case.json",
+      "initial_result": "/Users/chenzeheng/Desktop/2E-VRPTW-PDD/output/experiments/model5_gap_target_20261001/prepared_inputs/50_tight/initial_result.json",
+      "case_id": "zhou_Set2_100-5-2_subset50_b3",
+      "customers": 50,
+      "pool_label": "tight",
+      "pool": 36,
+      "upper": 1688.0458882318521,
+      "source_result": "/Users/chenzeheng/Desktop/2E-VRPTW-PDD/output/experiments/model5_alns_round5_20261001/after/011_zhou_Set2_100-5-2_subset50_b3_tight_5s_seed44.json",
+      "source_seed": 44,
+      "source_time_budget": 5.0,
+      "existing_incumbent_runs": 3,
+      "existing_incumbent_total_solver_budget": 15.0
+    },
+    {
+      "case": "/Users/chenzeheng/Desktop/2E-VRPTW-PDD/output/experiments/model5_gap_target_20261001/prepared_inputs/100_full/case.json",
+      "initial_result": "/Users/chenzeheng/Desktop/2E-VRPTW-PDD/output/experiments/model5_gap_target_20261001/prepared_inputs/100_full/initial_result.json",
+      "case_id": "zhou_Set2_100-5-3_b3",
+      "customers": 100,
+      "pool_label": "full",
+      "pool": 156,
+      "upper": 2446.0400185180315,
+      "source_result": "/Users/chenzeheng/Desktop/2E-VRPTW-PDD/output/experiments/model5_alns_round5_20261001/after/021_zhou_Set2_100-5-3_b3_full_15s_seed42.json",
+      "source_seed": 42,
+      "source_time_budget": 15.0,
+      "existing_incumbent_runs": 6,
+      "existing_incumbent_total_solver_budget": 60.0
+    },
+    {
+      "case": "/Users/chenzeheng/Desktop/2E-VRPTW-PDD/output/experiments/model5_gap_target_20261001/prepared_inputs/100_tight/case.json",
+      "initial_result": "/Users/chenzeheng/Desktop/2E-VRPTW-PDD/output/experiments/model5_gap_target_20261001/prepared_inputs/100_tight/initial_result.json",
+      "case_id": "zhou_Set2_100-5-3_b3",
+      "customers": 100,
+      "pool_label": "tight",
+      "pool": 78,
+      "upper": 2811.4483006158707,
+      "source_result": "/Users/chenzeheng/Desktop/2E-VRPTW-PDD/output/experiments/model5_alns_round5_20261001/after/028_zhou_Set2_100-5-3_b3_tight_15s_seed43.json",
+      "source_seed": 43,
+      "source_time_budget": 15.0,
+      "existing_incumbent_runs": 6,
+      "existing_incumbent_total_solver_budget": 60.0
+    }
+  ],
+  "diagnostic_budget_seconds": 60,
+  "polish_time_seconds": 5,
+  "cg_e1_time_seconds": 10,
+  "seed": 42,
+  "scope": "Four observed B3 development configurations at 50/100 customers and full/tight pools. Existing best audited incumbents are selected for gap diagnosis, not a same-time single-seed algorithm comparison. Diagnostic work adds budget to earlier solves; not an ALNS-only performance claim.",
+  "formal_budget_user_question": "Pending; initial independent diagnostic uses 60 seconds.",
+  "default_alns_change": false,
+  "follow_up_stages": [
+    {
+      "method": "warm_ALNS_60s_then_retime_5s",
+      "cases": "same four diagnostic cases",
+      "extra_budget_seconds_per_case": 65
+    },
+    {
+      "method": "E2_perturb_then_E1_retime",
+      "cases": "observed 50-customer tight B3, selected because closest to 5% target",
+      "extra_budget_seconds": 120,
+      "scope": "exploratory, no generalization or default adoption"
+    },
+    {
+      "method": "CG_certificate_refinement",
+      "cases": "both fixed 100-customer diagnostic cases, where pricing was incomplete",
+      "extra_budget_seconds_per_case": 100
+    },
+    {
+      "method": "instrumented_CG_mismatch_reproduction",
+      "cases": "100-customer full B3 only",
+      "extra_budget_seconds": 100,
+      "scope": "debugging; failed guard; no certificate adopted"
+    },
+    {
+      "method": "strict_pricing_CG_certificate",
+      "cases": "both 100-customer diagnostic cases",
+      "extra_budget_seconds_per_case": 100,
+      "scope": "same relaxation; tighter solver tolerances; independent objective guard unchanged"
+    },
+    {
+      "method": "restricted_joint_E2_route_pool",
+      "cases": "50-customer tight B3 closest observed case",
+      "extra_budget_seconds": 120,
+      "scope": "joint task transfer, E1 routing and scheduling; UB only; exploratory"
+    },
+    {
+      "method": "restricted_joint_E2_route_pool_followup",
+      "cases": "remaining three observed diagnostic cases",
+      "extra_budget_seconds_per_case": 120,
+      "scope": "same frozen implementation; UB only; extra diagnostic runtime"
+    }
+  ],
+  "budget_accounting": "Cumulative solver allowances including incumbent portfolios: 50 full 260s, 50 tight 380s, 100 full 605s including failed/instrumented pricing, 100 tight 505s including failed pricing. Actual pool times: 50 full 2.38s, 50 tight 6.07s, each100 120.07s. Allowances are not actual wall times; startup, export and independent validation are additional. These are sequential hybrid diagnostics, not an equal-budget ALNS comparison. Formal validation budget question remains pending."
+}

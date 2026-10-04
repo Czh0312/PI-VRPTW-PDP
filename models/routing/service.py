@@ -1,112 +1,62 @@
-"""Stable application service for dispatching routing solvers.
-
-Solver modules are imported lazily so ALNS remains usable on machines where
-the optional Gurobi dependency is not installed.
-"""
-
+"""Dispatch current cycle solvers; historical algorithms require explicit opt-in."""
 from importlib import import_module
-
-from .catalog import require_model_number
-
-
-_EXACT_SOLVERS = {
-    number: (f"models.routing.variants.model_{number}", "solve_exact")
-    for number in range(1, 9)
-}
-
-_ALNS_SOLVERS = {
-    **{
-        number: (f"models.routing.alns.variants.model_{number}", "solve_alns")
-        for number in range(1, 7)
-    },
-    7: ("models.routing.alns.variants.model_7", "solve_alns"),
-    8: ("models.routing.alns.variants.model_8", "solve_alns"),
-}
+from .catalog import MODEL_SPECS, require_model_number
+from .common.operating_policy import policy_for
 
 
-def _load_solver(model: int, method: str):
-    registry = _EXACT_SOLVERS if method == "exact" else _ALNS_SOLVERS
-    if model not in registry:
-        raise ValueError(f"Model {model} 当前不支持 {method.upper()} 求解")
-    module_name, function_name = registry[model]
-    return getattr(import_module(module_name), function_name)
+def _load_solver(model, method):
+    module = (f"models.routing.baselines.variants.model_{model}" if method == "exact"
+              else f"models.routing.baselines.alns.model_{model}")
+    return getattr(import_module(module), "solve_exact" if method == "exact" else "solve_alns")
 
 
-def solve_routing(
-    *,
-    model,
-    method,
-    problem,
-    e1_tasks,
-    e2_tasks_by_sat,
-    alns_iter=5000,
-    alns_time=120,
-    seed=42,
-    TFp=9999.0,
-    stage1_time_ratio=None,
-    transshipment_min_net_saving=0.01,
-    transshipment_max_total=None,
-    transshipment_max_per_satellite=None,
-    exact_time=None,
-):
-    """Run one canonical routing model through its supported solver."""
+def solve_routing(*, model, method, problem, e1_tasks=None, e2_tasks_by_sat=None,
+                  alns_iter=5000, alns_time=120, seed=42, TFp=9999.0,
+                  exact_time=None, exact_backend=None, allow_baseline=False):
     model = require_model_number(int(model))
-    if model == 8 and stage1_time_ratio is not None:
-        raise ValueError('M8 已改为联合优化，不再接受 stage1_time_ratio')
+    policy = policy_for(problem)
+    policy.require_model(model)
     method = str(method).lower()
     if method not in {"exact", "alns"}:
-        raise ValueError(f"求解方法必须为 exact 或 alns，收到: {method}")
-
+        raise ValueError(f"Expected exact or alns, got {method}")
+    if getattr(policy, "multi_batch", False):
+        if problem.model_number != model:
+            raise ValueError("Requested model does not match the loaded instance")
+        if e1_tasks or e2_tasks_by_sat:
+            raise ValueError("Multibatch quantities must be derived from return events, not static tasks")
+        if exact_backend not in (None, "multibatch_indexed"):
+            raise ValueError("multi_batch_cutoff_v1 requires multibatch_indexed, not a legacy backend")
+        from .common.cycle.scope import batch_mode_for
+        module = import_module(MODEL_SPECS[model].module_path(batch_mode_for(problem)))
+        if method == "exact":
+            return module.solve_exact(problem, time_limit=exact_time if exact_time is not None else 60, seed=seed)
+        return module.solve_alns(problem, max_time=alns_time, max_iterations=alns_iter, seed=seed)
+    if model == 5:
+        raise ValueError('Current M5 requires multi_batch_cutoff_v1 with B>1; historical M5 was retired')
+    if not allow_baseline:
+        raise ValueError("Historical policy: use route --baseline / allow_baseline=True explicitly. "
+                         "Current M1/M2/M4 require the unified single-batch policy.")
     solver = _load_solver(model, method)
     if method == "exact":
-        kwargs = {
-            "problem": problem,
-            "e1_tasks": e1_tasks,
-            "e2_tasks_by_sat": e2_tasks_by_sat,
-            "vehicles_per_satellite": problem.fleet.e2_per_sat_count,
-            "verbose": True,
-            # The application layer must be able to distinguish a certified
-            # optimum from a feasible incumbent or a run with no solution.
-            "return_info": True,
-            "return_incumbent_on_time_limit": True,
-        }
+        kwargs = dict(problem=problem, e1_tasks=e1_tasks, e2_tasks_by_sat=e2_tasks_by_sat,
+                      vehicles_per_satellite=problem.fleet.e2_per_sat_count, verbose=True,
+                      return_info=True, return_incumbent_on_time_limit=True)
         if exact_time is not None:
             kwargs["time_limit"] = exact_time
-        if model in (3, 4, 6, 7, 8):
+        if exact_backend is not None:
+            kwargs["backend"] = exact_backend
+        if model in (3, 4):
             kwargs["TFp"] = TFp
         return solver(**kwargs)
-
-    adaptive_overrides = {
-        "cooling_schedule": "time",
-        "stagnation_time": max(0.05, alns_time * 0.30),
-        "reheat_fraction": 0.5,
-        "max_restarts": 2,
-        "intensification_time": max(0.02, alns_time * 0.08),
-    }
-    kwargs = {
-        "problem": problem,
-        "vehicles_per_satellite": problem.fleet.e2_per_sat_count,
-        "max_iterations": alns_iter,
-        "max_time": alns_time,
-        "seed": seed,
-    }
-    if model in (1, 2, 3, 4, 6, 7):
-        kwargs["alns_config_overrides"] = adaptive_overrides
-    if model not in (2, 4, 7):
-        kwargs["e1_tasks"] = e1_tasks
-        kwargs["e2_tasks_by_sat"] = e2_tasks_by_sat
-    if model in (1, 3, 6):
-        kwargs["strong_initial_solution"] = True
-    if model in (3, 4, 6, 7, 8):
+    kwargs = dict(problem=problem, vehicles_per_satellite=problem.fleet.e2_per_sat_count,
+                  max_iterations=alns_iter, max_time=alns_time, seed=seed,
+                  alns_config_overrides=dict(cooling_schedule="time",
+                      stagnation_time=max(0.05, alns_time * 0.30), reheat_fraction=0.5,
+                      max_restarts=2, intensification_time=max(0.02, alns_time * 0.08)))
+    if model in (1, 3):
+        kwargs.update(e1_tasks=e1_tasks, e2_tasks_by_sat=e2_tasks_by_sat, strong_initial_solution=True)
+    if model in (3, 4):
         kwargs["TFp"] = TFp
-    if model in (5, 6, 7):
-        kwargs.update(
-            transshipment_min_net_saving=transshipment_min_net_saving,
-            transshipment_max_total=transshipment_max_total,
-            transshipment_max_per_satellite=transshipment_max_per_satellite,
-        )
-    if model in (6, 7):
-        kwargs["stage1_time_ratio"] = stage1_time_ratio
-    if model == 8:
-        kwargs.update(return_info=True)
+    if policy.single_day:
+        kwargs["return_info"] = True
     return solver(**kwargs)

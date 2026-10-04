@@ -1,0 +1,93 @@
+--- before/models/routing/solvers/alns/evaluator.py
++++ after/models/routing/solvers/alns/evaluator.py
+@@ -89,6 +89,7 @@
+     """Return (penalized score, result, violations), never silently relax a rule."""
+     p, f = problem.operating_policy, problem.fleet
+     task = problem.task if _prepared is None else _prepared.task
++    summary_of = getattr(_prepared, 'load_summary', None)
+     result = empty_result(problem, 'alns')
+     violations, goods_ready = [], {}
+     # E1 deliveries do not depend on reverse flow; delivery times are explicit.
+@@ -126,7 +127,9 @@
+         bounds[begin] = max(p.cycle_start, r.get('depart_after', p.cycle_start))
+         bounds[finish] = max(p.cycle_start, r.get('return_after', p.cycle_start))
+         upper[finish] = p.cycle_end-p.e2_turnaround_time
+-        dbatches = {problem.order_map[o].batch for o, kind in r['tasks'] if kind == 'd'}
++        loads = summary_of(tuple(r['tasks'])) if summary_of is not None else None
++        dbatches = ({problem.order_map[o].batch for o, kind in r['tasks'] if kind == 'd'}
++                    if loads is None else loads[0])
+         if len(dbatches) > 1:
+             return 1e12, result, ['MIXED_DELIVERY_BATCHES']
+         if key in previous_vehicle:
+@@ -136,8 +139,11 @@
+         if dbatches:
+             b = next(iter(dbatches))
+             bounds[begin] = max(bounds[begin], goods_ready[s, b]+p.e2_dispatch_prep_time)
+-        load_w = sum(task(o, kind)[1] for o, kind in r['tasks'] if kind == 'd')
+-        load_v = sum(task(o, kind)[2] for o, kind in r['tasks'] if kind == 'd')
++        if loads is None:
++            load_w = sum(task(o, kind)[1] for o, kind in r['tasks'] if kind == 'd')
++            load_v = sum(task(o, kind)[2] for o, kind in r['tasks'] if kind == 'd')
++        else:
++            _, load_w, load_v = loads
+         if load_w > f.e2_weight_cap+1e-6 or load_v > f.e2_volume_cap+1e-6:
+             violations.append('E2_CAPACITY')
+         previous, site, service = begin, s, 0
+--- before/models/routing/solvers/alns/single_batch_cache.py
++++ after/models/routing/solvers/alns/single_batch_cache.py
+@@ -1,5 +1,6 @@
+ """Bounded caches owned by one immutable single-batch search context."""
+ from collections import OrderedDict
++from functools import lru_cache
+ 
+ from .cycle_cache import CycleEvaluator
+ from .evaluator import evaluate, route_distance
+@@ -11,13 +12,17 @@
+ class SingleBatchEvaluator(CycleEvaluator):
+     """Prepare task attributes and reuse distances, while decoding times afresh."""
+     propagate = staticmethod(propagate_times)
+-    def __init__(self, problem, capacity=128, *, distance_capacity=512):
++    def __init__(self, problem, capacity=128, *, distance_capacity=512, load_capacity=512):
+         if len(problem.operating_policy.batches) != 1:
+             raise ValueError('Single-batch cache requires B=1')
+         super().__init__(problem, capacity)
+         self.task_data = {(o.id, k): problem.task(o.id, k)
+                           for o in problem.orders for k in problem.task_kinds}
+         self.expected_tasks = frozenset(self.task_data)
++        if not isinstance(load_capacity, int) or load_capacity < 0:
++            raise ValueError('Load-summary capacity must be a nonnegative integer')
++        self.load_summary = (lru_cache(maxsize=load_capacity)(self._load_summary)
++                             if load_capacity else None)
+         self.distance_capacity = distance_capacity
+         self.distances = OrderedDict()
+         self.distance_hits = self.distance_misses = 0
+@@ -28,6 +33,17 @@
+         except KeyError:
+             # Preserve the reference API's error for malformed external tasks.
+             return self.problem.task(oid, kind)
++
++    def _load_summary(self, tasks):
++        # Only fixed task attributes are cached. Vehicle/site, waits, every
++        # event load and all timing/coverage checks remain decoder inputs.
++        try:
++            delivery = [self.task_data[oid, kind] for oid, kind in tasks if kind == 'd']
++        except KeyError:
++            # Let the original decoder preserve errors for external tasks.
++            return None
++        return (frozenset(t[0].batch for t in delivery),
++                sum(t[1] for t in delivery), sum(t[2] for t in delivery))
+ 
+     def __call__(self, problem, state):
+         if problem is not self.problem:
+@@ -53,8 +69,9 @@
+ 
+ 
+ class SingleBatchCache(EvaluationCache):
+-    def __init__(self, problem, capacity=256, *, e1_capacity=128):
+-        super().__init__(problem, SingleBatchEvaluator(problem, capacity=e1_capacity), capacity)
++    def __init__(self, problem, capacity=256, *, e1_capacity=128, load_capacity=512):
++        super().__init__(problem, SingleBatchEvaluator(problem, capacity=e1_capacity,
++                         load_capacity=load_capacity), capacity)
+         self._route_scorer = None
+ 
+     @property

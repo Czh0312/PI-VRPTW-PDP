@@ -1,0 +1,59 @@
+{
+  "mode": "continuous user-authorized implementation and sequential frozen comparisons",
+  "candidate": "pool_vehicle_order=True; count then first route ID on homogeneous M1/M2 private pool vehicles",
+  "default": false,
+  "comparisons": [
+    {
+      "stage": "fixed_pool",
+      "seeds": [
+        42,
+        43
+      ],
+      "budget": 10,
+      "shared_catalog": true,
+      "cached_CG_generation_excluded": true
+    },
+    {
+      "stage": "full_long",
+      "customers": 30,
+      "model": 2,
+      "seeds": [
+        42,
+        43
+      ],
+      "total_budget": 60,
+      "root_cap": 30,
+      "pool_cap": 5
+    },
+    {
+      "stage": "full_short",
+      "customers": 20,
+      "model": 2,
+      "seeds": [
+        42,
+        43
+      ],
+      "total_budget": 30,
+      "root_cap": 10,
+      "pool_cap": 3
+    }
+  ],
+  "baseline": "columns_compact, original integer pricing, compact cargo, loose individual route timing",
+  "other_changes_disabled": [
+    "continuous pricing",
+    "lazy timing pricing",
+    "tight slot bounds",
+    "aggregate slot timing",
+    "canonical timing",
+    "root budget reuse"
+  ],
+  "execution": "single-thread sequential isolated subprocesses, reverse order seed 43, no retries and no overwrites",
+  "validation": "independent tiny route/schedule enumeration, actual pinned MIP starts, full tests, source hashes, all outputs audited with two-cycle replay; only original complete MILP proves global optimality",
+  "adoption": "keep explicit opt-in unless full comparisons consistently improve; preserve negative and mixed results",
+  "revision": {
+    "reason": "Weighted count/first-route row retains integer ordering but does not imply the old count row for fractional points. Retain old row and add tie-breaking row.",
+    "first_version": "fixed_pool and full_long frozen before revision; retained without overwrite",
+    "final_version": "new frozen comparisons after first-version completes; same budgets, inputs and seeds",
+    "original_row_preserved": true
+  }
+}

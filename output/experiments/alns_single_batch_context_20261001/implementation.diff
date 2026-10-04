@@ -1,0 +1,367 @@
+--- before/models/routing/solvers/alns/single_batch_cache.py
++++ after/models/routing/solvers/alns/single_batch_cache.py
+@@ -0,0 +1,66 @@
++"""Bounded caches owned by one immutable single-batch search context."""
++from collections import OrderedDict
++
++from .cycle_cache import CycleEvaluator
++from .evaluator import evaluate, route_distance
++from .neighborhoods import EvaluationCache
++from .single_batch_scoring import SingleBatchRouteScorer
++
++
++class SingleBatchEvaluator(CycleEvaluator):
++    """Prepare task attributes and reuse distances, while decoding times afresh."""
++    def __init__(self, problem, capacity=128, *, distance_capacity=512):
++        if len(problem.operating_policy.batches) != 1:
++            raise ValueError('Single-batch cache requires B=1')
++        super().__init__(problem, capacity)
++        self.task_data = {(o.id, k): problem.task(o.id, k)
++                          for o in problem.orders for k in problem.task_kinds}
++        self.expected_tasks = frozenset(self.task_data)
++        self.distance_capacity = distance_capacity
++        self.distances = OrderedDict()
++        self.distance_hits = self.distance_misses = 0
++
++    def task(self, oid, kind):
++        try:
++            return self.task_data[oid, kind]
++        except KeyError:
++            # Preserve the reference API's error for malformed external tasks.
++            return self.problem.task(oid, kind)
++
++    def __call__(self, problem, state):
++        if problem is not self.problem:
++            raise ValueError('Single-batch evaluator belongs to one problem instance')
++        return evaluate(problem, state, _memo=self, _prepared=self)
++
++    def route_distance(self, problem, trip, layer):
++        if problem is not self.problem:
++            raise ValueError('Prepared distance belongs to one problem instance')
++        field = 'site_id' if layer == 'e1' else 'order_id'
++        key = (layer, None if layer == 'e1' else trip['satellite_id'],
++               tuple(e[field] for e in trip['events']))
++        if key in self.distances:
++            self.distance_hits += 1
++            self.distances.move_to_end(key)
++            return self.distances[key]
++        self.distance_misses += 1
++        value = route_distance(problem, trip, layer)
++        self.distances[key] = value
++        if len(self.distances) > self.distance_capacity:
++            self.distances.popitem(last=False)
++        return value
++
++
++class SingleBatchCache(EvaluationCache):
++    def __init__(self, problem, capacity=256, *, e1_capacity=128):
++        super().__init__(problem, SingleBatchEvaluator(problem, capacity=e1_capacity), capacity)
++        self._route_scorer = None
++
++    @property
++    def route_scorer(self):
++        # Skip preparation when a short solve never reaches route repair.
++        if self._route_scorer is None:
++            self._route_scorer = SingleBatchRouteScorer(self.problem)
++        return self._route_scorer
++
++    def score_route(self, problem, route, goods, vehicle_ready):
++        return self.route_scorer(problem, route, goods, vehicle_ready)
+--- before/models/routing/solvers/alns/single_batch_scoring.py
++++ after/models/routing/solvers/alns/single_batch_scoring.py
+@@ -1,7 +1,8 @@
+-"""Prepared local scoring for one fixed B=1 repair, preserving score arithmetic.
++"""Prepared local scoring for one fixed B=1 context, preserving score arithmetic.
+ 
+ This is a proposal-ranking score, never a feasibility certificate. Preparation
+-and arc caches belong to one repair call; changed inputs get a fresh scorer.
++and caches belong to one fixed problem within a solve. New solves and changed
++assignments get fresh scorers; ready times remain part of each score's inputs.
+ """
+ from functools import lru_cache
+ 
+@@ -20,7 +21,7 @@
+                 window = order.delivery_window if kind == 'd' else order.pickup_window
+                 due = min(window[1], self.batch.cutoff-order.service_time) if kind == 'd' else window[1]
+                 self.tasks[order.id, kind] = (order, weight, volume, kind, window[0], due)
+-        # Bounded and repair-local. Distances still come through the problem's
++        # Bounded and context-local. Distances still come through the problem's
+         # API, supporting directed/nonmetric matrices and custom travel data.
+         self.distance = lru_cache(maxsize=4096)(problem.distance)
+         self.travel = lru_cache(maxsize=4096)(problem.travel)
+--- before/models/routing/solvers/alns/single_batch.py
++++ after/models/routing/solvers/alns/single_batch.py
+@@ -11,9 +11,9 @@
+ from models.routing.common.cycle.audit import audit_solution
+ from models.routing.common.cycle.precheck import check_necessary_conditions, rejected_result, travel_lower_bounds
+ from .construction import chronological_state, appointment_state
+-from .cycle_cache import CycleEvaluator
++from .single_batch_cache import SingleBatchCache
+ from .single_batch_descent import SingleBatchDescent
+-from .neighborhoods import EvaluationCache, clone_state, destroy_repair, state_key, state_from_result
++from .neighborhoods import clone_state, destroy_repair, state_key, state_from_result
+ 
+ 
+ def _move(problem, original, rng, operator):
+@@ -87,7 +87,8 @@
+ 
+ 
+ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_result=None,
+-               seed_state=None, _travel_bounds=None, _assignment_search=None, _begun=None):
++               seed_state=None, _travel_bounds=None, _assignment_search=None, _begun=None,
++               _context=None):
+     if len(problem.operating_policy.batches) != 1:
+         raise ValueError('Single-batch search requires B=1')
+     if not math.isfinite(max_time) or max_time <= 0 or max_iterations < 0:
+@@ -98,7 +99,9 @@
+     if not precheck['passed'] and _assignment_search is None:
+         return rejected_result(problem, 'alns', precheck, time.perf_counter()-begun)
+     rng = random.Random(seed)
+-    cached = EvaluationCache(problem, CycleEvaluator(problem, capacity=128))
++    if _context is not None and _context.problem is not problem:
++        raise ValueError('Single-batch context belongs to one problem instance')
++    cached = _context if _context is not None else SingleBatchCache(problem)
+     if _assignment_search is not None:
+         from models.routing.common.cycle.assignment import input_assignment
+         _assignment_search.travel_bounds = travel_bounds
+@@ -158,7 +161,8 @@
+     # Free delivery/pickup assignment retains its original continuous search:
+     # incumbent descent competed with partition exploration in paired pilots.
+     descent_enabled = _assignment_search is None
+-    descent = SingleBatchDescent(best_problem, cache_sites=not best_problem.reusable)
++    descent = SingleBatchDescent(best_problem, cache_sites=not best_problem.reusable,
++                                 score_route=best_cache.score_route)
+     descent_seconds = 0.0
+     descent_generated = descent_filtered = descent_cache_hits = descent_enumerations = 0
+     seen_issues, iterations, audit_rejections = set(issues), 0, 0
+@@ -181,7 +185,8 @@
+                 descent_filtered += descent.filtered
+                 descent_cache_hits += descent.site_cache_hits
+                 descent_enumerations += descent.enumerations
+-                descent = SingleBatchDescent(best_problem, cache_sites=not best_problem.reusable)
++                descent = SingleBatchDescent(best_problem, cache_sites=not best_problem.reusable,
++                                             score_route=best_cache.score_route)
+             descent_start = time.perf_counter()
+             proposed = descent.propose(best_state, best_decoded, begun+max_time)
+             descent_seconds += time.perf_counter()-descent_start
+@@ -204,7 +209,8 @@
+         elif iteration and iteration % 150 == 0:
+             proposed = initial_state(problem, rng, randomized=True)
+         elif op.startswith('destroy_'):
+-            proposed = destroy_repair(problem, current, rng, op.split('_')[1], begun+max_time)
++            proposed = destroy_repair(problem, current, rng, op.split('_')[1], begun+max_time,
++                                      scorer=cached.route_scorer)
+         else:
+             proposed = _move(problem, current, rng, op)
+         if proposed_problem is problem and state_key(proposed) == state_key(current):
+--- before/models/routing/solvers/alns/single_batch_descent.py
++++ after/models/routing/solvers/alns/single_batch_descent.py
+@@ -25,11 +25,12 @@
+ 
+ class SingleBatchDescent:
+     """Reuse a bounded candidate list until the incumbent changes."""
+-    def __init__(self, problem, capacity=256, *, cache_sites=True):
++    def __init__(self, problem, capacity=256, *, cache_sites=True, score_route=None):
+         if len(problem.operating_policy.batches) != 1:
+             raise ValueError('Single-batch descent requires B=1')
+         self.problem, self.capacity = problem, capacity
+         self.cache_sites = cache_sites
++        self.score_route = score_route or _route_score
+         self.key, self.queue = None, []
+         self.e2_key, self.e2_options = None, []
+         self.site_options = OrderedDict()
+@@ -248,7 +249,7 @@
+                 for i, tasks in detail:
+                     route = proposed['e2'][i]
+                     route['tasks'] = list(tasks)
+-                    score, _ = _route_score(self.problem, route, goods, before.get(i,p.cycle_start))
++                    score, _ = self.score_route(self.problem, route, goods, before.get(i,p.cycle_start))
+                     if score > task_distance(self.problem,route['satellite'],tasks)+1e-6:
+                         keep = False
+                         break
+--- before/models/routing/solvers/alns/assignment.py
++++ after/models/routing/solvers/alns/assignment.py
+@@ -8,8 +8,7 @@
+ from models.routing.common.cycle.precheck import check_necessary_conditions
+ from models.routing.common.cycle.state import empty_result
+ from .construction import repair_assignment_state
+-from .cycle_cache import CycleEvaluator
+-from .neighborhoods import EvaluationCache
++from .single_batch_cache import SingleBatchCache
+ 
+ 
+ class AssignmentSearch:
+@@ -33,7 +32,7 @@
+         key = tuple(sorted(assignment.items()))
+         if key not in self.contexts:
+             fixed = assigned_problem(self.problem, assignment)
+-            self.contexts[key] = (fixed, EvaluationCache(fixed, CycleEvaluator(fixed, capacity=32), capacity=32))
++            self.contexts[key] = (fixed, SingleBatchCache(fixed, capacity=32, e1_capacity=32))
+             if len(self.contexts) > 8:
+                 old_key = next(k for k, (p, _) in self.contexts.items() if p is not self.active_problem)
+                 _, old = self.contexts.pop(old_key)
+@@ -69,7 +68,7 @@
+         proposed_problem, cache = self.context(candidate)
+         if not check_necessary_conditions(proposed_problem, self.travel_bounds)['passed']:
+             return None
+-        proposed = repair_assignment_state(proposed_problem, state, deadline)
++        proposed = repair_assignment_state(proposed_problem, state, deadline, scorer=cache.route_scorer)
+         if proposed is None:
+             return None
+         self.projections += 1
+--- before/models/routing/solvers/alns/partitioned_assignment.py
++++ after/models/routing/solvers/alns/partitioned_assignment.py
+@@ -8,6 +8,7 @@
+ from models.routing.common.cycle.state import empty_result
+ from models.routing.common.cycle.precheck import travel_lower_bounds
+ from .construction import reassigned_state
++from .single_batch_cache import SingleBatchCache
+ 
+ 
+ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42):
+@@ -48,6 +49,7 @@
+                 if sites:
+                     candidate[customer] = rng.choice(sites)
+         fixed = assigned_problem(problem, candidate)
++        context = SingleBatchCache(fixed)
+         remaining = max_time-(time.perf_counter()-start)
+         if remaining <= 0:
+             break
+@@ -57,7 +59,8 @@
+         warm = incumbents.get(key)
+         seed_state = None
+         if warm is None and best is not None:
+-            seed_state = reassigned_state(fixed, best, min(start+max_time, time.perf_counter()+max_time/20))
++            seed_state = reassigned_state(fixed, best, min(start+max_time, time.perf_counter()+max_time/20),
++                                           scorer=context.route_scorer)
+             projected += int(seed_state is not None)
+         remaining = max_time-(time.perf_counter()-start)
+         if remaining <= 0:
+@@ -66,7 +69,7 @@
+         subproblem_start = time.perf_counter()-start
+         solved = solve_fixed(fixed, max_time=min(remaining, max(.01, max_time*share)),
+                              max_iterations=iteration_budget, seed=seed+attempts, initial_result=warm,
+-                             seed_state=seed_state, _travel_bounds=travel_bounds)
++                             seed_state=seed_state, _travel_bounds=travel_bounds, _context=context)
+         attempts += 1
+         for field, counts in operator_totals.items():
+             for operator, count in solved['info'].get(field, {}).items():
+--- before/models/routing/solvers/alns/construction.py
++++ after/models/routing/solvers/alns/construction.py
+@@ -2,17 +2,17 @@
+ from .evaluator import initial_state
+ 
+ 
+-def reassigned_state(problem, result, deadline):
++def reassigned_state(problem, result, deadline, *, scorer=None):
+     """Keep unaffected routes when customer ownership changes, then repair.
+ 
+     A projected state is only a proposal: new inbound quantities can make old
+     routes infeasible, so the fixed solver must decode and audit it afresh.
+     """
+     from .neighborhoods import state_from_result
+-    return repair_assignment_state(problem, state_from_result(problem, result), deadline)
++    return repair_assignment_state(problem, state_from_result(problem, result), deadline, scorer=scorer)
+ 
+ 
+-def repair_assignment_state(problem, original, deadline):
++def repair_assignment_state(problem, original, deadline, *, scorer=None):
+     """Project complete search tasks, even when the current schedule is infeasible.
+ 
+     Work from the search state rather than a partial decoder result. Customer
+@@ -40,7 +40,8 @@
+                     choices.append((len(issues), route_distance(problem, trip, 'e1'), vehicle, pos))
+             _, _, vehicle, pos = min(choices)
+             rows[vehicle].insert(pos, site)
+-    return repair_orders(problem, state, [problem.order_map[oid] for oid in sorted(moved)], deadline)
++    return repair_orders(problem, state, [problem.order_map[oid] for oid in sorted(moved)], deadline,
++                         scorer=scorer)
+ 
+ 
+ def chronological_state(problem, rng):
+--- before/models/routing/solvers/alns/neighborhoods.py
++++ after/models/routing/solvers/alns/neighborhoods.py
+@@ -96,7 +96,7 @@
+     return distance+1e6*(load_penalty+max(0, len(dbatches)-1))+late*p.time_tick_seconds/60*1e4, completed
+ 
+ 
+-def destroy_repair(problem, original, rng, mode, deadline):
++def destroy_repair(problem, original, rng, mode, deadline, *, scorer=None):
+     if not problem.orders:
+         return clone_state(original)
+     orders = list(problem.orders)
+@@ -109,12 +109,12 @@
+         removed = orders[:count]
+     else:
+         removed = rng.sample(orders, count)
+-    repaired = repair_orders(problem, original, removed, deadline)
++    repaired = repair_orders(problem, original, removed, deadline, scorer=scorer)
+     return repaired if repaired is not None else clone_state(original)
+ 
+ 
+ def repair_orders(problem, original, removed, deadline, *, screen=True, cache_scores=True,
+-                  fast_scores=True):
++                  fast_scores=True, scorer=None):
+     """Reinsert complete requests; interruption never exposes a partial state.
+ 
+     The distance-only bound safely screens this *local ranking score* because
+@@ -135,7 +135,7 @@
+     score_route = _route_score
+     if tasks and fast_scores and len(p.batches) == 1:
+         from .single_batch_scoring import SingleBatchRouteScorer
+-        score_route = SingleBatchRouteScorer(problem)
++        score_route = scorer if scorer is not None else SingleBatchRouteScorer(problem)
+     # Scoped to this repair: goods-ready times and the problem stay fixed.
+     # Keep the route object alive with its score to prevent object-id reuse.
+     route_scores = {}
+--- before/models/routing/solvers/alns/evaluator.py
++++ after/models/routing/solvers/alns/evaluator.py
+@@ -85,9 +85,10 @@
+     return trips, violations, releases
+ 
+ 
+-def evaluate(problem, state, *, _memo=None):
++def evaluate(problem, state, *, _memo=None, _prepared=None):
+     """Return (penalized score, result, violations), never silently relax a rule."""
+     p, f = problem.operating_policy, problem.fleet
++    task = problem.task if _prepared is None else _prepared.task
+     result = empty_result(problem, 'alns')
+     violations, goods_ready = [], {}
+     # E1 deliveries do not depend on reverse flow; delivery times are explicit.
+@@ -135,13 +136,13 @@
+         if dbatches:
+             b = next(iter(dbatches))
+             bounds[begin] = max(bounds[begin], goods_ready[s, b]+p.e2_dispatch_prep_time)
+-        load_w = sum(problem.task(o, kind)[1] for o, kind in r['tasks'] if kind == 'd')
+-        load_v = sum(problem.task(o, kind)[2] for o, kind in r['tasks'] if kind == 'd')
++        load_w = sum(task(o, kind)[1] for o, kind in r['tasks'] if kind == 'd')
++        load_v = sum(task(o, kind)[2] for o, kind in r['tasks'] if kind == 'd')
+         if load_w > f.e2_weight_cap+1e-6 or load_v > f.e2_volume_cap+1e-6:
+             violations.append('E2_CAPACITY')
+         previous, site, service = begin, s, 0
+         for j, (oid, kind) in enumerate(r['tasks']):
+-            o, w, vol = problem.task(oid, kind)
++            o, w, vol = task(oid, kind)
+             if o.satellite != s or (oid, kind) in tasks:
+                 return 1e12, result, ['E2_TASK_COVERAGE']
+             node = (ri, j)
+@@ -158,7 +159,8 @@
+                 violations.append('E2_CAPACITY')
+         edges.append((previous, finish, service+problem.travel(site, s)+p.e2_return_unload_time))
+         parsed.append((r, ri, slot))
+-    expected = {(o.id, k) for o in problem.orders for k in problem.task_kinds}
++    expected = ({(o.id, k) for o in problem.orders for k in problem.task_kinds}
++                if _prepared is None else _prepared.expected_tasks)
+     if set(tasks) != expected:
+         return 1e12, result, ['E2_TASK_COVERAGE']
+     for o in problem.orders if problem.reusable else ():
+@@ -208,7 +210,8 @@
+         if gap > 0:
+             violations.append('CLEAN_STOCK_SHORTAGE')
+             shortage += gap
+-    distance = sum(route_distance(problem, r, layer) for layer in ('e1', 'e2') for r in result[layer+'_trips'])
++    distance_of = route_distance if _prepared is None else _prepared.route_distance
++    distance = sum(distance_of(problem, r, layer) for layer in ('e1', 'e2') for r in result[layer+'_trips'])
+     result['info']['objective'] = distance
+     return distance+len(violations)*1e6+shortage*1e5, result, violations
+ 

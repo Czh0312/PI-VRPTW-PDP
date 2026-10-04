@@ -2,6 +2,7 @@ from typing import Dict, List, Optional
 import math
 from models.routing.common.domain.node import Node, Depot, Satellite, Customer
 from models.routing.common.domain.vehicle import FleetConfig
+from models.routing.common.operating_policy import OperatingPolicy
 
 class ProblemInstance:
     """
@@ -12,7 +13,8 @@ class ProblemInstance:
     def __init__(self, nodes: Dict[str, Node], fleet_config: Dict[str, float],
                  speed: float = 1.0,
                  distance_matrix: Optional[Dict[str, Dict[str, float]]] = None,
-                 travel_time_matrix: Optional[Dict[str, Dict[str, float]]] = None):
+                 travel_time_matrix: Optional[Dict[str, Dict[str, float]]] = None,
+                 operating_policy=None):
         # ==========================================
         # 1. 基础节点数据初始化
         # ==========================================
@@ -23,6 +25,8 @@ class ProblemInstance:
 
         # 自动识别并将节点分类（Depot, Satellite, Customer）
         self._identify_node_types()
+        self.operating_policy = OperatingPolicy.from_config(
+            operating_policy if operating_policy is not None else fleet_config.get("operating_policy"))
         
         # ==========================================
         # 2. 车辆与容量配置 (E1 & E2)
@@ -45,6 +49,7 @@ class ProblemInstance:
         self._provided_distance_matrix = distance_matrix
         self._provided_travel_time_matrix = travel_time_matrix
         self._build_matrices()
+        self.operating_policy.validate_problem(self)
 
     def _identify_node_types(self):
         """遍历 nodes 字典，根据实例类型分发到对应列表"""

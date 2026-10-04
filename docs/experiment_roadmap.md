@@ -1,101 +1,11 @@
-# 当前实验路线
+# 当前实验顺序
 
-## 1. 目标
+1. 使用 `data/manifest.json` 固定输入和批次口径，保留输入哈希与独立审计。
+2. 对 M3 的 B=1/B>1 做同实例、同预算的算法验证与池规模研究；可行构造不等于最优解。
+3. 适配 M1/M2 的纯配送与 M4 的自由分仓到同一单批日程、服务要求与费用口径；历史基线不能直接代替。
+4. 以 M1/M3、M2/M4 做包装对照，明确容器投资、周期运营、寿命和评价期，研究回本条件与敏感性。
+5. 核实实际业务字段后开展真实配送基础上的应用；未观测回收字段仍标为情景。
 
-实验分成三条证据链：
+当前入口为 `experiments/runs/run_multibatch_cycle.py` 或 `main.py compare`。支持 manifest 选择、种子、预算、外层超时、冻结输入与源码、失败留存。`--list-only` 和 `--dry-run` 不启动求解。
 
-1. 小规模精确实验验证模型约束和 ALNS 解质量；
-2. 大规模 ALNS 实验验证算法可扩展性与各机制的边际价值；
-3. LaDe-D 案例把真实道路里程接入生命周期成本模型。
-
-当前实验只使用 `data/zhou_later_pickup/` 和 `data/real_case/`。Model 1–7 均可参加小规模精确验证和适用的 ALNS 对比；M7 精确枚举只建议用于很小实例。
-
-## 2. 小规模精确验证
-
-数据使用 Zhou Set1 的 7/10/12 客户实例。建议按模型能力分层：
-
-| 对比 | 目的 | 主要指标 |
-| --- | --- | --- |
-| M1 vs M2 | 自由分仓对纯配送的影响 | objective、assignment、runtime |
-| M3 vs M4 | 自由分仓对配送—回收的影响 | objective、assignment、runtime |
-| M3 vs M5 vs M6 | 空箱接力/交接的影响 | objective、relay events、runtime |
-| M4/M6 vs M7 | 自由分仓与异步交接联合价值 | assignment、relay events、objective、runtime |
-| Exact vs ALNS | 启发式解质量 | proven optimum、ALNS gap、命中时间 |
-
-精确求解达到时间限制时必须同时保存 incumbent、best bound 和 gap，并标记为未证明。不得将受限候选集合上的 `OPTIMAL` 当作原问题全局最优。
-
-当前批处理入口：
-
-```powershell
-python experiments/runs/run_mainline_small_exact.py `
-  --groups small --scenarios standard_same_day --models 1 2 3 4 6 7
-
-python experiments/runs/run_small_alns_time_to_exact.py --help
-python experiments/runs/run_model5_model6_exact_comparison.py --help
-```
-
-## 3. 中大规模 ALNS
-
-数据使用 Zhou Set2 的 100/200 客户实例。比较 M1、M2、M3、M4、M6、M7，并在相同场景、时间预算和随机种子下报告：
-
-- 可行率；
-- 总距离及 E1/E2 分项；
-- 多 seed 均值与标准差；
-- M2 相对 M1、M4 相对 M3 的自由分仓收益；
-- M6 相对 M3 的交接收益和实际交接次数；
-- M7 的最终分仓、相对同次第一阶段自由分仓解的交接收益和实际交接次数；
-- 运行时间。
-
-入口：
-
-```powershell
-python main.py compare --scale large --scenario standard_same_day `
-  --time 10 --seed 42 --models 1 2 3 4 6 7
-```
-
-比较以相同时间预算为主。不同模型单次迭代的计算量不同，不能只用相同迭代数判断优劣。
-
-Model 7 已完成一组标准基准：Set1 的22个实例按120秒/例运行精确法，
-10例证明全局最优、7例得到限时可行解、5例限时内无incumbent；Set2的18个
-实例按10秒/例、seed=42运行ALNS，17例得到可行解。完整结果见
-`output/experiments/model7_exact_and_large_alns_experiment.md`，稳定机器可读结果见
-`output/results/model7_exact_and_alns/`。
-
-为直接比较大规模机制，另完成了 M3、M4、M6、M7 的统一 ALNS 批次：
-`standard_same_day` 的18个实例、seed=42/43/44、每例3秒、迭代上限
-1,000,000。结果见
-`output/experiments/model3467_large_comparison_20260906/report.md`；原始运行见
-同目录的 `runs.jsonl` 和 `runs.csv`。该批次用于比较限时启发式表现，不提供
-全局最优性结论。
-
-3秒批次作为快速探针；正式大规模比较采用同一实例和 seed 的10秒批次，结果见
-`output/experiments/model3467_large_alns_10s/report.md`，合并运行数据见
-`output/experiments/model3467_large_alns_10s/runs_merged.csv`。
-
-以上本地3秒/10秒批次及 `model347_comparison_20260906` 批次对应提交
-`2ab729d` 保存的合并前实现。随后合入远程 `5bcb040` 的求解器优化，
-包括 M7 剩余时间续搜；已有数值保持原样，不代表合并后代码的重新实验。
-
-## 4. 真实案例成本分析
-
-LaDe-D 杭州案例使用 `config/cases/lade_hz_0829.json` 统一组合实例、车辆参数、成本参数和 OSRM 矩阵。需要报告：
-
-- 各路径机制的公里数与运输成本；
-- 一次性/可循环方案的累计成本曲线；
-- 清洗、追踪、损耗和运输的价值分解；
-- 损耗率等关键参数的敏感性；
-- 所有情景假设与真实观测字段的边界。
-
-```powershell
-python main.py cost --case config/cases/lade_hz_0829.json --time 10 `
-  --output output/economic_analysis_lade_real_0829
-```
-
-## 5. 报告规则
-
-- 机器可读的 CSV/JSON 与 Markdown 结论必须来源一致；
-- 结果目录保留数据集、场景、模型、seed、预算和时间戳；
-- 只在 `proven_optimal=True` 时计算相对精确最优 gap；
-- 未触发交接时应如实报告“0 次”，不能仅根据模型具备该机制推断收益；
-- Zhou 坐标不直接换算为真实人民币运输成本；真实成本采用 LaDe-D OSRM 公里矩阵；
-- 旧版“固定分仓逐轮中转试探”Model 7 研究记录只在 `archive/` 中追溯，不与当前联合 Model 7 汇总混用。
+旧实验及旧回本结论在清理前快照中，仅供追溯。清理不代表新版正式实验或经济性论证已完成。

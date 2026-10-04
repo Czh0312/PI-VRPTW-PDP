@@ -1,0 +1,58 @@
+...........................FF.........................                   [100%]
+=================================== FAILURES ===================================
+___________ test_nonassociative_initial_loads_do_not_share_prefixes ____________
+
+    def test_nonassociative_initial_loads_do_not_share_prefixes():
+        base = tiny_problem(3, 1)
+        orders = [replace(o, count=1, goods_weight=w) for o, w in zip(base.orders, (1e16, 1, 1))]
+        p = MultiBatchInstance(base.network, orders, base.operating_policy, model=3)
+        scorer = SingleBatchRouteScorer(p)
+        route = dict(satellite='S', tasks=[('o2', 'd'), ('o3', 'd')])
+        goods = {(s, 'b1'): 0 for s in p.satellites}
+>       helper = scorer.prepare_delivery_insertions(p, route, goods, 0)
+
+tests/routing/test_single_batch_delivery_prefix.py:166: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+models/routing/solvers/alns/single_batch_scoring.py:38: in prepare_delivery_insertions
+    return _DeliveryInsertions(self, route, goods, vehicle_ready)
+models/routing/solvers/alns/single_batch_scoring.py:172: in __init__
+    self.tasks = [scorer.tasks[t] for t in route['tasks']]
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+.0 = <list_iterator object at 0x1082c0040>
+
+>   self.tasks = [scorer.tasks[t] for t in route['tasks']]
+E   KeyError: ('o3', 'd')
+
+models/routing/solvers/alns/single_batch_scoring.py:172: KeyError
+_ test_delivery_preparation_has_no_travel_and_is_reused_when_initial_loads_match _
+
+    def test_delivery_preparation_has_no_travel_and_is_reused_when_initial_loads_match():
+        p = tiny_problem(3, 1)
+        scorer = SingleBatchRouteScorer(p)
+        travel = scorer.travel;calls = []
+        def wrapped(a, b):
+            calls.append((a, b));return travel(a, b)
+        scorer.travel = wrapped
+        route = dict(satellite='S', tasks=[('o2', 'd'), ('o2', 'p'), ('o3', 'p')])
+        goods = {(s, 'b1'): 0 for s in p.satellites}
+>       helper = scorer.prepare_delivery_insertions(p, route, goods, 0)
+
+tests/routing/test_single_batch_delivery_prefix.py:182: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+models/routing/solvers/alns/single_batch_scoring.py:38: in prepare_delivery_insertions
+    return _DeliveryInsertions(self, route, goods, vehicle_ready)
+models/routing/solvers/alns/single_batch_scoring.py:172: in __init__
+    self.tasks = [scorer.tasks[t] for t in route['tasks']]
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+.0 = <list_iterator object at 0x1082c02e0>
+
+>   self.tasks = [scorer.tasks[t] for t in route['tasks']]
+E   KeyError: ('o3', 'p')
+
+models/routing/solvers/alns/single_batch_scoring.py:172: KeyError
+=========================== short test summary info ============================
+FAILED tests/routing/test_single_batch_delivery_prefix.py::test_nonassociative_initial_loads_do_not_share_prefixes
+FAILED tests/routing/test_single_batch_delivery_prefix.py::test_delivery_preparation_has_no_travel_and_is_reused_when_initial_loads_match
+2 failed, 52 passed in 1.06s

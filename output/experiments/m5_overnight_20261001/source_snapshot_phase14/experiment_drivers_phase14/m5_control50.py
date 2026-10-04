@@ -1,0 +1,15 @@
+from pathlib import Path
+import json,hashlib
+H=Path('/Users/chenzeheng/Desktop/2E-VRPTW-PDD/output/experiments/m5_overnight_20261001');(H/'control50').mkdir()
+s=(H/'master49.py').read_text().replace('master49','control50')
+s=s.replace("model.update()\n (out/'integer_variables.json')","model.remove(model.getConstrByName('core47_cut_no_good'))\n model.update()\n (out/'integer_variables.json')")
+s=s.replace('complete_route_choice_integrality=True,all_original_columns_preserved=True','complete_route_choice_integrality=True,all_original_columns_preserved=True,only_last_S3_no_good_deleted=True')
+s=s.replace('experimental_complete_joint_master_with_all_route_choice_integrality','experimental_complete_joint_integer_control_without_last_S3_no_good')
+(H/'control50.py').write_text(s)
+old=json.loads((H/'manifest_master49_input.json').read_text())['sha256'];old[str(H/'control50.py')]=hashlib.sha256((H/'control50.py').read_bytes()).hexdigest();(H/'manifest_control50_input.json').write_text(json.dumps({'sha256':old},indent=2)+'\n')
+s=(H/'validators_phase14/master49.py').read_text().replace("out=HERE/'master49'","out=HERE/'control50'")
+s=s.replace('assert base.NumVars==model.NumVars and base.NumConstrs==model.NumConstrs','assert base.NumVars==model.NumVars and base.NumConstrs-1==model.NumConstrs')
+s=s.replace('for x,y in zip(base.getConstrs(),model.getConstrs()):assert x.ConstrName==y.ConstrName and row(base,x)==row(model,y)',"oldrows={x.ConstrName:row(base,x) for x in base.getConstrs()};newrows={x.ConstrName:row(model,x) for x in model.getConstrs()};assert oldrows.pop('core47_cut_no_good')==('<',0,{'core47_cut_group_0':1});assert oldrows==newrows")
+s=s.replace('all_original_rows_objective_indicators_and_bounds_unchanged=True','all_other_original_rows_objective_indicators_and_bounds_unchanged=True,only_last_S3_no_good_deleted=True')
+s=s.replace("assert model.Status==2 and model.ObjBound+1e-6>=cert['candidate_global_lower']","assert model.Status==2 and model.ObjBound+1e-6>=cert['raw_bound']-cert['margin']")
+(H/'validators_phase14/control50.py').write_text(s)

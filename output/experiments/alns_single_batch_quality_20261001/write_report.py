@@ -1,0 +1,57 @@
+"""Final report from complete results; rejected policies stay visible."""
+from pathlib import Path
+import json
+OUT=Path(__file__).resolve().parent;ROOT=OUT.parents[2]
+c=json.loads((OUT/'comparison.json').read_text());v=json.loads((OUT/'verification.json').read_text())
+keep=c['worst_removal_met_rule'];f=c['fixed_work']
+lines=['# 单批次 ALNS：时序传播提速与质量试验（2026-10-01）','',
+'## Material Passport','',
+'- Origin Skill：academic-research-suite / experiment-agent。',
+'- Origin Mode：validate，连续完成用户授权的 M1–M4 优化。',
+'- Verification Status：VERIFIED，限于已保存的对照、独立审计、回归和复现。','',
+'## 采用的改动','',
+'**M3/M4 使用整数索引数组执行时序传播。** 每个候选仍重新建立约束、传播到货/服务时刻，并检查容量、窗口、先送后取、物理车辆复用、回收量和库存。节点、边、队列顺序及 max/add 运算顺序保留，没有缓存可行性结论。完整参考解码器继续保留。', '',
+'两组 100 顾客实例，固定 300 次迭代，三次独立进程重复的 CPU 中位数：','',
+'| 模型 | 相比上一版的 CPU 耗时下降 |', '|---|---:|']
+for model in (3,4):
+ ds=[r['cpu_reduction_percent'] for r in f if r['model']==model]
+ lines.append(f'| M{model} | {min(ds):.2f}%–{max(ds):.2f}% |')
+lines += ['', '此表来自单独的时序传播消融实验，不包含 M2 新算子的搜索轨迹变化。48 次运行全部有效，最终路线、分仓和目标值逐值一致。M1/M2 的耗时差异较小且有波动，最终保留它们原有的字典传播路径。','',
+('**M2 采用按整单距离贡献排序的移除修复。** 对每个订单移除其全部访问，计算完整有向路线的静态距离变化，再带随机偏向选择订单并完整修复。它只用于候选排序，不是可行性或最优性证明。M1/M3/M4 不启用此算子。' if keep else '**M2 新移除算子未达到预登记条件，已撤回；M1/M2 沿用上一版搜索策略。** 本轮最终改动仅为 M3/M4 的等价时序传播提速。'), '',
+'## 完整质量对照','',
+'以下为冻结候选版本与本轮基线的全部 32 对结果。若 M2 未被采用，M2 行记录的是被否决候选，不能作为最终版本的收益。距离变化先按每对 `(候选/基线-1)×100%` 计算，再等权平均；负数表示改善。','',
+'| 模型 | 5 秒平均距离变化 | 改善 / 持平 / 退步 | 5 秒最大单次退步 | 15 秒平均距离变化 |', '|---|---:|---:|---:|---:|']
+for model in range(1,5):
+ a=next(r for r in c['summary'] if r['model']==model and r['budget']==5)
+ b=next(r for r in c['summary'] if r['model']==model and r['budget']==15)
+ lines.append(f"| M{model} | {a['mean_change_percent']:+.2f}% | {a['improved']} / {a['equal']} / {a['worse']} | +{a['maximum_regression_percent']:.2f}% | {b['mean_change_percent']:+.2f}% |")
+lines += ['', f"候选与基线各 **{c['valid_after']}/32**、**{c['valid_before']}/32** 个结果有效；候选 **{c['periodic_after']}/32** 通过周期重放。候选最大墙钟超出预算约 **{c['max_wall_overrun']:.3f} 秒**。", '',
+'5 秒对照使用另一个母例的 50/100 顾客场景，每模型三种子；15 秒使用 100 顾客、10 仓点场景，每模型两个种子。这些母来源在此前轮次出现过，不是完全未见数据。50 顾客嵌套于 100 顾客，不能视为独立来源。结果不证明每次同时间搜索都会改善；机器负载未完全控制。','',
+'采用条件在观察这些结果前登记：M2 的六对短预算中至少四对改善，且短、长预算平均变化均不增加，全部审计有效。未按观察后的结果修改阈值。','']
+lines += ['## 未采用的试验','',
+'| 试验 | M3 平均距离变化 | M4 平均距离变化 | 决定 |', '|---|---:|---:|---|']
+for name,label in [('pair_pilot_comparison.json','配送/回收随机分开插入'),('prefix_pilot_comparison.json','配送放在前段、回收放在后段')]:
+ rs=json.loads((OUT/name).read_text())
+ a=next(r for r in rs if r['model']==3);b=next(r for r in rs if r['model']==4)
+ lines.append(f"| {label} | {a['mean']:+.2f}% | {b['mean']:+.2f}% | 不采用 |")
+lines += ['', '两项试验分别为 12 对，使用本轮开发来源的 50/100 顾客实例，5 秒、种子 42/43/44。全模型按距离贡献移除订单的开发试验另有八对；M1/M3/M4 的平均距离增加约 0.64%/2.84%/5.36%，未启用。M2 两个种子平均改善约 3.47%，因此进入后续验证，而非直接采用。', '',
+'一级到货时间缓存另做了 48 次固定迭代运行，最终解相同，但整体耗时收益很小且有正负波动，已经移除。所有试验源码、原始结果与退步均保留；没有按最好种子汇报。', '',
+'## 协议和验证','',
+'- 固定工作量：`zhou_Set2_100-5-1b`、`zhou_Set2_100-10-1`，四模型，seed42，300 次迭代，60 秒上限不触发，每版三个独立进程重复，前后交错串行。CPU 不含数据加载、profiler 或外部复核审计。纯配送也接受了消融测试，但没有采用其数组路径。',
+'- 5 秒质量：`zhou_Set2_100-5-3_subset50_scenario02` 和 `zhou_Set2_100-5-3_scenario02`，四模型，seed42/43/44，共24对；本轮开发试验使用的是来源02，未用此场景。',
+'- 15 秒质量：`zhou_Set2_100-10-1_scenario02`，四模型，seed42/43，共八对。冻结源码与输入，事先登记全部作业，前后交替运行；失败、退步和候选选择过程保留。',
+'- 数组传播使用标准库 `graphlib.TopologicalSorter` 独立检查20组随机图的最长路径下界，覆盖浮点初始时刻、重复边、非连续标签和断开图；另检查三种循环，包括零时长循环。原完整解码器对照继续覆盖窗口、容量、等待和返回结果所有权，完整结果逐值一致。',
+ f"- 最终回归 **{v['tests_passed']} passed，{v['warnings']} 条依赖弃用警告，{v['test_seconds']:.2f} 秒**。当前工作区与采用源码的四模型、两来源共八组300次迭代最终结果一致，全部重新审计有效。", '',
+'## 限制','',
+'CPU 只确认 M3/M4 在两个100顾客实例上的小幅收益。质量测试仅为三个短预算种子和两个长预算种子的描述统计，场景、规模和来源存在依赖；既有母例在之前轮次已观察。M2 条件用于选择候选，相关样本结果不能当作无偏的总体收益估计。未完全控制机器负载，不宣称显著性、稳定质量提升、全数据集改善、30秒以上性能或全局最优性。', '',
+'统计谬误检查11/11：模型/预算/来源分层；不外推局部均值；说明来源选择和依赖；不作碰撞变量调整；保留全分母；不挑极端种子；不删退步；不做显著性挑选；预登记并保存候选过程；说明负载限制；预算固定不存在所讨论的反向因果问题。', '',
+'## 复核入口','',
+'- [完整质量汇总](../output/experiments/alns_single_batch_quality_20261001/comparison.json)',
+'- [全部质量配对](../output/experiments/alns_single_batch_quality_20261001/paired_results.csv)',
+'- [固定迭代消融](../output/experiments/alns_single_batch_quality_20261001/fixed_work_summary.json)',
+'- [预登记作业与采用条件](../output/experiments/alns_single_batch_quality_20261001/quality_manifest.json)',
+'- [当前工作区复现](../output/experiments/alns_single_batch_quality_20261001/live_equivalence.json)',
+'- [验证记录](../output/experiments/alns_single_batch_quality_20261001/verification.json)',
+'- [回归日志](../output/experiments/alns_single_batch_quality_20261001/full_regression.log)', '',
+'复算：同目录 `summarize.py`；固定工作量 `fixed_work.py`；质量对照 `run_pairs.py`；采用源码复现 `check_final.py`。','']
+(ROOT/'docs/alns_single_batch_quality_20261001.md').write_text('\n'.join(lines))

@@ -1,0 +1,82 @@
+................................................................FFFF.... [ 15%]
+........................................................................ [ 31%]
+........................................................................ [ 47%]
+........................................................................ [ 63%]
+........................................................................ [ 78%]
+........................................................................ [ 94%]
+.........................                                                [100%]
+=================================== FAILURES ===================================
+_ test_many_unused_slots_and_noncanonical_vehicle_start_remain_feasible[False-False] _
+
+compressed = False, linear = False
+
+    @pytest.mark.parametrize('compressed',[False,True])
+    @pytest.mark.parametrize('linear',[False,'complete'])
+    def test_many_unused_slots_and_noncanonical_vehicle_start_remain_feasible(compressed,linear):
+        gp = pytest.importorskip('gurobipy')
+        from tests.routing.test_single_batch_schedule_start import delayed_three_trip_start
+        p,initial = delayed_three_trip_start()
+        p.operating_policy = replace(p.operating_policy,e2_max_trips_per_vehicle=3)
+        p.fleet.e2_per_sat_count = 3
+        before = deepcopy(initial)
+>       assert audit_solution(p,initial)['valid']
+E       assert False
+
+tests/routing/test_single_batch_causal_bounds.py:54: AssertionError
+_ test_many_unused_slots_and_noncanonical_vehicle_start_remain_feasible[False-True] _
+
+compressed = True, linear = False
+
+    @pytest.mark.parametrize('compressed',[False,True])
+    @pytest.mark.parametrize('linear',[False,'complete'])
+    def test_many_unused_slots_and_noncanonical_vehicle_start_remain_feasible(compressed,linear):
+        gp = pytest.importorskip('gurobipy')
+        from tests.routing.test_single_batch_schedule_start import delayed_three_trip_start
+        p,initial = delayed_three_trip_start()
+        p.operating_policy = replace(p.operating_policy,e2_max_trips_per_vehicle=3)
+        p.fleet.e2_per_sat_count = 3
+        before = deepcopy(initial)
+>       assert audit_solution(p,initial)['valid']
+E       assert False
+
+tests/routing/test_single_batch_causal_bounds.py:54: AssertionError
+_ test_many_unused_slots_and_noncanonical_vehicle_start_remain_feasible[complete-False] _
+
+compressed = False, linear = 'complete'
+
+    @pytest.mark.parametrize('compressed',[False,True])
+    @pytest.mark.parametrize('linear',[False,'complete'])
+    def test_many_unused_slots_and_noncanonical_vehicle_start_remain_feasible(compressed,linear):
+        gp = pytest.importorskip('gurobipy')
+        from tests.routing.test_single_batch_schedule_start import delayed_three_trip_start
+        p,initial = delayed_three_trip_start()
+        p.operating_policy = replace(p.operating_policy,e2_max_trips_per_vehicle=3)
+        p.fleet.e2_per_sat_count = 3
+        before = deepcopy(initial)
+>       assert audit_solution(p,initial)['valid']
+E       assert False
+
+tests/routing/test_single_batch_causal_bounds.py:54: AssertionError
+_ test_many_unused_slots_and_noncanonical_vehicle_start_remain_feasible[complete-True] _
+
+compressed = True, linear = 'complete'
+
+    @pytest.mark.parametrize('compressed',[False,True])
+    @pytest.mark.parametrize('linear',[False,'complete'])
+    def test_many_unused_slots_and_noncanonical_vehicle_start_remain_feasible(compressed,linear):
+        gp = pytest.importorskip('gurobipy')
+        from tests.routing.test_single_batch_schedule_start import delayed_three_trip_start
+        p,initial = delayed_three_trip_start()
+        p.operating_policy = replace(p.operating_policy,e2_max_trips_per_vehicle=3)
+        p.fleet.e2_per_sat_count = 3
+        before = deepcopy(initial)
+>       assert audit_solution(p,initial)['valid']
+E       assert False
+
+tests/routing/test_single_batch_causal_bounds.py:54: AssertionError
+=========================== short test summary info ============================
+FAILED tests/routing/test_single_batch_causal_bounds.py::test_many_unused_slots_and_noncanonical_vehicle_start_remain_feasible[False-False]
+FAILED tests/routing/test_single_batch_causal_bounds.py::test_many_unused_slots_and_noncanonical_vehicle_start_remain_feasible[False-True]
+FAILED tests/routing/test_single_batch_causal_bounds.py::test_many_unused_slots_and_noncanonical_vehicle_start_remain_feasible[complete-False]
+FAILED tests/routing/test_single_batch_causal_bounds.py::test_many_unused_slots_and_noncanonical_vehicle_start_remain_feasible[complete-True]
+4 failed, 453 passed in 6.31s

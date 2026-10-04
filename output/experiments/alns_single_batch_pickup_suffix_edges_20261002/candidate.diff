@@ -1,0 +1,77 @@
+--- before/models/routing/solvers/alns/single_batch_scoring.py
++++ after/models/routing/solvers/alns/single_batch_scoring.py
+@@ -9,10 +9,11 @@
+ 
+ 
+ class SingleBatchRouteScorer:
+-    def __init__(self, problem):
++    def __init__(self, problem, *, cache_pickup_edges=True):
+         if len(problem.operating_policy.batches) != 1:
+             raise ValueError('Single-batch scoring requires B=1')
+         self.problem = problem
++        self.cache_pickup_edges = cache_pickup_edges
+         self.policy, self.fleet = problem.operating_policy, problem.fleet
+         self.batch = self.policy.batches[0]
+         self.tasks = {}
+@@ -85,6 +86,7 @@
+     def __init__(self, scorer, route, goods, vehicle_ready):
+         self.scorer, self.site = scorer, route['satellite']
+         self.tasks = [scorer.tasks[t] for t in route['tasks']]
++        self.edge_tasks = None
+         p, f = scorer.policy, scorer.fleet
+         self.return_after = route.get('return_after', p.cycle_start)
+         self.weight_cap, self.volume_cap = f.e2_weight_cap, f.e2_volume_cap
+@@ -125,6 +127,53 @@
+             self.prefixes.append((current, weight, volume, load_penalty, distance, late, previous, dict(delivered)))
+ 
+     def __call__(self, oid, position):
++        if not self.scorer.cache_pickup_edges:
++            return self._reference_score(oid, position)
++        self._extend(position)
++        scorer, p = self.scorer, self.scorer.policy
++        weight_cap, volume_cap = self.weight_cap, self.volume_cap
++        weight_scale, volume_scale = self.weight_scale, self.volume_scale
++        distance_to, travel_to = scorer.distance, scorer.travel
++        current, weight, volume, load_penalty, distance, late, previous, delivered = self.prefixes[position]
++        delivered = dict(delivered)
++        inserted = scorer.tasks[oid, 'p']
++        customer = inserted[0].customer
++        inserted = inserted+(travel_to(previous, customer), distance_to(previous, customer))
++        if position < len(self.tasks):
++            if self.edge_tasks is None:
++                # Static adjacent legs, requested only by a suffix score. The
++                # first original task always follows the inserted task, so its
++                # incoming leg cannot be reused from the unchanged route.
++                self.edge_tasks = [self.tasks[0]+(None, None)]
++                for before, task in zip(self.tasks, self.tasks[1:]):
++                    a, b = before[0].customer, task[0].customer
++                    self.edge_tasks.append(task+(travel_to(a, b), distance_to(a, b)))
++            first = self.tasks[position]
++            first = first+(travel_to(customer, first[0].customer), distance_to(customer, first[0].customer))
++            tasks = chain((inserted, first), self.edge_tasks[position+1:])
++        else:
++            tasks = (inserted,)
++        for order, w, vol, kind, ready, due, travel, leg_distance in tasks:
++            current = max(current+travel, ready)
++            if kind == 'p':
++                current = max(current, delivered.get(order.id, order.delivery_window[0]+order.service_time)+order.min_use_time)
++            late += max(0, current-due)
++            current += order.service_time
++            if kind == 'd':
++                delivered[order.id] = current
++            distance += leg_distance
++            previous = order.customer
++            weight += w if kind == 'p' else -w
++            volume += vol if kind == 'p' else -vol
++            load_penalty += max(0, weight-weight_cap)/weight_scale
++            load_penalty += max(0, volume-volume_cap)/volume_scale
++        completed = max(current+travel_to(previous, self.site)+p.e2_return_unload_time, self.return_after)
++        late += max(0, completed+p.e2_turnaround_time-p.cycle_end)
++        late += max(0, completed-scorer.batch.cutoff)
++        distance += distance_to(previous, self.site)
++        return distance+1e6*(load_penalty+0)+late*p.time_tick_seconds/60*1e4, completed
++
++    def _reference_score(self, oid, position):
+         self._extend(position)
+         scorer, p = self.scorer, self.scorer.policy
+         weight_cap, volume_cap = self.weight_cap, self.volume_cap

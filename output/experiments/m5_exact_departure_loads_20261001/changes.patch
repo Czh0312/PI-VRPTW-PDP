@@ -1,0 +1,358 @@
+--- before/models/routing/solvers/exact/formulation.py
++++ after/models/routing/solvers/exact/formulation.py
+@@ -10,7 +10,8 @@
+ 
+ def build_model(problem, *, verbose=False, deadline=None, share_e2=True, travel_bounds=None, domain_check=None,
+                 strengthen_multibatch=True, share_cutoff=True, e2_capacity_cuts=True,
+-                linear_e2_links=True, trip_symmetry=True, compress_multibatch_routes=None):
++                linear_e2_links=True, trip_symmetry=True, compress_multibatch_routes=None,
++                factor_e2_loads=False):
+     if len(problem.operating_policy.batches) == 1:
+         from .single_batch_formulation import build_model as build_single
+         return build_single(problem, verbose=verbose, deadline=deadline, share_e2=share_e2,
+@@ -226,6 +227,15 @@
+                                 for i, n in enumerate(nodes) if n['kind'] == 'd')
+         initial_v = gp.quicksum(n['v'] if free and layer == 'e1' else n['v']*visit[i]
+                                 for i, n in enumerate(nodes) if n['kind'] == 'd')
++        departure_loads = ()
++        if layer == 'e2' and factor_e2_loads:
++            # Reusing the sum in every source-arc propagation row creates a
++            # dense matrix. Define it once; projection preserves even the LP.
++            departure_loads = (m.addVar(ub=cap_w, name=label+'_departure_weight'),
++                               m.addVar(ub=cap_v, name=label+'_departure_volume'))
++            m.addConstr(departure_loads[0] == initial_w)
++            m.addConstr(departure_loads[1] == initial_v)
++            initial_w, initial_v = departure_loads
+         m.addConstr(initial_w <= cap_w*(used if strengthen else 1))
+         m.addConstr(initial_v <= cap_v*(used if strengthen else 1))
+         if strengthen:
+@@ -312,6 +322,7 @@
+                 m.addConstr((x[a, b] == 1) >> (times[b] >= batch.cutoff+problem.travel(left, right)))
+         return dict(nodes=nodes, base=base, used=used, start=start, end=end,
+                     global_internal_arcs=shared and compressed_routes,
++                    departure_loads=departure_loads,
+                     visit=visit, times=times, x=x, label=label)
+ 
+     for b in p.batches:
+@@ -647,4 +658,4 @@
+                    assignments=assignments, capacity_activation_cuts=strengthen,
+                    pickup_returns=pickup_returns, shared_cutoff=compact_cutoff,
+                    capacity_separator=capacity_separator, trip_count_symmetry=trip_symmetry,
+-                   linear_e2_links=linear_links)
++                   linear_e2_links=linear_links, factored_e2_loads=bool(factor_e2_loads))
+--- before/models/routing/solvers/exact/solver.py
++++ after/models/routing/solvers/exact/solver.py
+@@ -78,6 +78,8 @@
+                     variable.Start = int(arc in arcs)
+             for i, variable in r['visit'].items():
+                 variable.Start = int(i in order)
++            for resource, variable in zip(('w', 'v'), r.get('departure_loads', ())):
++                variable.Start = sum(r['nodes'][i][resource] for i in order if r['nodes'][i]['kind'] == 'd')
+             for index, event in zip(order, trip['events'] if trip else []):
+                 r['times'][index].Start = event['start']
+                 quantity = r['nodes'][index]['quantity']
+@@ -89,7 +91,7 @@
+ 
+ 
+ def solve_exact(problem, time_limit=60, seed=42, verbose=False, initial_result=None, _travel_bounds=None,
+-                _domain_check=None):
++                _domain_check=None, use_distance_certificate=True):
+     if not math.isfinite(time_limit) or time_limit <= 0:
+         raise ValueError('time_limit must be finite and positive')
+     begun = time.perf_counter()
+@@ -134,6 +136,20 @@
+     result['info']['primal_runtime'] = time.perf_counter()-primal_begun
+     result['info']['primal_seed_objective'] = generated['info']['objective'] if generated is not None else None
+     result['info']['primal_seed_strategy'] = generated['info'].get('primal_strategy') if generated is not None else None
++    certificate = None
++    if problem.model_number == 5 and len(problem.operating_policy.batches) > 1:
++        certificate_begun = time.perf_counter()
++        if use_distance_certificate:
++            from .multibatch_bounds import distance_certificate
++            try:
++                certificate = distance_certificate(problem, deadline=begun+time_limit)
++            except TimeoutError:
++                certificate = dict(bound=0.0, components=[], scope='time_limit')
++        else:
++            certificate = dict(bound=0.0, components=[], scope='disabled')
++        result['distance_certificate'] = certificate
++        result['info'].update(distance_certificate_bound=certificate['bound'],
++                              distance_certificate_runtime=time.perf_counter()-certificate_begun)
+ 
+     def preserve_incumbent():
+         """A timeout or failed start completion must never discard a valid input."""
+@@ -148,6 +164,8 @@
+         if conflict:
+             bound = None
+         kept.update(solver='exact', precheck=precheck)
++        if certificate is not None:
++            kept['distance_certificate'] = certificate
+         kept['info'] = {**info, 'objective': objective, 'proven_optimal': False,
+                         'proven_infeasible': False, 'incumbent_source': supplied['info'].get('incumbent_source', 'audited_start'),
+                         'best_bound': bound, 'runtime': time.perf_counter()-begun,
+@@ -160,6 +178,9 @@
+                                  travel_bounds=travel_bounds, domain_check=domain_check)
+     except TimeoutError:
+         result['info'].update(status='TIME_LIMIT_BUILD', runtime=time.perf_counter()-begun)
++        if certificate is not None and certificate['bound'] > 0:
++            result['info'].update(best_bound=certificate['bound'], best_bound_source='distance_certificate',
++                                  gurobi_best_bound=None)
+         return preserve_incumbent()
+     try:
+         result['info']['mip_start_supplied'] = _set_start(problem, model, ctx, supplied)
+@@ -180,12 +201,16 @@
+                                 'full_integer_time_multibatch_indexed',
+                     build_time=build_time, mip_runtime=model.Runtime,
+                     mip_work=model.Work,
++                    mip_iterations=model.IterCount,
+                     mip_node_count=model.NodeCount,
+                     runtime=time.perf_counter()-begun, sol_count=model.SolCount,
+                     variables=model.NumVars, constraints=model.NumConstrs+model.NumGenConstrs,
++                    linear_nonzeros=model.NumNZs,
+                     general_constraints=model.NumGenConstrs, e2_route_slots=len(ctx['e2']),
++                    single_batch_linear_link_mode=ctx.get('single_batch_linear_links', False),
+                     e2_indexed_internal_arcs=ctx.get('indexed_e2_internal_arcs'),
+                     e2_global_internal_arcs=len(ctx.get('global_e2_arcs', {})),
++                    e2_departure_load_variables=sum(len(r.get('departure_loads', ())) for r in ctx['e2']),
+                     time_tick_seconds=problem.operating_policy.time_tick_seconds,
+                     formulation_features=['sparse_time_arcs', 'vehicle_symmetry', 'causal_steps']+
+                         (['B1_supply_and_load_bounds', 'trip_count_symmetry', 'triangular_trip_slots',
+@@ -195,6 +220,8 @@
+                           'fixed_B1_pickup_quantities'] if len(problem.operating_policy.batches) == 1 else [])+
+                         (['shared_E2_task_states_and_internal_arcs'] if ctx['shared_e2'] else [])+
+                         (['global_E2_arcs_with_route_identity'] if ctx.get('compressed_e2_routes') else [])+
++                        (['B1_linear_E2_connections'] if ctx.get('single_batch_linear_links') else [])+
++                        (['factored_E2_departure_loads'] if ctx.get('factored_e2_loads') else [])+
+                         (['multibatch_capacity_activation', 'multibatch_load_bounds_and_arc_pruning']
+                          if ctx.get('capacity_activation_cuts') else [])+
+                         (['shared_order_cutoff_states'] if ctx.get('shared_cutoff') else [])+
+@@ -214,11 +241,22 @@
+             info['best_bound'] = float(model.ObjBound) if math.isfinite(model.ObjBound) else None
+         except (AttributeError, gp.GurobiError):
+             pass
++        if certificate is not None:
++            info['gurobi_best_bound'] = info.get('best_bound')
++            certificate_bound = certificate['bound']
++            if certificate_bound > 0 and (info['best_bound'] is None or certificate_bound > info['best_bound']):
++                info.update(best_bound=certificate_bound, best_bound_source='distance_certificate')
++            else:
++                info['best_bound_source'] = 'gurobi' if info['best_bound'] is not None else None
+         if not model.SolCount:
+             info['proven_optimal'] = False
+             return preserve_incumbent()
+         gap = model.MIPGap
+         info.update(objective=model.ObjVal, mip_gap=gap if math.isfinite(gap) else None)
++        if certificate is not None:
++            info['gurobi_mip_gap'] = info['mip_gap']
++        if certificate is not None and info['best_bound'] is not None:
++            info['mip_gap'] = max(0, info['objective']-info['best_bound'])/max(1e-9, abs(info['objective']))
+         if problem.free_assignment:
+             result['assignment'] = {c: s for (c, s), variable in ctx['assignments'].items() if variable.X > .5}
+ 
+--- before/models/routing/solvers/exact/multibatch_bounds.py
++++ after/models/routing/solvers/exact/multibatch_bounds.py
+@@ -0,0 +1,133 @@
++"""Cheap distance certificates for fixed-satellite, reusable M5 cycles.
++
++E1 uses shortest distances on all E1 locations before projecting each batch
++onto its mandatory delivery stops. E2 retains all mandatory task visits,
++with only universally forbidden adjacency removed. The entering/leaving
++arc minima and rounded minimum route count bound the two echelons separately.
++Neither a metric input nor paired delivery/pickup trips are required.
++"""
++import heapq
++import math
++
++from .multibatch_cuts import minimum_trip_count
++
++
++def _shortest(problem, origin, sites, check_budget):
++    distances = {site: math.inf for site in sites}
++    distances[origin] = 0.0
++    queue = [(0.0, origin)]
++    while queue:
++        check_budget()
++        value, site = heapq.heappop(queue)
++        if value != distances[site]:
++            continue
++        for other in sites:
++            candidate = value+problem.distance(site, other)
++            if candidate < distances[other]:
++                distances[other] = candidate
++                heapq.heappush(queue, (candidate, other))
++    return distances
++
++
++def _tour_bound(closure, base, required, check_budget):
++    """Minimum closed tour on the relaxed metric, or a safe arc-minimum bound.
++
++Concatenating any number of delivery trips and shortcutting repeated nodes
++on this directed shortest-path closure yields a Hamiltonian tour no longer
++than those trips. Held-Karp is therefore a lower bound even with finite
++capacities and optional pickup stops. Bound its exponential part at 12 stops.
++"""
++    if not required:
++        return 0.0
++    incoming = math.fsum(min(closure[other][site] for other in [base]+required if other != site)
++                         for site in required)+min(closure[site][base] for site in required)
++    outgoing = math.fsum(min(closure[site][other] for other in [base]+required if other != site)
++                         for site in required)+min(closure[base][site] for site in required)
++    if len(required) > 12:
++        return max(incoming, outgoing)
++    states = {(1 << i, i): closure[base][site] for i, site in enumerate(required)}
++    for mask in range(1, 1 << len(required)):
++        check_budget()
++        for i, site in enumerate(required):
++            current = states.get((mask, i))
++            if current is None:
++                continue
++            for j, other in enumerate(required):
++                if mask & (1 << j):
++                    continue
++                key = mask | (1 << j), j
++                candidate = current+closure[site][other]
++                if candidate < states.get(key, math.inf):
++                    states[key] = candidate
++    mask = (1 << len(required))-1
++    return max(incoming, outgoing,
++               min(states[mask, i]+closure[site][base] for i, site in enumerate(required)))
++
++
++def distance_certificate(problem, deadline=None):
++    """Return a conservative bound and its independently checkable components."""
++    if (problem.model_number != 5 or problem.free_assignment or not problem.reusable
++            or len(problem.operating_policy.batches) <= 1):
++        return dict(bound=0.0, components=[], scope='not_applicable')
++    def check_budget():
++        if deadline is not None:
++            import time
++            if time.perf_counter() >= deadline:
++                raise TimeoutError('distance certificate reached the total budget')
++
++    sites = (problem.depot,)+problem.satellites
++    closure = {site: _shortest(problem, site, sites, check_budget) for site in sites}
++    components = []
++    for batch in problem.operating_policy.batches:
++        required = [site for site in problem.satellites if problem.demands[site, batch.id]]
++        if not required:
++            continue
++        incoming = math.fsum(min(closure[other][site] for other in [problem.depot]+required if other != site)
++                             for site in required)
++        outgoing = math.fsum(min(closure[site][other] for other in [problem.depot]+required if other != site)
++                             for site in required)
++        incoming += min(closure[site][problem.depot] for site in required)
++        outgoing += min(closure[problem.depot][site] for site in required)
++        tour = _tour_bound(closure, problem.depot, required, check_budget)
++        components.append(dict(echelon='E1', batch=batch.id, incoming=incoming,
++                               outgoing=outgoing, tour_bound=tour, bound=max(incoming, outgoing, tour)))
++    for site in problem.satellites:
++        orders = [o for o in problem.orders if o.satellite == site]
++        if not orders:
++            continue
++        tasks = [(o, kind) for o in orders for kind in problem.task_kinds]
++        locations = tuple(sorted({site}|{o.customer for o in orders}))
++        local_closure = {origin: _shortest(problem, origin, locations, check_budget) for origin in locations}
++        tours = []
++        for batch in problem.operating_policy.batches:
++            required = sorted({o.customer for o in orders if o.batch == batch.id})
++            if required:
++                tours.append(dict(batch=batch.id, bound=_tour_bound(local_closure, site, required, check_budget)))
++
++        def allowed(left, right):
++            if left == right:
++                return False
++            a, kind_a = tasks[left]
++            b, kind_b = tasks[right]
++            if kind_a == kind_b == 'd' and a.batch != b.batch:
++                return False
++            return not (kind_a == 'p' and kind_b == 'd' and a.id == b.id)
++
++        incoming = math.fsum(min([problem.distance(site, o.customer)]+[
++            problem.distance(other.customer, o.customer) for j, (other, _) in enumerate(tasks)
++            if allowed(j, i)]) for i, (o, _) in enumerate(tasks))
++        outgoing = math.fsum(min([problem.distance(o.customer, site)]+[
++            problem.distance(o.customer, other.customer) for j, (other, _) in enumerate(tasks)
++            if allowed(i, j)]) for i, (o, _) in enumerate(tasks))
++        routes = minimum_trip_count(problem, orders)
++        incoming += routes*min(problem.distance(o.customer, site) for o in orders)
++        outgoing += routes*min(problem.distance(site, o.customer) for o in orders)
++        delivery_tours = math.fsum(row['bound'] for row in tours)
++        components.append(dict(echelon='E2', satellite=site, minimum_routes=routes,
++                               incoming=incoming, outgoing=outgoing, delivery_tours=tours,
++                               bound=max(incoming, outgoing, delivery_tours)))
++    raw = math.fsum(row['bound'] for row in components)
++    # Subtract a relative/absolute margin before combining with solver bounds.
++    safe = max(0.0, raw-1e-7*max(1.0, raw)) if math.isfinite(raw) else 0.0
++    return dict(bound=safe, raw_bound=raw, components=components,
++                scope='full_fixed_M5_cycle_distance', method='shortest_closure_tours_and_mandatory_visits')
+--- before/tools/audit/benchmark_multibatch_primal.py
++++ after/tools/audit/benchmark_multibatch_primal.py
+@@ -5,6 +5,8 @@
+ Incumbent mode compares the original seed portfolio with insertion/E1 merging.
+ Root mode compares indicator/rectangular routes with linear E2 links and trip symmetry.
+ Routes mode compares indexed internal arcs with adaptive sharing and route identity.
++Loads mode compares repeated departure-load sums with their factored variables.
++Bounds mode compares Gurobi-only reporting with a separate M5 distance certificate.
+ Both arms use the same total budget and seed; this is not a historical snapshot.
+ Optional --initial-results freezes an audited incumbent for each case in both arms.
+ This small diagnostic does not establish large-instance speed improvements.
+@@ -66,7 +68,7 @@
+             stack.enter_context(patch.object(solver, 'build_model',
+                 side_effect=lambda *a, **kw: original(*a, **kw, **options)))
+         result = solver.solve_exact(problem, time_limit=job['budget'], seed=job['seed'],
+-                                    verbose=True, initial_result=initial)
++                                    verbose=True, initial_result=initial, **job.get('solve_options', {}))
+     wall = time.perf_counter()-begun
+     write(output, dict(job=job, wall_seconds=wall, result=result,
+                        independent_audit=audit_solution(problem, result)))
+@@ -78,7 +80,7 @@
+     parser.add_argument('--cases', nargs='+', default=DEFAULT_CASES)
+     parser.add_argument('--time', type=float, default=5)
+     parser.add_argument('--seeds', type=int, nargs='+', default=[42])
+-    parser.add_argument('--mode', choices=['primal', 'formulation', 'incumbent', 'root', 'routes'], default='primal')
++    parser.add_argument('--mode', choices=['primal', 'formulation', 'incumbent', 'root', 'routes', 'loads', 'bounds'], default='primal')
+     parser.add_argument('--initial-results', nargs='+',
+                         help='one audited result (raw or benchmark payload) per case, frozen for both arms')
+     parser.add_argument('--worker', help=argparse.SUPPRESS)
+@@ -91,7 +93,7 @@
+     if args.initial_results and len(args.initial_results) != len(args.cases):
+         parser.error('--initial-results must supply exactly one result per case')
+     if args.initial_results and args.mode in ('primal', 'incumbent'):
+-        parser.error('--initial-results is only supported for formulation, root and routes ablation')
++        parser.error('--initial-results is only supported for formulation, root, routes, loads and bounds ablation')
+     from configuration.loader import load_routing_case, resolve_project_path
+     from models.routing.common.cycle import load_instance
+     from models.routing.common.cycle.audit import audit_solution
+@@ -139,10 +141,15 @@
+                      ('compact', True, {})],
+             'routes': [('reference', True, dict(compress_multibatch_routes=False)),
+                        ('adaptive', True, {})],
++            'loads': [('reference', True, dict(factor_e2_loads=False)),
++                      ('factored', True, dict(factor_e2_loads=True))],
++            'bounds': [('reference', True, {}), ('bounded', True, {})],
+         }[args.mode]
+         for seed in args.seeds:
+             for variant, warm, options in variants:
+                 jobs.append(dict(id=f'{index:02d}_{seed}_{variant}', variant=variant, build_options=options,
++                                 solve_options=dict(use_distance_certificate=False)
++                                     if args.mode == 'bounds' and variant == 'reference' else {},
+                                  source_case=path, case=str(frozen/'case.json'), warm_start=warm,
+                                  **initial_options,
+                                  budget=args.time, seed=seed,
+@@ -158,14 +165,14 @@
+     # Shared source files may be edited by another active chat. Check the
+     # frozen solver before dispatching workers, including duplicate keywords
+     # (which ast.parse alone does not reject).
+-    for name in ('formulation.py', 'solver.py', 'multibatch_cuts.py', 'primal.py', 'multibatch_primal.py'):
++    for name in ('formulation.py', 'solver.py', 'multibatch_cuts.py', 'primal.py', 'multibatch_primal.py', 'multibatch_bounds.py'):
+         path = output/'source_snapshot/models/routing/solvers/exact'/name
+         compile(path.read_text(), str(path), 'exec')
+     hashes = {str(p.relative_to(output)): hashlib.sha256(p.read_bytes()).hexdigest()
+               for p in sorted(output.rglob('*')) if p.is_file()}
+     write(output/'manifest.json', dict(purpose=f'M5_{args.mode}_ablation_diagnostic', jobs=jobs,
+         python=sys.version, platform=platform.platform(), artifact_sha256=hashes,
+-        python_hash_seed=0, note='Same integer feasible set. No ALNS. Total budget includes primal and model build.',
++        python_hash_seed=0, note='Same integer feasible set. No ALNS. Total budget includes primal, distance certificate and model build.',
+         initial_result_note='Both arms receive the same independently audited frozen incumbent; own primal remains enabled.'
+                             if args.initial_results else 'No supplied incumbent; each worker constructs its own timed primal.'))
+     records = []

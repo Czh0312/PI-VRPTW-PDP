@@ -1,21 +1,14 @@
-# 路径求解模型
+# 路径层
 
-- `common/`：所有模型共用的领域对象、数据/矩阵读取、任务构建和精确求解工具。
-- `alns/`：公共 ALNS 数据结构、搜索引擎、强初始解，以及 Model 1–8 的专属算子。
-- `variants/model_1` 至 `variants/model_8`：当前数学模型与精确求解入口。
-- `catalog.py`：模型编号、slug 与含义的唯一来源。
-- `service.py`：正式入口使用的统一求解分发层；精确求解器按需加载。
+当前编号模型按原有习惯放在 `variants/model_1/`～`model_5/`：
+M1/M2 纯两级配送，M3/M4 单批次循环，M5 多批次循环；M2/M4 可自由选仓。
+每个目录都有 `model.py`、`exact/`、`alns/` 和公共入口 `__init__.py`。
 
-Model 1–7 统一使用 `model.py` 表示完整模型、`exact_solver.py` 表示严格精确入口。
-Model 7 采用完整分仓枚举与松弛证书，固定分仓后调用完整 Model 6 子问题。
-M2/M3/M4 的默认精确入口使用 `common/commodity_flow.py` 的完整四类货物流模型；
-原车辆索引模型通过 `backend="indexed"` 保留。M1 默认继续使用原模型。
-M7 可利用全局松弛同时筛除多个不能改善的分仓，仍保留未闭合子问题的有效下界。
-详见项目 `docs/solver_optimization_20260913.md` 及对应结果总表。
-大型模型的必要约束与目标组件可放入 `formulation/`。过去尝试的列生成、分支定价、
-时间扩展和分解算法已移至 `archive/models/routing/variants/`，不再混入当前主线。
+`service.py` 按编号调用对应目录，入口校验批次数和模型身份。
+`solvers/exact/` 保存 MILP、解提取和自由选仓穷举；`solvers/alns/` 保存初解、评价和启发式搜索。
+两种求解器分别按需加载，不互相导入；ALNS 不加载 Gurobi。
+`common/cycle/` 只保存共同日程、订单、结果格式、分仓转换与独立审计，不包含求解算法。
+`baselines/` 只保存显式调用的历史 M1–M4。旧 M5 中转与 M6–M8 没有恢复。
+`alns/` 为历史基线的通用搜索组件；新版 ALNS 入口在各编号模型目录。
 
-M8 联合优化全部 E1/E2 路线、配送回收安排与同质空箱交接，不再固定基础路线。
-精确入口直接求完整模型；ALNS 在同一搜索循环中处理两级路线和容量协作。
-当前规则下 M8 与 M6 精确可行域相同。历史两阶段版本保留于 `model_8/two_stage_v2/`，
-更早版本位于 `model_8/legacy/`。详见 `docs/model8_capacity_cooperation.md`。
+详见 [模型位置说明](../../docs/model_layout.md)。

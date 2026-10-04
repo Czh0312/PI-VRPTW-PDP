@@ -5,7 +5,7 @@ from models.routing.common.domain.node import Task
 def build_tasks_from_assignment(problem: ProblemInstance, assignment: dict):
     """Build delivery/pickup tasks for an explicit free-assignment partition.
 
-    This follows the Model 4/7 one-container-per-customer formulation and does
+    This follows the Model 4 one-container-per-customer formulation and does
     not mutate the pre-assignment stored on ``ProblemInstance``.
     """
     cw = problem.fleet.container_weight
@@ -63,14 +63,24 @@ def build_tasks_from_assignment(problem: ProblemInstance, assignment: dict):
 
 
 def build_tasks_for_model(problem: ProblemInstance, model_type: int):
+    from .operating_policy import policy_for
+    from models.routing.catalog import require_model_number
+    require_model_number(model_type)
+    policy = policy_for(problem)
+    policy.require_model(model_type)
+    if getattr(policy, 'multi_batch', False):
+        raise ValueError('Multibatch tasks require the event-based solver; static E1 pickup totals are not supported')
+    if policy.single_day:
+        policy.validate_problem(problem)
+        problem.aggregate_demands_from_pre_assignment()
     e1_tasks = []
     e2_tasks_by_sat = {s.id: [] for s in problem.satellites}
 
     cw = problem.fleet.container_weight
     cv = problem.fleet.container_volume
 
-    if model_type in (2, 4, 7):
-        # M2/M4/M7 是顾客自由分仓模型，求解器直接从 ProblemInstance
+    if model_type in (2, 4):
+        # M2/M4 是顾客自由分仓模型，求解器直接从 ProblemInstance
         # 构造任务；这里返回空容器，仅保持统一主入口的调用契约。
         return e1_tasks, e2_tasks_by_sat
     if model_type == 1:
@@ -91,9 +101,9 @@ def build_tasks_for_model(problem: ProblemInstance, model_type: int):
                         c.tw_del,
                     )
                 )
-    elif model_type in (3, 5, 6, 8):
+    elif model_type == 3:
         for s in problem.satellites:
-            if s.delivery_weight > 1e-9:
+            if s.delivery_weight > 1e-9 or (policy.single_day and s.delivery_volume > 1e-9):
                 e1_tasks.append(
                     Task(f"{s.id}d", s.id, "d", s.delivery_weight, s.delivery_volume, (0.0, s.e1_delivery_due_date))
                 )

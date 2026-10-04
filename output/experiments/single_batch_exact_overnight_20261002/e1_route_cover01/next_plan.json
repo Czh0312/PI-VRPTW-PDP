@@ -1,0 +1,28 @@
+{
+  "candidate": "Optional valid E1 component row in complete B1 M3 integer kernel",
+  "status": "registered_design_only_not_implemented",
+  "hypothesis": "The complete E1 route-cover floor improves independent root bounds at very low measured construction cost. Even when the summed E1/E2 root bound is below the complete kernel's total bound, a valid E1-cost component row may remove fractional E1 choices and improve the original complete MILP.",
+  "scope": "B1 M3 only. All original delivery/recovery tasks, integer clocks, cross-trip precedence, capacities, stocks and real vehicles remain in the complete integer model. Never use fixed E1 assignments for M4.",
+  "correctness": [
+    "Use a validated matching-problem fingerprint certificate. Sum the ORIGINAL raw E1 route arc cost expression and add only E1_cost>=certified_E1_component_floor. Do not impose a route-pool restriction.",
+    "Original schedule's complete E1 objective must satisfy the new row. Fixed original integer schedules are loaded/replayed without altered assignment or business data. Original E2 objective is excluded from the E1 row.",
+    "Charge enumeration/LP/certification overhead to the same total end-to-end budget. Baseline skips this stage; candidate spends at most min(2sec,10%total) before the original complete solver.",
+    "Complete E1 relaxation LP is not original integer proof. Only the original full MILP's valid bound and global status can certify the final model.",
+    "Do not change default or M5 behavior. If integration alters public metadata or extraction, independently test wrong model/fingerprint, exhausted build budget, malformed certificate and fixed integer warm starts."
+  ],
+  "validation": "First inspect the complete solver's E1 arc expression and existing component distance cuts. Confirm whether existing generic cuts already dominate this floor. If dominated on both sources, retain diagnosis and do not run pointless end-to-end comparisons. Independent tiny exhaustive integer objective/feasibility and all frozen M3 integer schedule row projection required before timing.",
+  "planned_comparison": "Register fresh independently frozen two-source M3 baseline/candidate, seeds42/43/44 if budget permits, total budgets15/30, same initial schedule per group; reverse order at alternating seeds. Preparation global optimum of source2 must be disclosed, do not choose easier new sources after seeing performance.",
+  "adoption_gate": "Stable end-to-end original integer LB/Gap or proof-time benefit across independent sources/seeds/short-long budgets plus full audit/regression; mixed or negative remainsFalse. Current root-only strength evidence does not meet this gate.",
+  "reviewed_utc": "2026-10-01T19:23:45.115142+00:00",
+  "original_component_api_review": {
+    "B1_dispatch": "formulation.build_model lines22-28 directly returns single_batch_formulation.build_model without distance_cuts/_distance_certificate.",
+    "generic_certificate": "solver.solve_exact distance certificate only for model5 with more than1 batch. Current M3 has no generic E1 component certificate row.",
+    "integration_direction": "Optional guarded M3-only certificate application after model build and before original audited warm-start loading; reconstruct E1 cost from every original E1 route arc/node, depot endpoints -1/-2. Do not modify original row/variable domain or routing extraction.",
+    "fingerprint_note": "Current root outer metadata fingerprints the full input; standalone E1 component record does not yet carry it. Future original-kernel certificate must add full matching fingerprint and scope validation, included in budget, before application.",
+    "source_sha256": {
+      "models/routing/solvers/exact/formulation.py": "87d0aa374c5e8bda32dad90c4ed59b453ede0cf2ae92f67fcfc7d45910631285",
+      "models/routing/solvers/exact/solver.py": "45aa67c9c0ad5f67b1cdc518e6aed37907411ebb96a8f2f871e59dd8446fd69a",
+      "models/routing/solvers/exact/single_batch_formulation.py": "5e06a38417e3286d6117a82f60ab7fd766301454d3667cd7f2d7b1074dad891c"
+    }
+  }
+}

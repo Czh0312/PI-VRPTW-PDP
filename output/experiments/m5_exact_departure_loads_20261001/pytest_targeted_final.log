@@ -1,0 +1,21 @@
+.......................F...                                              [100%]
+=================================== FAILURES ===================================
+___________ test_optional_e1_satellite_detour_uses_shortest_closure ____________
+
+    def test_optional_e1_satellite_detour_uses_shortest_closure():
+        from models.routing.common.domain.node import Satellite
+        from models.routing.common.domain.instance import ProblemInstance
+        base = fixture(pool=2)
+        nodes = dict(base.network.nodes)
+        nodes['T'] = Satellite('T', 0, 0)
+        matrix = {a: {b: 0 if a == b else 100 for b in nodes} for a in nodes}
+        for a, b in [('D', 'T'), ('T', 'S'), ('S', 'D'), ('S', 'C'), ('C', 'S')]:
+            matrix[a][b] = 1
+>       problem = MultiBatchInstance(ProblemInstance(nodes, base.network.fleet_config, distance_matrix=matrix),
+                                     base.orders, base.operating_policy)
+E       AttributeError: 'ProblemInstance' object has no attribute 'fleet_config'
+
+tests/routing/test_multibatch_distance_certificate.py:98: AttributeError
+=========================== short test summary info ============================
+FAILED tests/routing/test_multibatch_distance_certificate.py::test_optional_e1_satellite_detour_uses_shortest_closure
+1 failed, 26 passed in 1.00s

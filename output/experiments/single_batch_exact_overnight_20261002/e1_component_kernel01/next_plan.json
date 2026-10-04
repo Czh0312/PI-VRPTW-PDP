@@ -1,0 +1,21 @@
+{
+  "candidate": "e1_clocked_route_cover01",
+  "status": "registered_not_implemented",
+  "created_utc": "2026-10-01T20:11:07.389036+00:00",
+  "hypothesis": "Clock-free E1 cover bound is too weak and its component row failed stable end-to-end benefit. Original B1M3 E1 delivery windows, first-pickup-after-cutoff movement, return unloading/cleaning/turnaround may exclude cheap relaxed paths. A complete clocked E1 universe could strengthen the component without altering original integer feasibility. Diagnose component strength before any new end-to-end comparisons.",
+  "scope": "B1 M3 ONLY; fixed positive warehouse quantities; original all-D-before-all-P geometry. No M4 assignment transfer or M5 semantic changes.",
+  "correctness": [
+    "Enumerate every ordered D subset and ordered P subset. Check BOTH original capacities and original raw travel/distance, service/start rules and integer task windows BEFORE selecting the cheapest representative by task mask. Filtering the old cheapest representative is invalid: a dearer same-mask route may be the only clock-feasible route.",
+    "Use original single_batch_bounds necessary windows, safe full-network shortest-travel lower bounds ONLY for derived necessary windows; raw travel applies on actual route arcs. Explicit delivery starts batch.start+e1_load_time; pickup-only starts no earlier than cutoff; first pickup arrival additionally at least cutoff+RAW travel from its predecessor.",
+    "Original audited route must embed with same sequence, raw distance, tasks/quantities and integer schedule. Relax only E2 synchronization, cross-route supply/inventory interactions in the component LP. Do not discard original complete model tasks or physical vehicles/serial trips.",
+    "Complete feasible route universe cover/fleet LP gives an E1-only floor after raw-route dual check and numerical repair. Incomplete enumeration or LP means fallback, never restricted universe objective. Do not assert full integer optimality from the component LP."
+  ],
+  "first_validation": "Independent exhaustive integer E1 sequence/clock oracle on tiny directed/zero-time, capacity/window/cutoff cases, plus unchanged original40task schedule projection from both fixed sources. Then cheap frozen two-source component-strength diagnostic, no claimed solver speedup.",
+  "next_budget": "Up to2seconds component per source, Threads1. No long kernel experiment unless bounds materially stronger and independently valid. Future end-to-end fresh frozen baseline/candidate seeds42/43/44 short15/long30 totalbudget, unchanged starts, alternating order.",
+  "adoption_gate": "Only stable end-to-end original LB/Gap/proof-time gains across independent sources/seeds/budgets with complete audits/regression. Component-only gains cannot enable defaults.",
+  "runtime_sha256": {
+    "models/routing/solvers/exact/single_batch_e1_bound.py": "3ae4eebbba2b641e06edf15aa218ae2b8f4c8e0fc522c20ecc50acbae815f5f6",
+    "models/routing/solvers/exact/strengthening.py": "0bd8da42e8797b64904ace43732367ca39d3f4ca38a879adb1caa38e2b934b42",
+    "models/routing/solvers/exact/single_batch_formulation.py": "5e06a38417e3286d6117a82f60ab7fd766301454d3667cd7f2d7b1074dad891c"
+  }
+}

@@ -1,0 +1,131 @@
+"""Fresh ALNS, audited route-pool improvements, and complete-domain certificates.
+
+All stages share one deadline. The explicit entry requires Gurobi; the default
+ALNS entry remains unchanged. Failure to reach a target is reported as such.
+"""
+from copy import deepcopy
+import math
+from pathlib import Path
+import time
+
+from models.routing.common.cycle.audit import audit_solution
+
+
+def solve_hybrid(problem, *, time_limit=660, alns_time_limit=15, primal_time_limit=180,
+        cover_time_limit=360, conditional_time_limit=105, target_gap=.05,
+        seed=42, max_subset_cuts_per_batch=6, max_conditions=3,
+        verbose=False, diagnostics_dir=None):
+    from models.routing.service import solve_routing
+    from .multibatch_route_pool import reoptimize_route_pool
+    from .multibatch_route_cg import route_cover_certificate, site_route_cover
+    from .multibatch_capacity_cuts import select_capacity_subsets
+    from .multibatch_conditional_inventory import refine_conditional_bound
+    from .multibatch_route_pricing import route_context
+    if (problem.model_number != 5 or problem.free_assignment or not problem.reusable
+            or len(problem.operating_policy.batches) <= 1):
+        raise ValueError('Hybrid requires fixed reusable multibatch M5')
+    for name, value in [('time_limit', time_limit), ('alns_time_limit', alns_time_limit)]:
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError(name+' must be finite and positive')
+    for name, value in [('primal_time_limit', primal_time_limit), ('cover_time_limit', cover_time_limit),
+                        ('conditional_time_limit', conditional_time_limit)]:
+        if not math.isfinite(value) or value < 0:
+            raise ValueError(name+' must be finite and nonnegative')
+    if not math.isfinite(target_gap) or not 0 <= target_gap < 1:
+        raise ValueError('target_gap must lie in [0, 1)')
+    for name, value in [('max_subset_cuts_per_batch', max_subset_cuts_per_batch), ('max_conditions', max_conditions)]:
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise ValueError(name+' must be a nonnegative integer')
+    begun = time.perf_counter()
+    deadline = begun+time_limit
+    path = Path(diagnostics_dir) if diagnostics_dir is not None else None
+    stages, lower, reference, conditional = [], 0.0, None, None
+    result = solve_routing(model=5, method='alns', problem=problem, seed=seed,
+        alns_time=min(alns_time_limit, max(1e-12, deadline-time.perf_counter())), alns_iter=100000,
+        verbose=verbose)
+    audited = audit_solution(problem, result)
+    if not audited['valid']:
+        # No certified UB exists; keep explicit failure rather than manufacturing a gap.
+        return dict(result=result, upper_bound=None, bound=0.0, gap=None, target_reached=False,
+            status='NO_AUDITED_ALNS_INCUMBENT', audit=audited, stages=[], runtime=time.perf_counter()-begun,
+            proven_optimal=False, proven_infeasible=False)
+    initial = deepcopy(result)
+    stages.append(dict(stage='alns', upper_bound=audited['objective'], runtime=time.perf_counter()-begun))
+    backend = 'patterns' if len({o.satellite for o in problem.orders}) <= 5 and (
+        problem.operating_policy.e1_turnaround_time == 0) else 'auto'
+    primal_deadline = min(deadline, time.perf_counter()+primal_time_limit)
+    # Two rebuilding passes receive separate shares of the same stage budget.
+    for number in range(2):
+        budget = max(0, primal_deadline-time.perf_counter())/(2-number)
+        if budget <= 1e-6:
+            break
+        result = reoptimize_route_pool(problem, result, time_limit=budget, seed=seed,
+            transfers=True, exchanges=True, recombinations=True, max_passes=1,
+            e1_backend=backend, max_columns=256, verbose=verbose,
+            diagnostics_dir=path/f'primal_{number}' if path else None)
+        audited = audit_solution(problem, result)
+        if not audited['valid']:
+            raise RuntimeError('Hybrid primal failed independent whole-cycle audit')
+        stages.append(dict(stage='route_pool', pass_index=number, upper_bound=audited['objective'],
+            runtime=result['info']['runtime'], pool_complete=False))
+    cover_deadline = min(deadline, time.perf_counter()+cover_time_limit)
+    remaining = max(0, cover_deadline-time.perf_counter())
+    if remaining > 1e-6:
+        reference = route_cover_certificate(problem, time_limit=remaining*.75, initial_result=result,
+            seed=seed, e1_time_limit=30, e1_backend=backend, batch_pricing=True, dual_repair=True,
+            delivery_count_cuts=True, pricing_time_limit=8, verbose=verbose,
+            diagnostics_dir=path/'reference' if path else None)
+        lower = reference['bound']
+        subset_runs = []
+        # Restricted LPs choose rows only. Each resulting bound is repriced over
+        # the complete route domain; restricted master bounds never enter LB.
+        candidates = []
+        for row in reference.get('sites', []):
+            if time.perf_counter() >= cover_deadline:
+                break
+            context = route_context(problem, row['satellite'])
+            cuts = select_capacity_subsets(problem, context, row['columns'],
+                deadline=min(cover_deadline, time.perf_counter()+3), max_per_batch=max_subset_cuts_per_batch)
+            if cuts:
+                candidates.append((row, context, cuts))
+        for number, (old, context, cuts) in enumerate(candidates):
+            now = time.perf_counter()
+            if now >= cover_deadline:
+                break
+            bag = dict(e2_trips=[dict(satellite_id=context['satellite'],
+                events=[dict(order_id=o, kind=k) for o, k in c['tasks']]) for c in old['columns']])
+            refined = site_route_cover(problem, context,
+                deadline=min(cover_deadline, now+(cover_deadline-now)/(len(candidates)-number)),
+                initial_result=bag, seed=seed, batch_pricing=True, dual_repair=True, delivery_count_cuts=True,
+                subset_cuts=cuts, pricing_time_limit=8, verbose=verbose,
+                pricing_export_path=path/f'subsets_{number}_pricing.mps' if path else None)
+            subset_runs.append(dict(satellite=context['satellite'], cuts=cuts, certificate=refined,
+                                    restricted_objective_used_as_bound=False))
+            if refined['bound'] > old['bound']:
+                reference['sites'][reference['sites'].index(old)] = refined
+                component = next(c for c in reference['components'] if c['satellite'] == context['satellite'])
+                component.update(route_cover_bound=refined['bound'], bound=max(component['bound'], refined['bound']))
+        reference['subset_runs'] = subset_runs
+        raw = reference['e1_bound']+math.fsum(c['bound'] for c in reference['components'])
+        lower = max(lower, max(0, raw-1e-7*max(1, abs(raw))))
+        reference.update(bound=lower, raw_bound=raw)
+        stages.append(dict(stage='route_cover', bound=lower, upper_bound=audited['objective'],
+                           subset_runs=len(subset_runs), runtime=cover_time_limit-max(0, cover_deadline-time.perf_counter())))
+    if reference is not None and conditional_time_limit > 0 and time.perf_counter() < deadline:
+        conditional = refine_conditional_bound(problem, reference, result,
+            deadline=min(deadline, time.perf_counter()+conditional_time_limit), seed=seed,
+            max_conditions=max_conditions, target_gap=target_gap, verbose=verbose,
+            diagnostics_dir=path/'conditional' if path else None)
+        lower = max(lower, conditional['bound'])
+        stages.append(dict(stage='conditional_inventory', bound=lower, runtime=conditional['runtime']))
+    upper = audited['objective']
+    if lower > upper+1e-5:
+        raise RuntimeError('Certified lower bound exceeds independently audited upper bound')
+    gap = max(0, upper-lower)/max(1e-9, abs(upper))
+    result['info'].update(objective=upper, best_bound=lower, mip_gap=gap,
+        proven_optimal=False, proven_infeasible=False, proof_scope='M5_hybrid_full_domain_certificates',
+        runtime=time.perf_counter()-begun, target_reached=gap <= target_gap)
+    return dict(result=result, initial_result=initial, upper_bound=upper, bound=lower, gap=gap,
+        target_reached=gap <= target_gap, status='TARGET_REACHED' if gap <= target_gap else 'FEASIBLE_TARGET_NOT_REACHED',
+        audit=audited, stages=stages, reference_certificate=reference, conditional_certificate=conditional,
+        runtime=time.perf_counter()-begun, proven_optimal=False, proven_infeasible=False)

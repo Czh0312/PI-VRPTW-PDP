@@ -33,7 +33,7 @@ def problem(seed):
 def test_complete_flow_matches_vehicle_indexed_model(seed, model):
     p = problem(seed)
     e1,e2 = build_tasks_for_model(p,model)
-    solver = import_module(f'models.routing.variants.model_{model}').solve_exact
+    solver = import_module(f'models.routing.baselines.variants.model_{model}').solve_exact
     common = dict(problem=p,e1_tasks=e1,e2_tasks_by_sat=e2,vehicles_per_satellite=2,
                   time_limit=30,verbose=False,return_info=True,gurobi_params={'Threads':2})
     reference = solver(**common,backend='indexed')

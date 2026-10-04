@@ -1,0 +1,30 @@
+{
+  "status": "design_only_implementation_and_final_registration_pending",
+  "created": "2026-10-01T23:55:13.398055+08:00",
+  "candidate": "M2 audited suffix warm seed with real E2 vehicle repacking",
+  "rationale": "Original-E1 packing rescues a new best option on one short100 incumbent and two otherwise rejected options on one long100 incumbent. E1 alternatives mostly raise evaluation cost; keep the first candidate focused on vehicle scheduling.",
+  "implementation": "Reuse the rejected mid-search audited-tail proposal timing (non-refinement attempt%4==2, max_time/20, top3 geometry). Compare direct, direct_packed, repaired, repaired_packed complete candidates; pack sequences by backward latest-departure bound, greedily pick a real available vehicle under configured slots, never split tasks or change order coverage. Fresh complete decode plus independent fixed and lifted M2 audit must accept strict full-objective gain. Use new owned module/helper or only partitioned_assignment.py; public flag=False must preserve original proposals, RNG, shares40/10,32partitionwarmstarts. No terminal budget reservation. Guards B1 delivery-only and deadline required; no reuse of partial states or failed audits.",
+  "quality": {
+    "short_family": "zhou_Set2_100-5-3",
+    "short_sizes": [
+      50,
+      100
+    ],
+    "short_budget": 5,
+    "short_seeds": [
+      222,
+      223,
+      224
+    ],
+    "long_family": "zhou_Set2_100-10-1_scenario02",
+    "long_size": 100,
+    "long_budget": 15,
+    "long_seeds": [
+      222,
+      223
+    ],
+    "gates": "All16full+periodicvalid; each short/long and short50/short100 mean paired objectivechange<=0%, anysingleworsening<=5%,>=3/6shortwins and>=1/2longwin. Additional mechanism gate: at least one long-budget run actually consumes a packed audited seed. Freeze exact flags/source/input/seed/budget/adoption criteria before quality, no posthoc gate/subset/reseed/retry.",
+    "fixed_work_disabled": "Two100 cases 5-2/10-1 scenario02 seed221 fixed500 must exactly reproduce baseline when feature disabled."
+  },
+  "limitations": "Previously observed scenario geometries, fresh seeds only; physical/customer subset50/100 but some orders/owners/windows differ. Single small descriptive pilot, no significance or general/global-optimum/GAP claim. Process inventory unavailable in sandbox; log load and external interference. All rejected versions and trials retained."
+}

@@ -1,0 +1,126 @@
+........................................................................ [ 10%]
+........................................................................ [ 20%]
+........................................................................ [ 30%]
+.......................................................FF............... [ 40%]
+........................................................................ [ 51%]
+........................................................................ [ 61%]
+........................................................................ [ 71%]
+........................................................................ [ 81%]
+........................................................................ [ 91%]
+.........................................................                [100%]
+=================================== FAILURES ===================================
+_______ test_linear_relaxation_projection_and_sparsity_are_preserved[0] ________
+
+seed = 0
+
+    @pytest.mark.parametrize('seed', [0, 2, 5])
+    def test_linear_relaxation_projection_and_sparsity_are_preserved(seed):
+        gp = pytest.importorskip('gurobipy')
+        from models.routing.solvers.exact.formulation import build_model
+        values, sizes = [], []
+        for factored in (False, True):
+            model, ctx = build_model(nonmetric_problem(seed), compress_multibatch_routes=True,
+                                     factor_e2_loads=factored)
+            relaxed = None
+            try:
+                # Both relaxations drop the same untouched E1 indicators. Retain
+                # all capacity candidates as static rows in both comparisons.
+                separator = ctx['capacity_separator']
+                for terms, rhs in separator.candidates:
+                    model.addConstr(gp.quicksum(separator.variables[i] for i in terms) <= rhs)
+                model.update()
+                sizes.append(model.NumNZs)
+                relaxed = model.relax()
+                relaxed.Params.Presolve = 0
+                relaxed.optimize()
+                assert relaxed.Status == gp.GRB.OPTIMAL
+                values.append(relaxed.ObjVal)
+                if factored:
+                    for route in ctx['e2']:
+                        for resource, var in zip(('w', 'v'), route['departure_loads']):
+                            demand = sum(node[resource]*relaxed.getVarByName(route['visit'][i].VarName).X
+                                         for i, node in enumerate(route['nodes']) if node['kind'] == 'd')
+                            assert relaxed.getVarByName(var.VarName).X == pytest.approx(demand, abs=1e-6)
+            finally:
+                if relaxed is not None:
+                    relaxed.dispose()
+                model.dispose()
+        assert values[0] == pytest.approx(values[1])
+>       assert sizes[1] < sizes[0]
+E       assert 982 < 958
+
+tests/routing/test_multibatch_departure_loads.py:80: AssertionError
+_______ test_linear_relaxation_projection_and_sparsity_are_preserved[2] ________
+
+seed = 2
+
+    @pytest.mark.parametrize('seed', [0, 2, 5])
+    def test_linear_relaxation_projection_and_sparsity_are_preserved(seed):
+        gp = pytest.importorskip('gurobipy')
+        from models.routing.solvers.exact.formulation import build_model
+        values, sizes = [], []
+        for factored in (False, True):
+            model, ctx = build_model(nonmetric_problem(seed), compress_multibatch_routes=True,
+                                     factor_e2_loads=factored)
+            relaxed = None
+            try:
+                # Both relaxations drop the same untouched E1 indicators. Retain
+                # all capacity candidates as static rows in both comparisons.
+                separator = ctx['capacity_separator']
+                for terms, rhs in separator.candidates:
+                    model.addConstr(gp.quicksum(separator.variables[i] for i in terms) <= rhs)
+                model.update()
+                sizes.append(model.NumNZs)
+                relaxed = model.relax()
+                relaxed.Params.Presolve = 0
+                relaxed.optimize()
+                assert relaxed.Status == gp.GRB.OPTIMAL
+                values.append(relaxed.ObjVal)
+                if factored:
+                    for route in ctx['e2']:
+                        for resource, var in zip(('w', 'v'), route['departure_loads']):
+                            demand = sum(node[resource]*relaxed.getVarByName(route['visit'][i].VarName).X
+                                         for i, node in enumerate(route['nodes']) if node['kind'] == 'd')
+                            assert relaxed.getVarByName(var.VarName).X == pytest.approx(demand, abs=1e-6)
+            finally:
+                if relaxed is not None:
+                    relaxed.dispose()
+                model.dispose()
+        assert values[0] == pytest.approx(values[1])
+>       assert sizes[1] < sizes[0]
+E       assert 982 < 958
+
+tests/routing/test_multibatch_departure_loads.py:80: AssertionError
+=============================== warnings summary ===============================
+tests/routing/test_model_scope.py::test_explicit_baseline_cli_remains_usable[1]
+  /Users/chenzeheng/Desktop/2E-VRPTW-PDD/.venv/lib/python3.9/site-packages/matplotlib/_fontconfig_pattern.py:64: PyparsingDeprecationWarning: 'oneOf' deprecated - use 'one_of'
+    prop = Group((name + Suppress("=") + comma_separated(value)) | oneOf(_CONSTANTS))
+
+tests/routing/test_model_scope.py::test_explicit_baseline_cli_remains_usable[1]
+tests/routing/test_model_scope.py::test_explicit_baseline_cli_remains_usable[1]
+tests/routing/test_model_scope.py::test_explicit_baseline_cli_remains_usable[1]
+tests/routing/test_model_scope.py::test_explicit_baseline_cli_remains_usable[1]
+tests/routing/test_model_scope.py::test_explicit_baseline_cli_remains_usable[1]
+tests/routing/test_model_scope.py::test_explicit_baseline_cli_remains_usable[1]
+  /Users/chenzeheng/Desktop/2E-VRPTW-PDD/.venv/lib/python3.9/site-packages/matplotlib/_fontconfig_pattern.py:85: PyparsingDeprecationWarning: 'parseString' deprecated - use 'parse_string'
+    parse = parser.parseString(pattern)
+
+tests/routing/test_model_scope.py::test_explicit_baseline_cli_remains_usable[1]
+tests/routing/test_model_scope.py::test_explicit_baseline_cli_remains_usable[1]
+tests/routing/test_model_scope.py::test_explicit_baseline_cli_remains_usable[1]
+tests/routing/test_model_scope.py::test_explicit_baseline_cli_remains_usable[1]
+tests/routing/test_model_scope.py::test_explicit_baseline_cli_remains_usable[1]
+tests/routing/test_model_scope.py::test_explicit_baseline_cli_remains_usable[1]
+  /Users/chenzeheng/Desktop/2E-VRPTW-PDD/.venv/lib/python3.9/site-packages/matplotlib/_fontconfig_pattern.py:89: PyparsingDeprecationWarning: 'resetCache' deprecated - use 'reset_cache'
+    parser.resetCache()
+
+tests/routing/test_model_scope.py::test_explicit_baseline_cli_remains_usable[1]
+  /Users/chenzeheng/Desktop/2E-VRPTW-PDD/.venv/lib/python3.9/site-packages/matplotlib/_mathtext.py:45: PyparsingDeprecationWarning: 'enablePackrat' deprecated - use 'enable_packrat'
+    ParserElement.enablePackrat()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+- generated xml file: /Users/chenzeheng/Desktop/2E-VRPTW-PDD/output/experiments/model5_alns_round4_20261001/pytest.xml -
+=========================== short test summary info ============================
+FAILED tests/routing/test_multibatch_departure_loads.py::test_linear_relaxation_projection_and_sparsity_are_preserved[0]
+FAILED tests/routing/test_multibatch_departure_loads.py::test_linear_relaxation_projection_and_sparsity_are_preserved[2]
+2 failed, 703 passed, 14 warnings in 44.18s

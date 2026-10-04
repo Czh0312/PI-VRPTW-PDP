@@ -1,0 +1,56 @@
+.................................................................F...... [ 97%]
+..                                                                       [100%]
+=================================== FAILURES ===================================
+__________ test_unclosed_assignment_never_becomes_global_certificate ___________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x108ce4460>
+
+    def test_unclosed_assignment_never_becomes_global_certificate(monkeypatch):
+        from models.routing.solvers.exact import solver as exact_solver
+        from models.routing.solvers.exact.assignment import solve_exact
+        def unclosed(fixed, **_):
+            result = solve(fixed)
+            result['info'].update(status='TIME_LIMIT', proven_optimal=False, best_bound=0)
+            return result
+        monkeypatch.setattr(exact_solver, 'solve_exact', unclosed)
+        result = solve_exact(problem(2), time_limit=2)
+        assert result['audit']['valid']
+        assert result['info']['assignments_visited'] == 2
+        assert not result['info']['proven_optimal'] and not result['info']['proven_infeasible']
+>       assert result['info']['status'] == 'TIME_LIMIT' and result['info']['best_bound'] == 0
+E       AssertionError: assert ('TIME_LIMIT' == 'TIME_LIMIT'
+E         
+E           TIME_LIMIT and 3.9999996 == 0)
+
+tests/routing/test_single_batch_comparison.py:106: AssertionError
+=============================== warnings summary ===============================
+tests/routing/test_multibatch_cycle.py::test_cli_roundtrip_and_no_overwrite
+  /Users/chenzeheng/Desktop/2E-VRPTW-PDD/.venv/lib/python3.9/site-packages/matplotlib/_fontconfig_pattern.py:64: PyparsingDeprecationWarning: 'oneOf' deprecated - use 'one_of'
+    prop = Group((name + Suppress("=") + comma_separated(value)) | oneOf(_CONSTANTS))
+
+tests/routing/test_multibatch_cycle.py::test_cli_roundtrip_and_no_overwrite
+tests/routing/test_multibatch_cycle.py::test_cli_roundtrip_and_no_overwrite
+tests/routing/test_multibatch_cycle.py::test_cli_roundtrip_and_no_overwrite
+tests/routing/test_multibatch_cycle.py::test_cli_roundtrip_and_no_overwrite
+tests/routing/test_multibatch_cycle.py::test_cli_roundtrip_and_no_overwrite
+tests/routing/test_multibatch_cycle.py::test_cli_roundtrip_and_no_overwrite
+  /Users/chenzeheng/Desktop/2E-VRPTW-PDD/.venv/lib/python3.9/site-packages/matplotlib/_fontconfig_pattern.py:85: PyparsingDeprecationWarning: 'parseString' deprecated - use 'parse_string'
+    parse = parser.parseString(pattern)
+
+tests/routing/test_multibatch_cycle.py::test_cli_roundtrip_and_no_overwrite
+tests/routing/test_multibatch_cycle.py::test_cli_roundtrip_and_no_overwrite
+tests/routing/test_multibatch_cycle.py::test_cli_roundtrip_and_no_overwrite
+tests/routing/test_multibatch_cycle.py::test_cli_roundtrip_and_no_overwrite
+tests/routing/test_multibatch_cycle.py::test_cli_roundtrip_and_no_overwrite
+tests/routing/test_multibatch_cycle.py::test_cli_roundtrip_and_no_overwrite
+  /Users/chenzeheng/Desktop/2E-VRPTW-PDD/.venv/lib/python3.9/site-packages/matplotlib/_fontconfig_pattern.py:89: PyparsingDeprecationWarning: 'resetCache' deprecated - use 'reset_cache'
+    parser.resetCache()
+
+tests/routing/test_multibatch_cycle.py::test_cli_roundtrip_and_no_overwrite
+  /Users/chenzeheng/Desktop/2E-VRPTW-PDD/.venv/lib/python3.9/site-packages/matplotlib/_mathtext.py:45: PyparsingDeprecationWarning: 'enablePackrat' deprecated - use 'enable_packrat'
+    ParserElement.enablePackrat()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/routing/test_single_batch_comparison.py::test_unclosed_assignment_never_becomes_global_certificate
+1 failed, 73 passed, 14 warnings in 18.54s

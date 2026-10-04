@@ -1,0 +1,47 @@
+"""Run the current fixed-batch container model; B=1 is the single-batch case."""
+import argparse
+import sys
+from configuration.loader import PROJECT_ROOT, load_json, load_routing_case
+
+DEFAULT_CASE = PROJECT_ROOT / "config/cases/single_batch_demo.json"
+
+def load_config(case_path=DEFAULT_CASE):
+    return load_routing_case(case_path)
+
+def main(argv=None):
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if "--baseline" in arguments:
+        from .baseline_route import main as baseline_main
+        return baseline_main([arg for arg in arguments if arg != "--baseline"])
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--case", default=str(DEFAULT_CASE))
+    parser.add_argument("--model", type=int, choices=range(1, 5), help="新版目前支持 M3；M1/M2/M4 待适配")
+    parser.add_argument("--solver", choices=("alns", "exact"))
+    parser.add_argument("--exact-time", type=float)
+    parser.add_argument("--time", type=float)
+    parser.add_argument("--iterations", type=int)
+    parser.add_argument("--seed", type=int)
+    parser.add_argument("--data")
+    parser.add_argument("--orders")
+    parser.add_argument("--fleet-config")
+    parser.add_argument("--exact-backend", choices=("multibatch_indexed",))
+    parser.add_argument("--day-end", type=float, help=argparse.SUPPRESS)
+    parser.add_argument("--output", help="New or empty result directory")
+    parser.add_argument("--baseline", action="store_true", help="显式运行隔离的历史 M1–M4 基线")
+    args = parser.parse_args(arguments)
+    config, fleet = load_config(args.case)
+    if args.day_end is not None:
+        raise ValueError("--day-end is single-day only; edit the current calendar/cycle_end explicitly")
+    if (fleet.get("operating_policy") or {}).get("policy_version") != "multi_batch_cutoff_v1":
+        raise ValueError("Historical case: use --baseline explicitly; current cases require multi_batch_cutoff_v1")
+    for argument, key in (("model", "model"), ("solver", "solver"), ("exact_time", "exact_time"),
+                          ("time", "alns_time"), ("iterations", "alns_iter"), ("seed", "seed"),
+                          ("data", "data"), ("orders", "orders"), ("exact_backend", "exact_backend")):
+        value = getattr(args, argument)
+        if value is not None:
+            config[key] = value
+    if args.fleet_config:
+        fleet = {**load_json(args.fleet_config), "operating_policy": fleet["operating_policy"]}
+        config["routing_config"] = args.fleet_config
+    from .multibatch import run_case
+    return run_case(config, fleet, case_path=args.case, output=args.output)

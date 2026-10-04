@@ -1,0 +1,132 @@
+{
+  "selection_rule": "SHA256 order, first 30/50 for medium; no solver-dependent filtering.",
+  "cohort_rule": "SHA256 order index modulo 3; B2 merges first two cohorts; B1 merges all.",
+  "time_unit": "scenario_minutes",
+  "distance_unit": "benchmark_coordinate_units_not_km",
+  "preserved_fields": [
+    "locations",
+    "assigned_satellite",
+    "goods_weight",
+    "service_time"
+  ],
+  "original_windows": {
+    "C11_order": {
+      "delivery_ready": "110.0",
+      "delivery_due": "200.0",
+      "pickup_ready": "570.0",
+      "pickup_due": "810.0"
+    },
+    "C3_order": {
+      "delivery_ready": "253.0",
+      "delivery_due": "343.0",
+      "pickup_ready": "713.0",
+      "pickup_due": "953.0"
+    },
+    "C7_order": {
+      "delivery_ready": "297.0",
+      "delivery_due": "387.0",
+      "pickup_ready": "757.0",
+      "pickup_due": "997.0"
+    },
+    "C9_order": {
+      "delivery_ready": "111.0",
+      "delivery_due": "201.0",
+      "pickup_ready": "571.0",
+      "pickup_due": "811.0"
+    },
+    "C6_order": {
+      "delivery_ready": "271.0",
+      "delivery_due": "361.0",
+      "pickup_ready": "731.0",
+      "pickup_due": "971.0"
+    },
+    "C0_order": {
+      "delivery_ready": "126.0",
+      "delivery_due": "216.0",
+      "pickup_ready": "586.0",
+      "pickup_due": "826.0"
+    },
+    "C5_order": {
+      "delivery_ready": "63.0",
+      "delivery_due": "153.0",
+      "pickup_ready": "523.0",
+      "pickup_due": "763.0"
+    },
+    "C8_order": {
+      "delivery_ready": "94.0",
+      "delivery_due": "184.0",
+      "pickup_ready": "554.0",
+      "pickup_due": "794.0"
+    },
+    "C4_order": {
+      "delivery_ready": "326.0",
+      "delivery_due": "416.0",
+      "pickup_ready": "786.0",
+      "pickup_due": "1026.0"
+    },
+    "C1_order": {
+      "delivery_ready": "290.0",
+      "delivery_due": "380.0",
+      "pickup_ready": "750.0",
+      "pickup_due": "990.0"
+    },
+    "C10_order": {
+      "delivery_ready": "299.0",
+      "delivery_due": "389.0",
+      "pickup_ready": "759.0",
+      "pickup_due": "999.0"
+    },
+    "C2_order": {
+      "delivery_ready": "96.0",
+      "delivery_due": "186.0",
+      "pickup_ready": "556.0",
+      "pickup_due": "796.0"
+    }
+  },
+  "window_rule": "New scenario windows: delivery anchor+120+(source ready mod 60), width 120; pickup early 360..420, flexible 440..560 or forced-late 560..600; last cohort early. Each cohort anchor is 720 minutes apart.",
+  "limitation": "These are derived benchmark scenarios, not the original Zhou time-window instances.",
+  "family_id": "zhou_Set1_12-2-4",
+  "source_kind": "zhou_derived_scenario",
+  "size": "small",
+  "input_source_sha256": {
+    "data/zhou_later_pickup/small/standard_same_day/Set1_12-2-4.csv": "0f970b6f180288abba9344169e8d0fa11b376415baceb20e942765bbda44aeb1",
+    "config/routing/validation/zhou_small.json": "89d4708b22cb6b0e7d0ab25a0bbf1dff502fe83f80d71c63851082712ad68ea6"
+  },
+  "original_fleet": {
+    "schema_version": 1,
+    "parameter_scope": "benchmark_validation_small",
+    "source_type": "scenario_assumption",
+    "description": "Fleet and reusable-container assumptions for Zhou small benchmark instances.",
+    "units": {
+      "weight": "benchmark demand units",
+      "volume": "benchmark volume units",
+      "speed": "coordinate units per time unit"
+    },
+    "E1_vehicle_count": 2,
+    "E1_Qk": 1500.0,
+    "E1_Ck": 40.0,
+    "vehicles_per_satellite": 4,
+    "E2_Qv": 300.0,
+    "E2_Cv": 5.0,
+    "container_weight": 2.0,
+    "container_volume": 1.0,
+    "speed": 1.0
+  },
+  "fleet_rule": "Same fleet in B1/B2/B3; E1 can carry one complete satellite shipment; one E1 per satellite available; E2 count >= largest designed cohort per satellite.",
+  "cohort_by_order": {
+    "C11_order": 0,
+    "C3_order": 1,
+    "C7_order": 2,
+    "C9_order": 0,
+    "C6_order": 1,
+    "C0_order": 2,
+    "C5_order": 0,
+    "C8_order": 1,
+    "C4_order": 2,
+    "C1_order": 0,
+    "C10_order": 1,
+    "C2_order": 2
+  },
+  "pairing_contract": "All order fields except delivery_batch_id are identical; same network, fleet, pool, cycle and final cutoff.",
+  "return_batch": "Not an input. Derived by the solver/auditor from actual unload times."
+}

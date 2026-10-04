@@ -15,6 +15,7 @@ from gurobipy import GRB
 
 from .domain.node import Task
 from models.routing.alns.types import is_tfp_active
+from .operating_policy import policy_for, validate_task_inputs
 
 
 def solve_commodity_flow(problem, model_number, vehicles_per_satellite, *,
@@ -26,6 +27,12 @@ def solve_commodity_flow(problem, model_number, vehicles_per_satellite, *,
                          e2_cost_lower_bounds=None, e1_cost_lower_bound=None,
                          zero_pickup_load=False, excluded_assignments=None):
     started = time.perf_counter()
+    policy = policy_for(problem)
+    policy.require_model(model_number)
+    if policy.single_day:
+        validate_task_inputs(problem, e1_tasks, e2_tasks_by_sat)
+        if zero_pickup_load:
+            raise ValueError("single-day policy does not support pickup-load relaxations")
     free = model_number in (2, 4)
     pickup = model_number in (3, 4)
     depot = problem.depot.id
@@ -92,6 +99,8 @@ def solve_commodity_flow(problem, model_number, vehicles_per_satellite, *,
         finite.append(TFp)
     max_arc = max((max(row) for row in problem.time), default=0.0)
     horizon = max(finite) + (len(tasks)+2)*max_arc + sum(service.values()) + 1.0
+    if policy.single_day:
+        horizon = max(horizon, policy.day_end)
     lower = {n: max(0.0, t.tw[0]) for n, t in tasks.items()}
     upper = {n: min(horizon, t.tw[1]) for n, t in tasks.items()}
     for n, t in e1_map.items():
@@ -110,6 +119,9 @@ def solve_commodity_flow(problem, model_number, vehicles_per_satellite, *,
                 if i == j:
                     continue
                 if i != base and j != base:
+                    if (label == 'x' and policy.single_day
+                            and tasks[i].kind == 'p' and tasks[j].kind == 'd'):
+                        continue
                     if tasks[i].cust == tasks[j].cust and tasks[i].kind == 'p' and tasks[j].kind == 'd':
                         continue
                     if lower[i]+service[i]+travel(i, j) > upper[j]+1e-9:
@@ -126,12 +138,19 @@ def solve_commodity_flow(problem, model_number, vehicles_per_satellite, *,
         m.addConstr(departures <= (problem.e1_vehicle_count if label == 'x' else vehicles_per_satellite))
         # Explicit order is needed even for co-located, zero-service tasks.
         order = {n: m.addVar(lb=0, ub=len(nodes), name=f'order_{label}[{n}]') for n in nodes}
+        if policy.single_day and label != 'x':
+            for n in nodes:
+                task = tasks[n]
+                d = f'{task.cust}d'
+                if task.kind == 'p' and d in order:
+                    m.addConstr(order[n] >= order[d] + 1)
         for (i, j), z in arcvars.items():
             if j != base:
                 if i == base:
                     m.addConstr(order[j] >= z)
-                    origin = times[start_node]+service[start_node] if start_node else 0.0
-                    origin_ub = upper[start_node]+service[start_node] if start_node else 0.0
+                    prep = policy.e2_dispatch_prep_time if start_node else 0.0
+                    origin = times[start_node]+service[start_node]+prep if start_node else policy.dispatch_time
+                    origin_ub = upper[start_node]+service[start_node]+prep if start_node else policy.dispatch_time
                 else:
                     m.addConstr(order[j] >= order[i]+1-(len(nodes)+1)*(1-z))
                     origin = times[i]+service[i]
@@ -139,8 +158,15 @@ def solve_commodity_flow(problem, model_number, vehicles_per_satellite, *,
                 big_m = max(0.0, origin_ub+travel(i, j)-lower[j])
                 m.addConstr(times[j] >= origin+travel(i, j)-big_m*(1-z))
             elif return_node:
-                big_m = max(0.0, upper[i]+service[i]+travel(i, j)-lower[return_node])
-                m.addConstr(times[return_node] >= times[i]+service[i]+travel(i, j)-big_m*(1-z))
+                unload = policy.e2_return_unload_time
+                big_m = max(0.0, upper[i]+service[i]+travel(i, j)+unload-lower[return_node])
+                m.addConstr(times[return_node] >= times[i]+service[i]+travel(i, j)+unload-big_m*(1-z))
+            if j == base and policy.single_day:
+                unload = (policy.depot_return_unload_time if label == 'x'
+                          else policy.e2_return_unload_time)
+                m.addGenConstrIndicator(z, True,
+                    times[i]+service[i]+travel(i, j)+unload <= policy.day_end,
+                    name=f'{label}_DayEnd_{i}')
         # Four commodities: remaining delivery / collected pickup, W / V.
         for dimension, capacity in zip(('w', 'v'), caps):
             delivery = {a: m.addVar(lb=0, ub=capacity, name=f'D{dimension}_{label}[{a[0]},{a[1]}]') for a in arcs}
@@ -198,7 +224,7 @@ def solve_commodity_flow(problem, model_number, vehicles_per_satellite, *,
         allowance = min(allowance, max(0.0, remaining))
         if allowance >= 0.02:
             warm_started = time.perf_counter()
-            solver = import_module(f'models.routing.alns.variants.model_{model_number}').solve_alns
+            solver = import_module(f'models.routing.baselines.alns.model_{model_number}').solve_alns
             kwargs = dict(problem=problem, vehicles_per_satellite=vehicles_per_satellite,
                           max_time=allowance, max_iterations=1000000, seed=int((gurobi_params or {}).get('Seed',42)),
                           verbose=False, return_info=True)
@@ -211,6 +237,12 @@ def solve_commodity_flow(problem, model_number, vehicles_per_satellite, *,
             if warm_info.get('feasible'):
                 warm_start_routes = result[:2]
             warm_seconds = time.perf_counter()-warm_started
+    if warm_start_routes:
+        if policy.single_day:
+            from .solution_audit import audit_exact_solution
+            if not audit_exact_solution(problem, model_number, *warm_start_routes,
+                                        tfp=TFp)['valid']:
+                warm_start_routes = None
     if warm_start_routes:
         r1, r2 = warm_start_routes
         for label, base, arcvars in graphs:
@@ -248,6 +280,7 @@ def solve_commodity_flow(problem, model_number, vehicles_per_satellite, *,
                 mip_gap=m.MIPGap if feasible else None, sol_count=m.SolCount,
                 model_rows=m.NumConstrs, model_columns=m.NumVars, model_binary=m.NumBinVars,
                 node_count=m.NodeCount, assignment=None)
+    info['operating_policy'] = policy.as_dict(problem)
     r1 = r2 = assignment = None
     if feasible and (proven or return_incumbent_on_time_limit):
         routes_by_label = {}

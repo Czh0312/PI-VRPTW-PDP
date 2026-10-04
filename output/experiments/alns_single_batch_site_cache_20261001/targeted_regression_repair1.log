@@ -1,0 +1,31 @@
+...............................F........................................ [ 77%]
+.....................                                                    [100%]
+=================================== FAILURES ===================================
+____ test_global_tie_order_differs_from_legacy_group_order_and_is_restored _____
+
+    def test_global_tie_order_differs_from_legacy_group_order_and_is_restored():
+        from models.routing.common.domain.instance import ProblemInstance
+        p, state = interleaved(1)
+        nodes = p.network.nodes
+        matrix = {a: {b: 0 if a == b else 1 for b in nodes} for a in nodes}
+        fleet = dict(E1_vehicle_count=1, vehicles_per_satellite=1, E1_Qk=100, E1_Ck=100,
+                     E2_Qv=100, E2_Cv=100, container_weight=1, container_volume=1)
+        p = MultiBatchInstance(ProblemInstance(nodes, fleet, distance_matrix=matrix,
+            travel_time_matrix=matrix), p.orders, p.operating_policy, model=3)
+        for route in state['e2']:
+            oid = route['tasks'][0][0]
+            route['tasks'] = [(oid, 'd'), (oid, 'p')]
+        reference, cached = engines(p)
+        legacy = SingleBatchDescent(p, cache_sites=True, cache_distances=True)
+        expected = reference._e2_candidates(state, time.perf_counter()+2)
+>       assert legacy._e2_candidates(state, time.perf_counter()+2) != expected
+E       AssertionError: assert [('e2', ((0, []), (2, [('o1_0', 'd'), ('o1_0', 'p'), ('o1_1', 'd'), ('o1_1', 'p')]))), ('e2', ((0, []), (2, [('o1_0', ...1', 'p'), ('o1_0', 'p')]))), ('e2', ((0, []), (2, [('o1_1', 'd'), ('o1_1', 'p'), ('o1_0', 'd'), ('o1_0', 'p')]))), ...] != [('e2', ((0, []), (2, [('o1_0', 'd'), ('o1_0', 'p'), ('o1_1', 'd'), ('o1_1', 'p')]))), ('e2', ((0, []), (2, [('o1_0', ...1', 'p'), ('o1_0', 'p')]))), ('e2', ((0, []), (2, [('o1_1', 'd'), ('o1_1', 'p'), ('o1_0', 'd'), ('o1_0', 'p')]))), ...]
+E        +  where [('e2', ((0, []), (2, [('o1_0', 'd'), ('o1_0', 'p'), ('o1_1', 'd'), ('o1_1', 'p')]))), ('e2', ((0, []), (2, [('o1_0', ...1', 'p'), ('o1_0', 'p')]))), ('e2', ((0, []), (2, [('o1_1', 'd'), ('o1_1', 'p'), ('o1_0', 'd'), ('o1_0', 'p')]))), ...] = _e2_candidates({'deliveries': {'b1': [['S', 'T']]}, 'e2': [{'satellite': 'S', 'tasks': [('o1_0', 'd'), ('o1_0', 'p')], 'vehicle': 0},...sks': [('o2_0', 'd'), ('o2_0', 'p')], 'vehicle': 0}], 'pickup_order': {'b1': ['S', 'T']}, 'pickup_vehicle': {'b1': {}}}, (0.527476166 + 2))
+E        +    where _e2_candidates = <models.routing.solvers.alns.single_batch_descent.SingleBatchDescent object at 0x1088337f0>._e2_candidates
+E        +    and   0.527476166 = <built-in function perf_counter>()
+E        +      where <built-in function perf_counter> = time.perf_counter
+
+tests/routing/test_single_batch_site_cache.py:121: AssertionError
+=========================== short test summary info ============================
+FAILED tests/routing/test_single_batch_site_cache.py::test_global_tie_order_differs_from_legacy_group_order_and_is_restored
+1 failed, 92 passed in 0.35s

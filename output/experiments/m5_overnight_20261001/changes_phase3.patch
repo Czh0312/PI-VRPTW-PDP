@@ -1,0 +1,861 @@
+--- /dev/null
++++ b/models/routing/solvers/exact/multibatch_physical_site.py
+@@ -0,0 +1,262 @@
++"""Conditional E2 cost floors with the original physical vehicle calendars.
++
++Keep ALL orders of one satellite and its exact E2 formulation. Remove E1
++route variables and every row/indicator using them, and relax the local
++container pool to the entire local demand. Remaining E1 auxiliary variables
++can take zero, so their residual stock rows impose no additional restriction.
++The original network is retained, including directed nonmetric travel.
++
++A full M5 schedule projects to this model whenever its supply completions
++and early-return quantities satisfy the declared conditions. ObjBound is
++therefore a conditional E2 lower bound, never a full M5 upper or proof.
++"""
++from dataclasses import replace
++import math
++from pathlib import Path
++import time
++
++from models.routing.common.cycle import MultiBatchInstance
++from models.routing.common.cycle.audit import audit_solution
++
++
++def build_physical_site(problem, site, *, supply_thresholds=None, minimum_returns=None,
++                        maximum_returns=None,
++                        deadline=None, verbose=False, compress_routes=None, cost_floor=0.0):
++    """Build the projection, optionally using an externally certified site floor.
++
++    The caller must establish that cost_floor is valid for every local E2
++    schedule satisfying the supplied conditions; this builder does not prove
++    an arbitrary caller-provided floor. An unconditional complete route-cover
++    certificate is also valid under the additional conditions.
++    """
++    import gurobipy as gp
++    from .formulation import build_model
++    if not math.isfinite(cost_floor) or cost_floor < 0:
++        raise ValueError('cost_floor must be finite and nonnegative')
++    if problem.model_number != 5 or problem.free_assignment or not problem.reusable:
++        raise ValueError('Physical site floors require fixed reusable multibatch M5')
++    orders = tuple(o for o in problem.orders if o.satellite == site)
++    if site not in problem.satellites or not orders:
++        raise ValueError('An active satellite is required')
++    thresholds, required = dict(supply_thresholds or {}), dict(minimum_returns or {})
++    allowed = dict(maximum_returns or {})
++    total = sum(o.count for o in orders)
++    present = {o.batch for o in orders}
++    for values, maximum, batches in ((thresholds, problem.operating_policy.cycle_end, present),
++                                     (required, total, set(problem.batch_map)),
++                                     (allowed, total, set(problem.batch_map))):
++        for bid, value in values.items():
++            if bid not in batches or not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= maximum:
++                raise ValueError('Conditions require known batches and bounded nonnegative integers')
++    policy = replace(problem.operating_policy,
++                     container_pool_size=max(problem.operating_policy.container_pool_size, total))
++    local = MultiBatchInstance(problem.network, orders, policy, model=5)
++    model, context = build_model(local, deadline=deadline, verbose=verbose,
++        e2_capacity_cuts=False, compress_multibatch_routes=compress_routes)
++    try:
++        def check():
++            if deadline is not None and time.perf_counter() >= deadline:
++                raise TimeoutError('Physical site build reached its total budget')
++        removed = {}
++        def collect(value):
++            if isinstance(value, gp.Var):
++                removed[value.index] = value
++            elif isinstance(value, gp.LinExpr):
++                for i in range(value.size()): collect(value.getVar(i))
++            elif isinstance(value, dict):
++                for item in value.values(): collect(item)
++            elif isinstance(value, (tuple, list)):
++                for item in value: collect(item)
++        for route in context['e1']: collect(route)
++        rank_prefixes = tuple(r['label']+'_rank[' for r in context['e1'])
++        for var in model.getVars():
++            if var.VarName.startswith(rank_prefixes): collect(var)
++        def touches(expression):
++            return any(expression.getVar(i).index in removed for i in range(expression.size()))
++        linear, indicators = [], []
++        for i, row in enumerate(model.getConstrs()):
++            if i % 256 == 0: check()
++            if touches(model.getRow(row)): linear.append(row)
++        for i, row in enumerate(model.getGenConstrs()):
++            if i % 256 == 0: check()
++            if row.GenConstrType != gp.GRB.GENCONSTR_INDICATOR:
++                raise ValueError('Unexpected general constraint in physical-site projection')
++            flag, _, expression, _, _ = model.getGenConstrIndicator(row)
++            if flag.index in removed or touches(expression): indicators.append(row)
++        objective = model.getObjective()
++        e2_objective = gp.LinExpr()
++        for i in range(objective.size()):
++            var = objective.getVar(i)
++            if var.index not in removed: e2_objective.addTerms(objective.getCoeff(i), var)
++        proof = dict(removed_variables=[v.VarName for v in removed.values()],
++            removed_linear_rows=[r.ConstrName for r in linear],
++            removed_indicators=[r.GenConstrName for r in indicators],
++            original_pool=problem.operating_policy.container_pool_size, local_relaxed_pool=policy.container_pool_size,
++            local_container_demand=total, original_network_retained=True)
++        model.remove(linear)
++        model.remove(indicators)
++        model.remove(list(removed.values()))
++        model.setObjective(e2_objective)
++        if cost_floor:
++            model.addConstr(e2_objective >= cost_floor, name='physical_certified_cost_floor')
++        proof['externally_certified_cost_floor'] = cost_floor
++        model.update()
++        context['e1'] = []
++        supplies = {bid: model.getVarByName(f'delivery_{site}_{bid}') for bid in present}
++        for bid, value in thresholds.items(): supplies[bid].LB = max(supplies[bid].LB, value)
++        flags = {}
++        for bid in sorted(set(required) | set(allowed)):
++            check()
++            cutoff, expression = problem.batch_map[bid].cutoff, gp.LinExpr()
++            for order in orders:
++                returned = context['pickup_returns'][order.id]
++                if returned.UB <= cutoff: flag = 1
++                elif returned.LB > cutoff: flag = 0
++                else:
++                    flag = model.addVar(vtype=gp.GRB.BINARY, name=f'physical_early_{order.id}_{bid}')
++                    model.addConstr((flag == 1) >> (returned <= cutoff),
++                                    name=f'physical_early_yes_{order.id}_{bid}')
++                    # An upper count needs exact classification. Integer return
++                    # clocks make cutoff+1 the first possible late completion.
++                    if bid in allowed:
++                        if returned.VType != gp.GRB.INTEGER:
++                            raise ValueError('Maximum returns require integer return clocks')
++                        model.addConstr((flag == 0) >> (returned >= cutoff+1),
++                                        name=f'physical_early_no_{order.id}_{bid}')
++                flags[order.id, bid] = flag
++                expression += order.count*flag
++            if bid in required:
++                model.addConstr(expression >= required[bid], name=f'physical_minimum_returns_{bid}')
++            if bid in allowed:
++                model.addConstr(expression <= allowed[bid], name=f'physical_maximum_returns_{bid}')
++        model.update()
++        check()
++        return model, {**context, 'local_problem': local, 'original_problem': problem,
++            'satellite': site, 'supplies': supplies, 'supply_thresholds': thresholds,
++            'minimum_returns': required, 'maximum_returns': allowed,
++            'return_flags': flags, 'projection_proof': proof}
++    except Exception:
++        model.dispose()
++        raise
++
++
++def project_physical_site(problem, context, initial, *, fix=False):
++    """Fix or start all route decisions from an audited original FULL schedule."""
++    import gurobipy as gp
++    audit = audit_solution(problem, initial)
++    if not audit['valid']:
++        raise ValueError('Projection requires an audited full M5 schedule')
++    site = context['satellite']
++    supplies = {(e['site_id'], t['batch_id']): e['start']+problem.service(e['site_id'])
++        for t in initial['e1_trips'] for e in t['events'] if e['kind'] == 'd'}
++    trips = [t for t in initial['e2_trips'] if t['satellite_id'] == site]
++    returned = {e['order_id']: t['return_complete'] for t in trips for e in t['events'] if e['kind'] == 'p'}
++    if any(supplies[site, bid] < value for bid, value in context['supply_thresholds'].items()):
++        raise ValueError('Full schedule does not meet the conditional supply threshold')
++    for bid, required in context['minimum_returns'].items():
++        count = sum(o.count for o in problem.orders if o.satellite == site
++                    and returned[o.id] <= problem.batch_map[bid].cutoff)
++        if count < required: raise ValueError('Full schedule does not meet minimum early returns')
++    for bid, allowed in context['maximum_returns'].items():
++        count = sum(o.count for o in problem.orders if o.satellite == site
++                    and returned[o.id] <= problem.batch_map[bid].cutoff)
++        if count > allowed: raise ValueError('Full schedule does not meet maximum early returns')
++    def put(var, value):
++        if isinstance(var, int):
++            if var != value: raise ValueError('Projection contradicts a constant return flag')
++            return
++        var.Start = value
++        if fix: var.LB = var.UB = value
++    for bid, var in context['supplies'].items(): put(var, supplies[site, bid])
++    for oid, var in context['pickup_returns'].items(): put(var, returned[oid])
++    for (oid, bid), var in context['return_flags'].items():
++        put(var, int(returned[oid] <= problem.batch_map[bid].cutoff))
++    vehicles = {}
++    for trip in trips: vehicles.setdefault(trip['vehicle_id'], []).append(trip)
++    chosen = {}
++    for vehicle, old in enumerate(sorted(vehicles, key=lambda v: (-len(vehicles[v]), v))):
++        for slot, trip in enumerate(sorted(vehicles[old], key=lambda t: t['trip_index'])):
++            chosen[vehicle, slot] = trip
++    globals_ = context.get('global_e2_arcs', {})
++    for var in globals_.values(): put(var, 0)
++    covered = set()
++    cost = 0.0
++    for route in context['e2']:
++        trip = chosen.get((route['vehicle'], route['slot']))
++        indices = []
++        if trip:
++            lookup = {(n['order'].id, n['kind']): i for i,n in enumerate(route['nodes'])}
++            indices = [lookup[e['order_id'], e['kind']] for e in trip['events']]
++            covered.add((route['vehicle'], route['slot']))
++        arcs = set(zip([-1]+indices, indices+[-2])) if trip else set()
++        if not arcs <= route['x'].keys(): raise ValueError('Full trip has an absent physical-site arc')
++        put(route['used'], int(trip is not None))
++        put(route['start'], trip['departure'] if trip else 0)
++        put(route['end'], trip['return_complete'] if trip else 0)
++        for i,var in route['visit'].items(): put(var, int(i in indices))
++        for arc,var in route['x'].items():
++            if route.get('global_internal_arcs') and min(arc) >= 0:
++                if arc in arcs: put(var, 1)
++            else: put(var, int(arc in arcs))
++        if trip:
++            for index,event in zip(indices, trip['events']): put(route['times'][index], event['start'])
++            places = [site]+[problem.order_map[e['order_id']].customer for e in trip['events']]+[site]
++            cost += math.fsum(problem.distance(a,b) for a,b in zip(places,places[1:]))
++    if covered != set(chosen): raise ValueError('Full schedule exceeds physical-site route slots')
++    return dict(satellite=site, mapped_trips=len(trips), original_site_cost=cost,
++                supply_thresholds=context['supply_thresholds'], minimum_returns=context['minimum_returns'],
++                maximum_returns=context['maximum_returns'])
++
++
++def physical_site_certificate(problem, site, *, time_limit=60, supply_thresholds=None,
++        minimum_returns=None, maximum_returns=None, initial_result=None, seed=42, fallback_bound=0.0,
++        verbose=False, diagnostics_path=None, compress_routes=None):
++    """A conditional site-cost certificate; infeasibility remains subproblem-only."""
++    import gurobipy as gp
++    if not math.isfinite(time_limit) or time_limit <= 0:
++        raise ValueError('time_limit must be finite and positive')
++    if not math.isfinite(fallback_bound) or fallback_bound < 0:
++        raise ValueError('fallback_bound must be finite and nonnegative')
++    begun, model = time.perf_counter(), None
++    result = dict(satellite=site, bound=fallback_bound, raw_bound=None, margin=0.0,
++        status='TIME_LIMIT_BUILD', scope='M5_conditional_physical_E2_site_cost_relaxation',
++        proven_optimal=False, proven_infeasible=False, subproblem_optimal=False,
++        subproblem_infeasible=False, subproblem_objective=None,
++        supply_thresholds=dict(supply_thresholds or {}), minimum_returns=dict(minimum_returns or {}),
++        maximum_returns=dict(maximum_returns or {}))
++    try:
++        model, context = build_physical_site(problem, site, supply_thresholds=supply_thresholds,
++            minimum_returns=minimum_returns, maximum_returns=maximum_returns,
++            deadline=begun+time_limit, verbose=verbose,
++            compress_routes=compress_routes, cost_floor=fallback_bound)
++        result['projection_proof'] = context['projection_proof']
++        if initial_result is not None:
++            result['initial_projection'] = project_physical_site(problem, context, initial_result)
++        model.Params.Seed = int(seed)
++        model.Params.IntFeasTol = model.Params.FeasibilityTol = 1e-9
++        model.Params.DualReductions = 0
++        model.Params.TimeLimit = max(0, begun+time_limit-time.perf_counter())
++        model.optimize()
++        try:
++            raw = float(model.ObjBound)
++        except (gp.GurobiError, AttributeError):
++            raw = math.nan
++        if math.isfinite(raw) and model.Status != gp.GRB.INFEASIBLE:
++            margin = 1e-7*max(1, abs(raw))
++            result.update(raw_bound=raw, margin=margin, bound=max(fallback_bound, max(0, raw-margin)))
++        result.update(status=int(model.Status), subproblem_optimal=model.Status == gp.GRB.OPTIMAL,
++            subproblem_infeasible=model.Status == gp.GRB.INFEASIBLE,
++            subproblem_objective=float(model.ObjVal) if model.SolCount else None,
++            variables=model.NumVars, constraints=model.NumConstrs,
++            general_constraints=model.NumGenConstrs, nodes=model.NodeCount,
++            e2_slots=len(context['e2']), build_seconds=time.perf_counter()-begun-model.Runtime)
++        if diagnostics_path is not None:
++            path = Path(diagnostics_path)
++            path.parent.mkdir(parents=True, exist_ok=True)
++            model.write(str(path))
++    except TimeoutError:
++        pass
++    finally:
++        result['runtime'] = time.perf_counter()-begun
++        if model is not None: model.dispose()
++    return result
+--- /dev/null
++++ b/models/routing/solvers/exact/multibatch_physical_cuts.py
+@@ -0,0 +1,221 @@
++"""Conditional physical-site floors in a joint relaxation's cost epigraph.
++
++The joint route domain may retain a cheaper path for an actual trip's task
++set. A floor on executable E2 cost must therefore constrain theta_site, not
++the compressed route-cost sum. Every full schedule projects with theta_site
++equal to its actual site cost, which dominates the compressed cover cost.
++
++Supply in the E1 projection can be earlier than actual supply. Thus a lower
++threshold on projected supply also holds for actual supply. Cumulative E1
++pickup quantities equal containers returned by that cutoff in a full
++schedule projection: the first eligible cutoff collects every returned box.
++This equality also permits upper-count conditions. The implication is a
++projection property; relaxed solutions need not be full physical schedules.
++
++This module accepts externally validated oracle certificates for the SAME
++problem. It does not validate a caller-created certificate or establish
++full M5 optimality. No public solver enables these experimental cuts yet.
++"""
++import math
++
++
++def lift_physical_costs(model, context):
++    """Replace compressed route objective terms by dominating site costs."""
++    import gurobipy as gp
++    if 'physical_costs' in context:
++        return context['physical_costs']
++    model.update()
++    if model.ModelSense != gp.GRB.MINIMIZE:
++        raise ValueError('Physical cost floors require minimization')
++    old = model.getObjective()
++    if not isinstance(old, gp.LinExpr):
++        raise ValueError('Physical cost floors require a linear objective')
++    costs, floors = {}, {}
++    compressed = gp.LinExpr()
++    for site, data in sorted(context['routes'].items()):
++        expression = gp.LinExpr()
++        for (i, _), var in data['choices'].items():
++            cost = data['rows'][i]['column']['cost']
++            if not math.isfinite(cost) or cost < 0 or abs(var.Obj-cost) > 1e-8:
++                raise ValueError('Route objective must match nonnegative compressed column costs')
++            expression.addTerms(cost, var)
++        compressed += expression
++        theta = model.addVar(lb=0, name=f'physical_cost_{site}')
++        floors[site] = model.addConstr(theta >= expression, name=f'physical_cover_cost_{site}')
++        costs[site] = theta
++    model.setObjective(old-compressed+gp.quicksum(costs.values()))
++    model.update()
++    context['physical_costs'] = costs
++    context['physical_cover_rows'] = floors
++    return costs
++
++
++def _integer_at_least(model, expression, threshold, lower, upper, name):
++    """An exact iff flag; threshold-1 is valid only for integer expressions."""
++    import gurobipy as gp
++    if not isinstance(threshold, int) or isinstance(threshold, bool):
++        raise ValueError('Thresholds must be integer')
++    lower, upper = math.ceil(lower), math.floor(upper)
++    if lower > upper:
++        raise ValueError('Invalid expression bounds')
++    if threshold <= lower:
++        return 1
++    if threshold > upper:
++        return 0
++    flag = model.addVar(vtype=gp.GRB.BINARY, name=name)
++    model.addConstr(expression >= lower+(threshold-lower)*flag, name=name+'_lower')
++    model.addConstr(expression <= threshold-1+(upper-threshold+1)*flag, name=name+'_upper')
++    return flag
++
++
++def add_physical_cut(problem, model, context, certificate, *, base_floor=0.0, name='physical_cut'):
++    """Add an externally validated conditional floor or infeasibility no-good.
++
++    base_floor must itself be an unconditional site-cost lower bound. The
++    physical oracle bound must apply to all actual schedules satisfying its
++    conditions, not to a restricted route pool or fixed physical assignment.
++    """
++    import gurobipy as gp
++    if problem.model_number != 5 or problem.free_assignment or not problem.reusable:
++        raise ValueError('Physical cuts require fixed reusable multibatch M5')
++    if certificate.get('scope') != 'M5_conditional_physical_E2_site_cost_relaxation':
++        raise ValueError('A physical-site certificate is required')
++    site = certificate['satellite']
++    if site not in context['routes']:
++        raise ValueError('An active satellite is required')
++    bound = certificate['bound']
++    if not all(math.isfinite(v) and v >= 0 for v in (bound, base_floor)):
++        raise ValueError('Cost floors must be finite and nonnegative')
++    total = sum(o.count for o in problem.orders if o.satellite == site)
++    thresholds = certificate.get('supply_thresholds', {})
++    required = certificate.get('minimum_returns', {})
++    allowed = certificate.get('maximum_returns', {})
++    present = {o.batch for o in problem.orders if o.satellite == site}
++    for values, batches, maximum in ((thresholds, present, problem.operating_policy.cycle_end),
++                                     (required, set(problem.batch_map), total),
++                                     (allowed, set(problem.batch_map), total)):
++        for bid, value in values.items():
++            if bid not in batches or not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= maximum:
++                raise ValueError('Conditions require known batches and bounded integers')
++    infeasible = certificate.get('subproblem_infeasible', False)
++    if infeasible and certificate.get('status') != gp.GRB.INFEASIBLE:
++        raise ValueError('A no-good requires proved subproblem infeasibility')
++    costs = lift_physical_costs(model, context)
++    theta = costs[site]
++    theta.LB = max(theta.LB, base_floor)
++    e1 = context['e1']
++    supplies = e1.get('supplies', e1.get('deliveries'))
++    if supplies is None:
++        raise ValueError('Joint context must retain integer supply variables')
++    triggers = []
++    for bid, threshold in sorted(thresholds.items()):
++        variable = supplies[site, bid]
++        if variable.VType not in (gp.GRB.INTEGER, gp.GRB.BINARY):
++            raise ValueError('Supply thresholds require integer variables')
++        flag = _integer_at_least(model, variable, threshold, variable.LB, variable.UB,
++                                 f'{name}_supply_{bid}')
++        triggers.append(dict(flag=flag, expression=variable, threshold=threshold,
++                             kind='supply', batch=bid))
++    for kind, counts in (('returns', required), ('maximum_returns', allowed)):
++        for bid, threshold in sorted(counts.items()):
++            # The E1 model equates these integer allocations to pickup quantities
++            # at the satellite for each cutoff, for BOTH E1 backends.
++            expression = gp.quicksum(o.count*e1['allocation'][o.id, batch.id]
++                for o in problem.orders if o.satellite == site
++                for batch in problem.operating_policy.batches
++                if problem.batch_index[batch.id] <= problem.batch_index[bid])
++            if kind == 'maximum_returns':
++                # -prefix >= -R iff prefix <= R; bounds remain exact and finite.
++                flag = _integer_at_least(model, -expression, -threshold, -total, 0,
++                                         f'{name}_maximum_returns_{bid}')
++            else:
++                flag = _integer_at_least(model, expression, threshold, 0, total,
++                                         f'{name}_returns_{bid}')
++            triggers.append(dict(flag=flag, expression=expression, threshold=threshold,
++                                 kind=kind, batch=bid))
++    flags = [t['flag'] for t in triggers]
++    if any(isinstance(v, int) and v == 0 for v in flags):
++        active = 0
++    else:
++        variables = [v for v in flags if not isinstance(v, int)]
++        if not variables:
++            active = 1
++        elif len(variables) == 1:
++            active = variables[0]
++        else:
++            active = model.addVar(vtype=gp.GRB.BINARY, name=name+'_active')
++            for i, var in enumerate(variables):
++                model.addConstr(active <= var, name=f'{name}_and_upper_{i}')
++            model.addConstr(active >= gp.quicksum(variables)-len(variables)+1,
++                            name=name+'_and_lower')
++    row = None
++    if infeasible:
++        # A constant true condition makes the relaxation infeasible, while a
++        # constant false condition adds no row. Neither changes proof flags.
++        row = model.addConstr(gp.LinExpr(active) <= 0, name=name+'_no_good')
++    elif bound > base_floor:
++        row = model.addConstr(theta >= base_floor+(bound-base_floor)*active,
++                              name=name+'_cost_floor')
++    model.update()
++    return dict(satellite=site, active=active, triggers=triggers, cost=theta, row=row,
++        bound=bound, base_floor=base_floor, infeasible=infeasible,
++        cost_target='actual_site_cost_epigraph', scope='experimental_conditional_physical_cut',
++        proven_optimal=False, proven_infeasible=False)
++
++
++def project_physical_costs(problem, context, initial, *, cuts=(), fix=False):
++    """Set actual site costs and exact trigger flags after set_joint_projection."""
++    from models.routing.common.cycle.audit import audit_solution
++    if not audit_solution(problem, initial)['valid']:
++        raise ValueError('Physical cost projection requires an audited full M5 schedule')
++    def put(var, value):
++        if isinstance(var, int):
++            if var != value:
++                raise ValueError('Projection contradicts a constant condition')
++            return
++        var.Start = value
++        if fix:
++            var.LB = var.UB = value
++    values = {site:0.0 for site in context['physical_costs']}
++    for trip in initial['e2_trips']:
++        site = trip['satellite_id']
++        places = [site]+[problem.order_map[e['order_id']].customer for e in trip['events']]+[site]
++        values[site] += math.fsum(problem.distance(a,b) for a,b in zip(places,places[1:]))
++    for site, var in context['physical_costs'].items():
++        put(var, values[site])
++    # Existing projection helpers let Gurobi derive supply variables from
++    # selected E1 routes, so their Start attribute need not be populated.
++    # Reconstruct the actual projection instead of reading an undefined start.
++    e1 = context['e1']
++    projected_supply = {}
++    if context['backend'] == 'patterns':
++        patterns = {(r['batch'], tuple(r['delivery']), tuple(r['pickup'])):r
++                    for r in e1['patterns']}
++        for trip in initial['e1_trips']:
++            pattern = patterns[trip['batch_id'],
++                tuple(e['site_id'] for e in trip['events'] if e['kind']=='d'),
++                tuple(e['site_id'] for e in trip['events'] if e['kind']=='p')]
++            projected_supply.update({(site,trip['batch_id']):value
++                                      for site,value in pattern['supply'].items()})
++    else:
++        projected_supply = {(e['site_id'],trip['batch_id']):e['start']+problem.service(e['site_id'])
++            for trip in initial['e1_trips'] for e in trip['events'] if e['kind']=='d'}
++    supplies = e1.get('supplies', e1.get('deliveries'))
++    for key, var in supplies.items():
++        put(var, projected_supply[key])
++    returned = {e['order_id']:trip['return_complete'] for trip in initial['e2_trips']
++                for e in trip['events'] if e['kind']=='p'}
++    for cut in cuts:
++        enabled = []
++        for trigger in cut['triggers']:
++            if trigger['kind'] == 'supply':
++                value = projected_supply[cut['satellite'], trigger['batch']]
++            else:
++                value = sum(o.count for o in problem.orders if o.satellite==cut['satellite']
++                            and returned[o.id] <= problem.batch_map[trigger['batch']].cutoff)
++            flag = int(round(value) <= trigger['threshold'] if trigger['kind'] == 'maximum_returns'
++                       else round(value) >= trigger['threshold'])
++            put(trigger['flag'], flag)
++            enabled.append(flag)
++        put(cut['active'], int(all(enabled)))
++    return dict(actual_site_costs=values, cost_target='actual_site_cost_epigraph')
+--- /dev/null
++++ b/tests/routing/test_multibatch_physical_site.py
+@@ -0,0 +1,154 @@
++"""Full-schedule projections and genuine one-vehicle congestion lower bounds."""
++import math
++
++import pytest
++
++from models.routing.common.cycle.audit import audit_solution
++from models.routing.solvers.exact.multibatch_physical_site import (
++    build_physical_site, physical_site_certificate, project_physical_site)
++from models.routing.solvers.exact.solver import solve_exact
++from tests.routing.test_multibatch_departure_loads import nonmetric_problem
++from tests.routing.test_multibatch_route_service import congestion_problem
++
++
++@pytest.mark.parametrize('seed', range(6))
++@pytest.mark.parametrize('compressed', [False, True])
++def test_original_full_schedule_projects_with_supply_and_early_return_conditions(seed, compressed):
++    gp = pytest.importorskip('gurobipy')
++    problem = nonmetric_problem(seed)
++    initial = solve_exact(problem, time_limit=5)
++    assert initial['info']['proven_optimal'] and audit_solution(problem, initial)['valid']
++    for site in {o.satellite for o in problem.orders}:
++        supplies = {t['batch_id']: e['start']+problem.service(site)
++            for t in initial['e1_trips'] for e in t['events'] if e['kind'] == 'd' and e['site_id'] == site}
++        returned = {e['order_id']: t['return_complete'] for t in initial['e2_trips'] if t['satellite_id'] == site
++                    for e in t['events'] if e['kind'] == 'p'}
++        counts = {b.id: sum(o.count for o in problem.orders if o.satellite == site and returned[o.id] <= b.cutoff)
++                  for b in problem.operating_policy.batches}
++        model, context = build_physical_site(problem, site, supply_thresholds=supplies,
++            minimum_returns=counts, maximum_returns=counts, compress_routes=compressed)
++        try:
++            assert context['local_problem'].network is problem.network
++            projected = project_physical_site(problem, context, initial, fix=True)
++            model.optimize()
++            assert model.Status == gp.GRB.OPTIMAL
++            assert model.ObjVal == pytest.approx(projected['original_site_cost'], abs=1e-6)
++            assert context['projection_proof']['local_relaxed_pool'] >= sum(o.count for o in context['local_problem'].orders)
++        finally: model.dispose()
++        cert = physical_site_certificate(problem, site, time_limit=3, supply_thresholds=supplies,
++            minimum_returns=counts, maximum_returns=counts, initial_result=initial, compress_routes=compressed)
++        assert cert['bound'] <= projected['original_site_cost']+1e-6
++        assert not cert['proven_optimal'] and not cert['proven_infeasible']
++
++
++@pytest.mark.parametrize('compressed', [False, True])
++def test_physical_site_bound_closes_independent_one_vehicle_waiting_counterexample(compressed):
++    pytest.importorskip('gurobipy')
++    problem = congestion_problem()
++    # Each delivery has a separate unit-volume trip, both before time 10.
++    # Both pickups occur after time 50. If each delivery shares its pickup,
++    # the one vehicle cannot complete the second delivery before 10.
++    # Therefore at least 3 nonempty trips, each cost 2: bound 6 is attained.
++    cert = physical_site_certificate(problem, 'S', time_limit=5, compress_routes=compressed)
++    assert cert['subproblem_optimal'] and cert['subproblem_objective'] == pytest.approx(6)
++    assert 6-1e-6 <= cert['bound'] <= 6
++    assert not cert['proven_optimal'] and not cert['proven_infeasible']
++    full = solve_exact(problem, time_limit=5)
++    assert full['info']['objective'] == pytest.approx(10)
++
++
++def test_impossible_conditional_returns_only_prove_subproblem_infeasibility():
++    pytest.importorskip('gurobipy')
++    problem = congestion_problem()
++    cert = physical_site_certificate(problem, 'S', time_limit=5, minimum_returns={'b1': 1})
++    assert cert['subproblem_infeasible'] and not cert['proven_infeasible']
++    assert cert['bound'] == 0 and cert['raw_bound'] is None
++
++
++@pytest.mark.parametrize('compressed', [False, True])
++def test_certified_independent_trip_floor_preserves_the_full_projection(compressed):
++    gp = pytest.importorskip('gurobipy')
++    problem = congestion_problem()
++    initial = solve_exact(problem, time_limit=5)
++    # Unit capacity needs at least two trips, each of cost 2. The certified
++    # independent cover floor 4 is weaker than the physical-calendar floor 6.
++    model, context = build_physical_site(problem, 'S', cost_floor=4,
++                                         compress_routes=compressed)
++    try:
++        row = model.getConstrByName('physical_certified_cost_floor')
++        assert row.Sense == '>' and row.RHS == 4
++        projection = project_physical_site(problem, context, initial, fix=True)
++        model.optimize()
++        assert model.Status == gp.GRB.OPTIMAL
++        assert model.ObjVal == pytest.approx(projection['original_site_cost'])
++    finally:
++        model.dispose()
++    cert = physical_site_certificate(problem, 'S', time_limit=5, fallback_bound=4,
++                                     compress_routes=compressed)
++    assert cert['projection_proof']['externally_certified_cost_floor'] == 4
++    assert cert['subproblem_optimal'] and 6-1e-6 <= cert['bound'] <= 6
++    assert not cert['proven_optimal']
++
++
++def test_condition_guard_and_projection_reject_nonmatching_full_schedule():
++    pytest.importorskip('gurobipy')
++    problem = congestion_problem()
++    for kwargs in [dict(supply_thresholds={'bad': 0}), dict(supply_thresholds={'b1': True}),
++                   dict(minimum_returns={'b1': 3}), dict(minimum_returns={'b1': -1}),
++                   dict(maximum_returns={'b1': True}), dict(maximum_returns={'b1': 3})]:
++        with pytest.raises(ValueError, match='Conditions'):
++            build_physical_site(problem, 'S', **kwargs)
++    with pytest.raises(ValueError, match='active'): build_physical_site(problem, 'bad')
++    initial = solve_exact(problem, time_limit=5)
++    model, context = build_physical_site(problem, 'S', minimum_returns={'b1': 1})
++    try:
++        with pytest.raises(ValueError, match='minimum early returns'):
++            project_physical_site(problem, context, initial)
++    finally: model.dispose()
++    for budget in (0, -1, math.inf):
++        with pytest.raises(ValueError, match='time_limit'):
++            physical_site_certificate(problem, 'S', time_limit=budget)
++    for floor in (-1, math.inf, math.nan):
++        with pytest.raises(ValueError, match='cost_floor'):
++            build_physical_site(problem, 'S', cost_floor=floor)
++        with pytest.raises(ValueError, match='fallback_bound'):
++            physical_site_certificate(problem, 'S', fallback_bound=floor)
++
++
++@pytest.mark.parametrize('returned', [29, 30, 31])
++def test_maximum_count_needs_reverse_classification_at_the_integer_cutoff(returned):
++    gp = pytest.importorskip('gurobipy')
++    from tests.routing.test_multibatch_cycle import fixture
++    problem = fixture(pool=2)
++    model, context = build_physical_site(problem, 'S', maximum_returns={'b1':0})
++    try:
++        variable = context['pickup_returns']['o1']
++        variable.LB = variable.UB = returned
++        model.Params.DualReductions = 0
++        model.optimize()
++        assert model.Status == (gp.GRB.INFEASIBLE if returned <= 30 else gp.GRB.OPTIMAL)
++        if returned <= 30:
++            # Deliberately restore the old one-way mistake: both flags can be
++            # zero even though o1 actually returns before/at the cutoff.
++            model.remove(next(row for row in model.getGenConstrs()
++                              if row.GenConstrName == 'physical_early_no_o1_b1'))
++            model.optimize()
++            assert model.Status == gp.GRB.OPTIMAL
++            assert context['return_flags']['o1','b1'].X == 0
++    finally:
++        model.dispose()
++
++
++def test_maximum_projection_rejects_too_many_actual_early_returns():
++    pytest.importorskip('gurobipy')
++    from tests.routing.test_multibatch_cycle import fixture, hand_solution
++    problem = fixture(pool=2)
++    model, context = build_physical_site(problem, 'S', maximum_returns={'b1':0})
++    try:
++        with pytest.raises(ValueError, match='maximum early returns'):
++            project_physical_site(problem, context, hand_solution(problem, 30))
++        project_physical_site(problem, context, hand_solution(problem, 31), fix=True)
++        model.optimize()
++        assert model.SolCount
++    finally:
++        model.dispose()
+--- /dev/null
++++ b/tests/routing/test_multibatch_physical_cuts.py
+@@ -0,0 +1,145 @@
++"""Integer activation boundaries, cost epigraphs, and full M5 projections."""
++import math
++
++import pytest
++
++from models.routing.common.cycle.audit import audit_solution
++from models.routing.solvers.exact.multibatch_joint_inventory import build_joint_inventory, set_joint_projection
++from models.routing.solvers.exact.multibatch_physical_cuts import (
++    add_physical_cut, lift_physical_costs, project_physical_costs)
++from models.routing.solvers.exact.multibatch_physical_site import physical_site_certificate
++from models.routing.solvers.exact.solver import solve_exact
++from tests.routing.test_multibatch_departure_loads import nonmetric_problem
++from tests.routing.test_multibatch_joint_inventory import domains
++from tests.routing.test_multibatch_route_service import congestion_problem
++
++
++@pytest.mark.parametrize('supply', range(4))
++@pytest.mark.parametrize('early', range(3))
++@pytest.mark.parametrize('maximum', range(3))
++@pytest.mark.parametrize('infeasible', [False, True])
++def test_cost_floor_and_no_good_activate_iff_all_integer_conditions_hold(supply, early, maximum, infeasible):
++    gp = pytest.importorskip('gurobipy')
++    problem = congestion_problem()
++    model = gp.Model()
++    model.Params.OutputFlag = 0
++    model.Params.DualReductions = 0
++    supply_var = model.addVar(vtype=gp.GRB.INTEGER, ub=3)
++    model.addConstr(supply_var == supply)
++    route = model.addVar(lb=1, ub=1, obj=4)
++    allocation = {}
++    for index, order in enumerate(problem.orders):
++        for batch in problem.operating_policy.batches:
++            value = int((index < early and batch.id == 'b1') or
++                        (index >= early and batch.id == problem.operating_policy.batches[-1].id))
++            allocation[order.id, batch.id] = model.addVar(lb=value, ub=value, vtype=gp.GRB.BINARY)
++    model.update()
++    context = dict(e1=dict(supplies={('S','b1'):supply_var}, allocation=allocation),
++        routes={'S':dict(rows=[dict(column=dict(cost=4))], choices={(0,None):route})})
++    cert = dict(satellite='S', bound=6, supply_thresholds={'b1':2}, minimum_returns={'b1':1},
++        maximum_returns={'b1':maximum},
++        scope='M5_conditional_physical_E2_site_cost_relaxation',
++        subproblem_infeasible=infeasible, status=gp.GRB.INFEASIBLE if infeasible else gp.GRB.OPTIMAL)
++    try:
++        cut = add_physical_cut(problem, model, context, cert, base_floor=4)
++        model.optimize()
++        enabled = supply >= 2 and 1 <= early <= maximum
++        if infeasible and enabled:
++            assert model.Status == gp.GRB.INFEASIBLE
++        else:
++            assert model.Status == gp.GRB.OPTIMAL
++            assert model.ObjVal == pytest.approx(6 if enabled and not infeasible else 4)
++            assert cut['active'].X == int(enabled)
++            assert route.X == 1  # compressed cost stays 4, theta may rise to 6
++        assert cut['cost_target'] == 'actual_site_cost_epigraph'
++        assert not cut['proven_optimal'] and not cut['proven_infeasible']
++        assert lift_physical_costs(model, context) is context['physical_costs']
++    finally:
++        model.dispose()
++
++
++@pytest.mark.parametrize('seed', range(6))
++@pytest.mark.parametrize('timed', [False, True])
++def test_nonmetric_full_optimum_projects_with_actual_cost_and_conditional_flags(seed, timed):
++    gp = pytest.importorskip('gurobipy')
++    problem = nonmetric_problem(seed)
++    initial = solve_exact(problem, time_limit=5)
++    assert initial['info']['proven_optimal'] and audit_solution(problem, initial)['valid']
++    model, context = build_joint_inventory(problem, domains(problem, timed=timed))
++    cuts = []
++    try:
++        for site in context['routes']:
++            thresholds = {t['batch_id']:e['start']+problem.service(site)
++                for t in initial['e1_trips'] for e in t['events'] if e['kind']=='d' and e['site_id']==site}
++            counts = {b.id:sum(e['quantity'] for t in initial['e2_trips'] if t['satellite_id']==site
++                and t['return_complete']<=b.cutoff for e in t['events'] if e['kind']=='p')
++                for b in problem.operating_policy.batches}
++            cert = physical_site_certificate(problem, site, time_limit=5,
++                supply_thresholds=thresholds, minimum_returns=counts, maximum_returns=counts,
++                initial_result=initial)
++            assert cert['subproblem_optimal']
++            cuts.append(add_physical_cut(problem, model, context, cert, name=f'cut_{site}'))
++        set_joint_projection(problem, context, initial, fix=True)
++        projection = project_physical_costs(problem, context, initial, cuts=cuts, fix=True)
++        model.optimize()
++        assert model.Status == gp.GRB.OPTIMAL
++        assert model.ObjVal <= initial['info']['objective']+1e-6
++        for site in context['routes']:
++            for batch in problem.operating_policy.batches:
++                projected = sum(o.count*context['e1']['allocation'][o.id, b.id].X
++                    for o in problem.orders if o.satellite == site
++                    for b in problem.operating_policy.batches
++                    if problem.batch_index[b.id] <= problem.batch_index[batch.id])
++                actual = sum(e['quantity'] for t in initial['e2_trips'] if t['satellite_id'] == site
++                    and t['return_complete'] <= batch.cutoff for e in t['events'] if e['kind'] == 'p')
++                assert projected == pytest.approx(actual, abs=1e-8)
++        assert sum(projection['actual_site_costs'].values()) == pytest.approx(initial['audit']['distances']['e2'])
++    finally:
++        model.dispose()
++    # A fresh un-fixed relaxation also remains below the independently solved
++    # full optimum, even when the oracle floor raises a compressed objective.
++    model, context = build_joint_inventory(problem, domains(problem, timed=timed))
++    try:
++        for site in context['routes']:
++            cert = physical_site_certificate(problem, site, time_limit=5)
++            add_physical_cut(problem, model, context, cert, name=f'cut_{site}')
++        model.optimize()
++        assert model.Status == gp.GRB.OPTIMAL
++        assert model.ObjBound <= initial['info']['objective']+1e-6
++    finally:
++        model.dispose()
++
++
++def test_physical_oracle_floor_closes_one_vehicle_waiting_gap():
++    gp = pytest.importorskip('gurobipy')
++    problem = congestion_problem()
++    model, context = build_joint_inventory(problem, domains(problem, timed=True))
++    try:
++        model.optimize()
++        assert model.ObjVal == pytest.approx(8)
++        cert = physical_site_certificate(problem, 'S', time_limit=5)
++        cut = add_physical_cut(problem, model, context, cert, base_floor=4)
++        model.optimize()
++        assert model.Status == gp.GRB.OPTIMAL
++        assert 10-1e-6 <= model.ObjBound <= 10
++        assert isinstance(cut['active'], int) and cut['active'] == 1
++        assert not cut['proven_optimal']
++    finally:
++        model.dispose()
++
++
++def test_invalid_conditions_scope_and_floors_cannot_create_certified_cuts():
++    pytest.importorskip('gurobipy')
++    problem = congestion_problem()
++    cert = physical_site_certificate(problem, 'S', time_limit=5)
++    cases = [dict(scope='restricted_route_pool'), dict(satellite='bad'), dict(bound=math.inf),
++             dict(supply_thresholds={'b1':True}), dict(supply_thresholds={'bad':0}),
++             dict(minimum_returns={'b1':3}), dict(maximum_returns={'b1':3}),
++             dict(maximum_returns={'b1':False}), dict(subproblem_infeasible=True, status=9)]
++    for changes in cases:
++        model, context = build_joint_inventory(problem, domains(problem, timed=True))
++        try:
++            with pytest.raises(ValueError):
++                add_physical_cut(problem, model, context, {**cert, **changes})
++        finally:
++            model.dispose()
+--- /dev/null
++++ b/tests/routing/test_multibatch_physical_maximum.py
+@@ -0,0 +1,64 @@
++"""Independent cutoff equality projections through the indexed E1 backend."""
++from dataclasses import replace
++
++import pytest
++
++from models.routing.common.cycle import MultiBatchInstance
++from models.routing.common.cycle.audit import audit_solution
++from models.routing.common.cycle.state import empty_result
++from models.routing.common.domain.instance import ProblemInstance
++from models.routing.common.domain.node import Depot, Satellite, Customer
++from models.routing.solvers.exact.multibatch_joint_inventory import build_joint_inventory, set_joint_projection
++from models.routing.solvers.exact.multibatch_physical_cuts import add_physical_cut, project_physical_costs
++from tests.routing.test_multibatch_cycle import fixture
++from tests.routing.test_multibatch_joint_inventory import domains
++
++
++@pytest.mark.parametrize('returned', [30, 31])
++@pytest.mark.parametrize('timed', [False, True])
++def test_five_site_cutoff_allocation_equals_actual_returns_for_maximum_activation(returned, timed):
++    gp = pytest.importorskip('gurobipy')
++    template = fixture(pool=10, zero=True, cleaning=0)
++    nodes, orders = {'D':Depot('D',0,0)}, []
++    for i in range(5):
++        site, customer = f'S{i}', f'C{i}'
++        nodes[site] = Satellite(site,0,0)
++        nodes[customer] = Customer(customer,0,0,0,0,(0,125),(0,125),site)
++        orders.extend(replace(o,id=f'{o.id}_{i}',customer=customer,satellite=site) for o in template.orders)
++    fleet = dict(E1_vehicle_count=1,vehicles_per_satellite=1,E1_Qk=500,E1_Ck=500,
++                 E2_Qv=500,E2_Cv=500,container_weight=1,container_volume=1)
++    problem = MultiBatchInstance(ProblemInstance(nodes,fleet),orders,template.operating_policy)
++    initial = empty_result(problem,'manual')
++    for index,batch in enumerate(problem.operating_policy.batches):
++        selected = [o for o in orders if o.batch == batch.id]
++        pickups = []
++        for o in selected:
++            quantity = (int(returned <= 30) if index == 0 else 1+int(returned > 30)) if o.satellite == 'S0' else 1
++            if quantity:
++                pickups.append(dict(kind='p',site_id=o.satellite,quantity=quantity,start=batch.cutoff))
++            initial['e2_trips'].append(dict(trip_id=f'e2_{o.id}',vehicle_id=0,satellite_id=o.satellite,
++                trip_index=index,departure=batch.start+1,
++                return_complete=returned if o.id == 'o1_0' else batch.start+4,
++                events=[dict(kind='d',order_id=o.id,start=batch.start+2,quantity=1),
++                        dict(kind='p',order_id=o.id,start=batch.start+3,quantity=1)]))
++        initial['e1_trips'].append(dict(trip_id=f'e1_{index}',vehicle_id=0,batch_id=batch.id,
++            departure=batch.start,return_complete=batch.cutoff+1,
++            events=[dict(kind='d',site_id=o.satellite,quantity=1,start=batch.start+1) for o in selected]+pickups))
++    assert audit_solution(problem,initial)['valid']
++    model,context = build_joint_inventory(problem,domains(problem,timed=timed))
++    try:
++        assert context['backend'] == 'indexed'
++        # Zero directed distances provide an independently evident floor of 0.
++        cert = dict(satellite='S0',bound=0,maximum_returns={'b1':0},
++            scope='M5_conditional_physical_E2_site_cost_relaxation',subproblem_infeasible=False)
++        cut = add_physical_cut(problem,model,context,cert)
++        set_joint_projection(problem,context,initial,fix=True)
++        project_physical_costs(problem,context,initial,cuts=[cut],fix=True)
++        model.optimize()
++        assert model.Status == gp.GRB.OPTIMAL and model.ObjVal == 0
++        early = sum(o.count*context['e1']['allocation'][o.id,'b1'].X
++                    for o in orders if o.satellite == 'S0')
++        assert early == int(returned <= 30)
++        assert cut['active'].X == int(returned > 30)
++    finally:
++        model.dispose()

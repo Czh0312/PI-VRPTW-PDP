@@ -1,0 +1,829 @@
+--- a/models/routing/solvers/exact/multibatch_joint_inventory.py
++++ b/models/routing/solvers/exact/multibatch_joint_inventory.py
+@@ -21,11 +21,21 @@
+     if 'timing_groups' in universe:
+         if not all(g['complete'] for g in universe['timing_groups']):
+             raise ValueError('Joint inventory requires complete timing frontiers')
+-        return [dict(column=r['column'], keys=tuple(tuple(k) for k in r['column']['tasks']),
++        clocks = {}
++        if 'clock_groups' in universe:
++            if not all(g['complete'] for g in universe['clock_groups']):
++                raise ValueError('Joint inventory requires complete service envelopes')
++            clocks = {(frozenset(tuple(k) for k in r['tasks']), r['cutoff']): r
++                      for g in universe['clock_groups'] for r in g['columns']}
++        rows = [dict(column=r['column'], keys=tuple(tuple(k) for k in r['column']['tasks']),
+             pickups=tuple(oid for oid, kind in r['column']['tasks'] if kind == 'p'),
+             minimum_return_bound=r['column']['return_complete'], allowed_cutoffs=(r['cutoff'],),
+             latest_departure=r['latest_departure'])
+             for g in universe['timing_groups'] for r in g['columns']]
++        if clocks:
++            for row in rows:
++                row['service_envelope'] = clocks[frozenset(row['keys']), row['allowed_cutoffs'][0]]
++        return rows
+     p, site = problem.operating_policy, context['satellite']
+     after = {n['key']: n['window'][0]+n['order'].service_time
+              +travel['inward'][site][n['order'].customer]+p.e2_return_unload_time
+@@ -93,6 +103,29 @@
+             fleet = model.addConstr(gp.LinExpr() <= context['maximum_trips'], name=f'joint_trip_limit_{site_index}')
+             cost = model.addConstr(gp.LinExpr() >= (site_bounds or {}).get(site, 0.0), name=f'certified_E2_cost_{site_index}')
+             supplies = e1.get('supplies', e1.get('deliveries'))
++            service = {}
++            compulsory = {}
++            if 'clock_groups' in universe:
++                landmarks = sorted({p.cycle_start, p.cycle_end}
++                    |{value for b in p.batches for value in (b.start, b.cutoff, b.end)})
++                points = sorted(set(landmarks[:-1]) | {(a+b)//2 for a,b in zip(landmarks, landmarks[1:])})
++                for point in points:
++                    compulsory[point] = model.addConstr(gp.LinExpr() <= problem.fleet.e2_per_sat_count,
++                        name=f'joint_compulsory_{site_index}_{point}')
++                for i, node in enumerate(context['nodes']):
++                    oid, kind = node['key']
++                    if kind == 'd':
++                        service[node['key']] = (
++                            model.addConstr(e1['order_times'][oid, kind]-supplies[site, node['order'].batch]
++                                >= p.e2_dispatch_prep_time, name=f'joint_service_offset_{site_index}_{i}'),
++                            model.addConstr(e1['order_times'][oid, kind] >= 0,
++                                name=f'joint_service_earliest_{site_index}_{i}'))
++                    else:
++                        service[node['key']] = (
++                            model.addConstr(e1['order_times'][oid, kind] <= 0,
++                                name=f'joint_service_latest_{site_index}_{i}'),
++                            model.addConstr(e1['returns'][oid] >= 0,
++                                name=f'joint_service_return_{site_index}_{i}'))
+             supply = {n['key']: model.addConstr(supplies[site, n['order'].batch]
+                 <= -p.e2_dispatch_prep_time, name=f'joint_supply_{site_index}_{i}')
+                 for i, n in enumerate(context['nodes']) if n['key'][1] == 'd'} if timed and backend == 'indexed' else {}
+@@ -124,6 +157,21 @@
+                            for value in levels.get(key[0], [])[1:] if row['latest_departure'] < value]
+                     coefficients += [1]*len(bad)
+                     constraints += bad
++                    if service:
++                        envelope = row['service_envelope']
++                        # ALL-path extrema, independent of the cost profile
++                        # and finite-supply rounding. This interval is inside
++                        # every actual trip with the same task set/cutoff.
++                        busy = [constraint for point,constraint in compulsory.items()
++                            if envelope['latest_start_max'] <= point
++                            < envelope['return_earliest']+p.e2_turnaround_time]
++                        coefficients += [1]*len(busy)
++                        constraints += busy
++                        for oid, kind in row['keys']:
++                            values = (envelope['delivery_offsets'][oid], envelope['delivery_earliest'][oid]) \
++                                if kind == 'd' else (envelope['pickup_latest'][oid], envelope['return_earliest'])
++                            coefficients += [-value for value in values]
++                            constraints += list(service[oid, kind])
+                     var = model.addVar(vtype=GRB.CONTINUOUS if levels else GRB.BINARY, ub=1,
+                         obj=row['column']['cost'],
+                         column=gp.Column(coefficients, constraints), name=f'joint_route_{site_index}_{i}_{batch_index}')
+@@ -232,8 +280,13 @@
+             variables=model.NumVars, constraints=model.NumConstrs, general_constraints=model.NumGenConstrs,
+             route_choices=len(context['choices']), backend=context['backend'], nodes=model.NodeCount)
+         result['timing_envelopes'] = timed
++        serviced = any('clock_groups' in universe for _, universe in domains.values())
++        result['service_envelopes'] = serviced
++        result['compulsory_vehicle_cuts'] = serviced
+         if timed and context['backend'] == 'patterns':
+             result['scope'] = 'M5_joint_E1_inventory_and_continuous_timed_E2_cutoff_cover_relaxation'
++        if serviced:
++            result['scope'] = 'M5_joint_E1_inventory_and_service_timed_E2_cutoff_cover_relaxation'
+         if model.SolCount:
+             result['relaxation_objective'] = float(model.ObjVal)
+             result['selected_columns'] = [dict(satellite=site, column_index=i, cutoff=bid,
+@@ -347,7 +400,7 @@
+ def joint_route_inventory_certificate(problem, *, time_limit=60, initial_result=None,
+         seed=42, joint_time_limit=25, recovery_time_limit=5, e1_time_limit=10,
+         integer_cover_time_limit=15, enumeration_time_limit=15, enumeration_max_states=2000000,
+-        verbose=False, diagnostics_dir=None, timing_envelopes=False):
++        verbose=False, diagnostics_dir=None, timing_envelopes=False, service_envelopes=False):
+     """Independent bounds, joint cutoff coupling, then audited schedule recovery."""
+     from models.routing.common.cycle.audit import audit_solution
+     from .multibatch_bounds import distance_certificate
+@@ -360,6 +413,10 @@
+     from .multibatch_route_cg import site_route_cover
+     if not isinstance(timing_envelopes, bool):
+         raise ValueError('timing_envelopes must be boolean')
++    if not isinstance(service_envelopes, bool):
++        raise ValueError('service_envelopes must be boolean')
++    if service_envelopes and not timing_envelopes:
++        raise ValueError('service_envelopes requires timing_envelopes')
+     if problem.model_number != 5 or problem.free_assignment or not problem.reusable or len(problem.operating_policy.batches) <= 1:
+         raise ValueError('Joint route inventory requires fixed reusable multibatch M5')
+     if not math.isfinite(time_limit) or time_limit <= 0:
+@@ -404,10 +461,11 @@
+                 universe = enumerate_route_universe(problem, context,
+                     deadline=min(site_deadline, now+min(enumeration_time_limit,
+                         (site_deadline-now)*(.85 if timing_envelopes else .5))),
+-                    max_states=enumeration_max_states)
++                    max_states=enumeration_max_states,
++                    **({'service_envelopes': service_envelopes} if timing_envelopes else {}))
+                 if universe['complete']:
+                     domains[context['satellite']] = context, universe
+-                    reference_universe = {k: v for k, v in universe.items() if k != 'timing_groups'}
++                    reference_universe = {k: v for k, v in universe.items() if k not in ('timing_groups', 'clock_groups')}
+                     row = enumerated_route_cover(problem, context, reference_universe, deadline=site_deadline,
+                         verbose=verbose, export_path=export, integer_cover_time_limit=integer_cover_time_limit,
+                         initial_result=initial_result, seed=seed)
+@@ -421,10 +479,17 @@
+                         with gzip.open(export.with_name(export.stem+'_timing.json.gz'), 'wb', compresslevel=1) as stream:
+                             stream.write(encoded)
+                         del encoded
++                        if service_envelopes:
++                            service_data = {k: universe[k] for k in ('complete', 'clock_columns', 'clock_groups')}
++                            encoded = json.dumps(service_data, ensure_ascii=False, allow_nan=False,
++                                                 separators=(',', ':')).encode('utf-8')
++                            with gzip.open(export.with_name(export.stem+'_service.json.gz'), 'wb', compresslevel=1) as stream:
++                                stream.write(encoded)
++                            del encoded
+                 else:
+                     row = site_route_cover(problem, context, deadline=site_deadline, initial_result=initial_result,
+                         seed=seed, verbose=verbose, pricing_export_path=export)
+-                    row['enumeration'] = enumeration_stats({k: v for k, v in universe.items() if k != 'timing_groups'})
++                    row['enumeration'] = enumeration_stats({k: v for k, v in universe.items() if k not in ('timing_groups', 'clock_groups')})
+             else:
+                 row = site_route_cover(problem, context, deadline=site_deadline, initial_result=initial_result,
+                     seed=seed, verbose=verbose, pricing_export_path=export)
+--- a/models/routing/solvers/exact/multibatch_route_timing.py
++++ b/models/routing/solvers/exact/multibatch_route_timing.py
+@@ -51,7 +51,10 @@
+             shutil.copyfileobj(incoming, outgoing, length=1024*1024)
+ 
+ 
+-def enumerate_timed_route_universe(problem, context, *, deadline=None, max_states=2000000):
++def enumerate_timed_route_universe(problem, context, *, deadline=None, max_states=2000000,
++                                  service_envelopes=False):
++    if not isinstance(service_envelopes, bool):
++        raise ValueError('service_envelopes must be boolean')
+     if not isinstance(max_states, int) or isinstance(max_states, bool) or max_states < 1:
+         raise ValueError('max_states must be a positive integer')
+     from models.routing.common.cycle.precheck import travel_lower_bounds
+@@ -60,7 +63,7 @@
+     travel = travel_lower_bounds(problem)
+     nodes = context['nodes']
+     categories = [None]+[b.id for b in p.batches if any(n['key'][1] == 'd' and n['order'].batch == b.id for n in nodes)]
+-    groups, timing_groups, states, completed = [], [], 0, True
++    groups, timing_groups, clock_groups, states, completed = [], [], [], 0, True
+     class Interrupted(Exception):
+         pass
+     for category in categories:
+@@ -84,9 +87,10 @@
+         min_back = [travel['inward'][site][a]+p.e2_return_unload_time for a in positions]
+         start = p.cycle_start if category is None else context['release'][category]
+         cap_w, cap_v = f.e2_weight_cap+1e-6, f.e2_volume_cap+1e-6
+-        best, frontier, path, starts, delivered = {}, {}, [], [], [-1]*n
++        best, frontier, clocks, path, starts, delivered = {}, {}, {}, [], [], [-1]*n
++        offsets, delivery_offsets = [], [-1]*n
+         group_begun, group_states, complete = time.perf_counter(), states, True
+-        def latest(limit):
++        def upper_clocks(limit):
+             upper, following = {}, None
+             for j in reversed(path):
+                 value = high[j]
+@@ -99,13 +103,36 @@
+                     value = min(value, upper[mate]-services[j]-orders[j].min_use_time)
+                 upper[j] = value
+                 following = j
+-            return int(upper[path[0]]-duration[n][path[0]])
++            return int(upper[path[0]]-duration[n][path[0]]), upper
+ 
+         def retain(mask, full_cost, end, has_d, has_p):
+             cutoffs = [(b.id, min(b.cutoff, p.cycle_end-p.e2_turnaround_time))
+                        for b in p.batches if end <= b.cutoff] if has_p else [(None, p.cycle_end-p.e2_turnaround_time)]
+             for bid, limit in cutoffs:
+-                allowed_start = latest(limit) if has_d else None
++                if has_d or service_envelopes:
++                    latest_departure, upper = upper_clocks(limit)
++                allowed_start = latest_departure if has_d else None
++                if service_envelopes:
++                    # Aggregate EVERY feasible path before cost/latest
++                    # dominance. A removed path must still contribute its
++                    # optimistic clocks to full-M5 projection bounds.
++                    key = mask, bid
++                    if key not in clocks:
++                        clocks[key] = dict(tasks=tuple(keys[j] for j in range(n) if mask & (1 << j)),
++                            cutoff=bid, delivery_offsets={}, delivery_earliest={},
++                            pickup_latest={}, return_earliest=int(end), latest_start_max=latest_departure)
++                    envelope = clocks[key]
++                    envelope['return_earliest'] = min(envelope['return_earliest'], int(end))
++                    envelope['latest_start_max'] = max(envelope['latest_start_max'], latest_departure)
++                    for position, j in enumerate(path):
++                        oid = keys[j][0]
++                        if is_delivery[j]:
++                            a, b = envelope['delivery_offsets'], envelope['delivery_earliest']
++                            a[oid] = min(a.get(oid, offsets[position]), offsets[position])
++                            b[oid] = min(b.get(oid, starts[position]), starts[position])
++                        else:
++                            a = envelope['pickup_latest']
++                            a[oid] = max(a.get(oid, upper[j]), upper[j])
+                 rows = frontier.setdefault((mask, bid), [])
+                 if any(r['column']['cost'] <= full_cost and
+                        (allowed_start is None or r['latest_departure'] >= allowed_start) for r in rows):
+@@ -158,6 +185,12 @@
+                     continue
+                 path.append(j)
+                 starts.append(int(at))
++                if service_envelopes:
++                    offset = (offsets[-1]+services[last] if offsets else 0)+duration[last][j]
++                    if not is_delivery[j] and mate >= 0 and delivery_offsets[mate] >= 0:
++                        offset = max(offset, delivery_offsets[mate]+services[mate]+orders[j].min_use_time)
++                    offsets.append(int(offset))
++                    if is_delivery[j]: delivery_offsets[j] = offset
+                 if is_delivery[j]:
+                     delivered[j] = at
+                 dfs(mask | bit, j, at+services[j], cost+distance[last][j],
+@@ -165,6 +198,9 @@
+                     has_d or is_delivery[j], has_pickup)
+                 if is_delivery[j]:
+                     delivered[j] = -1
++                if service_envelopes:
++                    if is_delivery[j]: delivery_offsets[j] = -1
++                    offsets.pop()
+                 path.pop()
+                 starts.pop()
+         try:
+@@ -177,7 +213,12 @@
+             columns=list(best.values()), runtime=time.perf_counter()-group_begun))
+         timing_groups.append(dict(category=category, complete=complete,
+             columns=[r for rows in frontier.values() for r in rows]))
++        if service_envelopes:
++            clock_groups.append(dict(category=category, complete=complete, columns=list(clocks.values())))
+         if not complete:
+             break
+-    return dict(complete=completed and len(groups) == len(categories), groups=groups, timing_groups=timing_groups,
++    result = dict(complete=completed and len(groups) == len(categories), groups=groups, timing_groups=timing_groups,
+                 timing_columns=sum(len(g['columns']) for g in timing_groups), states=states, columns=sum(len(g['columns']) for g in groups), runtime=time.perf_counter()-begun)
++    if service_envelopes:
++        result.update(clock_groups=clock_groups, clock_columns=sum(len(g['columns']) for g in clock_groups))
++    return result
+--- a/models/routing/variants/model_5/exact/README.md
++++ b/models/routing/variants/model_5/exact/README.md
+@@ -81,3 +81,8 @@
+ 小仓数路径使用连续时间列与完整整数覆盖成本界；联合混合松弛最优仍不代表完整 M5 最优。
+ 本组同为 120 秒对照将 50 顾客下界提高到约 2235.41，gap 约 0.55%；默认关闭。
+ 见 [供货时间与路线成本的联合下界](../../../../../docs/m5_route_timing_20261001.md)。
++
++第十七步可在时间列上增加 `service_envelopes=True`，对全部路径（含成本支配删除路径）
++聚合必要服务/回仓时刻，并添加实际车队数的必占用区间约束。50 顾客两种子下界小幅提升，
++第三种子限时退步，因此仍默认关闭；完整 M5 最优性标志不变。
++见 [全路径服务包络与车辆并发对照](../../../../../docs/m5_route_service_20261001.md)。
+--- a/docs/exact_solver_architecture.md
++++ b/docs/exact_solver_architecture.md
+@@ -140,3 +140,8 @@
+ 另保留完整整数覆盖的成本界。完整方案投影使用一级路线最早供货值，不能强制替代列
+ 保留原实际出发时刻。更多仓采用一级弧模型，保留原始时间前沿和二元列。见
+ [供货时间与路线成本的联合下界](m5_route_timing_20261001.md)。
++
++M5 的 `service_envelopes=True` 需同时启用时间前沿。服务极值在任何路径支配删除之前聚合；
++车辆必占用区间使用全路径最大可行出发时刻，不能用有限供货取整后的上界替代。
++服务、回仓和关键时刻并发约束仍是必要条件，保留完整方案投影，尚未恢复全部车辆串行关系。
++当前收益很小且限时存在退步，默认关闭。见 [服务包络与车辆并发验证](m5_route_service_20261001.md)。
+--- a/tools/README.md
++++ b/tools/README.md
+@@ -59,3 +59,8 @@
+ `timed` 供货兼容时间列，另提供强制部分枚举的 `fallback`。正式组使用 120 秒预算，
+ 完整成本列域、时间前沿、连续/整数成本模型、联合模型和真实恢复模型均导出。
+ 见 [供货连接与完整前沿复核](../docs/m5_route_timing_20261001.md)。
++
++`audit/benchmark_multibatch_route_service.py` 比较 `timed` 供货前沿与 `service` 全路径服务包络、
++车辆必占用区间约束，另提供 `fallback`。两组冻结同一已审计初解、输入和源码；服务辅助域
++单独压缩导出。默认总预算 180 秒、联合阶段 85 秒，报告保留限时退步，见
++[服务与并发同预算结果](../docs/m5_route_service_20261001.md)。
+--- /dev/null
++++ b/tests/routing/test_multibatch_route_service.py
+@@ -0,0 +1,278 @@
++"""All-path service extrema, including paths removed by cost dominance."""
++from collections import defaultdict
++from dataclasses import replace
++import gzip
++import math
++import time
++
++import pytest
++
++from models.routing.common.cycle import MultiBatchInstance
++from models.routing.common.cycle.audit import audit_solution
++from models.routing.solvers.exact.multibatch_joint_inventory import (
++    build_joint_inventory, set_joint_projection, solve_joint_inventory, joint_route_inventory_certificate)
++from models.routing.solvers.exact.multibatch_route_timing import enumerate_timed_route_universe
++from models.routing.solvers.exact.multibatch_route_pricing import route_context
++from tests.routing.test_multibatch_route_timing import independent_windows, tradeoff_problem
++from tests.routing.test_multibatch_route_cg import enumerate_trips
++from tests.routing.test_multibatch_departure_loads import nonmetric_problem
++from tests.routing.test_multibatch_cycle import fixture, hand_solution
++
++
++def replay(problem, site, sequence, departure, windows, forced=None):
++    now, previous, delivered, starts = departure, site, {}, {}
++    for key in sequence:
++        oid, kind = key
++        order = problem.order_map[oid]
++        low, high = windows[key]
++        now = max(now+problem.travel(previous, order.customer), low)
++        if kind == 'p' and (oid, 'd') in sequence:
++            if oid not in delivered: return None
++            now = max(now, delivered[oid]+order.service_time+order.min_use_time)
++        if forced and forced[0] == key:
++            if now > forced[1]: return None
++            now = forced[1]
++        if now > high: return None
++        starts[key] = now
++        if kind == 'd': delivered[oid] = now
++        now += order.service_time
++        previous = order.customer
++    return starts, now+problem.travel(previous, site)+problem.operating_policy.e2_return_unload_time
++
++
++def oracle(problem, site):
++    release, windows = independent_windows(problem, site)
++    p = problem.operating_policy
++    zero = {key: (0, math.inf) for key in windows}
++    records = {}
++    for sequence, _ in enumerate_trips(problem, site):
++        delivery = {problem.order_map[oid].batch for oid, kind in sequence if kind == 'd'}
++        start = max([p.cycle_start]+[release[b] for b in delivery])
++        earliest, returned = replay(problem, site, sequence, start, windows)
++        offsets, _ = replay(problem, site, sequence, 0, zero)
++        cutoffs = [(b.id, min(b.cutoff, p.cycle_end-p.e2_turnaround_time)) for b in p.batches] \
++            if any(k == 'p' for _, k in sequence) else [(None, p.cycle_end-p.e2_turnaround_time)]
++        for bid, horizon in cutoffs:
++            if returned > horizon: continue
++            lo, hi = start, p.cycle_end
++            while lo < hi:
++                mid = (lo+hi+1)//2
++                state = replay(problem, site, sequence, mid, windows)
++                if state is not None and state[1] <= horizon: lo = mid
++                else: hi = mid-1
++            key = frozenset(sequence), bid
++            r = records.setdefault(key, dict(delivery_offsets={}, delivery_earliest={}, pickup_latest={},
++                                            return_earliest=returned, latest_start_max=lo))
++            r['return_earliest'] = min(r['return_earliest'], returned)
++            r['latest_start_max'] = max(r['latest_start_max'], lo)
++            for task in sequence:
++                oid, kind = task
++                if kind == 'd':
++                    for field, value in [('delivery_offsets', offsets[task]), ('delivery_earliest', earliest[task])]:
++                        r[field][oid] = min(r[field].get(oid, value), value)
++                else:
++                    lo, hi = earliest[task], windows[task][1]
++                    while lo < hi:
++                        mid = (lo+hi+1)//2
++                        state = replay(problem, site, sequence, start, windows, forced=(task, mid))
++                        if state is not None and state[1] <= horizon: lo = mid
++                        else: hi = mid-1
++                    r['pickup_latest'][oid] = max(r['pickup_latest'].get(oid, lo), lo)
++    return records
++
++
++def domains(problem):
++    return {s: (c, enumerate_timed_route_universe(problem, c, service_envelopes=True))
++            for s in problem.satellites for c in [route_context(problem, s)] if c['nodes']}
++
++
++@pytest.mark.parametrize('seed', range(6))
++def test_service_extrema_match_all_paths_and_independent_forced_time_search(seed):
++    problem = nonmetric_problem(seed)
++    for site, (_, universe) in domains(problem).items():
++        assert universe['complete']
++        observed = {}
++        for group in universe['clock_groups']:
++            assert group['complete']
++            for r in group['columns']:
++                observed[frozenset(r['tasks']), r['cutoff']] = {k: r[k] for k in (
++                    'delivery_offsets', 'delivery_earliest', 'pickup_latest', 'return_earliest', 'latest_start_max')}
++        assert observed == oracle(problem, site)
++
++
++@pytest.mark.parametrize('seed', range(6))
++def test_known_full_optimum_projects_to_service_model_and_bounds_are_safe(seed):
++    gp = pytest.importorskip('gurobipy')
++    from models.routing.solvers.exact.solver import solve_exact
++    problem = nonmetric_problem(seed)
++    initial = solve_exact(problem, time_limit=5)
++    assert initial['info']['proven_optimal'] and audit_solution(problem, initial)['valid']
++    d = domains(problem)
++    model, context = build_joint_inventory(problem, d)
++    try:
++        set_joint_projection(problem, context, initial, fix=True)
++        model.optimize()
++        assert model.Status == gp.GRB.OPTIMAL and model.ObjVal <= initial['info']['objective']+1e-6
++    finally: model.dispose()
++    result = solve_joint_inventory(problem, d, deadline=time.perf_counter()+5, initial_result=initial)
++    assert result['service_envelopes'] and not result['proven_optimal']
++    assert result['bound'] <= initial['info']['objective']+1e-6
++
++
++@pytest.mark.parametrize('returned', [29, 30, 31])
++@pytest.mark.parametrize('cleaning', [0, 20])
++def test_original_cutoff_cleaning_boundaries_remain_projectable(returned, cleaning):
++    gp = pytest.importorskip('gurobipy')
++    problem = fixture(pool=2, cleaning=cleaning)
++    model, context = build_joint_inventory(problem, domains(problem))
++    try:
++        set_joint_projection(problem, context, hand_solution(problem, returned), fix=True)
++        model.optimize()
++        assert model.Status == gp.GRB.OPTIMAL
++    finally: model.dispose()
++
++
++def test_cost_dominated_path_still_contributes_better_delivery_clock():
++    base = tradeoff_problem()
++    orders = [replace(o, delivery_window=(0, 100 if o.id == 'a' else 39)) for o in base.orders]
++    problem = MultiBatchInstance(base.network, orders, base.operating_policy)
++    universe = enumerate_timed_route_universe(problem, route_context(problem, 'S'), service_envelopes=True)
++    taskset = {('a', 'd'), ('b', 'd')}
++    front = [r for g in universe['timing_groups'] for r in g['columns'] if set(r['column']['tasks']) == taskset]
++    assert [(r['column']['cost'], r['latest_departure']) for r in front] == [(3, 38)]
++    clock = next(r for g in universe['clock_groups'] for r in g['columns'] if set(r['tasks']) == taskset)
++    assert clock['delivery_offsets']['a'] == 1
++    assert clock['delivery_earliest']['a'] == 2
++    assert front[0]['column']['starts'][1] == 22
++    assert clock['return_earliest'] == 4
++
++
++def test_service_guard_and_partial_enumeration():
++    p = fixture(pool=2)
++    for value in ['yes', 1, None]:
++        with pytest.raises(ValueError, match='boolean'):
++            enumerate_timed_route_universe(p, route_context(p, 'S'), service_envelopes=value)
++        with pytest.raises(ValueError, match='boolean'):
++            joint_route_inventory_certificate(p, service_envelopes=value)
++    with pytest.raises(ValueError, match='requires'):
++        joint_route_inventory_certificate(p, service_envelopes=True)
++    u = enumerate_timed_route_universe(p, route_context(p, 'S'), service_envelopes=True, max_states=1)
++    with pytest.raises(ValueError, match='complete'):
++        build_joint_inventory(p, {'S': (route_context(p, 'S'), u)})
++
++
++def test_public_service_export_is_separate_from_cost_and_time_columns(tmp_path):
++    pytest.importorskip('gurobipy')
++    import json
++    p = fixture(pool=2)
++    r = joint_route_inventory_certificate(p, initial_result=hand_solution(p), time_limit=5,
++        joint_time_limit=1, recovery_time_limit=1, timing_envelopes=True, service_envelopes=True,
++        diagnostics_dir=tmp_path)
++    with gzip.open(tmp_path/'site_0_best_pricing_service.json.gz','rt') as stream: clock = json.load(stream)
++    with gzip.open(tmp_path/'site_0_best_pricing.json.gz','rt') as stream: ordinary = json.load(stream)
++    assert clock['complete'] and clock['clock_groups']
++    assert 'clock_groups' not in ordinary and 'timing_groups' not in ordinary
++    assert r['joint_certificate']['service_envelopes'] and r['bound'] <= r['upper_bound']
++
++
++def congestion_problem():
++    from models.routing.common.cycle import Order
++    from models.routing.common.domain.instance import ProblemInstance
++    from models.routing.common.domain.node import Depot, Satellite, Customer
++    base = fixture(pool=2, cleaning=0)
++    nodes = {'D': Depot('D', 0, 0), 'S': Satellite('S', 0, 0),
++        'A': Customer('A',1,0,0,0,(0,125),(0,125),'S'),
++        'B': Customer('B',2,0,0,0,(0,125),(0,125),'S')}
++    travel = {a:{b:0 if a==b else 1 for b in nodes} for a in nodes}
++    fleet = dict(E1_vehicle_count=1, vehicles_per_satellite=1, E1_Qk=500, E1_Ck=500,
++                 E2_Qv=2, E2_Cv=1, container_weight=1, container_volume=1)
++    orders = [Order('a','A','S','b1',1,1,(0,10),(50,60),0,40),
++              Order('b','B','S','b1',1,1,(0,10),(50,60),0,40)]
++    return MultiBatchInstance(ProblemInstance(nodes,fleet,distance_matrix=travel,travel_time_matrix=travel),
++                              orders,replace(base.operating_policy, e2_max_trips_per_vehicle=4))
++
++
++def test_compulsory_intervals_raise_bound_when_cheap_long_trips_need_two_vehicles():
++    gp = pytest.importorskip('gurobipy')
++    from models.routing.solvers.exact.solver import solve_exact
++    problem = congestion_problem()
++    initial = solve_exact(problem,time_limit=5)
++    assert initial['info']['proven_optimal'] and initial['info']['objective'] == pytest.approx(10)
++    plain = {s:(c,enumerate_timed_route_universe(problem,c)) for s in problem.satellites
++             for c in [route_context(problem,s)] if c['nodes']}
++    weak = solve_joint_inventory(problem,plain,deadline=time.perf_counter()+5,initial_result=initial)
++    strong = solve_joint_inventory(problem,domains(problem),deadline=time.perf_counter()+5,initial_result=initial)
++    assert weak['relaxation_objective'] == pytest.approx(8)
++    assert strong['relaxation_objective'] == pytest.approx(10)
++    assert strong['bound'] <= initial['info']['objective']
++
++
++@pytest.mark.parametrize('turnaround, expected', [(0, 0), (9, 0), (10, 1)])
++def test_compulsory_vehicle_interval_is_half_open_after_turnaround(turnaround, expected):
++    pytest.importorskip('gurobipy')
++    base = congestion_problem()
++    problem = MultiBatchInstance(base.network, base.orders,
++        replace(base.operating_policy, e2_turnaround_time=turnaround))
++    model, context = build_joint_inventory(problem, domains(problem))
++    try:
++        data = context['routes']['S']
++        index = next(i for i, r in enumerate(data['rows'])
++            if set(r['keys']) == {('a', 'd'), ('a', 'p')} and r['allowed_cutoffs'] == ('b2',))
++        envelope = data['rows'][index]['service_envelope']
++        assert envelope['return_earliest'] == 51
++        var = data['choices'][index, 'b2']
++        assert model.getCoeff(model.getConstrByName('joint_compulsory_0_60'), var) == expected
++    finally: model.dispose()
++
++
++def test_actual_delayed_departure_projects_after_finite_supply_rounding_with_clocks():
++    gp = pytest.importorskip('gurobipy')
++    problem = fixture(pool=2, zero=True)
++    initial = hand_solution(problem)
++    assert audit_solution(problem, initial)['valid']
++    model, context = build_joint_inventory(problem, domains(problem))
++    try:
++        assert all(r['latest_departure'] in (None, 0, 60) for r in context['routes']['S']['rows'])
++        assert any(r['service_envelope']['latest_start_max'] > r['latest_departure']
++            for r in context['routes']['S']['rows'] if r['latest_departure'] is not None)
++        set_joint_projection(problem, context, initial, fix=True)
++        model.optimize()
++        assert model.Status == gp.GRB.OPTIMAL and model.ObjVal == 0
++    finally: model.dispose()
++
++
++def test_service_envelopes_project_five_sites_to_indexed_e1():
++    gp = pytest.importorskip('gurobipy')
++    from models.routing.common.domain.instance import ProblemInstance
++    from models.routing.common.domain.node import Depot, Satellite, Customer
++    from models.routing.common.cycle.state import empty_result
++    template = fixture(pool=5, zero=True, cleaning=0)
++    nodes, orders = {'D': Depot('D', 0, 0)}, []
++    for i in range(5):
++        site, customer = f'S{i}', f'C{i}'
++        nodes[site] = Satellite(site, 0, 0)
++        nodes[customer] = Customer(customer, 0, 0, 0, 0, (0, 125), (0, 125), site)
++        orders.extend(replace(o, id=f'{o.id}_{i}', customer=customer, satellite=site) for o in template.orders)
++    fleet = dict(E1_vehicle_count=1, vehicles_per_satellite=1, E1_Qk=500, E1_Ck=500,
++                 E2_Qv=500, E2_Cv=500, container_weight=1, container_volume=1)
++    problem = MultiBatchInstance(ProblemInstance(nodes, fleet), orders, template.operating_policy)
++    initial = empty_result(problem, 'manual')
++    for index, batch in enumerate(problem.operating_policy.batches):
++        selected = [o for o in orders if o.batch == batch.id]
++        initial['e1_trips'].append(dict(trip_id=f'e1_{index}', vehicle_id=0, batch_id=batch.id,
++            departure=batch.start, return_complete=batch.cutoff+1,
++            events=[dict(kind='d', site_id=o.satellite, quantity=1, start=batch.start+1) for o in selected]
++                 +[dict(kind='p', site_id=o.satellite, quantity=1, start=batch.cutoff) for o in selected]))
++        for o in selected:
++            initial['e2_trips'].append(dict(trip_id=f'e2_{o.id}', vehicle_id=0, satellite_id=o.satellite,
++                trip_index=index, departure=batch.start+1, return_complete=batch.start+4,
++                events=[dict(kind='d', order_id=o.id, start=batch.start+2, quantity=1),
++                        dict(kind='p', order_id=o.id, start=batch.start+3, quantity=1)]))
++    assert audit_solution(problem, initial)['valid']
++    model, context = build_joint_inventory(problem, domains(problem))
++    try:
++        assert context['backend'] == 'indexed'
++        set_joint_projection(problem, context, initial, fix=True)
++        model.optimize()
++        assert model.Status == gp.GRB.OPTIMAL and model.ObjVal == 0
++    finally: model.dispose()
+--- /dev/null
++++ b/tools/audit/benchmark_multibatch_route_service.py
+@@ -0,0 +1,168 @@
++"""Frozen M5 supply frontiers versus all-path service and vehicle concurrency bounds.
++
++Both variants start with the same audited schedule and total budget.
++Joint lower bounds relax physical E2 schedules; recovered upper bounds
++are accepted only after a full M5 audit. Partial domains fall back safely.
++"""
++from __future__ import annotations
++
++import argparse
++import hashlib
++import json
++import math
++import os
++from pathlib import Path
++import platform
++import shutil
++import subprocess
++import sys
++import time
++
++ROOT = Path(__file__).resolve().parents[2]
++sys.path.insert(0, str(ROOT))
++
++
++def write(path, value):
++    path.write_text(json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False)+'\n')
++
++
++def worker(job, destination):
++    from configuration.loader import load_routing_case
++    from models.routing.common.cycle import load_instance
++    from models.routing.common.cycle.audit import audit_solution
++    problem = load_instance(*load_routing_case(job['case']))
++    initial = json.loads(Path(job['initial_result']).read_text())
++    independent = audit_solution(problem, initial)
++    if not independent['valid']:
++        raise ValueError('Frozen incumbent failed audit')
++    started = time.perf_counter()
++    from models.routing.variants.model_5.exact import joint_route_inventory_certificate
++    experiment = joint_route_inventory_certificate(problem,
++        time_limit=job['budget'], initial_result=initial, seed=job['seed'], verbose=True,
++        joint_time_limit=job['joint_time_limit'],
++        recovery_time_limit=job['recovery_time_limit'],
++        timing_envelopes=True,
++        service_envelopes=job['variant'] in ('service', 'fallback'),
++        e1_time_limit=job['e1_time_limit'], integer_cover_time_limit=job['integer_cover_time_limit'],
++        enumeration_time_limit=job['enumeration_time_limit'],
++        enumeration_max_states=1 if job['variant'] == 'fallback' else job['enumeration_max_states'],
++        diagnostics_dir=destination.parent/(job['id']+'_models'))
++    checked = audit_solution(problem, experiment['result'])
++    if not checked['valid']:
++        raise ValueError('Returned full-M5 schedule failed independent audit')
++    lower, upper = experiment['bound'], checked['objective']
++    if not math.isclose(upper, experiment['upper_bound'], rel_tol=1e-9, abs_tol=1e-6):
++        raise ValueError('Upper bound differs from audited returned schedule')
++    write(destination, dict(job=job, wall_seconds=time.perf_counter()-started,
++        frozen_incumbent_audit=independent, output_audit=checked, bound=lower, upper_bound=upper,
++        fixed_incumbent_gap=max(0, independent['objective']-lower)/max(1e-9, abs(independent['objective'])),
++        gap=max(0, upper-lower)/max(1e-9, abs(upper)), result_valid=checked['valid'], experiment=experiment))
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--output', type=Path, required=True)
++    parser.add_argument('--cases', nargs='+')
++    parser.add_argument('--initial-results', nargs='+')
++    parser.add_argument('--time', type=float, default=180)
++    parser.add_argument('--joint-time', type=float, default=85)
++    parser.add_argument('--recovery-time', type=float, default=3)
++    parser.add_argument('--e1-time', type=float, default=10, help='E1 time cap inside the CG budget, further capped at one third of remaining time')
++    parser.add_argument('--integer-time', type=float, default=15)
++    parser.add_argument('--enumeration-time', type=float, default=50)
++    parser.add_argument('--enumeration-states', type=int, default=2000000)
++    parser.add_argument('--seeds', nargs='+', type=int, default=[42])
++    parser.add_argument('--variants', nargs='+', choices=['timed', 'service', 'fallback'], default=['timed', 'service'])
++    parser.add_argument('--worker', help=argparse.SUPPRESS)
++    args = parser.parse_args()
++    if args.worker:
++        worker(json.loads(args.worker), args.output)
++        return
++    if not args.cases or not args.initial_results or len(args.cases) != len(args.initial_results):
++        parser.error('one --initial-results file is required per case')
++    if any(not math.isfinite(v) or v <= 0 for v in (args.time, args.joint_time, args.recovery_time, args.e1_time, args.enumeration_time, args.integer_time)):
++        parser.error('budgets must be finite and positive')
++    if args.enumeration_states < 1:
++        parser.error('enumeration-states must be positive')
++    if len(set(args.variants)) != len(args.variants):
++        parser.error('variants must be distinct')
++    from configuration.loader import load_routing_case, resolve_project_path
++    from models.routing.common.cycle import load_instance
++    from models.routing.common.cycle.audit import audit_solution
++    output = args.output.resolve()
++    output.mkdir(parents=True, exist_ok=False)
++    jobs = []
++    for index, source in enumerate(args.cases):
++        config, fleet = load_routing_case(source)
++        problem = load_instance(config, fleet)
++        if problem.model_number != 5:
++            raise ValueError('M5 inputs required')
++        frozen = output/'inputs'/str(index)
++        frozen.mkdir(parents=True)
++        for field in ('data', 'orders', 'distance_matrix', 'duration_matrix', 'dataset_metadata'):
++            if config.get(field):
++                path = resolve_project_path(config[field])
++                target = frozen/(field+path.suffix)
++                shutil.copy2(path, target)
++                config[field] = str(target)
++        write(frozen/'fleet.json', fleet)
++        config['routing_config'], config['operating_policy'] = str(frozen/'fleet.json'), fleet['operating_policy']
++        for field in ('algorithm_config', 'container_pool_config'):
++            config.pop(field, None)
++        write(frozen/'case.json', config)
++        payload = json.loads(resolve_project_path(args.initial_results[index]).read_text())
++        initial = payload.get('result', payload)
++        independent = audit_solution(problem, initial)
++        if not independent['valid']:
++            raise ValueError('Initial result failed independent M5 audit')
++        write(frozen/'initial_result.json', initial)
++        write(frozen/'initial_audit.json', independent)
++        for seed in args.seeds:
++            for variant in args.variants:
++                jobs.append(dict(id=f'{index:02d}_{seed}_{variant}', variant=variant,
++                    case=str(frozen/'case.json'), source_case=source, initial_result=str(frozen/'initial_result.json'),
++                    frozen_upper_bound=independent['objective'], budget=args.time, seed=seed,
++                    joint_time_limit=args.joint_time, recovery_time_limit=args.recovery_time, e1_time_limit=args.e1_time,
++                    integer_cover_time_limit=args.integer_time, enumeration_time_limit=args.enumeration_time, enumeration_max_states=args.enumeration_states, orders=len(problem.orders),
++                    customers=len({o.customer for o in problem.orders})))
++    for source in [*ROOT.glob('models/**/*.py'), *ROOT.glob('configuration/*.py'), Path(__file__).resolve()]:
++        target = output/'source_snapshot'/source.relative_to(ROOT)
++        target.parent.mkdir(parents=True, exist_ok=True)
++        shutil.copy2(source, target)
++    for name in ('multibatch_route_timing.py', 'multibatch_joint_inventory.py', 'multibatch_route_pool.py', 'multibatch_e1_inventory.py', 'multibatch_e1_routes.py', 'multibatch_route_integer_cover.py', 'multibatch_route_enumeration.py', 'multibatch_route_cg.py', 'multibatch_route_pricing.py', 'multibatch_bounds.py', 'solver.py', 'formulation.py'):
++        path = output/'source_snapshot/models/routing/solvers/exact'/name
++        compile(path.read_text(), str(path), 'exec')
++    hashes = {str(p.relative_to(output)): hashlib.sha256(p.read_bytes()).hexdigest()
++              for p in sorted(output.rglob('*')) if p.is_file()}
++    write(output/'manifest.json', dict(jobs=jobs, artifact_sha256=hashes, python=sys.version,
++        platform=platform.platform(), python_hash_seed=0,
++        note='Same audited incumbent and total budget. Supply frontiers versus all-path service extrema and compulsory vehicle intervals. Both enumerate complete domains within the same budget. Only full-M5 audits provide upper bounds; no full-M5 optimality proof.'))
++    summary = []
++    frozen_worker = output/'source_snapshot/tools/audit/benchmark_multibatch_route_service.py'
++    for job in jobs:
++        destination = output/(job['id']+'.json')
++        started = time.perf_counter()
++        with (output/(job['id']+'.log')).open('w') as log:
++            try:
++                run = subprocess.run([sys.executable, str(frozen_worker), '--worker', json.dumps(job),
++                    '--output', str(destination)], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
++                    timeout=args.time+20, env={**os.environ, 'PYTHONHASHSEED': '0'})
++                failure = f'EXIT_{run.returncode}' if run.returncode else None
++            except subprocess.TimeoutExpired:
++                failure = 'OUTER_TIMEOUT'
++        row = dict(job=job, failure=failure, outer_seconds=time.perf_counter()-started)
++        if destination.exists():
++            payload = json.loads(destination.read_text())
++            experiment = payload['experiment']
++            row.update(bound=payload['bound'], upper_bound=payload['upper_bound'], gap=payload['gap'],
++                fixed_incumbent_gap=payload['fixed_incumbent_gap'], wall_seconds=payload['wall_seconds'],
++                result_valid=payload['result_valid'], status=experiment['status'], recovery=experiment['recovery'],
++                reference_bound=experiment['reference_certificate']['bound'],
++                joint_status=experiment['joint_certificate']['status'] if experiment['joint_certificate'] else None)
++        summary.append(row)
++        write(output/'summary.json', summary)
++        print(json.dumps(row, ensure_ascii=False), flush=True)
++
++
++if __name__ == '__main__':
++    main()
+--- /dev/null
++++ b/docs/m5_route_service_20261001.md
+@@ -0,0 +1,85 @@
++# M5 全路径服务包络与车辆并发约束：第十七轮
++
++本轮得到有效但很小的下界提升，**尚不推荐作为默认配置**。50 顾客两组同为 180 秒总预算、同一已审计初解：种子 42、43 的下界从 **2235.406525 提高到 2235.423137**，完整上界仍为 **2247.646368**，gap 从 **0.544563% 降至 0.543824%**。种子 44 的新组在联合阶段限时，返回下界 **2227.323389**，比旧方法退步。完整 M5 仍未证明最优。
++
++## 入口和证明口径
++
++```python
++from models.routing.variants.model_5.exact import joint_route_inventory_certificate
++
++experiment = joint_route_inventory_certificate(
++    problem,
++    initial_result=audited_result,
++    time_limit=180,
++    timing_envelopes=True,
++    service_envelopes=True,
++    enumeration_time_limit=50,
++    joint_time_limit=85,
++    recovery_time_limit=3,
++    e1_time_limit=10,
++    integer_cover_time_limit=15,
++    diagnostics_dir='output/experiments/my_m5_service_bounds',
++)
++```
++
++`service_envelopes` 默认 False，要求同时启用 `timing_envelopes`。它加强完整路线域上的联合松弛，未加入完整物理车辆排序。顶层 `proven_optimal`、`proven_infeasible` 均保持 False；`relaxation_optimal` 仅描述联合松弛。下界取求解器 `ObjBound` 扣除相对数值余量，并保留原独立证书界。恢复方案只有经过完整周期审计才可更新上界。
++
++完整枚举中断时不启用服务包络或联合模型，仍回退到完整 MILP 定价。全过程使用同一总期限；阶段预算包含建模，诊断导出也计入实测总耗时。
++
++## 为什么必须保留被成本支配路线的时刻信息
++
++对同一任务集合和整趟回收截止，遍历**全部**可行路径，在执行成本/最晚出发支配删除之前聚合五类必要界：配送服务相对出发的最小偏移、最早配送服务时刻、最晚回收服务时刻、最早完整回仓时刻，以及所有路径中最大的可行出发时刻。
++
++这些最小值、最大值可能来自不同路径，所以这里只使用必要不等式，不把它们拼成可执行日程。成本较高而服务较早的路径，即使从成本前沿中删除，仍必须贡献包络。回收服务最晚界也包含同趟使用时长和回仓截止。纯回收列没有供货连接，但仍计算其最大可行出发时刻。
++
++配送服务下界使用“一级实际供货时刻 + 准备时间 + 加权最小路径偏移”，另加加权最早服务界；回收服务使用加权最晚界，完整回仓使用加权最早回仓界。整趟任务覆盖等式保证每个订单对应的列权重和为 1。原完整方案保留订单实际服务、回仓时刻，一级路线投影可以更早供货，因此这些必要界不会排除其投影。
++
++## 车辆必占用区间
++
++记同一任务集合/截止的全路径最大出发时刻为 `latest_start_max`，最早回仓为 `return_earliest`。每条实际路线必然占用车辆区间
++
++```text
++[latest_start_max, return_earliest + e2_turnaround_time)
++```
++
++仅当左端小于右端时区间非空。对周期与批次关键时刻及相邻时刻的整数中点，约束包含该点的列选择量之和不超过该仓实际车辆数。完整日程中同车占用区间互不重叠，所以这些约束是有效必要条件；连续路线变量仍构成松弛。
++
++区间左端必须取**全部路径的真实最大出发时刻**，不能使用按一级有限供货值向下取整后的时间列上界，也不能只取最低成本路线的上界。否则可能制造过长占用区间，错误排除完整方案。右端采用半开区间，周转完成瞬间可执行下一趟。
++
++## 冻结初解与同预算结果
++
++正式运行现场枚举完整域，冻结输入、源码、初解、MPS 和压缩辅助域。两种方法分别为上一轮 `timed` 与本轮 `service`，参数和阶段上限相同。50 顾客采用种子 42、43、44；20、30 顾客采用种子 42。
++
++| 50 顾客种子 | 旧下界 | 新下界 | 旧实际用时 | 新实际用时 | 新联合状态 |
++|---:|---:|---:|---:|---:|---|
++| 42 | 2235.406525 | **2235.423137** | 63.38 秒 | 101.62 秒 | 松弛最优 |
++| 43 | 2235.406525 | **2235.423137** | 58.85 秒 | 105.98 秒 | 松弛最优 |
++| 44 | 2235.406525 | 2227.323389 | 63.09 秒 | 137.65 秒 | 限时 |
++
++种子 44 的联合阶段上限为 85 秒，建模后求解器约剩 60.20 秒；不能把整个 180 秒总预算描述成 180 秒联合求解。其新组 gap 为约 0.90419%。旧有效证书可与新证书取最大值，但该最大值需要已有旧证书，不能伪装成新组单次运行输出。对照运行期间还执行了回归和独立域复核，表中耗时是当时实测值，不能据此声称严格隔离机器负载后的速度比。
++
++20、30 顾客新旧下界相同，分别为 **1426.648954 / 1623.978337**；本轮没有找到更好的完整上界。7 个已知精确小例、两种方法共 14 次运行均返回审计可行方案；另有 30/50 顾客两次强制部分枚举回退，总计 **26 次正式运行**。小例中的松弛最优同样不自动等于完整 M5 最优。
++
++50 顾客仍保留 333,338 个供货压缩时间列，联合模型变量数仍为 336,146。线性行数从 6,308 增至 6,564，新增 200 条服务包络行、56 条并发行；非零系数从 14,637,649 增至 20,859,456。收益仅为约 0.016612 的目标值提升，建模与求解负担明显增加，因此默认关闭。
++
++## 另外两条尝试
++
++仅将有分数列的 S1 仓 231,705 个路线变量改为二元，120 秒整数求解没有抬高原下界。加入完整方案热启动和约化成本检查后，仍没有抬高下界；约化成本筛选没有固定任何列。这只是局部整数化实验，不能证明所有路线整数性均无影响。
++
++完整的成本、出发和订单服务时刻多维前沿扩张至 1,239,395 个路线选择。300 秒总预算的试运行报告松弛界约 2227.318237，低于已有证书，因而撤回该实现，保留实验源码与记录。这条试验路径没有完成独立证书复核，未使用其数值更新正式界。本轮保留的实现只聚合必要时刻极值，不保留该多维前沿。
++
++## 验证与记录
++
++新增 27 项测试，包含六个有向非度量小例的全路径极值与独立强制时刻二分搜索、已知完整最优方案投影、截止和清洗边界、被成本支配路径的服务贡献、有限供货取整后的延迟出发投影、五仓一级弧模型投影，以及周转完成点的半开边界。并发反例中，旧松弛目标为 8、新松弛目标和完整 M5 最优值均为 10。
++
++相关三组测试 **79 项通过**；最终当前共享目录全部路由回归 **2259 项通过**，14 条警告来自原依赖。计数包含同期其他工作的测试。见 [最终测试日志](../output/experiments/m5_timed_integrality_20261001/pytest_final.log)。
++
++独立复核器从原始输入重建载荷和前向时间依赖，对所有路径聚合极值，算法不调用生产反向上界传播。它检查完整成本列域、成本/出发前沿、服务包络、全部新增矩阵系数、一级基础矩阵、导出模型下界以及完整初解投影；真实恢复日程另行重建审计。复核结果写入 [validation.json](../output/experiments/m5_timed_integrality_20261001/validation.json)。
++
++最终独立复核通过全部 **26 次正式运行**：66 个完整覆盖 LP、66 个完整整数覆盖模型、26 个一级库存模型、24 个联合模型和 24 份真实日程恢复。66 份时间前沿、33 份服务包络全部核对，完整 LP 共复核 1,680,966 个序列化列；两个取得提升的新联合模型均独立复现相同最优值。限时种子的保守界也得到独立复算支持，不声称其正式运行已经最优。
++
++已审计完整方案保存为 [best_full_result.json](../output/experiments/m5_timed_integrality_20261001/best_full_result.json)，最好上下界及来源保存为 [combined_certificate.json](../output/experiments/m5_timed_integrality_20261001/combined_certificate.json)。这对上下界已由种子 42 的同一次正式运行返回，完整最优性标志仍为 False。定向改动保存为 [changes.patch](../output/experiments/m5_timed_integrality_20261001/changes.patch)。
++
++正式记录见 [50 顾客对照](../output/experiments/m5_timed_integrality_20261001/verified_50_180s/summary.json)、[20/30 顾客对照](../output/experiments/m5_timed_integrality_20261001/verified_medium_180s/summary.json)、[小例对照](../output/experiments/m5_timed_integrality_20261001/verified_small_5s/summary.json)、[回退检查](../output/experiments/m5_timed_integrality_20261001/verified_fallback_180s/summary.json)。
++
++剩余差额主要需要更强的物理日程联系。本轮结果支持继续研究车辆串行与供货、回收时刻的耦合；继续求解已经最优的这一个松弛，无法消除其剩余 gap。

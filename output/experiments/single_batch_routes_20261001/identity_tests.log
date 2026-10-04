@@ -1,0 +1,187 @@
+F.......F...FFFFF.........................................               [100%]
+=================================== FAILURES ===================================
+_ test_global_arcs_match_indexed_routes_with_multiple_vehicles_and_slots[0-1] __
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1060e1d00>, model = 1
+seed = 0
+
+    @pytest.mark.parametrize('model', [1, 2, 3, 4])
+    @pytest.mark.parametrize('seed', range(6))
+    def test_global_arcs_match_indexed_routes_with_multiple_vehicles_and_slots(monkeypatch, model, seed):
+        pytest.importorskip('gurobipy')
+        p = tiny_problem(model, seed)
+        p.fleet.e1_count = 2
+        p.fleet.e2_per_sat_count = 3
+        p.operating_policy = replace(p.operating_policy, e2_max_trips_per_vehicle=3)
+        results = []
+        for compressed in (False, True):
+            monkeypatch.setattr(solver, 'build_model', lambda *a, **kw: build_model(*a, compress_routes=compressed, **kw))
+            r = solver.solve_exact(p, time_limit=5)
+            if r['audit']['valid']:
+                assert audit_solution(p, r)['valid']
+                assert r['info']['proven_optimal']
+            else:
+                assert r['info']['proven_infeasible']
+            results.append(r['info'])
+        assert results[0]['proven_infeasible'] == results[1]['proven_infeasible']
+        if not results[0]['proven_infeasible']:
+            assert results[0]['objective'] == pytest.approx(results[1]['objective'])
+>           assert results[1]['variables'] < results[0]['variables']
+E           assert 72 < 70
+
+tests/routing/test_compact_route_identity.py:36: AssertionError
+----------------------------- Captured stdout call -----------------------------
+Set parameter LicenseID to value 2723359
+_ test_global_arcs_match_indexed_routes_with_multiple_vehicles_and_slots[2-1] __
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1064573a0>, model = 1
+seed = 2
+
+    @pytest.mark.parametrize('model', [1, 2, 3, 4])
+    @pytest.mark.parametrize('seed', range(6))
+    def test_global_arcs_match_indexed_routes_with_multiple_vehicles_and_slots(monkeypatch, model, seed):
+        pytest.importorskip('gurobipy')
+        p = tiny_problem(model, seed)
+        p.fleet.e1_count = 2
+        p.fleet.e2_per_sat_count = 3
+        p.operating_policy = replace(p.operating_policy, e2_max_trips_per_vehicle=3)
+        results = []
+        for compressed in (False, True):
+            monkeypatch.setattr(solver, 'build_model', lambda *a, **kw: build_model(*a, compress_routes=compressed, **kw))
+            r = solver.solve_exact(p, time_limit=5)
+            if r['audit']['valid']:
+                assert audit_solution(p, r)['valid']
+                assert r['info']['proven_optimal']
+            else:
+                assert r['info']['proven_infeasible']
+            results.append(r['info'])
+        assert results[0]['proven_infeasible'] == results[1]['proven_infeasible']
+        if not results[0]['proven_infeasible']:
+            assert results[0]['objective'] == pytest.approx(results[1]['objective'])
+>           assert results[1]['variables'] < results[0]['variables']
+E           assert 72 < 70
+
+tests/routing/test_compact_route_identity.py:36: AssertionError
+_ test_global_arcs_match_indexed_routes_with_multiple_vehicles_and_slots[3-1] __
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x106aaaa30>, model = 1
+seed = 3
+
+    @pytest.mark.parametrize('model', [1, 2, 3, 4])
+    @pytest.mark.parametrize('seed', range(6))
+    def test_global_arcs_match_indexed_routes_with_multiple_vehicles_and_slots(monkeypatch, model, seed):
+        pytest.importorskip('gurobipy')
+        p = tiny_problem(model, seed)
+        p.fleet.e1_count = 2
+        p.fleet.e2_per_sat_count = 3
+        p.operating_policy = replace(p.operating_policy, e2_max_trips_per_vehicle=3)
+        results = []
+        for compressed in (False, True):
+            monkeypatch.setattr(solver, 'build_model', lambda *a, **kw: build_model(*a, compress_routes=compressed, **kw))
+            r = solver.solve_exact(p, time_limit=5)
+>           if r['audit']['valid']:
+E           KeyError: 'audit'
+
+tests/routing/test_compact_route_identity.py:27: KeyError
+_ test_global_arcs_match_indexed_routes_with_multiple_vehicles_and_slots[3-2] __
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x106005610>, model = 2
+seed = 3
+
+    @pytest.mark.parametrize('model', [1, 2, 3, 4])
+    @pytest.mark.parametrize('seed', range(6))
+    def test_global_arcs_match_indexed_routes_with_multiple_vehicles_and_slots(monkeypatch, model, seed):
+        pytest.importorskip('gurobipy')
+        p = tiny_problem(model, seed)
+        p.fleet.e1_count = 2
+        p.fleet.e2_per_sat_count = 3
+        p.operating_policy = replace(p.operating_policy, e2_max_trips_per_vehicle=3)
+        results = []
+        for compressed in (False, True):
+            monkeypatch.setattr(solver, 'build_model', lambda *a, **kw: build_model(*a, compress_routes=compressed, **kw))
+            r = solver.solve_exact(p, time_limit=5)
+>           if r['audit']['valid']:
+E           KeyError: 'audit'
+
+tests/routing/test_compact_route_identity.py:27: KeyError
+_ test_global_arcs_match_indexed_routes_with_multiple_vehicles_and_slots[3-3] __
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x105e9be20>, model = 3
+seed = 3
+
+    @pytest.mark.parametrize('model', [1, 2, 3, 4])
+    @pytest.mark.parametrize('seed', range(6))
+    def test_global_arcs_match_indexed_routes_with_multiple_vehicles_and_slots(monkeypatch, model, seed):
+        pytest.importorskip('gurobipy')
+        p = tiny_problem(model, seed)
+        p.fleet.e1_count = 2
+        p.fleet.e2_per_sat_count = 3
+        p.operating_policy = replace(p.operating_policy, e2_max_trips_per_vehicle=3)
+        results = []
+        for compressed in (False, True):
+            monkeypatch.setattr(solver, 'build_model', lambda *a, **kw: build_model(*a, compress_routes=compressed, **kw))
+            r = solver.solve_exact(p, time_limit=5)
+>           if r['audit']['valid']:
+E           KeyError: 'audit'
+
+tests/routing/test_compact_route_identity.py:27: KeyError
+_ test_global_arcs_match_indexed_routes_with_multiple_vehicles_and_slots[3-4] __
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x105fdb5b0>, model = 4
+seed = 3
+
+    @pytest.mark.parametrize('model', [1, 2, 3, 4])
+    @pytest.mark.parametrize('seed', range(6))
+    def test_global_arcs_match_indexed_routes_with_multiple_vehicles_and_slots(monkeypatch, model, seed):
+        pytest.importorskip('gurobipy')
+        p = tiny_problem(model, seed)
+        p.fleet.e1_count = 2
+        p.fleet.e2_per_sat_count = 3
+        p.operating_policy = replace(p.operating_policy, e2_max_trips_per_vehicle=3)
+        results = []
+        for compressed in (False, True):
+            monkeypatch.setattr(solver, 'build_model', lambda *a, **kw: build_model(*a, compress_routes=compressed, **kw))
+            r = solver.solve_exact(p, time_limit=5)
+>           if r['audit']['valid']:
+E           KeyError: 'audit'
+
+tests/routing/test_compact_route_identity.py:27: KeyError
+_ test_global_arcs_match_indexed_routes_with_multiple_vehicles_and_slots[4-1] __
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x105f6cc10>, model = 1
+seed = 4
+
+    @pytest.mark.parametrize('model', [1, 2, 3, 4])
+    @pytest.mark.parametrize('seed', range(6))
+    def test_global_arcs_match_indexed_routes_with_multiple_vehicles_and_slots(monkeypatch, model, seed):
+        pytest.importorskip('gurobipy')
+        p = tiny_problem(model, seed)
+        p.fleet.e1_count = 2
+        p.fleet.e2_per_sat_count = 3
+        p.operating_policy = replace(p.operating_policy, e2_max_trips_per_vehicle=3)
+        results = []
+        for compressed in (False, True):
+            monkeypatch.setattr(solver, 'build_model', lambda *a, **kw: build_model(*a, compress_routes=compressed, **kw))
+            r = solver.solve_exact(p, time_limit=5)
+            if r['audit']['valid']:
+                assert audit_solution(p, r)['valid']
+                assert r['info']['proven_optimal']
+            else:
+                assert r['info']['proven_infeasible']
+            results.append(r['info'])
+        assert results[0]['proven_infeasible'] == results[1]['proven_infeasible']
+        if not results[0]['proven_infeasible']:
+            assert results[0]['objective'] == pytest.approx(results[1]['objective'])
+>           assert results[1]['variables'] < results[0]['variables']
+E           assert 72 < 70
+
+tests/routing/test_compact_route_identity.py:36: AssertionError
+=========================== short test summary info ============================
+FAILED tests/routing/test_compact_route_identity.py::test_global_arcs_match_indexed_routes_with_multiple_vehicles_and_slots[0-1]
+FAILED tests/routing/test_compact_route_identity.py::test_global_arcs_match_indexed_routes_with_multiple_vehicles_and_slots[2-1]
+FAILED tests/routing/test_compact_route_identity.py::test_global_arcs_match_indexed_routes_with_multiple_vehicles_and_slots[3-1]
+FAILED tests/routing/test_compact_route_identity.py::test_global_arcs_match_indexed_routes_with_multiple_vehicles_and_slots[3-2]
+FAILED tests/routing/test_compact_route_identity.py::test_global_arcs_match_indexed_routes_with_multiple_vehicles_and_slots[3-3]
+FAILED tests/routing/test_compact_route_identity.py::test_global_arcs_match_indexed_routes_with_multiple_vehicles_and_slots[3-4]
+FAILED tests/routing/test_compact_route_identity.py::test_global_arcs_match_indexed_routes_with_multiple_vehicles_and_slots[4-1]
+7 failed, 51 passed in 1.77s

@@ -4,8 +4,8 @@ import json
 from pathlib import Path
 
 from models.routing.alns.types import Route, Solution
-from models.routing.alns.variants.model_3 import solve_alns as solve_m3
-from models.routing.alns.variants.model_4 import solve_alns as solve_m4
+from models.routing.baselines.alns.model_3 import solve_alns as solve_m3
+from models.routing.baselines.alns.model_4 import solve_alns as solve_m4
 from models.routing.common.data_loader import parse_dataset
 from models.routing.common.domain.instance import ProblemInstance
 from models.routing.common.task_builder import build_tasks_for_model

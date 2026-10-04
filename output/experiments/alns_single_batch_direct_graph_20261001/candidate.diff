@@ -1,0 +1,172 @@
+--- before/models/routing/solvers/alns/single_batch.py
++++ after/models/routing/solvers/alns/single_batch.py
+@@ -101,7 +101,9 @@
+     rng = random.Random(seed)
+     if _context is not None and _context.problem is not problem:
+         raise ValueError('Single-batch context belongs to one problem instance')
+-    cached = _context if _context is not None else SingleBatchCache(problem)
++    cached = (_context if _context is not None else
++              SingleBatchCache(problem, dense_timing=True)
++              if problem.reusable and _assignment_search is None else SingleBatchCache(problem))
+     if _assignment_search is not None:
+         from models.routing.common.cycle.assignment import input_assignment
+         _assignment_search.travel_bounds = travel_bounds
+--- before/models/routing/solvers/alns/evaluator.py
++++ after/models/routing/solvers/alns/evaluator.py
+@@ -110,7 +110,9 @@
+ 
+     # Difference constraints propagate cross-route customer precedence and
+     # physical-vehicle reuse; deliberate departure/return waits are preserved.
+-    bounds, edges, upper, tasks = {}, [], {}, {}
++    dense = problem.reusable and getattr(_prepared, 'dense_timing', False)
++    bounds, edges, upper, tasks = ([] if dense else {}), [], ([] if dense else {}), {}
++    route_nodes = []
+     plans = [r for r in state['e2'] if r['tasks']]
+     previous_vehicle, slots = {}, defaultdict(int)
+     parsed = []
+@@ -123,10 +125,17 @@
+         slots[key] += 1
+         if slot >= p.e2_max_trips_per_vehicle:
+             violations.append('E2_TRIP_LIMIT')
+-        begin, finish = ('start', ri), ('end', ri)
+-        bounds[begin] = max(p.cycle_start, r.get('depart_after', p.cycle_start))
+-        bounds[finish] = max(p.cycle_start, r.get('return_after', p.cycle_start))
+-        upper[finish] = p.cycle_end-p.e2_turnaround_time
++        if dense:
++            begin, finish = len(bounds), len(bounds)+1
++            route_nodes.append(begin)
++            bounds.extend((max(p.cycle_start, r.get('depart_after', p.cycle_start)),
++                           max(p.cycle_start, r.get('return_after', p.cycle_start))))
++            upper.extend((p.cycle_end, p.cycle_end-p.e2_turnaround_time))
++        else:
++            begin, finish = ('start', ri), ('end', ri)
++            bounds[begin] = max(p.cycle_start, r.get('depart_after', p.cycle_start))
++            bounds[finish] = max(p.cycle_start, r.get('return_after', p.cycle_start))
++            upper[finish] = p.cycle_end-p.e2_turnaround_time
+         loads = summary_of(tuple(r['tasks'])) if summary_of is not None else None
+         dbatches = ({problem.order_map[o].batch for o, kind in r['tasks'] if kind == 'd'}
+                     if loads is None else loads[0])
+@@ -151,10 +160,14 @@
+             o, w, vol = task(oid, kind)
+             if o.satellite != s or (oid, kind) in tasks:
+                 return 1e12, result, ['E2_TASK_COVERAGE']
+-            node = (ri, j)
++            node = len(bounds) if dense else (ri, j)
+             tasks[oid, kind] = node
+             tw = o.delivery_window if kind == 'd' else o.pickup_window
+-            bounds[node], upper[node] = tw
++            if dense:
++                bounds.append(tw[0])
++                upper.append(tw[1])
++            else:
++                bounds[node], upper[node] = tw
+             if len(p.batches) == 1 and kind == 'd':
+                 upper[node] = min(upper[node], p.batches[0].cutoff-o.service_time)
+             edges.append((previous, node, service+problem.travel(site, o.customer)))
+@@ -171,7 +184,9 @@
+         return 1e12, result, ['E2_TASK_COVERAGE']
+     for o in problem.orders if problem.reusable else ():
+         edges.append((tasks[o.id, 'd'], tasks[o.id, 'p'], o.service_time+o.min_use_time))
+-    if _prepared is not None and problem.reusable:
++    if dense:
++        acyclic = _prepared.propagate_dense(bounds, edges)
++    elif _prepared is not None and problem.reusable:
+         acyclic = _prepared.propagate(bounds, edges)
+     else:
+         indegree = {n: 0 for n in bounds}
+@@ -192,11 +207,13 @@
+         acyclic = visited == len(bounds)
+     if not acyclic:
+         return 1e12, result, ['TIMING_CYCLE']
+-    if any(t > upper.get(node, p.cycle_end) for node, t in bounds.items()):
++    times_with_limits = (zip(bounds, upper) if dense else
++                         ((t, upper.get(node, p.cycle_end)) for node, t in bounds.items()))
++    if any(t > limit for t, limit in times_with_limits):
+         violations.append('E2_TIME_WINDOW')
+     quantities = {b.id: {s: 0 for s in problem.satellites} for b in p.batches}
+     for r, ri, slot in parsed:
+-        u = bounds['end', ri]
++        u = bounds[route_nodes[ri]+1] if dense else bounds['end', ri]
+         returned = sum(problem.order_map[o].count for o, k in r['tasks'] if k == 'p')
+         batch = next((b for b in p.batches if u <= b.cutoff), None)
+         if returned:
+@@ -204,11 +221,13 @@
+                 quantities[batch.id][r['satellite']] += returned
+             else:
+                 violations.append('TERMINAL_OUTSTANDING')
+-        events = [dict(order_id=o, kind=k, start=bounds[ri, j], quantity=problem.order_map[o].count)
++        events = [dict(order_id=o, kind=k, start=bounds[route_nodes[ri]+2+j] if dense else bounds[ri, j],
++                       quantity=problem.order_map[o].count)
+                   for j, (o, k) in enumerate(r['tasks'])]
+         result['e2_trips'].append(dict(trip_id=f'e2_{r["satellite"]}_{r["vehicle"]}_{slot}',
+                                        satellite_id=r['satellite'], vehicle_id=r['vehicle'], trip_index=slot,
+-                                       departure=bounds['start', ri], return_complete=u, events=events))
++                                       departure=bounds[route_nodes[ri]] if dense else bounds['start', ri],
++                                       return_complete=u, events=events))
+     result['e1_trips'], e1_issues, releases = (
+         _memo.returns(state, quantities) if _memo is not None else
+         _e1_returns(problem, state, quantities))
+--- before/models/routing/solvers/alns/single_batch_cache.py
++++ after/models/routing/solvers/alns/single_batch_cache.py
+@@ -6,16 +6,19 @@
+ from .evaluator import evaluate, route_distance
+ from .neighborhoods import EvaluationCache
+ from .single_batch_scoring import SingleBatchRouteScorer
+-from .single_batch_timing import propagate_times
++from .single_batch_timing import propagate_dense, propagate_times
+ 
+ 
+ class SingleBatchEvaluator(CycleEvaluator):
+     """Prepare task attributes and reuse distances, while decoding times afresh."""
+     propagate = staticmethod(propagate_times)
+-    def __init__(self, problem, capacity=128, *, distance_capacity=512, load_capacity=512):
++    propagate_dense = staticmethod(propagate_dense)
++    def __init__(self, problem, capacity=128, *, distance_capacity=512, load_capacity=512,
++                 dense_timing=False):
+         if len(problem.operating_policy.batches) != 1:
+             raise ValueError('Single-batch cache requires B=1')
+         super().__init__(problem, capacity)
++        self.dense_timing = dense_timing
+         self.task_data = {(o.id, k): problem.task(o.id, k)
+                           for o in problem.orders for k in problem.task_kinds}
+         self.expected_tasks = frozenset(self.task_data)
+@@ -69,9 +72,10 @@
+ 
+ 
+ class SingleBatchCache(EvaluationCache):
+-    def __init__(self, problem, capacity=256, *, e1_capacity=128, load_capacity=512):
++    def __init__(self, problem, capacity=256, *, e1_capacity=128, load_capacity=512,
++                 dense_timing=False):
+         super().__init__(problem, SingleBatchEvaluator(problem, capacity=e1_capacity,
+-                         load_capacity=load_capacity), capacity)
++                         load_capacity=load_capacity, dense_timing=dense_timing), capacity)
+         self._route_scorer = None
+ 
+     @property
+--- before/models/routing/solvers/alns/single_batch_timing.py
++++ after/models/routing/solvers/alns/single_batch_timing.py
+@@ -29,3 +29,24 @@
+                 queue.append(child)
+     bounds.update(zip(nodes, values))
+     return visited == len(nodes)
++
++
++def propagate_dense(values, edges):
++    """Walk freshly built integer nodes in the original insertion order."""
++    children = [[] for _ in values]
++    indegree = [0]*len(values)
++    for parent, child, delta in edges:
++        children[parent].append((child, delta))
++        indegree[child] += 1
++    queue = [i for i, degree in enumerate(indegree) if not degree]
++    visited = 0
++    while queue:
++        node = queue.pop()
++        visited += 1
++        ready = values[node]
++        for child, delta in children[node]:
++            values[child] = max(values[child], ready+delta)
++            indegree[child] -= 1
++            if not indegree[child]:
++                queue.append(child)
++    return visited == len(values)

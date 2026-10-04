@@ -1,0 +1,767 @@
+--- a/models/routing/solvers/exact/multibatch_route_cg.py
++++ b/models/routing/solvers/exact/multibatch_route_cg.py
+@@ -30,7 +30,8 @@
+ 
+ 
+ def site_route_cover(problem, context, *, deadline, initial_result=None, seed=42,
+-                     pricing_time_limit=2.0, verbose=False, pricing_export_path=None, heuristic_pricing=True):
++                     pricing_time_limit=2.0, verbose=False, pricing_export_path=None, heuristic_pricing=True,
++                     pricing_backend='milp', enumeration_time_limit=15.0, enumeration_max_states=2000000):
+     import gurobipy as gp
+     from gurobipy import GRB
+     begun = time.perf_counter()
+@@ -39,6 +40,21 @@
+         return dict(satellite=site, bound=0.0, status='EMPTY', lp_converged=True, iterations=[], columns=[], runtime=0.0)
+     if time.perf_counter() >= deadline:
+         return dict(satellite=site, bound=0.0, status='TIME_LIMIT_BUILD', lp_converged=False, iterations=[], columns=[], runtime=0.0)
++    enumeration = None
++    if pricing_backend == 'hybrid':
++        from .multibatch_route_enumeration import enumerate_route_universe, enumerated_route_cover, enumeration_stats
++        universe = enumerate_route_universe(problem, context,
++            deadline=min(deadline, time.perf_counter()+min(enumeration_time_limit, max(0, deadline-time.perf_counter())/3)),
++            max_states=enumeration_max_states)
++        enumeration = enumeration_stats(universe)
++        if universe['complete']:
++            result = enumerated_route_cover(problem, context, universe, deadline=deadline,
++                verbose=verbose, export_path=pricing_export_path)
++            result['runtime'] = time.perf_counter()-begun
++            return result
++        # An incomplete pool cannot certify min reduced cost. Retain the
++        # full original MILP pricing domain, including unvisited categories.
++        del universe
+     m = gp.Model('M5_relaxed_E2_route_cover')
+     m.Params.OutputFlag = int(verbose)
+     m.Params.Threads = 1
+@@ -142,7 +158,7 @@
+         return dict(satellite=site, bound=max(0.0, best), status=status, lp_converged=converged,
+                     best_witness=best_witness, iterations=iterations, columns=columns,
+                     variables=m.NumVars, pricing_variables=pricer.model.NumVars if pricer else None,
+-                    runtime=time.perf_counter()-begun)
++                    runtime=time.perf_counter()-begun, enumeration=enumeration, pricing_backend='milp')
+     except TimeoutError:
+         return dict(satellite=site, bound=max(0.0, best), status='TIME_LIMIT_BUILD', lp_converged=False,
+                     best_witness=best_witness, iterations=iterations, columns=columns, runtime=time.perf_counter()-begun)
+@@ -154,13 +170,20 @@
+ 
+ def route_cover_certificate(problem, *, time_limit=30, initial_result=None, seed=42,
+                             pricing_time_limit=2.0, verbose=False, diagnostics_dir=None, heuristic_pricing=True,
+-                            e1_time_limit=0.0, e1_inventory=True):
++                            e1_time_limit=0.0, e1_inventory=True, pricing_backend='milp',
++                            enumeration_time_limit=15.0, enumeration_max_states=2000000):
+     if not math.isfinite(time_limit) or time_limit <= 0:
+         raise ValueError('time_limit must be finite and positive')
+     if not math.isfinite(pricing_time_limit) or pricing_time_limit <= 0:
+         raise ValueError('pricing_time_limit must be finite and positive')
+     if not math.isfinite(e1_time_limit) or e1_time_limit < 0:
+         raise ValueError('e1_time_limit must be finite and nonnegative')
++    if pricing_backend not in ('milp', 'hybrid'):
++        raise ValueError('pricing_backend must be milp or hybrid')
++    if not math.isfinite(enumeration_time_limit) or enumeration_time_limit <= 0:
++        raise ValueError('enumeration_time_limit must be finite and positive')
++    if not isinstance(enumeration_max_states, int) or isinstance(enumeration_max_states, bool) or enumeration_max_states < 1:
++        raise ValueError('enumeration_max_states must be a positive integer')
+     if (problem.model_number != 5 or problem.free_assignment or not problem.reusable
+             or len(problem.operating_policy.batches) <= 1):
+         raise ValueError('Route-cover certificates require fixed, reusable multibatch M5')
+@@ -195,7 +218,8 @@
+         site_deadline = min(deadline, time.perf_counter()+remaining/(len(contexts)-index))
+         site_rows.append(site_route_cover(problem, context, deadline=site_deadline,
+             initial_result=initial_result, seed=seed, pricing_time_limit=pricing_time_limit, verbose=verbose,
+-            heuristic_pricing=heuristic_pricing,
++            heuristic_pricing=heuristic_pricing, pricing_backend=pricing_backend,
++            enumeration_time_limit=enumeration_time_limit, enumeration_max_states=enumeration_max_states,
+             pricing_export_path=Path(diagnostics_dir)/f'site_{index}_best_pricing.mps' if diagnostics_dir else None))
+     distance_e1 = math.fsum(max(0.0, row['bound']-1e-7*max(1.0, row['bound'])) for row in baseline['components'] if row['echelon'] == 'E1')
+     e1 = max(distance_e1, e1_certificate['bound'] if e1_certificate else 0.0)
+@@ -209,6 +233,7 @@
+     return dict(bound=bound, raw_bound=raw, e1_bound=e1, distance_e1_bound=distance_e1,
+                 e1_certificate=e1_certificate, components=components, sites=site_rows,
+                 distance_certificate=baseline, scope='M5_relaxed_E2_route_cover_plus_E1_certificate',
++                pricing_backend=pricing_backend,
+                 status='LP_CONVERGED' if all(row['lp_converged'] for row in site_rows) else 'PARTIAL_CERTIFIED_BOUND',
+                 runtime=time.perf_counter()-begun, proven_optimal=False, proven_infeasible=False,
+                 relaxed_constraints=['actual_E1_supply_times', 'cross_trip_delivery_pickup_use_times',
+--- /dev/null
++++ b/models/routing/solvers/exact/multibatch_route_enumeration.py
+@@ -0,0 +1,210 @@
++"""Complete elementary E2 enumeration when resources make the domain small.
++
++All raw task paths are explored, including nonmetric detours. Retain the
++cheapest feasible path per TASK SET: route-cover rows and prices depend only
++on that set. A partial enumeration supplies columns, never a pricing bound.
++"""
++from __future__ import annotations
++
++import json
++import math
++from pathlib import Path
++import time
++
++
++def enumerate_route_universe(problem, context, *, deadline=None, max_states=2000000):
++    if not isinstance(max_states, int) or isinstance(max_states, bool) or max_states < 1:
++        raise ValueError('max_states must be a positive integer')
++    from models.routing.common.cycle.precheck import travel_lower_bounds
++    begun = time.perf_counter()
++    p, f, site = problem.operating_policy, problem.fleet, context['satellite']
++    travel = travel_lower_bounds(problem)
++    nodes = context['nodes']
++    categories = [None]+[b.id for b in p.batches if any(n['key'][1] == 'd' and n['order'].batch == b.id for n in nodes)]
++    groups, states, completed = [], 0, True
++    class Interrupted(Exception):
++        pass
++    for category in categories:
++        selected = [n for n in nodes if n['key'][1] == 'p' or n['order'].batch == category]
++        n = len(selected)
++        keys = [node['key'] for node in selected]
++        orders = [node['order'] for node in selected]
++        positions = [o.customer for o in orders]
++        is_delivery = [key[1] == 'd' for key in keys]
++        weights = [node['weight'] for node in selected]
++        volumes = [node['volume'] for node in selected]
++        low = [node['window'][0] for node in selected]
++        high = [node['window'][1] for node in selected]
++        services = [o.service_time for o in orders]
++        by_key = {key: i for i, key in enumerate(keys)}
++        mates = [by_key.get((oid, 'p' if kind == 'd' else 'd'), -1) for oid, kind in keys]
++        duration = [[problem.travel(a, b) for b in positions] for a in positions+[site]]
++        distance = [[problem.distance(a, b) for b in positions] for a in positions+[site]]
++        back_time = [problem.travel(a, site)+p.e2_return_unload_time for a in positions]
++        back_cost = [problem.distance(a, site) for a in positions]
++        min_back = [travel['inward'][site][a]+p.e2_return_unload_time for a in positions]
++        start = p.cycle_start if category is None else context['release'][category]
++        cap_w, cap_v = f.e2_weight_cap+1e-6, f.e2_volume_cap+1e-6
++        best, path, starts, delivered = {}, [], [], [-1]*n
++        group_begun, group_states, complete = time.perf_counter(), states, True
++        def dfs(mask, last, clock, cost, dw, dv, pw, pv, net_w, net_v, peak_w, peak_v, has_d, has_p):
++            nonlocal states
++            states += 1
++            if states > max_states or (states % 256 == 0 and deadline is not None and time.perf_counter() >= deadline):
++                raise Interrupted
++            if mask:
++                end = clock+back_time[last]
++                if (has_d or category is None) and end+p.e2_turnaround_time <= p.cycle_end and (not has_p or end <= p.batches[-1].cutoff):
++                    full_cost = cost+back_cost[last]
++                    if mask not in best or full_cost < best[mask]['cost']:
++                        best[mask] = dict(tasks=tuple(keys[j] for j in path), cost=full_cost,
++                            departure=int(start), starts=list(starts), return_complete=int(end))
++            for j in range(n):
++                bit = 1 << j
++                if mask & bit or low[j] > high[j]:
++                    continue
++                mate = mates[j]
++                if is_delivery[j] and mate >= 0 and mask & (1 << mate):
++                    continue
++                at = max(clock+duration[last][j], low[j])
++                if not is_delivery[j] and mate >= 0 and delivered[mate] >= 0:
++                    at = max(at, delivered[mate]+services[mate]+orders[j].min_use_time)
++                if at > high[j]:
++                    continue
++                d_w, d_v = dw+(weights[j] if is_delivery[j] else 0), dv+(volumes[j] if is_delivery[j] else 0)
++                p_w, p_v = pw+(0 if is_delivery[j] else weights[j]), pv+(0 if is_delivery[j] else volumes[j])
++                delta_w, delta_v = net_w+weights[j]*(-1 if is_delivery[j] else 1), net_v+volumes[j]*(-1 if is_delivery[j] else 1)
++                peak_w_new, peak_v_new = max(peak_w, delta_w), max(peak_v, delta_v)
++                # Initial load is ALL deliveries selected anywhere on the
++                # path. Future deliveries increase every earlier load, so
++                # these partial-path violations can never be repaired.
++                if d_w+peak_w_new > cap_w or d_v+peak_v_new > cap_v or p_w > cap_w or p_v > cap_v:
++                    continue
++                has_pickup = has_p or not is_delivery[j]
++                limit = min(p.cycle_end-p.e2_turnaround_time, p.batches[-1].cutoff) if has_pickup else p.cycle_end-p.e2_turnaround_time
++                # Direct return may be slower than a detour on nonmetric
++                # inputs. Only the shortest-time lower bound can prune.
++                if at+services[j]+min_back[j] > limit:
++                    continue
++                path.append(j)
++                starts.append(int(at))
++                if is_delivery[j]:
++                    delivered[j] = at
++                dfs(mask | bit, j, at+services[j], cost+distance[last][j],
++                    d_w, d_v, p_w, p_v, delta_w, delta_v, peak_w_new, peak_v_new,
++                    has_d or is_delivery[j], has_pickup)
++                if is_delivery[j]:
++                    delivered[j] = -1
++                path.pop()
++                starts.pop()
++        try:
++            if deadline is not None and time.perf_counter() >= deadline:
++                raise Interrupted
++            dfs(0, n, start, 0.0, 0, 0, 0, 0, 0, 0, 0, 0, False, False)
++        except Interrupted:
++            completed, complete = False, False
++        groups.append(dict(category=category, complete=complete, states=states-group_states,
++            columns=list(best.values()), runtime=time.perf_counter()-group_begun))
++        if not complete:
++            break
++    return dict(complete=completed and len(groups) == len(categories), groups=groups,
++                states=states, columns=sum(len(g['columns']) for g in groups), runtime=time.perf_counter()-begun)
++
++
++class EnumeratedRoutePricer:
++    """Exact pricing over a COMPLETE union of elementary route task sets."""
++    def __init__(self, universe):
++        if not universe['complete']:
++            raise ValueError('A partial route universe cannot certify pricing')
++        self.universe = universe
++        self.model = self
++        self.NumVars = 0
++
++    def price(self, duals, fleet_dual=0.0, *, time_limit=2, phase_one=False, stop_at_negative=False):
++        begun, nu = time.perf_counter(), min(0.0, float(fleet_dual))
++        reports, candidates = [], []
++        margin = 1e-7*max(1.0, math.fsum(abs(float(v)) for v in duals.values()), abs(nu))
++        for group in self.universe['groups']:
++            column = min(group['columns'], key=lambda c: (0.0 if phase_one else c['cost'])-math.fsum(duals.get(tuple(k), 0.0) for k in c['tasks']), default=None)
++            value = None if column is None else (0.0 if phase_one else column['cost'])-math.fsum(duals.get(tuple(k), 0.0) for k in column['tasks'])-nu
++            reports.append(dict(category=group['category'], optimal=True, infeasible=column is None,
++                status=2 if column is not None else 3, lower_bound=0 if value is None else value-margin,
++                raw_lower_bound=value, reduced_cost=value, margin=margin, runtime=0, work=0,
++                method='complete_enumeration', columns=len(group['columns']), states=group['states']))
++            if value is not None:
++                candidates.append((value, column))
++        value, column = min(candidates, key=lambda row: row[0]) if candidates else (None, None)
++        return dict(status=2, optimal=True, infeasible=not candidates,
++            lower_bound=0.0 if value is None else value-margin,
++            raw_lower_bound=value, margin=margin, reduced_cost=value, column=column,
++            runtime=time.perf_counter()-begun, work=0, groups=reports, variables=0,
++            method='complete_enumeration')
++
++    def write(self, filename):
++        import gzip
++        path = Path(filename).with_suffix('.json.gz')
++        with gzip.open(path, 'wt', encoding='utf-8', compresslevel=1) as stream:
++            json.dump(self.universe, stream, ensure_ascii=False, allow_nan=False)
++
++    def dispose(self):
++        pass
++
++
++def enumeration_stats(universe):
++    return {**{k: v for k, v in universe.items() if k != 'groups'},
++            'groups': [{**{k: v for k, v in g.items() if k != 'columns'},
++                        'columns': len(g['columns'])} for g in universe['groups']]}
++
++
++def enumerated_route_cover(problem, context, universe, *, deadline, verbose=False, export_path=None):
++    """Solve the full route-cover LP, then certify all route dual inequalities."""
++    import gurobipy as gp
++    from gurobipy import GRB
++    begun = time.perf_counter()
++    pricer = EnumeratedRoutePricer(universe)
++    site, K = context['satellite'], context['maximum_trips']
++    model = gp.Model('M5_complete_enumerated_E2_route_cover')
++    model.Params.OutputFlag = int(verbose)
++    model.Params.Threads = 1
++    model.Params.Method = 1
++    model.Params.DualReductions = 0
++    columns = [c for g in universe['groups'] for c in g['columns']]
++    variables, witness, kept, status, bound = [], None, [], 'TIME_LIMIT_BUILD', 0.0
++    try:
++        rows = {n['key']: model.addConstr(gp.LinExpr() == 1, name=f'cover_{i}') for i, n in enumerate(context['nodes'])}
++        fleet = model.addConstr(gp.LinExpr() <= K, name='aggregate_trip_limit')
++        for i, column in enumerate(columns):
++            if i % 256 == 0 and time.perf_counter() >= deadline:
++                raise TimeoutError
++            tasks = [tuple(key) for key in column['tasks']]
++            variables.append(model.addVar(obj=column['cost'],
++                column=gp.Column([1]*(len(tasks)+1), [rows[key] for key in tasks]+[fleet]), name=f'route_{i}'))
++        model.Params.TimeLimit = max(0, deadline-time.perf_counter())
++        model.optimize()
++        if model.Status == GRB.OPTIMAL:
++            duals, nu = {key: row.Pi for key, row in rows.items()}, min(0.0, fleet.Pi)
++            priced = pricer.price(duals, nu)
++            raw = math.fsum(duals.values())+K*nu+K*min(0, priced['lower_bound'])
++            bound, status = max(0, raw), 'LP_CONVERGED'
++            witness = dict(phase='distance', method='complete_enumeration', master_objective=model.ObjVal,
++                duals=[[list(key), value] for key, value in duals.items()], fleet_dual=nu, maximum_trips=K,
++                pricing={k: v for k, v in priced.items() if k != 'column'}, candidate_bound=raw, new_column=priced['column'])
++            kept = [{**c, 'lp_value': v.X} for c, v in zip(columns, variables) if v.X > 1e-8]
++            if export_path is not None:
++                path = Path(export_path)
++                path.parent.mkdir(parents=True, exist_ok=True)
++                pricer.write(path)
++                model.write(str(path.with_name(path.stem+'_master.mps.gz')))
++        else:
++            status = 'RELAXATION_INFEASIBLE' if model.Status == GRB.INFEASIBLE else 'MASTER_TIME_LIMIT'
++        return dict(satellite=site, bound=bound, status=status, lp_converged=status == 'LP_CONVERGED',
++            best_witness=0 if witness is not None else None, iterations=[witness] if witness else [], columns=kept,
++            variables=model.NumVars, pricing_variables=0, runtime=time.perf_counter()-begun,
++            enumeration=enumeration_stats(universe), columns_generated=len(columns),
++            pricing_backend='complete_enumeration', columns_retained='positive_LP_variables')
++    except TimeoutError:
++        return dict(satellite=site, bound=0.0, status='TIME_LIMIT_BUILD', lp_converged=False,
++            best_witness=None, iterations=[], columns=[], runtime=time.perf_counter()-begun,
++            enumeration=enumeration_stats(universe), pricing_backend='complete_enumeration')
++    finally:
++        model.dispose()
+--- /dev/null
++++ b/tests/routing/test_multibatch_route_enumeration.py
+@@ -0,0 +1,159 @@
++"""Verify complete native pricing against independently enumerated task paths."""
++import gzip
++import json
++import math
++import random
++import time
++
++import pytest
++
++from models.routing.common.cycle import MultiBatchInstance
++from models.routing.solvers.exact.multibatch_route_cg import route_cover_certificate
++from models.routing.solvers.exact.multibatch_route_enumeration import enumerate_route_universe, EnumeratedRoutePricer
++from models.routing.solvers.exact.multibatch_route_pricing import evaluate_column, route_context
++from tests.routing.test_multibatch_cycle import fixture, hand_solution
++from tests.routing.test_multibatch_departure_loads import nonmetric_problem
++from tests.routing.test_multibatch_route_cg import enumerate_trips, enumerated_lp, detour_problem
++
++
++@pytest.mark.parametrize('seed', range(6))
++@pytest.mark.parametrize('phase_one', [False, True])
++def test_complete_task_sets_and_pricing_match_independent_all_path_oracle(seed, phase_one):
++    p = nonmetric_problem(seed)
++    rng = random.Random(712+seed)
++    for site in p.satellites:
++        ctx = route_context(p, site)
++        if not ctx['nodes']:
++            continue
++        oracle = enumerate_trips(p, site)
++        expected = {}
++        for sequence, cost in oracle:
++            key = frozenset(sequence)
++            expected[key] = min(expected.get(key, math.inf), cost)
++        universe = enumerate_route_universe(p, ctx)
++        assert universe['complete']
++        actual = {frozenset(c['tasks']): c['cost'] for g in universe['groups'] for c in g['columns']}
++        assert set(actual) == set(expected)
++        for key in expected:
++            assert actual[key] == pytest.approx(expected[key], abs=1e-8)
++        pi = {node['key']: rng.uniform(-10, 30) for node in ctx['nodes']}
++        nu = -3.5
++        priced = EnumeratedRoutePricer(universe).price(pi, nu, phase_one=phase_one)
++        value = min((0 if phase_one else cost)-sum(pi[k] for k in seq)-nu for seq, cost in oracle)
++        assert priced['optimal'] and priced['raw_lower_bound'] == pytest.approx(value, abs=1e-8)
++        assert priced['lower_bound'] <= value+1e-8
++        c = priced['column']
++        replayed = evaluate_column(p, ctx, c['tasks'])
++        assert replayed is not None and replayed['cost'] == pytest.approx(c['cost'])
++        assert replayed['starts'] == c['starts'] and replayed['return_complete'] == c['return_complete']
++
++
++@pytest.mark.parametrize('seed', range(6))
++def test_complete_cover_lp_matches_oracle_and_never_claims_integer_optimality(seed):
++    pytest.importorskip('gurobipy')
++    from models.routing.solvers.exact.solver import solve_exact
++    p = nonmetric_problem(seed)
++    cert = route_cover_certificate(p, pricing_backend='hybrid', e1_time_limit=1, time_limit=5)
++    assert cert['status'] == 'LP_CONVERGED'
++    for row in cert['sites']:
++        if row['status'] == 'EMPTY':
++            continue
++        opt = enumerated_lp(p, row['satellite'], enumerate_trips(p, row['satellite']))
++        assert opt-1e-3 <= row['bound'] <= opt+1e-6
++        assert row['enumeration']['complete'] and row['pricing_backend'] == 'complete_enumeration'
++    full = solve_exact(p, time_limit=5)
++    assert full['info']['proven_optimal'] and cert['bound'] <= full['info']['objective']+1e-6
++    assert not cert['proven_optimal'] and not cert['proven_infeasible']
++
++
++def test_nonmetric_return_detours_are_not_pruned_by_direct_return_time():
++    p = detour_problem()
++    i = p.network.node_index
++    p.network.time[i['S']][i['A']] = 1
++    p.network.time[i['A']][i['S']] = 110
++    p = MultiBatchInstance(p.network, p.orders, p.operating_policy)
++    ctx = route_context(p, 'S')
++    assert evaluate_column(p, ctx, [('a', 'p')]) is None
++    assert evaluate_column(p, ctx, [('a', 'p'), ('b', 'p')]) is not None
++    universe = enumerate_route_universe(p, ctx)
++    oracle = enumerate_trips(p, 'S')
++    expected = {frozenset(seq) for seq, _ in oracle}
++    actual = {frozenset(c['tasks']) for g in universe['groups'] for c in g['columns']}
++    assert universe['complete'] and actual == expected
++
++
++def test_delivery_only_return_after_pickup_cutoff_is_retained():
++    p = detour_problem()
++    i = p.network.node_index
++    p.network.time[i['S']][i['A']] = 1
++    p.network.time[i['A']][i['S']] = 110
++    p = MultiBatchInstance(p.network, p.orders, p.operating_policy)
++    universe = enumerate_route_universe(p, route_context(p, 'S'))
++    column = next(c for g in universe['groups'] for c in g['columns'] if c['tasks'] == (('a', 'd'),))
++    assert p.operating_policy.batches[-1].cutoff < column['return_complete'] <= p.operating_policy.cycle_end
++
++
++def test_initial_delivery_load_counts_future_deliveries_at_earlier_pickups():
++    p = detour_problem()
++    p.fleet.e2_volume_cap = 1
++    ctx = route_context(p, 'S')
++    assert evaluate_column(p, ctx, [('b', 'p'), ('a', 'd')]) is None
++    universe = enumerate_route_universe(p, ctx)
++    assert universe['complete']
++    for g in universe['groups']:
++        for c in g['columns']:
++            assert evaluate_column(p, ctx, c['tasks']) is not None
++
++
++def test_incomplete_universe_never_certifies_and_full_milp_fallback_remains():
++    pytest.importorskip('gurobipy')
++    p = fixture(pool=2)
++    universe = enumerate_route_universe(p, route_context(p, 'S'), max_states=1)
++    assert not universe['complete']
++    with pytest.raises(ValueError, match='partial'):
++        EnumeratedRoutePricer(universe)
++    cert = route_cover_certificate(p, time_limit=5, initial_result=hand_solution(p),
++        pricing_backend='hybrid', enumeration_max_states=1)
++    row = cert['sites'][0]
++    assert not row['enumeration']['complete'] and row['pricing_backend'] == 'milp'
++    assert row['lp_converged'] and row['bound'] <= enumerated_lp(p, 'S', enumerate_trips(p, 'S'))+1e-6
++    assert not cert['proven_optimal']
++
++
++def test_deadline_and_parameter_validation():
++    p = fixture(pool=2)
++    universe = enumerate_route_universe(p, route_context(p, 'S'), deadline=0)
++    assert not universe['complete'] and universe['states'] == 0
++    for v in (0, True, 1.5):
++        with pytest.raises(ValueError):
++            enumerate_route_universe(p, route_context(p, 'S'), max_states=v)
++        with pytest.raises(ValueError):
++            route_cover_certificate(p, enumeration_max_states=v)
++    for v in (0, -1, math.inf, math.nan):
++        with pytest.raises(ValueError):
++            route_cover_certificate(p, enumeration_time_limit=v)
++    with pytest.raises(ValueError, match='pricing_backend'):
++        route_cover_certificate(p, pricing_backend='partial')
++    cert = route_cover_certificate(p, pricing_backend='hybrid', time_limit=1e-12)
++    assert cert['bound'] == 0 and not cert['proven_optimal']
++
++
++def test_full_route_cover_exports_complete_universe_and_replayable_lp(tmp_path):
++    gp = pytest.importorskip('gurobipy')
++    from models.routing.variants.model_5.exact import route_cover_certificate as public
++    p = fixture(pool=2)
++    cert = public(p, time_limit=5, initial_result=hand_solution(p), pricing_backend='hybrid', diagnostics_dir=tmp_path)
++    universes = list(tmp_path.glob('*_best_pricing.json.gz'))
++    masters = list(tmp_path.glob('*_best_pricing_master.mps.gz'))
++    assert cert['status'] == 'LP_CONVERGED' and len(universes) == len(masters) == 1
++    with gzip.open(universes[0], 'rt') as stream:
++        universe = json.load(stream)
++    assert universe['complete']
++    m = gp.read(str(masters[0]))
++    try:
++        m.Params.OutputFlag = 0
++        m.optimize()
++        assert m.Status == gp.GRB.OPTIMAL
++        assert m.ObjVal-1e-3 <= cert['sites'][0]['bound'] <= m.ObjVal+1e-6
++    finally:
++        m.dispose()
+--- /dev/null
++++ b/tools/audit/benchmark_multibatch_enumerated_pricing.py
+@@ -0,0 +1,164 @@
++"""Sequential frozen M5 MILP-pricing versus complete-enumeration hybrid.
++
++All variants use the same audited upper bound and original total budget.
++Complete enumeration certifies a relaxed route-cover LP only; partial
++universes fall back to the full original integer pricing domain.
++"""
++from __future__ import annotations
++
++import argparse
++import hashlib
++import json
++import math
++import os
++from pathlib import Path
++import platform
++import shutil
++import subprocess
++import sys
++import time
++
++ROOT = Path(__file__).resolve().parents[2]
++sys.path.insert(0, str(ROOT))
++
++
++def write(path, value):
++    path.write_text(json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False)+'\n')
++
++
++def worker(job, destination):
++    from configuration.loader import load_routing_case
++    from models.routing.common.cycle import load_instance
++    from models.routing.common.cycle.audit import audit_solution
++    problem = load_instance(*load_routing_case(job['case']))
++    initial = json.loads(Path(job['initial_result']).read_text())
++    independent = audit_solution(problem, initial)
++    if not independent['valid']:
++        raise ValueError('Frozen incumbent failed audit')
++    started = time.perf_counter()
++    from models.routing.solvers.exact.multibatch_route_cg import route_cover_certificate
++    certificate = route_cover_certificate(problem, time_limit=job['budget'], initial_result=initial,
++        seed=job['seed'], pricing_time_limit=job['pricing_time_limit'], verbose=True,
++        e1_time_limit=job['e1_time_limit'],
++        pricing_backend='milp' if job['variant'] == 'cg' else 'hybrid',
++        enumeration_time_limit=job['enumeration_time_limit'],
++        enumeration_max_states=1 if job['variant'] == 'fallback' else job['enumeration_max_states'],
++        diagnostics_dir=destination.parent/(job['id']+'_pricing_models'))
++    lower = certificate['bound']
++    payload, valid = dict(certificate=certificate), None
++    upper = independent['objective']
++    write(destination, dict(job=job, wall_seconds=time.perf_counter()-started,
++        frozen_incumbent_audit=independent, bound=lower,
++        fixed_incumbent_gap=max(0, upper-lower)/max(1e-9, abs(upper)) if lower is not None else None,
++        result_valid=valid, **payload))
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--output', type=Path, required=True)
++    parser.add_argument('--cases', nargs='+')
++    parser.add_argument('--initial-results', nargs='+')
++    parser.add_argument('--time', type=float, default=30)
++    parser.add_argument('--pricing-time', type=float, default=2)
++    parser.add_argument('--e1-time', type=float, default=10, help='E1 time cap inside the CG budget, further capped at one third of remaining time')
++    parser.add_argument('--enumeration-time', type=float, default=15)
++    parser.add_argument('--enumeration-states', type=int, default=2000000)
++    parser.add_argument('--seeds', nargs='+', type=int, default=[42])
++    parser.add_argument('--variants', nargs='+', choices=['cg', 'hybrid', 'fallback'], default=['cg', 'hybrid'])
++    parser.add_argument('--worker', help=argparse.SUPPRESS)
++    args = parser.parse_args()
++    if args.worker:
++        worker(json.loads(args.worker), args.output)
++        return
++    if not args.cases or not args.initial_results or len(args.cases) != len(args.initial_results):
++        parser.error('one --initial-results file is required per case')
++    if any(not math.isfinite(v) or v <= 0 for v in (args.time, args.pricing_time, args.e1_time, args.enumeration_time)):
++        parser.error('budgets must be finite and positive')
++    if args.enumeration_states < 1:
++        parser.error('enumeration-states must be positive')
++    if len(set(args.variants)) != len(args.variants):
++        parser.error('variants must be distinct')
++    from configuration.loader import load_routing_case, resolve_project_path
++    from models.routing.common.cycle import load_instance
++    from models.routing.common.cycle.audit import audit_solution
++    output = args.output.resolve()
++    output.mkdir(parents=True, exist_ok=False)
++    jobs = []
++    for index, source in enumerate(args.cases):
++        config, fleet = load_routing_case(source)
++        problem = load_instance(config, fleet)
++        if problem.model_number != 5:
++            raise ValueError('M5 inputs required')
++        frozen = output/'inputs'/str(index)
++        frozen.mkdir(parents=True)
++        for field in ('data', 'orders', 'distance_matrix', 'duration_matrix', 'dataset_metadata'):
++            if config.get(field):
++                path = resolve_project_path(config[field])
++                target = frozen/(field+path.suffix)
++                shutil.copy2(path, target)
++                config[field] = str(target)
++        write(frozen/'fleet.json', fleet)
++        config['routing_config'], config['operating_policy'] = str(frozen/'fleet.json'), fleet['operating_policy']
++        for field in ('algorithm_config', 'container_pool_config'):
++            config.pop(field, None)
++        write(frozen/'case.json', config)
++        payload = json.loads(resolve_project_path(args.initial_results[index]).read_text())
++        initial = payload.get('result', payload)
++        independent = audit_solution(problem, initial)
++        if not independent['valid']:
++            raise ValueError('Initial result failed independent M5 audit')
++        write(frozen/'initial_result.json', initial)
++        write(frozen/'initial_audit.json', independent)
++        for seed in args.seeds:
++            for variant in args.variants:
++                jobs.append(dict(id=f'{index:02d}_{seed}_{variant}', variant=variant,
++                    case=str(frozen/'case.json'), source_case=source, initial_result=str(frozen/'initial_result.json'),
++                    frozen_upper_bound=independent['objective'], budget=args.time, seed=seed,
++                    pricing_time_limit=args.pricing_time, e1_time_limit=args.e1_time,
++                    enumeration_time_limit=args.enumeration_time, enumeration_max_states=args.enumeration_states, orders=len(problem.orders),
++                    customers=len({o.customer for o in problem.orders})))
++    for source in [*ROOT.glob('models/**/*.py'), *ROOT.glob('configuration/*.py'), Path(__file__).resolve()]:
++        target = output/'source_snapshot'/source.relative_to(ROOT)
++        target.parent.mkdir(parents=True, exist_ok=True)
++        shutil.copy2(source, target)
++    for name in ('multibatch_route_enumeration.py', 'multibatch_route_cg.py', 'multibatch_route_pricing.py', 'multibatch_bounds.py', 'solver.py', 'formulation.py'):
++        path = output/'source_snapshot/models/routing/solvers/exact'/name
++        compile(path.read_text(), str(path), 'exec')
++    hashes = {str(p.relative_to(output)): hashlib.sha256(p.read_bytes()).hexdigest()
++              for p in sorted(output.rglob('*')) if p.is_file()}
++    write(output/'manifest.json', dict(jobs=jobs, artifact_sha256=hashes, python=sys.version,
++        platform=platform.platform(), python_hash_seed=0,
++        note='Same audited frozen upper bound. Enumeration, full LP and fallback all share the original budget. No integer M5 proof.'))
++    summary = []
++    frozen_worker = output/'source_snapshot/tools/audit/benchmark_multibatch_enumerated_pricing.py'
++    for job in jobs:
++        destination = output/(job['id']+'.json')
++        started = time.perf_counter()
++        with (output/(job['id']+'.log')).open('w') as log:
++            try:
++                run = subprocess.run([sys.executable, str(frozen_worker), '--worker', json.dumps(job),
++                    '--output', str(destination)], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
++                    timeout=args.time+20, env={**os.environ, 'PYTHONHASHSEED': '0'})
++                failure = f'EXIT_{run.returncode}' if run.returncode else None
++            except subprocess.TimeoutExpired:
++                failure = 'OUTER_TIMEOUT'
++        row = dict(job=job, failure=failure, outer_seconds=time.perf_counter()-started)
++        if destination.exists():
++            payload = json.loads(destination.read_text())
++            row.update(bound=payload['bound'], fixed_incumbent_gap=payload['fixed_incumbent_gap'],
++                       wall_seconds=payload['wall_seconds'], result_valid=payload['result_valid'])
++            if job['variant'] in ('cg', 'hybrid', 'fallback'):
++                row.update(status=payload['certificate']['status'],
++                    e1_bound=payload['certificate']['e1_bound'],
++                    e1_certificate=payload['certificate'].get('e1_certificate'),
++                    sites=[{key: s[key] for key in ('satellite', 'bound', 'status', 'lp_converged', 'runtime')}
++                           for s in payload['certificate']['sites']])
++            else:
++                row['info'] = payload['result']['info']
++        summary.append(row)
++        write(output/'summary.json', summary)
++        print(json.dumps(row, ensure_ascii=False), flush=True)
++
++
++if __name__ == '__main__':
++    main()
+--- /dev/null
++++ b/docs/m5_enumerated_pricing_20261001.md
+@@ -0,0 +1,102 @@
++# M5 第十三步：完整二层路线枚举与定价收敛
++
++日期：2026-10-01。
++
++本轮改善下界计算。保持上一轮已经完整审计的 50 顾客可行上界 **2261.8315**，新后端在 60 秒总预算内得到组合下界 **2195.3268**，gap 为 **2.9403%**；上一轮保存的组合 gap 为 9.6560%。三个种子均完成全部仓的路线覆盖 LP，总用时 20.58–22.28 秒。
++
++这次没有改变路线覆盖松弛的数学模型。重新运行的原 MILP 定价在种子 42 上也得到接近相同的界，用时 53.38 秒；种子 43、44 在 60 秒内未收敛。收益来自完整定价更快、更稳定，并非得到了一种理论上更强的松弛。LP 收敛仍不证明完整 M5 的整数最优性。
++
++## 1. 使用入口
++
++```python
++from models.routing.variants.model_5.exact import route_cover_certificate
++
++certificate = route_cover_certificate(
++    problem,
++    initial_result=audited_result,
++    time_limit=60,
++    e1_time_limit=10,
++    pricing_backend='hybrid',
++    enumeration_time_limit=15,
++    enumeration_max_states=2_000_000,
++    diagnostics_dir='output/experiments/my_m5_certificate',
++)
++```
++
++新实现位于 [`multibatch_route_enumeration.py`](../models/routing/solvers/exact/multibatch_route_enumeration.py)，接入 [`multibatch_route_cg.py`](../models/routing/solvers/exact/multibatch_route_cg.py)。`pricing_backend` 默认仍是 `'milp'`，现有调用方式继续有效。
++
++`'hybrid'` 为每个仓尝试完整路线枚举。枚举用时最多为指定上限和该仓开始时剩余预算三分之一的较小值；枚举、完整 LP 建模/求解、一级证书与必要的 MILP 回退共用原总预算。达到状态数或时间上限时，记录不完整状态并回退到原有完整 MILP 定价域，保留所有配送批次和所有回收任务。
++
++## 2. 枚举范围与安全剪枝
++
++每条二层路线按配送批次分类，另有纯回收类别。一趟至多服务一个配送批次，但可以回收所有批次的订单。每项配送/回收任务至多访问一次，允许相同物理位置重复出现。访问顺序使用原始有向距离和整数行驶时间，不要求三角不等式。
++
++深度优先搜索检查服务窗口、同趟配送先于回收、订单最短使用时长、重量和体积。当前路径的初始载荷包含该路径中所有配送任务，包括位于后面的配送。增加未来配送只会提高此前各位置的载荷，因此超容量的前缀可以安全剪除。
++
++回仓剪枝使用最短行驶时间下界。原始直接回仓弧可能比绕行慢，不能据此排除仍可继续访问其他任务的路径；直接回仓只用于判断当前路径能否成为完整列。包含回收的路线必须在最后回收截止前卸箱完成；纯配送路线可以在该截止之后返回，但仍须满足周期终点和周转时间。
++
++搜索穷尽后，每个**任务集合**只保留成本最低的可行顺序。路线覆盖 LP 的覆盖系数、有限总趟数系数以及对偶定价只依赖任务集合，故较贵的同集合路线被严格支配。这一规则仅适用于当前松弛，不能直接用于保留真实供应、清洗和车辆串行时间的完整 M5 整数主问题。
++
++## 3. 完整 LP 与下界口径
++
++完整枚举成功后，直接建立包含全部保留列的连续路线覆盖主问题：每项任务恰好覆盖一次，路线数不超过有限车队和最大趟数推导的总上限 (K)。变量是连续的非负路线使用量。
++
++对完整路线域重新计算最小约化成本，而非只检查 LP 中正值列。沿用已有保守对偶证书：
++
++\[
++L_s=\sum_t\pi_t+K\nu+K\min(0,\rho),\qquad \nu\leq0.
++\]
++
++其中 \(\rho\) 是完整路线域最小约化成本减去数值余量。一级证书与各仓二层成本界相加，再与原距离证书比较，得到完整 M5 的有效成本下界。浮点余量使新后端的界可能比已收敛原定价低约千分之一，本次差异不代表松弛模型不同。
++
++诊断导出包括完整路线域 `*_best_pricing.json.gz` 和包含全部列的 `*_best_pricing_master.mps.gz`。结果 JSON 只保留正值 LP 列以控制体积，`columns_generated` 和 `variables` 记录完整列数；不能把结果 JSON 中的正值列数误认为完整路线域大小。
++
++完整模型的 `proven_optimal`、`proven_infeasible` 继续为 `False`。`LP_CONVERGED` 只表示对应松弛的 LP 已完成；完整枚举失败后的部分列不提供定价下界。
++
++## 4. 同输入、同上界、同总预算对照
++
++输入为上一轮审计后的方案，20/30/50 顾客上界分别为 1437.4738、1654.8221、2261.8315。两种后端都启用同样的一级证书，时间上限 10 秒并计入 60 秒总预算。使用种子 42、43、44，顺序运行，共 18 次。
++
++| 顾客数 | 冻结可行上界 | 新后端下界 | 新后端 gap | 原定价用时（42/43/44） | 新后端用时（42/43/44） |
++|---:|---:|---:|---:|---|---|
++| 20 | 1437.4738 | 1422.2295 | 1.0605% | 0.93 / 1.16 / 0.73 秒 | 0.26 / 0.27 / 0.38 秒 |
++| 30 | 1654.8221 | 1623.9767 | 1.8640% | 11.94 / 10.16 / 9.03 秒 | 2.30 / 2.31 / 2.30 秒 |
++| 50 | 2261.8315 | **2195.3268** | **2.9403%** | 53.38 / 60.01 / 60.01 秒 | **20.58 / 20.96 / 22.28 秒** |
++
++20、30 顾客两种后端均完成 LP，界的差别仅为保守数值余量。50 顾客的原定价种子 42 得到 2195.3282、gap 2.9402%；种子 43、44 得到约 2043.4294、gap 9.6560%，均为尚未收敛但有效的下界。新后端三个种子的列域、LP 目标和保守下界相同。小样本只支持本组输入上的速度与稳定性观察。
++
++见 [正式多种子汇总](../output/experiments/m5_enumerated_pricing_20261001/final_60s/summary.json)。对照没有使用预先生成的路线域或预先求好的 LP。
++
++## 5. 50 顾客的完整路线域
++
++| 仓 | 枚举状态数 | 保留的任务集合列数 | 二层证书下界 |
++|---|---:|---:|---:|
++| S0 | 852 | 311 | 65.7928 |
++| S4 | 12,395 | 4,123 | 237.4559 |
++| S3 | 400,166 | 74,073 | 433.1933 |
++| S1 | 907,530 | 186,230 | 437.5456 |
++| 合计 | **1,320,943** | **264,737** | **1173.9876** |
++
++一级证书为 1021.3394。S1 的 LP 目标为 437.5473，经过对偶修正后为 437.5456；其正值路线总量约为 8.1111，存在分数路线选择，说明完整路线枚举本身尚未消除整数间隙。
++
++## 6. 测试、回退与独立复核
++
++新增 [24 项测试](../tests/routing/test_multibatch_route_enumeration.py)，用六种有向非度量小例的全部任务排列作为独立参照，检查任务集合最低成本、任意对偶乘子下的定价以及完整 LP。边界测试覆盖非度量回仓绕行、纯配送较晚返回、未来配送对初始载荷的影响、部分枚举禁用证书、完整 MILP 回退、预算和公开入口导出。
++
++相关回归 **448 项通过**，14 条警告来自原 Matplotlib/PyParsing 依赖。见 [测试日志](../output/experiments/m5_enumerated_pricing_20261001/pytest.log) 与 [回归命令](../output/experiments/m5_enumerated_pricing_20261001/run_regression.sh)。
++
++另对 7 个已知精确小例分别运行两种后端，共 14 次，所有下界均不超过已知完整整数最优值，所有非空仓均完成 LP，见 [小例汇总](../output/experiments/m5_enumerated_pricing_20261001/final_small_5s/summary.json)。强制把枚举状态上限设为 1，对 30/50 顾客运行两次：均正确回到原完整 MILP 定价域，30 顾客完成 LP，50 顾客保存限时有效界，见 [回退汇总](../output/experiments/m5_enumerated_pricing_20261001/final_fallback_60s/summary.json)。
++
++总计 34 次正式运行均冻结输入、已审计上界、源码、参数和日志。工具为 [`benchmark_multibatch_enumerated_pricing.py`](../tools/audit/benchmark_multibatch_enumerated_pricing.py)，批量执行脚本为 [run_formal.py](../output/experiments/m5_enumerated_pricing_20261001/run_formal.py)。
++
++[独立复核脚本](../output/experiments/m5_enumerated_pricing_20261001/validate.py) 重新审计所有完整上界、序列化路线和各轮对偶公式。[枚举与 LP 复核器](../output/experiments/m5_enumerated_pricing_20261001/validation_enumeration.py) 从原始输入重新生成上下界，用 Floyd–Warshall 重算最短时间，并从头重算每个候选前缀的初始载荷与整条时间线，核对全部任务集合及其最低成本。它逐项核对每份完整 LP 的目标、覆盖矩阵、有限趟数行和连续变量域，再读取 MPS 重新求解。一级继续使用 [独立一级路线与库存复核器](../output/experiments/m5_enumerated_pricing_20261001/validation_e1.py)。
++
++最终复核记录见 [validation.json](../output/experiments/m5_enumerated_pricing_20261001/validation.json)，本轮定向代码改动见 [changes.patch](../output/experiments/m5_enumerated_pricing_20261001/changes.patch)。正式实验冻结后，共享代码另增加了默认 `'auto'` 的一级后端选择参数；复核记录两份源码哈希及逐项差异，二层枚举实现未变，并另跑了当前入口的定向回归。
++
++最终复核通过全部 **34** 次正式运行，重新求解 **45** 份完整二层 LP 和 **34** 份一级模型，累计重放 **931,377** 条完整 LP 列并检查 **1,005** 份对偶证书；去重后的 **25** 个仓级路线域均与独立前缀重枚举的最低成本集合完全一致。
++
++## 7. 剩余 gap
++
++新后端下界与现有可行上界相差约 **66.50**。各仓原有路线覆盖 LP 已闭合，继续延长同一松弛的定价时间，预期不能实质提高其 LP 目标。
++
++下一步应检查完整路线覆盖的整数下界，以及主问题中实际供应、回收截止、清洗和物理车辆串行的连接。加强这些连接可以缩小现有松弛；完整精确求解仍需保留完整路线域及有效分支/证明口径。更大实例的路线域可能迅速增长，因此保留状态/时间上限与完整 MILP 回退。
+--- a/models/routing/variants/model_5/exact/README.md
++++ b/models/routing/variants/model_5/exact/README.md
+@@ -47,3 +47,9 @@
+ 重排/跨趟转移候选和一级路线，保留实际物理车辆、服务/回仓时刻、回收截止及清洗库存。
+ `solve_exact(..., route_pool_time=10)` 可在原预算内生成热启动，默认仍为 0。
+ 候选池界只描述受限主问题，不作为 M5 全局界，见 [二层路线池优化](../../../../../docs/m5_route_pool_20261001.md)。
++
++第十三步可用 `route_cover_certificate(..., pricing_backend='hybrid', e1_time_limit=10)`，
++在原总预算内完整枚举二层任务路径，保留每个任务集合的最低成本路线并求解完整覆盖 LP。
++枚举受时间/状态上限保护，未完成时回退到原完整 MILP 定价；默认仍为 `'milp'`。
++50 顾客本组多种子均得到约 2.94% 的上下界 gap，LP 收敛仍不证明完整整数最优。
++见 [完整二层枚举与定价收敛](../../../../../docs/m5_enumerated_pricing_20261001.md)。
+--- a/tools/README.md
++++ b/tools/README.md
+@@ -39,3 +39,8 @@
+ `audit/benchmark_multibatch_route_pool.py` 比较 `reorder`/`pool` 的二层路线候选搜索，
+ 及 `cg`/`pool-cg`、`milp`/`pool-milp` 的同总预算组合。每轮保存候选列、输入输出及 MPS，
+ 只使用当前初解生成候选，见 [二层路线池整数主问题](../docs/m5_route_pool_20261001.md)。
++
++`audit/benchmark_multibatch_enumerated_pricing.py` 在冻结的同一已审计上界和总预算下，
++比较 `cg` 原 MILP 定价、`hybrid` 完整路线枚举/回退，以及 `fallback` 强制中断枚举。
++支持 `--enumeration-time`、`--enumeration-states`；完整路线域和完整覆盖 LP 压缩导出，
++见 [二层完整枚举与独立复核](../docs/m5_enumerated_pricing_20261001.md)。
+--- a/docs/exact_solver_architecture.md
++++ b/docs/exact_solver_architecture.md
+@@ -81,6 +81,11 @@
+ 跨越未使用的中间趟位。有限候选池只输出审计合格的上界；可选 `route_pool_time` 热启动
+ 计入完整 MILP 原预算，见 [二层路线池与同预算验证](m5_route_pool_20261001.md)。
+ 
++M5 的路线覆盖证书可显式使用 `pricing_backend='hybrid'`，在原预算内完整枚举二层任务路径，
++按任务集合保留最低成本路线，直接求解包含全部列的连续覆盖主问题。
++只有完整路线域可以提供枚举定价证书；枚举达到状态/时间上限时回退到原完整 MILP 定价。
++该选项默认关闭，LP 收敛不产生完整 M5 整数证明，见 [完整二层枚举与定价收敛](m5_enumerated_pricing_20261001.md)。
++
+ 历史 M1–M4 的 indexed 和 commodity_flow 后端保存在 `models/routing/baselines/`，需要 `--baseline` 或 `allow_baseline=True`。这些证明只针对历史业务规则，不能作为新版四模型的证明。
+ 
+ 第四轮将 B=1 建模隔离到 `single_batch_formulation.py`。`strengthening.py` 提供一级供货截止的

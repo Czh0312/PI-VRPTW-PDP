@@ -1,0 +1,26 @@
+...........................F............................................ [ 48%]
+........................................................................ [ 96%]
+.....                                                                    [100%]
+=================================== FAILURES ===================================
+___________ test_nonassociative_initial_loads_do_not_share_prefixes ____________
+
+    def test_nonassociative_initial_loads_do_not_share_prefixes():
+        base = tiny_problem(3, 1)
+        orders = [replace(o, count=1, goods_weight=w) for o, w in zip(base.orders, (1e16, 1, 1))]
+        p = MultiBatchInstance(base.network, orders, base.operating_policy, model=3)
+        scorer = SingleBatchRouteScorer(p)
+        route = dict(satellite='S', tasks=[('o1', 'd'), ('o2', 'd')])
+        goods = {(s, 'b1'): 0 for s in p.satellites}
+        helper = scorer.prepare_delivery_insertions(p, route, goods, 0)
+        for pos in (0, 2, 1, 2, 0):
+            candidate = {**route, 'tasks': route['tasks'][:pos]+[('o0', 'd')]+route['tasks'][pos:]}
+            assert helper('o0', pos) == _route_score(p, candidate, goods, 0)
+>       assert len(helper.prepared) == 2
+E       AssertionError: assert 1 == 2
+E        +  where 1 = len({('o0', <class 'float'>, 1.0000000000000004e+16, <class 'float'>, 3.0): [(1, 1.0000000000000004e+16, 3.0, 499999999999...(7, 1.0000000000000002e+16, 2.0, 999999999999998.2, 11.0, 0, ...), (15, 1e+16, 1.0, 1499999999999997.2, 13.0, 0, ...)]})
+E        +    where {('o0', <class 'float'>, 1.0000000000000004e+16, <class 'float'>, 3.0): [(1, 1.0000000000000004e+16, 3.0, 499999999999...(7, 1.0000000000000002e+16, 2.0, 999999999999998.2, 11.0, 0, ...), (15, 1e+16, 1.0, 1499999999999997.2, 13.0, 0, ...)]} = <models.routing.solvers.alns.single_batch_scoring._DeliveryInsertions object at 0x105c97d90>.prepared
+
+tests/routing/test_single_batch_delivery_prefix.py:170: AssertionError
+=========================== short test summary info ============================
+FAILED tests/routing/test_single_batch_delivery_prefix.py::test_nonassociative_initial_loads_do_not_share_prefixes
+1 failed, 148 passed in 4.63s

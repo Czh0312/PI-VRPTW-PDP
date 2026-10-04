@@ -1,0 +1,67 @@
+--- before/models/routing/solvers/alns/single_batch.py
++++ candidate/models/routing/solvers/alns/single_batch.py
+@@ -161,8 +161,9 @@
+     # Free delivery/pickup assignment retains its original continuous search:
+     # incumbent descent competed with partition exploration in paired pilots.
+     descent_enabled = _assignment_search is None
+-    descent = SingleBatchDescent(best_problem, cache_sites=not best_problem.reusable,
+-                                 score_route=best_cache.score_route, cache_distances=best_problem.reusable)
++    descent = SingleBatchDescent(best_problem, cache_sites=True,
++                                 score_route=best_cache.score_route, cache_distances=best_problem.reusable,
++                                 preserve_global_order=best_problem.reusable)
+     descent_seconds = 0.0
+     descent_generated = descent_filtered = descent_cache_hits = descent_enumerations = 0
+     descent_deferred = descent_recovered = 0
+@@ -188,8 +189,9 @@
+                 descent_enumerations += descent.enumerations
+                 descent_deferred += descent.deferred_count
+                 descent_recovered += descent.recovered
+-                descent = SingleBatchDescent(best_problem, cache_sites=not best_problem.reusable,
+-                                             score_route=best_cache.score_route, cache_distances=best_problem.reusable)
++                descent = SingleBatchDescent(best_problem, cache_sites=True,
++                                             score_route=best_cache.score_route, cache_distances=best_problem.reusable,
++                                             preserve_global_order=best_problem.reusable)
+             descent_start = time.perf_counter()
+             proposed = descent.propose(best_state, best_decoded, begun+max_time)
+             descent_seconds += time.perf_counter()-descent_start
+--- before/models/routing/solvers/alns/single_batch_descent.py
++++ candidate/models/routing/solvers/alns/single_batch_descent.py
+@@ -27,11 +27,12 @@
+ class SingleBatchDescent:
+     """Reuse a bounded candidate list until the incumbent changes."""
+     def __init__(self, problem, capacity=256, *, cache_sites=True, score_route=None,
+-                 cache_distances=False):
++                 cache_distances=False, preserve_global_order=False):
+         if len(problem.operating_policy.batches) != 1:
+             raise ValueError('Single-batch descent requires B=1')
+         self.problem, self.capacity = problem, capacity
+         self.cache_sites = cache_sites
++        self.preserve_global_order = preserve_global_order
+         self.score_route = score_route or _route_score
+         self.cache_distances = cache_distances
+         self.order_customers = {o.id: o.customer for o in problem.orders} if cache_distances else None
+@@ -89,10 +90,20 @@
+                     self.site_options[key] = local
+                     if len(self.site_options) > 64:
+                         self.site_options.popitem(last=False)
+-            for gain, _, changes in local:
+-                options.append((gain, tuple((indices[i], tasks) for i, tasks in changes)))
+-        options.sort(key=lambda option: -option[0])
+-        e2 = [('e2', changes) for _, changes in options[:self.capacity]]
++            for gain, serial, changes in local:
++                mapped = tuple((indices[i], tasks) for i, tasks in changes)
++                # The uncached enumerator visits outer routes in global order.
++                # Within one outer route, local retain order is the same. This
++                # recovers its tie order even when satellites are interleaved.
++                if self.preserve_global_order:
++                    options.append((gain, mapped, (mapped[0][0], -serial)))
++                else:
++                    options.append((gain, mapped))
++        if self.preserve_global_order:
++            options.sort(key=lambda option: (-option[0], option[2]))
++        else:
++            options.sort(key=lambda option: -option[0])
++        e2 = [('e2', option[1]) for option in options[:self.capacity]]
+         self.e2_key, self.e2_options = state_key(state)[3], e2
+         return e2
+ 

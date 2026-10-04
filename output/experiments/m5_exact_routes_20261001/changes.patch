@@ -1,0 +1,356 @@
+--- before/models/routing/solvers/exact/formulation.py
++++ after/models/routing/solvers/exact/formulation.py
+@@ -3,10 +3,14 @@
+ 
+ import time
+ 
++# The route-identity LP can be weaker on small models. Use the same structural
++# crossover as the single-batch implementation, rather than a customer limit.
++M5_COMPRESS_ROUTE_MIN_INTERNAL_ARCS = 10000
++
+ 
+ def build_model(problem, *, verbose=False, deadline=None, share_e2=True, travel_bounds=None, domain_check=None,
+                 strengthen_multibatch=True, share_cutoff=True, e2_capacity_cuts=True,
+-                linear_e2_links=True, trip_symmetry=True):
++                linear_e2_links=True, trip_symmetry=True, compress_multibatch_routes=None):
+     if len(problem.operating_policy.batches) == 1:
+         from .single_batch_formulation import build_model as build_single
+         return build_single(problem, verbose=verbose, deadline=deadline, share_e2=share_e2,
+@@ -99,7 +103,8 @@
+             else:
+                 task_load_w[key].LB = weight
+                 task_load_v[key].LB = volume
+-    shared_arcs, aggregate_arcs = {}, {}
++    shared_arcs, aggregate_arcs, global_arcs, e2_arc_cache = {}, {}, {}, {}
++    indexed_internal = 0
+     causal_limit = max(10, 4*len(problem.orders)+4*len(problem.satellites)*f.e2_per_sat_count*p.e2_max_trips_per_vehicle)
+     if linear_links:
+         # At most one trip per task. A satellite's causal DAG has its task
+@@ -112,24 +117,10 @@
+             m.dispose()
+             raise TimeoutError('MILP construction reached the total time budget')
+ 
+-    def route(nodes, base, cap_w, cap_v, unload, label, layer, batch=None):
+-        nonlocal objective
+-        check_budget()
++    def route_arcs(nodes, base, cap_w, cap_v, unload, layer, batch):
++        if layer == 'e2' and base in e2_arc_cache:
++            return e2_arc_cache[base]
+         count = len(nodes)
+-        used = m.addVar(vtype=GRB.BINARY, name=label+'_used')
+-        start = m.addVar(vtype=GRB.INTEGER, ub=H, name=label+'_start')
+-        end = m.addVar(vtype=GRB.INTEGER, ub=H, name=label+'_end')
+-        visit = m.addVars(count, vtype=GRB.BINARY, name=label+'_visit')
+-        shared = compact and layer == 'e2'
+-        keys = [(n['order'].id, n['kind']) for n in nodes] if shared else []
+-        times = ({i: order_times[key] for i, key in enumerate(keys)} if shared else
+-                 m.addVars(count, vtype=GRB.INTEGER, ub=H, name=label+'_time'))
+-        # E2 already has strictly increasing global causal steps below.
+-        rank = m.addVars(count, lb=0, ub=max(1, count), name=label+'_rank') if layer == 'e1' else None
+-        load_w = ({i: task_load_w[key] for i, key in enumerate(keys)} if shared else
+-                  m.addVars(count, ub=cap_w, name=label+'_weight'))
+-        load_v = ({i: task_load_v[key] for i, key in enumerate(keys)} if shared else
+-                  m.addVars(count, ub=cap_v, name=label+'_volume'))
+         # -1 = source, -2 = sink. There is no empty source-to-sink route.
+         end_limit = min(H-p.e1_turnaround_time, batch.end) if layer == 'e1' else H-p.e2_turnaround_time
+         arcs = [(-1, j) for j in range(count)
+@@ -156,7 +147,67 @@
+                     if overlap and (left['w']+right['w'] > cap_w+1e-6 or left['v']+right['v'] > cap_v+1e-6):
+                         continue
+                 arcs.append((i, j))
+-        x = m.addVars(arcs, vtype=GRB.BINARY, name=label+'_arc')
++        if layer == 'e2':
++            e2_arc_cache[base] = arcs
++        return arcs
++
++    e2_nodes, internal_estimate = {}, 0
++    for site in problem.satellites:
++        check_budget()
++        nodes = []
++        for order in problem.orders:
++            if order.satellite != site:
++                continue
++            for kind in problem.task_kinds:
++                _, weight, volume = problem.task(order.id, kind)
++                nodes.append(dict(site=order.customer, order=order, kind=kind, quantity=order.count,
++                                  w=weight, v=volume, service=order.service_time,
++                                  window=windows[order.id, kind]))
++        e2_nodes[site] = nodes
++        if not nodes:
++            continue
++        arcs = route_arcs(nodes, site, f.e2_weight_cap, f.e2_volume_cap,
++                          p.e2_return_unload_time, 'e2', None)
++        slots = sum(min(p.e2_max_trips_per_vehicle, len(nodes)//(v+1) if trip_symmetry else len(nodes))
++                    for v in range(min(f.e2_per_sat_count, len(nodes))))
++        internal_estimate += sum(a >= 0 and b >= 0 for a, b in arcs)*slots
++    compressed_routes = compact and (internal_estimate >= M5_COMPRESS_ROUTE_MIN_INTERNAL_ARCS
++                                    if compress_multibatch_routes is None else compress_multibatch_routes)
++
++    def route(nodes, base, cap_w, cap_v, unload, label, layer, batch=None):
++        nonlocal objective, indexed_internal
++        check_budget()
++        count = len(nodes)
++        used = m.addVar(vtype=GRB.BINARY, name=label+'_used')
++        start = m.addVar(vtype=GRB.INTEGER, ub=H, name=label+'_start')
++        end = m.addVar(vtype=GRB.INTEGER, ub=H, name=label+'_end')
++        visit = m.addVars(count, vtype=GRB.BINARY, name=label+'_visit')
++        shared = compact and layer == 'e2'
++        keys = [(n['order'].id, n['kind']) for n in nodes] if shared else []
++        times = ({i: order_times[key] for i, key in enumerate(keys)} if shared else
++                 m.addVars(count, vtype=GRB.INTEGER, ub=H, name=label+'_time'))
++        # E2 already has strictly increasing global causal steps below.
++        rank = m.addVars(count, lb=0, ub=max(1, count), name=label+'_rank') if layer == 'e1' else None
++        load_w = ({i: task_load_w[key] for i, key in enumerate(keys)} if shared else
++                  m.addVars(count, ub=cap_w, name=label+'_weight'))
++        load_v = ({i: task_load_v[key] for i, key in enumerate(keys)} if shared else
++                  m.addVars(count, ub=cap_v, name=label+'_volume'))
++        arcs = route_arcs(nodes, base, cap_w, cap_v, unload, layer, batch)
++        if layer == 'e2':
++            indexed_internal += sum(a >= 0 and b >= 0 for a, b in arcs)
++        if shared and compressed_routes:
++            x = {}
++            for a, b in arcs:
++                if a >= 0 and b >= 0:
++                    key = keys[a], keys[b]
++                    if key not in global_arcs:
++                        global_arcs[key] = m.addVar(vtype=GRB.BINARY, name=f'm5_link_{len(global_arcs)}')
++                        shared_arcs[key] = [global_arcs[key]]
++                    x[a, b] = global_arcs[key]
++                else:
++                    x[a, b] = m.addVar(vtype=GRB.BINARY, name=f'{label}_arc[{a},{b}]')
++        else:
++            x = m.addVars(arcs, vtype=GRB.BINARY, name=label+'_arc')
+         incoming, outgoing = {i: [] for i in range(count)}, {i: [] for i in range(count)}
+         for a, b in arcs:
+             if b >= 0:
+@@ -187,8 +238,14 @@
+         for i, n in enumerate(nodes):
+             if i % 64 == 0:
+                 check_budget()
+-            m.addConstr(gp.quicksum(incoming[i]) == visit[i])
+-            m.addConstr(gp.quicksum(outgoing[i]) == visit[i])
++            if shared and compressed_routes:
++                if (-1, i) in x:
++                    m.addConstr(x[-1, i] <= visit[i])
++                if (i, -2) in x:
++                    m.addConstr(x[i, -2] <= visit[i])
++            else:
++                m.addConstr(gp.quicksum(incoming[i]) == visit[i])
++                m.addConstr(gp.quicksum(outgoing[i]) == visit[i])
+             m.addConstr(visit[i] <= used)
+             if free and layer == 'e1':
+                 # Quantity and weight belong to the unique vehicle visiting
+@@ -212,7 +269,8 @@
+                 check_budget()
+             left = base if a == -1 else nodes[a]['site']
+             right = base if b == -2 else nodes[b]['site']
+-            objective += problem.distance(left, right)*x[a, b]
++            if not (shared and compressed_routes and a >= 0 and b >= 0):
++                objective += problem.distance(left, right)*x[a, b]
+             if a == -1:
+                 if shared and linear_links:
+                     lower = nodes[b]['window'][0]
+@@ -241,7 +299,8 @@
+                     m.addConstr((x[a, b] == 1) >> (end >= times[a]+tail))
+             else:
+                 if shared:
+-                    shared_arcs.setdefault((keys[a], keys[b]), []).append(x[a, b])
++                    if not compressed_routes:
++                        shared_arcs.setdefault((keys[a], keys[b]), []).append(x[a, b])
+                     continue
+                 m.addConstr((x[a, b] == 1) >> (times[b] >= times[a]+nodes[a]['service']+problem.travel(left, right)))
+                 if rank is not None:
+@@ -252,6 +311,7 @@
+             if layer == 'e1' and b != -2 and nodes[b]['kind'] == 'p' and (a == -1 or nodes[a]['kind'] == 'd'):
+                 m.addConstr((x[a, b] == 1) >> (times[b] >= batch.cutoff+problem.travel(left, right)))
+         return dict(nodes=nodes, base=base, used=used, start=start, end=end,
++                    global_internal_arcs=shared and compressed_routes,
+                     visit=visit, times=times, x=x, label=label)
+ 
+     for b in p.batches:
+@@ -352,13 +412,7 @@
+             used_slots = []
+             slot_limit = min(p.e2_max_trips_per_vehicle, task_count//(v+1) if trip_symmetry else task_count)
+             for slot in range(slot_limit):
+-                nodes = []
+-                for o in orders:
+-                    for kind in problem.task_kinds:
+-                        _, w, volume = problem.task(o.id, kind)
+-                        nodes.append(dict(site=o.customer, order=o, kind=kind, quantity=o.count,
+-                                          w=w, v=volume, service=o.service_time,
+-                                          window=site_windows[s, o.id, kind] if free else windows[o.id, kind]))
++                nodes = e2_nodes[s]
+                 r = route(nodes, s, f.e2_weight_cap, f.e2_volume_cap,
+                           p.e2_return_unload_time, f'e2_{s}_{v}_{slot}', 'e2')
+                 r.update(satellite=s, vehicle=v, slot=slot)
+@@ -471,11 +525,47 @@
+     if compact:
+         for key, variable in order_times.items():
+             variable.LB, variable.UB = windows[key]
++        if compressed_routes:
++            memberships = {key: [] for key in order_times}
++            entering = {key: [] for key in order_times}
++            leaving = {key: [] for key in order_times}
++            identities, identity_limits = {}, {}
++            for site in problem.satellites:
++                local_routes = [r for r in routes2 if r['satellite'] == site]
++                for route_id, r in enumerate(local_routes, 1):
++                    for i, n in enumerate(r['nodes']):
++                        key = n['order'].id, n['kind']
++                        if key not in identities:
++                            identities[key] = m.addVar(lb=1, ub=len(local_routes), name=f'm5_route_{len(identities)}')
++                            identity_limits[key] = len(local_routes)-1
++                        memberships[key].append(route_id*r['visit'][i])
++                        if (-1, i) in r['x']:
++                            entering[key].append(r['x'][-1, i])
++                        if (i, -2) in r['x']:
++                            leaving[key].append(r['x'][i, -2])
++            for (left, right), arc in global_arcs.items():
++                check_budget()
++                leaving[left].append(arc)
++                entering[right].append(arc)
++                # Exactly one binary visit makes each continuous identity
++                # equal its unique local route number in any integer solution.
++                slack = identity_limits[left]
++                m.addConstr(identities[left]-identities[right] <= slack*(1-arc))
++                m.addConstr(identities[right]-identities[left] <= slack*(1-arc))
++            for key in order_times:
++                check_budget()
++                m.addConstr(identities[key] == gp.quicksum(memberships[key]))
++                m.addConstr(gp.quicksum(entering[key]) == 1)
++                m.addConstr(gp.quicksum(leaving[key]) == 1)
+         for (left, right), indexed in shared_arcs.items():
+             check_budget()
+-            active = m.addVar(vtype=GRB.BINARY)
++            active = global_arcs[left, right] if compressed_routes else m.addVar(vtype=GRB.BINARY)
+             aggregate_arcs[left, right] = active
+-            m.addConstr(active == gp.quicksum(indexed))
++            if compressed_routes:
++                objective += problem.distance(problem.order_map[left[0]].customer,
++                                               problem.order_map[right[0]].customer)*active
++            else:
++                m.addConstr(active == gp.quicksum(indexed))
+             a, b = problem.order_map[left[0]], problem.order_map[right[0]]
+             travel = a.service_time+problem.travel(a.customer, b.customer)
+             if linear_links:
+@@ -552,6 +642,8 @@
+     m.setObjective(objective, GRB.MINIMIZE)
+     m.update()
+     return m, dict(e1=routes1, e2=routes2, shared_e2=compact, shared_e2_arcs=len(shared_arcs),
++                   global_e2_arcs=global_arcs, compressed_e2_routes=compressed_routes,
++                   indexed_e2_internal_arcs=indexed_internal,
+                    assignments=assignments, capacity_activation_cuts=strengthen,
+                    pickup_returns=pickup_returns, shared_cutoff=compact_cutoff,
+                    capacity_separator=capacity_separator, trip_count_symmetry=trip_symmetry,
+--- before/models/routing/solvers/exact/solver.py
++++ after/models/routing/solvers/exact/solver.py
+@@ -184,6 +184,8 @@
+                     runtime=time.perf_counter()-begun, sol_count=model.SolCount,
+                     variables=model.NumVars, constraints=model.NumConstrs+model.NumGenConstrs,
+                     general_constraints=model.NumGenConstrs, e2_route_slots=len(ctx['e2']),
++                    e2_indexed_internal_arcs=ctx.get('indexed_e2_internal_arcs'),
++                    e2_global_internal_arcs=len(ctx.get('global_e2_arcs', {})),
+                     time_tick_seconds=problem.operating_policy.time_tick_seconds,
+                     formulation_features=['sparse_time_arcs', 'vehicle_symmetry', 'causal_steps']+
+                         (['B1_supply_and_load_bounds', 'trip_count_symmetry', 'triangular_trip_slots',
+--- before/tools/audit/benchmark_multibatch_primal.py
++++ after/tools/audit/benchmark_multibatch_primal.py
+@@ -4,7 +4,9 @@
+ mode disables the newer capacity cuts, pruning and order-level cutoff sharing.
+ Incumbent mode compares the original seed portfolio with insertion/E1 merging.
+ Root mode compares indicator/rectangular routes with linear E2 links and trip symmetry.
++Routes mode compares indexed internal arcs with adaptive sharing and route identity.
+ Both arms use the same total budget and seed; this is not a historical snapshot.
++Optional --initial-results freezes an audited incumbent for each case in both arms.
+ This small diagnostic does not establish large-instance speed improvements.
+ """
+ from __future__ import annotations
+@@ -48,6 +50,7 @@
+     from models.routing.common.cycle.audit import audit_solution
+     from models.routing.solvers.exact import solver
+     problem = load_instance(*load_routing_case(job['case']))
++    initial = json.loads(Path(job['initial_result']).read_text()) if job.get('initial_result') else None
+     begun = time.perf_counter()
+     with ExitStack() as stack:
+         if not job['warm_start']:
+@@ -62,7 +65,8 @@
+             original = solver.build_model
+             stack.enter_context(patch.object(solver, 'build_model',
+                 side_effect=lambda *a, **kw: original(*a, **kw, **options)))
+-        result = solver.solve_exact(problem, time_limit=job['budget'], seed=job['seed'], verbose=True)
++        result = solver.solve_exact(problem, time_limit=job['budget'], seed=job['seed'],
++                                    verbose=True, initial_result=initial)
+     wall = time.perf_counter()-begun
+     write(output, dict(job=job, wall_seconds=wall, result=result,
+                        independent_audit=audit_solution(problem, result)))
+@@ -74,7 +78,9 @@
+     parser.add_argument('--cases', nargs='+', default=DEFAULT_CASES)
+     parser.add_argument('--time', type=float, default=5)
+     parser.add_argument('--seeds', type=int, nargs='+', default=[42])
+-    parser.add_argument('--mode', choices=['primal', 'formulation', 'incumbent', 'root'], default='primal')
++    parser.add_argument('--mode', choices=['primal', 'formulation', 'incumbent', 'root', 'routes'], default='primal')
++    parser.add_argument('--initial-results', nargs='+',
++                        help='one audited result (raw or benchmark payload) per case, frozen for both arms')
+     parser.add_argument('--worker', help=argparse.SUPPRESS)
+     args = parser.parse_args(argv)
+     if args.worker:
+@@ -82,8 +88,13 @@
+         return
+     if not math.isfinite(args.time) or args.time <= 0:
+         parser.error('--time must be finite and positive')
++    if args.initial_results and len(args.initial_results) != len(args.cases):
++        parser.error('--initial-results must supply exactly one result per case')
++    if args.initial_results and args.mode in ('primal', 'incumbent'):
++        parser.error('--initial-results is only supported for formulation, root and routes ablation')
+     from configuration.loader import load_routing_case, resolve_project_path
+     from models.routing.common.cycle import load_instance
++    from models.routing.common.cycle.audit import audit_solution
+     output = args.output.resolve()
+     output.mkdir(parents=True, exist_ok=False)
+     jobs = []
+@@ -106,6 +117,19 @@
+         for field in ('algorithm_config', 'container_pool_config'):
+             config.pop(field, None)
+         write(frozen/'case.json', config)
++        initial_options = {}
++        if args.initial_results:
++            initial_source = resolve_project_path(args.initial_results[index])
++            payload = json.loads(initial_source.read_text())
++            initial = payload.get('result', payload)
++            independent = audit_solution(problem, initial)
++            if not independent['valid']:
++                raise ValueError(f'Initial result failed independent audit: {initial_source}')
++            write(frozen/'initial_result.json', initial)
++            write(frozen/'initial_audit.json', independent)
++            initial_options = dict(initial_result=str(frozen/'initial_result.json'),
++                                   initial_source=str(initial_source),
++                                   initial_objective=initial['info']['objective'])
+         variants = {
+             'primal': [('cold', False, {}), ('warm', True, {})],
+             'formulation': [('reference', True, dict(strengthen_multibatch=False, share_cutoff=False)),
+@@ -113,11 +137,14 @@
+             'incumbent': [('reference', True, {}), ('improved', True, {})],
+             'root': [('reference', True, dict(linear_e2_links=False, trip_symmetry=False)),
+                      ('compact', True, {})],
++            'routes': [('reference', True, dict(compress_multibatch_routes=False)),
++                       ('adaptive', True, {})],
+         }[args.mode]
+         for seed in args.seeds:
+             for variant, warm, options in variants:
+                 jobs.append(dict(id=f'{index:02d}_{seed}_{variant}', variant=variant, build_options=options,
+                                  source_case=path, case=str(frozen/'case.json'), warm_start=warm,
++                                 **initial_options,
+                                  budget=args.time, seed=seed,
+                                  primal_improve=not (args.mode == 'incumbent' and variant == 'reference'),
+                                  orders=len(problem.orders),
+@@ -138,7 +165,9 @@
+               for p in sorted(output.rglob('*')) if p.is_file()}
+     write(output/'manifest.json', dict(purpose=f'M5_{args.mode}_ablation_diagnostic', jobs=jobs,
+         python=sys.version, platform=platform.platform(), artifact_sha256=hashes,
+-        python_hash_seed=0, note='Same integer feasible set. No ALNS. Total budget includes primal and model build.'))
++        python_hash_seed=0, note='Same integer feasible set. No ALNS. Total budget includes primal and model build.',
++        initial_result_note='Both arms receive the same independently audited frozen incumbent; own primal remains enabled.'
++                            if args.initial_results else 'No supplied incumbent; each worker constructs its own timed primal.'))
+     records = []
+     frozen_worker = output/'source_snapshot'/'tools/audit/benchmark_multibatch_primal.py'
+     for job in jobs:

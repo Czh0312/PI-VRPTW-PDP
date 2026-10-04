@@ -7,6 +7,8 @@
 模拟退火接受、算子权重更新和进度日志。具体模型的 evaluator、算子、
 中转优化和输出格式由调用方注入。
 """
+from __future__ import annotations
+
 from dataclasses import dataclass
 import math
 import random

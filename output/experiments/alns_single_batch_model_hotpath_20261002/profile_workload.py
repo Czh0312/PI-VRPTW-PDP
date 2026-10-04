@@ -1,0 +1,59 @@
+"""Profile frozen fixed-work M3; do not treat instrumented time as CPU evidence."""
+from pathlib import Path
+import ast
+import cProfile
+import json
+import os
+import pstats
+import sys
+
+OUT=Path(__file__).resolve().parent
+sys.path.insert(0,str(OUT/'before_source'))
+from configuration.loader import load_routing_case
+from models.routing.common.cycle import load_instance
+from models.routing.common.cycle.audit import audit_solution
+from models.routing.service import solve_routing
+
+qualnames={}
+for file in (OUT/'before_source').rglob('*.py'):
+    tree=ast.parse(file.read_text())
+    def walk(node,prefix=''):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child,(ast.ClassDef,ast.FunctionDef,ast.AsyncFunctionDef)):
+                name=prefix+child.name
+                if isinstance(child,(ast.FunctionDef,ast.AsyncFunctionDef)):
+                    qualnames[str(file),child.lineno]=name
+                walk(child,name+'.')
+            else:
+                walk(child,prefix)
+    walk(tree)
+rows=[]
+for index,job in enumerate(json.loads((OUT/'diagnostic_jobs.json').read_text())['jobs']):
+    config,fleet=load_routing_case(job['case'])
+    problem=load_instance({**config,'model':job['model']},fleet)
+    profiler=cProfile.Profile()
+    result=profiler.runcall(solve_routing,model=job['model'],method='alns',problem=problem,
+                          alns_time=job['budget'],alns_iter=job['iterations'],seed=job['seed'])
+    profiler.dump_stats(str(OUT/('%02d.pstats'%index)))
+    audit=audit_solution(problem,result)
+    (OUT/('%02d_result.json'%index)).write_text(json.dumps(dict(job=job,result=result,audit=audit),indent=2))
+    assert audit['valid'] and audit['periodic_replay']['valid']
+    stats=pstats.Stats(profiler)
+    functions=[]
+    for (file,line,name),(primitive,calls,self_time,cumulative,callers) in stats.stats.items():
+        functions.append(dict(file=file,line=line,name=name,qualname=qualnames.get((file,line),name),calls=calls,primitive=primitive,
+                              self_seconds=self_time,cumulative_seconds=cumulative,
+                              callers=[dict(file=k[0],line=k[1],name=k[2],stats=v) for k,v in callers.items()]))
+    row=dict(job,total_profile_seconds=stats.total_tt,load=os.getloadavg(),
+             objective=result['info']['objective'],iterations=result['info']['iterations'],
+             full_audit_valid=audit['valid'],periodic=audit['periodic_replay']['valid'],
+             top_self=sorted(functions,key=lambda x:-x['self_seconds'])[:30],
+             signatures=[x for x in functions if x['name']=='state_key'],
+             distance_kernel=[x for x in functions if x['file'].endswith('single_batch_descent.py') and x['name'] in ('task_distance','_enumerate_routes')],
+             top_cumulative=sorted(functions,key=lambda x:-x['cumulative_seconds'])[:15])
+    rows.append(row)
+    (OUT/('%02d_functions.json'%index)).write_text(json.dumps(functions,indent=2))
+    (OUT/'profile_summary.json').write_text(json.dumps(rows,indent=2))
+    print(job['family'],job['model'],'profile_seconds',stats.total_tt,'distance_kernel',
+          [(x['calls'],x['cumulative_seconds'],100*x['cumulative_seconds']/stats.total_tt)
+           for x in row['distance_kernel']],flush=True)

@@ -1,0 +1,73 @@
+{
+  "target_gap_percent": 5,
+  "jobs": [
+    {
+      "id": "100_full",
+      "case": "/Users/chenzeheng/Desktop/2E-VRPTW-PDD/output/experiments/model5_gap_target_20261001/prepared_inputs/100_full/case.json",
+      "initial_record": "/Users/chenzeheng/Desktop/2E-VRPTW-PDD/output/experiments/model5_gap_target_20261001/joint_route_pool_120s/100_full.json",
+      "previous_upper": 2300.6311703030506,
+      "previous_lower": 1595.5469533582743,
+      "previous_certificate": "/Users/chenzeheng/Desktop/2E-VRPTW-PDD/output/experiments/model5_gap_target_20261001/strict_pricing_100s/00_42_cg.json",
+      "pool_time": 120,
+      "certificate_time": 120,
+      "e1_certificate_time": 20,
+      "seed": 42
+    },
+    {
+      "id": "100_tight",
+      "case": "/Users/chenzeheng/Desktop/2E-VRPTW-PDD/output/experiments/model5_gap_target_20261001/prepared_inputs/100_tight/case.json",
+      "initial_record": "/Users/chenzeheng/Desktop/2E-VRPTW-PDD/output/experiments/model5_gap_target_20261001/joint_route_pool_120s/100_tight.json",
+      "previous_upper": 2619.7721279852294,
+      "previous_lower": 1591.865289397053,
+      "previous_certificate": "/Users/chenzeheng/Desktop/2E-VRPTW-PDD/output/experiments/model5_gap_target_20261001/strict_pricing_100s/01_42_cg.json",
+      "pool_time": 120,
+      "certificate_time": 120,
+      "e1_certificate_time": 20,
+      "seed": 42
+    }
+  ],
+  "scope": "Two observed 100-customer B3 development cases. Sequential extra-budget hybrid diagnostics, not an equal-budget ALNS comparison.",
+  "mode": "continuous",
+  "default_alns_change": false,
+  "bound_rule": "Use only complete-domain E1 relaxation and certified complete-category E2 pricing. Restricted pool bounds never count globally.",
+  "modifications": {
+    "models/routing/solvers/exact/multibatch_e1_inventory.py": {
+      "before_sha256": "268ba53b856ba3e3da48b5650d8713ac8e0f8292388a18dde87f0a10fbeb4b3d",
+      "after_sha256": "455cb1ef20737066b22e9f418aac036fd35a3923a606afed59cf029ab4d11b6a"
+    },
+    "models/routing/solvers/exact/multibatch_route_pool.py": {
+      "before_sha256": "ce02b5cb3b4fdead80324678d6e86c32aaee282b5f1065ce5a3e2467897bc013",
+      "after_sha256": "ec11a72e131a948798166aa1c3532b35856643e8004ff36e474df927910ecbcb"
+    }
+  },
+  "follow_up_stages": [
+    {
+      "method": "two_way_task_and_order_exchange",
+      "allowance_per_case": 180,
+      "max_columns": 256,
+      "cases": "two observed 100-customer configurations",
+      "scope": "exploratory; two changes: exchanges and larger pool"
+    },
+    {
+      "method": "targeted_E2_pricing",
+      "sites": [
+        "S1",
+        "S4"
+      ],
+      "allowance_per_site": 150,
+      "scope": "shared only if E2 relaxation coefficients are identical; E1 remains pool-specific"
+    },
+    {
+      "method": "same_kind_two_task_exchanges",
+      "allowance_per_case": 30,
+      "cases": "same two100 development cases",
+      "scope": "additional exploratory opt-in neighborhood; share previously verified global lower bounds"
+    }
+  ],
+  "budget_accounting": "New per-case allowances: pool120 + certificate120 + exchange180 =420s, plus shared E2 pricing150s per unresolved site. Previous-stage allowances and incumbent construction remain additional. Do not treat as equal-budget ALNS-only comparison.",
+  "production_options": {
+    "route_pool": "exchanges=True, e1_backend=patterns (<=5 sites, zero E1 turnaround)",
+    "certificate": "e1_backend=patterns (<=5 sites)",
+    "defaults": "unchanged; no ALNS changes made in this round"
+  }
+}

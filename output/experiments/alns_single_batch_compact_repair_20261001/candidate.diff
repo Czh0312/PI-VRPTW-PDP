@@ -1,0 +1,184 @@
+--- before/models/routing/solvers/alns/single_batch.py
++++ after/models/routing/solvers/alns/single_batch.py
+@@ -215,7 +215,8 @@
+             proposed = destroy_repair(problem, current, rng, op.split('_')[1], begun+max_time,
+                                       scorer=cached.route_scorer,
+                                       cache_distances=problem.reusable and _assignment_search is None,
+-                                      cache_pickup_prefix=problem.reusable and _assignment_search is None)
++                                      cache_pickup_prefix=problem.reusable and _assignment_search is None,
++                                      compact_insertions=problem.reusable and _assignment_search is None)
+         else:
+             proposed = _move(problem, current, rng, op)
+         if proposed_problem is problem and state_key(proposed) == state_key(current):
+--- before/models/routing/solvers/alns/neighborhoods.py
++++ after/models/routing/solvers/alns/neighborhoods.py
+@@ -97,7 +97,7 @@
+ 
+ 
+ def destroy_repair(problem, original, rng, mode, deadline, *, scorer=None, cache_distances=False,
+-                   cache_pickup_prefix=False):
++                   cache_pickup_prefix=False, compact_insertions=False):
+     if not problem.orders:
+         return clone_state(original)
+     orders = list(problem.orders)
+@@ -111,12 +111,14 @@
+     else:
+         removed = rng.sample(orders, count)
+     repaired = repair_orders(problem, original, removed, deadline, scorer=scorer,
+-                             cache_distances=cache_distances, cache_pickup_prefix=cache_pickup_prefix)
++                             cache_distances=cache_distances, cache_pickup_prefix=cache_pickup_prefix,
++                             compact_insertions=compact_insertions)
+     return repaired if repaired is not None else clone_state(original)
+ 
+ 
+ def repair_orders(problem, original, removed, deadline, *, screen=True, cache_scores=True,
+-                  fast_scores=True, scorer=None, cache_distances=False, cache_pickup_prefix=False):
++                  fast_scores=True, scorer=None, cache_distances=False, cache_pickup_prefix=False,
++                  compact_insertions=False):
+     """Reinsert complete requests; interruption never exposes a partial state.
+ 
+     The distance-only bound safely screens this *local ranking score* because
+@@ -137,10 +139,12 @@
+     score_route = _route_score
+     distance = problem.distance
+     prefix_enabled = False
++    compact_enabled = False
+     if tasks and fast_scores and len(p.batches) == 1:
+         from .single_batch_scoring import SingleBatchRouteScorer
+         score_route = scorer if scorer is not None else SingleBatchRouteScorer(problem)
+         prefix_enabled = cache_pickup_prefix and type(score_route) is SingleBatchRouteScorer
++        compact_enabled = compact_insertions and type(score_route) is SingleBatchRouteScorer
+         if cache_distances and isinstance(score_route, SingleBatchRouteScorer):
+             # Static directed arcs belong to the same fixed problem as the
+             # scorer. Reuse its bounded cache; scores and ready times stay fresh.
+@@ -149,6 +153,7 @@
+     # Keep the route object alive with its score to prevent object-id reuse.
+     route_scores = {}
+     pickup_prefixes = {}
++    delivery_templates = {}
+     for task in tasks:
+         if time.perf_counter() >= deadline:
+             return None
+@@ -182,6 +187,9 @@
+             saved_prefix = pickup_prefixes.get(id(route)) if prefix_enabled and kind == 'p' else None
+             pickup_prefix = (saved_prefix[2] if saved_prefix is not None and
+                              saved_prefix[0] is route and saved_prefix[1] == before[index] else None)
++            saved_template = delivery_templates.get(id(route)) if compact_enabled and kind == 'd' else None
++            delivery_template = (saved_template[2] if saved_template is not None and
++                                 saved_template[0] is route and saved_template[1] == before[index] else None)
+             for pos in range(len(existing)+1):
+                 if time.perf_counter() >= deadline:
+                     return None
+@@ -197,7 +205,8 @@
+                     tolerance = 1e-9*max(1, abs(bound), abs(best[0]), abs(scores[index]))
+                     if bound > best[0]+tolerance:
+                         continue
+-                candidate = {**route, 'tasks': existing[:pos]+[task]+existing[pos:]}
++                candidate = (None if compact_enabled else
++                             {**route, 'tasks': existing[:pos]+[task]+existing[pos:]})
+                 if prefix_enabled and kind == 'p':
+                     if pickup_prefix is None:
+                         pickup_prefix = score_route.prepare_pickup_insertions(problem, route, goods, before[index])
+@@ -206,11 +215,25 @@
+                         # route changes, shifts indices, or delays this vehicle.
+                         pickup_prefixes[id(route)] = (route, before[index], pickup_prefix)
+                     score, _ = pickup_prefix(oid, pos)
++                elif compact_enabled and kind == 'd':
++                    if delivery_template is None:
++                        delivery_template = score_route.prepare_delivery_scores(problem, route, goods, before[index])
++                        delivery_templates[id(route)] = (route, before[index], delivery_template)
++                    score, _ = delivery_template(oid, pos)
+                 else:
++                    if candidate is None:
++                        candidate = {**route, 'tasks': existing[:pos]+[task]+existing[pos:]}
+                     score, _ = score_route(problem, candidate, goods, before[index])
+-                option = (score-scores[index], index, candidate, False)
+-                if best is None or option[0] < best[0]:
+-                    best = option
++                if compact_enabled:
++                    delta = score-scores[index]
++                    if best is None or delta < best[0]:
++                        if candidate is None:
++                            candidate = {**route, 'tasks': existing[:pos]+[task]+existing[pos:]}
++                        best = (delta, index, candidate, False)
++                else:
++                    option = (score-scores[index], index, candidate, False)
++                    if best is None or option[0] < best[0]:
++                        best = option
+         for vehicle in range(f.e2_per_sat_count):
+             if counts[order.satellite, vehicle] >= p.e2_max_trips_per_vehicle:
+                 continue
+--- before/models/routing/solvers/alns/single_batch_scoring.py
++++ after/models/routing/solvers/alns/single_batch_scoring.py
+@@ -31,6 +31,11 @@
+         if problem is not self.problem:
+             raise ValueError('Prepared scorer belongs to one problem instance')
+         return _PickupInsertions(self, route, goods, vehicle_ready)
++
++    def prepare_delivery_scores(self, problem, route, goods, vehicle_ready):
++        if problem is not self.problem:
++            raise ValueError('Prepared scorer belongs to one problem instance')
++        return _DeliveryScores(self, route, goods, vehicle_ready)
+ 
+     def __call__(self, problem, route, goods, vehicle_ready):
+         if problem is not self.problem:
+@@ -151,3 +156,59 @@
+         late += max(0, completed-scorer.batch.cutoff)
+         distance += distance_to(previous, self.site)
+         return distance+1e6*(load_penalty+0)+late*p.time_tick_seconds/60*1e4, completed
++
++
++class _DeliveryScores:
++    """Reuse task metadata only; recompute every delivery candidate's events.
++
++    Initial sums follow the candidate's delivery order, including insertion
++    among pickups. No prefix load, penalty, schedule or score is reused.
++    """
++    def __init__(self, scorer, route, goods, vehicle_ready):
++        self.scorer, self.site = scorer, route['satellite']
++        self.tasks = [scorer.tasks[t] for t in route['tasks']]
++        self.deliveries, self.ranks = [], [0]
++        for task in self.tasks:
++            if task[3] == 'd':
++                self.deliveries.append(task)
++            self.ranks.append(len(self.deliveries))
++        p, f = scorer.policy, scorer.fleet
++        current = max(p.cycle_start, vehicle_ready, route.get('depart_after', p.cycle_start))
++        self.current = max(current, goods[self.site, scorer.batch.id])+p.e2_dispatch_prep_time
++        self.return_after = route.get('return_after', p.cycle_start)
++        self.has_pickup = any(t[3] == 'p' for t in self.tasks)
++        self.weight_cap, self.volume_cap = f.e2_weight_cap, f.e2_volume_cap
++        self.weight_scale, self.volume_scale = max(1, f.e2_weight_cap), max(1, f.e2_volume_cap)
++
++    def __call__(self, oid, position):
++        scorer, p = self.scorer, self.scorer.policy
++        inserted = scorer.tasks[oid, 'd']
++        rank, deliveries = self.ranks[position], self.deliveries
++        weight = sum(t[1] for t in chain(deliveries[:rank], (inserted,), deliveries[rank:]))
++        volume = sum(t[2] for t in chain(deliveries[:rank], (inserted,), deliveries[rank:]))
++        weight_cap, volume_cap = self.weight_cap, self.volume_cap
++        weight_scale, volume_scale = self.weight_scale, self.volume_scale
++        load_penalty = max(0, weight-weight_cap)/weight_scale
++        load_penalty += max(0, volume-volume_cap)/volume_scale
++        current, distance, late, previous, delivered = self.current, 0.0, 0, self.site, {}
++        distance_to, travel_to = scorer.distance, scorer.travel
++        for order, w, vol, kind, ready, due in chain(self.tasks[:position], (inserted,), self.tasks[position:]):
++            current = max(current+travel_to(previous, order.customer), ready)
++            if kind == 'p':
++                current = max(current, delivered.get(order.id, order.delivery_window[0]+order.service_time)+order.min_use_time)
++            late += max(0, current-due)
++            current += order.service_time
++            if kind == 'd':
++                delivered[order.id] = current
++            distance += distance_to(previous, order.customer)
++            previous = order.customer
++            weight += w if kind == 'p' else -w
++            volume += vol if kind == 'p' else -vol
++            load_penalty += max(0, weight-weight_cap)/weight_scale
++            load_penalty += max(0, volume-volume_cap)/volume_scale
++        completed = max(current+travel_to(previous, self.site)+p.e2_return_unload_time, self.return_after)
++        late += max(0, completed+p.e2_turnaround_time-p.cycle_end)
++        if self.has_pickup:
++            late += max(0, completed-scorer.batch.cutoff)
++        distance += distance_to(previous, self.site)
++        return distance+1e6*(load_penalty+0)+late*p.time_tick_seconds/60*1e4, completed

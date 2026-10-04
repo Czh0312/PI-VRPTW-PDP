@@ -1,0 +1,46 @@
+--- before_source/single_batch.py
++++ after_source/single_batch.py
+@@ -88,7 +88,7 @@
+ 
+ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_result=None,
+                seed_state=None, _travel_bounds=None, _assignment_search=None, _begun=None,
+-               _context=None):
++               _context=None, _late_pickup_greedy=True):
+     if len(problem.operating_policy.batches) != 1:
+         raise ValueError('Single-batch search requires B=1')
+     if not math.isfinite(max_time) or max_time <= 0 or max_iterations < 0:
+@@ -158,6 +158,8 @@
+     if _assignment_search is not None:
+         attempts['assignment'] = improved['assignment'] = noops['assignment'] = 0
+     attempts['descent'] = improved['descent'] = noops['descent'] = 0
++    late_pickup_enabled = bool(_late_pickup_greedy and problem.reusable and _assignment_search is None)
++    late_pickup_checks = late_pickup_uphill = late_pickup_vetoes = 0
+     # Free delivery/pickup assignment retains its original continuous search:
+     # incumbent descent competed with partition exploration in paired pilots.
+     descent_enabled = _assignment_search is None
+@@ -247,6 +249,14 @@
+         temperature = max(.01, (decoded['info'].get('objective') or 100)*.05*(1-progress)**2)
+         accept = (reward == 8 if descent_move else
+                   new_score <= score or rng.random() < math.exp(min(0, (score-new_score)/temperature)))
++        # Keep the original random draw, but stop uphill pickup-only moves
++        # in the latter half. Other operators retain their annealing policy.
++        if late_pickup_enabled and op == 'e1_pickup' and progress >= .5:
++            late_pickup_checks += 1
++            if new_score > score:
++                late_pickup_uphill += 1
++                late_pickup_vetoes += int(accept)
++            accept = new_score <= score
+         if accept:
+             current, score, decoded, issues = proposed, new_score, candidate, problems
+             problem, cached = proposed_problem, proposed_cache
+@@ -267,6 +277,10 @@
+                           time_to_first_feasible=first_feasible, time_to_best=last_improvement,
+                           algorithm='adaptive_destroy_repair_cycle_search',
+                           cooling_schedule='max_time_and_iteration_progress',
++                          late_pickup_policy='greedy_last_half' if late_pickup_enabled else 'original',
++                          late_pickup_checks=late_pickup_checks,
++                          late_pickup_uphill=late_pickup_uphill,
++                          late_pickup_vetoes=late_pickup_vetoes,
+                           evaluation_cache_hits=cached.hits, evaluation_cache_misses=cached.misses,
+                           descent_seconds=descent_seconds,
+                           descent_enabled=descent_enabled,

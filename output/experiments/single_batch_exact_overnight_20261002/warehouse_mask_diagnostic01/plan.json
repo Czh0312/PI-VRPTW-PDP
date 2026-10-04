@@ -1,0 +1,12 @@
+{
+  "registered_local": "2026-10-02T06:13:00+08:00",
+  "scope": "Read-only structural diagnosis while the sole price-balance solver pipeline waits; no new performance candidate, solver or production edit",
+  "question": "Would a complete partition by active warehouse subset materially reduce the customer-assignment state universe, and what exact coverage obligations would it have?",
+  "method": "For original M4 shared-customer necessary assignment domains D_c, compute exact counts for each nonempty used-site subset A by inclusion-exclusion: N(A)=sum_{B subset A}(-1)^(|A|-|B|) product_c |D_c intersect B|. Sum all N(A) equals product_c|D_c|. Validate against independent direct enumeration on tiny cases, including repeated-customer orders. Match existing physical schedule's shared assignment and warehouse mask.",
+  "correctness_boundary": "Counts are assignment candidates before original capacity/time/inventory/physical scheduling, not feasible-schedule counts or runtime estimates. A valid exact decomposition would have to include every feasible mask, keep all original delivery/pickup and shared assignment/physical constraints, aggregate GLOBAL LB as minimum across all mask subproblem LBs, and prove integer optimum only after every remaining mask closes or is validly pruned by global incumbent. Restricted-mask proof alone is not full proof.",
+  "inputs": "Two frozen20customer M4 sources and8 tiny original cases(4repeatedcustomer), unmodified original domains and schedules",
+  "budget": "Pure count/audit arithmetic only, no Gurobi model; no solver timing during external heavy runs",
+  "decision": "Diagnostic only. Do not start another candidate while M4 price balance is unresolved, and do not implement blind mask decomposition before reviewing counts and full proof/budget obligations.",
+  "default": false,
+  "production_edits": []
+}

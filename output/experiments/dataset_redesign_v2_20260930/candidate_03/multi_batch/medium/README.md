@@ -1,0 +1,76 @@
+# 多批次：M5 / medium
+
+同一 family_id 的 B1/B2/B3 使用相同网络、需求、窗口、车队和默认池。
+case.json 是运行入口；orders.json 和 policy.json 是该批次配置的订单与日程。
+共用网络、车队和来源资料位于 data/shared/，不按模型复制数据。
+
+| 案例 | 来源 | 顾客 | 订单 | 批次数 |
+| --- | --- | ---: | ---: | ---: |
+| [zhou_Set2_100-5-1b_subset20_b2](zhou_Set2_100-5-1b_subset20/b2/case.json) | zhou_derived_scenario | 20 | 20 | 2 |
+| [zhou_Set2_100-5-1b_subset20_b3](zhou_Set2_100-5-1b_subset20/b3/case.json) | zhou_derived_scenario | 20 | 20 | 3 |
+| [zhou_Set2_100-5-2_subset20_b2](zhou_Set2_100-5-2_subset20/b2/case.json) | zhou_derived_scenario | 20 | 20 | 2 |
+| [zhou_Set2_100-5-2_subset20_b3](zhou_Set2_100-5-2_subset20/b3/case.json) | zhou_derived_scenario | 20 | 20 | 3 |
+| [zhou_Set2_100-5-3_subset20_b2](zhou_Set2_100-5-3_subset20/b2/case.json) | zhou_derived_scenario | 20 | 20 | 2 |
+| [zhou_Set2_100-5-3_subset20_b3](zhou_Set2_100-5-3_subset20/b3/case.json) | zhou_derived_scenario | 20 | 20 | 3 |
+| [zhou_Set2_100-10-1_subset20_b2](zhou_Set2_100-10-1_subset20/b2/case.json) | zhou_derived_scenario | 20 | 20 | 2 |
+| [zhou_Set2_100-10-1_subset20_b3](zhou_Set2_100-10-1_subset20/b3/case.json) | zhou_derived_scenario | 20 | 20 | 3 |
+| [zhou_Set2_100-10-2_subset20_b2](zhou_Set2_100-10-2_subset20/b2/case.json) | zhou_derived_scenario | 20 | 20 | 2 |
+| [zhou_Set2_100-10-2_subset20_b3](zhou_Set2_100-10-2_subset20/b3/case.json) | zhou_derived_scenario | 20 | 20 | 3 |
+| [zhou_Set2_100-5-1b_subset30_b2](zhou_Set2_100-5-1b_subset30/b2/case.json) | zhou_derived_scenario | 30 | 30 | 2 |
+| [zhou_Set2_100-5-1b_subset30_b3](zhou_Set2_100-5-1b_subset30/b3/case.json) | zhou_derived_scenario | 30 | 30 | 3 |
+| [zhou_Set2_100-5-2_subset30_b2](zhou_Set2_100-5-2_subset30/b2/case.json) | zhou_derived_scenario | 30 | 30 | 2 |
+| [zhou_Set2_100-5-2_subset30_b3](zhou_Set2_100-5-2_subset30/b3/case.json) | zhou_derived_scenario | 30 | 30 | 3 |
+| [zhou_Set2_100-5-3_subset30_b2](zhou_Set2_100-5-3_subset30/b2/case.json) | zhou_derived_scenario | 30 | 30 | 2 |
+| [zhou_Set2_100-5-3_subset30_b3](zhou_Set2_100-5-3_subset30/b3/case.json) | zhou_derived_scenario | 30 | 30 | 3 |
+| [zhou_Set2_100-10-1_subset30_b2](zhou_Set2_100-10-1_subset30/b2/case.json) | zhou_derived_scenario | 30 | 30 | 2 |
+| [zhou_Set2_100-10-1_subset30_b3](zhou_Set2_100-10-1_subset30/b3/case.json) | zhou_derived_scenario | 30 | 30 | 3 |
+| [zhou_Set2_100-10-2_subset30_b2](zhou_Set2_100-10-2_subset30/b2/case.json) | zhou_derived_scenario | 30 | 30 | 2 |
+| [zhou_Set2_100-10-2_subset30_b3](zhou_Set2_100-10-2_subset30/b3/case.json) | zhou_derived_scenario | 30 | 30 | 3 |
+| [zhou_Set2_100-5-1b_subset20_scenario02_b2](zhou_Set2_100-5-1b_subset20_scenario02/b2/case.json) | zhou_derived_scenario | 20 | 20 | 2 |
+| [zhou_Set2_100-5-1b_subset20_scenario02_b3](zhou_Set2_100-5-1b_subset20_scenario02/b3/case.json) | zhou_derived_scenario | 20 | 20 | 3 |
+| [zhou_Set2_100-5-2_subset20_scenario02_b2](zhou_Set2_100-5-2_subset20_scenario02/b2/case.json) | zhou_derived_scenario | 20 | 20 | 2 |
+| [zhou_Set2_100-5-2_subset20_scenario02_b3](zhou_Set2_100-5-2_subset20_scenario02/b3/case.json) | zhou_derived_scenario | 20 | 20 | 3 |
+| [zhou_Set2_100-5-3_subset20_scenario02_b2](zhou_Set2_100-5-3_subset20_scenario02/b2/case.json) | zhou_derived_scenario | 20 | 20 | 2 |
+| [zhou_Set2_100-5-3_subset20_scenario02_b3](zhou_Set2_100-5-3_subset20_scenario02/b3/case.json) | zhou_derived_scenario | 20 | 20 | 3 |
+| [zhou_Set2_100-10-1_subset20_scenario02_b2](zhou_Set2_100-10-1_subset20_scenario02/b2/case.json) | zhou_derived_scenario | 20 | 20 | 2 |
+| [zhou_Set2_100-10-1_subset20_scenario02_b3](zhou_Set2_100-10-1_subset20_scenario02/b3/case.json) | zhou_derived_scenario | 20 | 20 | 3 |
+| [zhou_Set2_100-10-2_subset20_scenario02_b2](zhou_Set2_100-10-2_subset20_scenario02/b2/case.json) | zhou_derived_scenario | 20 | 20 | 2 |
+| [zhou_Set2_100-10-2_subset20_scenario02_b3](zhou_Set2_100-10-2_subset20_scenario02/b3/case.json) | zhou_derived_scenario | 20 | 20 | 3 |
+| [zhou_Set2_100-5-1b_subset30_scenario02_b2](zhou_Set2_100-5-1b_subset30_scenario02/b2/case.json) | zhou_derived_scenario | 30 | 30 | 2 |
+| [zhou_Set2_100-5-1b_subset30_scenario02_b3](zhou_Set2_100-5-1b_subset30_scenario02/b3/case.json) | zhou_derived_scenario | 30 | 30 | 3 |
+| [zhou_Set2_100-5-2_subset30_scenario02_b2](zhou_Set2_100-5-2_subset30_scenario02/b2/case.json) | zhou_derived_scenario | 30 | 30 | 2 |
+| [zhou_Set2_100-5-2_subset30_scenario02_b3](zhou_Set2_100-5-2_subset30_scenario02/b3/case.json) | zhou_derived_scenario | 30 | 30 | 3 |
+| [zhou_Set2_100-5-3_subset30_scenario02_b2](zhou_Set2_100-5-3_subset30_scenario02/b2/case.json) | zhou_derived_scenario | 30 | 30 | 2 |
+| [zhou_Set2_100-5-3_subset30_scenario02_b3](zhou_Set2_100-5-3_subset30_scenario02/b3/case.json) | zhou_derived_scenario | 30 | 30 | 3 |
+| [zhou_Set2_100-10-1_subset30_scenario02_b2](zhou_Set2_100-10-1_subset30_scenario02/b2/case.json) | zhou_derived_scenario | 30 | 30 | 2 |
+| [zhou_Set2_100-10-1_subset30_scenario02_b3](zhou_Set2_100-10-1_subset30_scenario02/b3/case.json) | zhou_derived_scenario | 30 | 30 | 3 |
+| [zhou_Set2_100-10-2_subset30_scenario02_b2](zhou_Set2_100-10-2_subset30_scenario02/b2/case.json) | zhou_derived_scenario | 30 | 30 | 2 |
+| [zhou_Set2_100-10-2_subset30_scenario02_b3](zhou_Set2_100-10-2_subset30_scenario02/b3/case.json) | zhou_derived_scenario | 30 | 30 | 3 |
+| [lade_0823_20aoi_b2](lade_0823_20aoi/b2/case.json) | lade_derived_scenario | 20 | 20 | 2 |
+| [lade_0823_20aoi_b3](lade_0823_20aoi/b3/case.json) | lade_derived_scenario | 20 | 20 | 3 |
+| [lade_0823_30aoi_b2](lade_0823_30aoi/b2/case.json) | lade_derived_scenario | 30 | 30 | 2 |
+| [lade_0823_30aoi_b3](lade_0823_30aoi/b3/case.json) | lade_derived_scenario | 30 | 30 | 3 |
+| [lade_0824_20aoi_b2](lade_0824_20aoi/b2/case.json) | lade_derived_scenario | 20 | 20 | 2 |
+| [lade_0824_20aoi_b3](lade_0824_20aoi/b3/case.json) | lade_derived_scenario | 20 | 20 | 3 |
+| [lade_0824_30aoi_b2](lade_0824_30aoi/b2/case.json) | lade_derived_scenario | 30 | 30 | 2 |
+| [lade_0824_30aoi_b3](lade_0824_30aoi/b3/case.json) | lade_derived_scenario | 30 | 30 | 3 |
+| [lade_0825_20aoi_b2](lade_0825_20aoi/b2/case.json) | lade_derived_scenario | 20 | 20 | 2 |
+| [lade_0825_20aoi_b3](lade_0825_20aoi/b3/case.json) | lade_derived_scenario | 20 | 20 | 3 |
+| [lade_0825_30aoi_b2](lade_0825_30aoi/b2/case.json) | lade_derived_scenario | 30 | 30 | 2 |
+| [lade_0825_30aoi_b3](lade_0825_30aoi/b3/case.json) | lade_derived_scenario | 30 | 30 | 3 |
+| [lade_0826_20aoi_b2](lade_0826_20aoi/b2/case.json) | lade_derived_scenario | 20 | 20 | 2 |
+| [lade_0826_20aoi_b3](lade_0826_20aoi/b3/case.json) | lade_derived_scenario | 20 | 20 | 3 |
+| [lade_0826_30aoi_b2](lade_0826_30aoi/b2/case.json) | lade_derived_scenario | 30 | 30 | 2 |
+| [lade_0826_30aoi_b3](lade_0826_30aoi/b3/case.json) | lade_derived_scenario | 30 | 30 | 3 |
+| [lade_0827_20aoi_b2](lade_0827_20aoi/b2/case.json) | lade_derived_scenario | 20 | 20 | 2 |
+| [lade_0827_20aoi_b3](lade_0827_20aoi/b3/case.json) | lade_derived_scenario | 20 | 20 | 3 |
+| [lade_0827_30aoi_b2](lade_0827_30aoi/b2/case.json) | lade_derived_scenario | 30 | 30 | 2 |
+| [lade_0827_30aoi_b3](lade_0827_30aoi/b3/case.json) | lade_derived_scenario | 30 | 30 | 3 |
+| [lade_0828_20aoi_b2](lade_0828_20aoi/b2/case.json) | lade_derived_scenario | 20 | 20 | 2 |
+| [lade_0828_20aoi_b3](lade_0828_20aoi/b3/case.json) | lade_derived_scenario | 20 | 20 | 3 |
+| [lade_0828_30aoi_b2](lade_0828_30aoi/b2/case.json) | lade_derived_scenario | 30 | 30 | 2 |
+| [lade_0828_30aoi_b3](lade_0828_30aoi/b3/case.json) | lade_derived_scenario | 30 | 30 | 3 |
+| [lade_0829_20aoi_b2](lade_0829_20aoi/b2/case.json) | lade_derived_scenario | 20 | 20 | 2 |
+| [lade_0829_20aoi_b3](lade_0829_20aoi/b3/case.json) | lade_derived_scenario | 20 | 20 | 3 |
+| [lade_0829_30aoi_b2](lade_0829_30aoi/b2/case.json) | lade_derived_scenario | 30 | 30 | 2 |
+| [lade_0829_30aoi_b3](lade_0829_30aoi/b3/case.json) | lade_derived_scenario | 30 | 30 | 3 |

@@ -1,0 +1,27 @@
+{
+  "status": "RESOLVED_AND_FINAL_CHECKS_PASSED",
+  "records": [
+    {
+      "layer": "test_fixture",
+      "issue": "Initial extra-slot fixture accessed an absent network.distance_matrix attribute.",
+      "repair": "Supply explicit nested distance and travel matrices to the fixture network constructor.",
+      "effect": "Test setup only; no large-instance solver result changed."
+    },
+    {
+      "layer": "validation",
+      "issue": "First final proof replay stopped at validation_conjunction.py:147 with NameError: name 'gp' is not defined.",
+      "repair": "Import gurobipy as gp at module scope, then rerun the full validator.",
+      "effect": "Validation script only; original frozen solver runs and exported models retained."
+    },
+    {
+      "layer": "validation",
+      "status": "VERIFIED",
+      "evidence": "validation_final.json"
+    },
+    {
+      "layer": "regression",
+      "status": "181 passed",
+      "evidence": "pytest_final.log"
+    }
+  ]
+}

@@ -1,0 +1,970 @@
+--- a/models/routing/variants/model_5/exact/bounds.py
++++ b/models/routing/variants/model_5/exact/bounds.py
+@@ -12,3 +12,9 @@
+     validate_problem(problem)
+     from models.routing.solvers.exact.multibatch_e1_inventory import e1_inventory_certificate as compute
+     return compute(problem, **options)
++
++
++def joint_route_inventory_certificate(problem, **options):
++    validate_problem(problem)
++    from models.routing.solvers.exact.multibatch_joint_inventory import joint_route_inventory_certificate as compute
++    return compute(problem, **options)
+--- a/models/routing/variants/model_5/exact/__init__.py
++++ b/models/routing/variants/model_5/exact/__init__.py
+@@ -1,6 +1,6 @@
+ """M5 exact entry."""
+ from .solver import solve_exact
+-from .bounds import e1_inventory_certificate, route_cover_certificate
++from .bounds import e1_inventory_certificate, route_cover_certificate, joint_route_inventory_certificate
+ from .primal import reoptimize_e1, reoptimize_route_pool
+ 
+-__all__ = ["solve_exact", "route_cover_certificate", "e1_inventory_certificate", "reoptimize_e1", "reoptimize_route_pool"]
++__all__ = ["solve_exact", "route_cover_certificate", "e1_inventory_certificate", "joint_route_inventory_certificate", "reoptimize_e1", "reoptimize_route_pool"]
+--- /dev/null
++++ b/models/routing/solvers/exact/multibatch_joint_inventory.py
+@@ -0,0 +1,386 @@
++"""Joint COMPLETE E2 route coverage and E1 cutoff/clean-stock relaxation.
++
++Only route task sets and necessary return-time bounds enter the E1 links.
++The cheapest route's actual clock is NOT imposed: cost dominance need not
++preserve actual supply, timing, or cross-route vehicle feasibility.
++"""
++from __future__ import annotations
++
++import math
++from copy import deepcopy
++from pathlib import Path
++import time
++
++from models.routing.common.cycle.precheck import travel_lower_bounds
++
++
++def cutoff_domains(problem, context, universe, travel):
++    """Every actual trip returns after every task's necessary service/return."""
++    if not universe['complete'] or not all(g['complete'] for g in universe['groups']):
++        raise ValueError('Joint inventory requires complete E2 route universes')
++    p, site = problem.operating_policy, context['satellite']
++    after = {n['key']: n['window'][0]+n['order'].service_time
++             +travel['inward'][site][n['order'].customer]+p.e2_return_unload_time
++             for n in context['nodes']}
++    rows = []
++    for group in universe['groups']:
++        for column in group['columns']:
++            keys = tuple(tuple(k) for k in column['tasks'])
++            pickups = tuple(oid for oid, kind in keys if kind == 'p')
++            earliest = max(after[k] for k in keys)
++            allowed = tuple(b.id for b in p.batches if b.cutoff >= earliest) if pickups else (None,)
++            if not allowed:
++                raise ValueError('A complete feasible trip has no necessary return cutoff')
++            rows.append(dict(column=column, keys=keys, pickups=pickups,
++                             minimum_return_bound=int(earliest), allowed_cutoffs=allowed))
++    return rows
++
++
++def build_joint_inventory(problem, domains, *, deadline=None, verbose=False,
++                          travel_bounds=None, distance_bounds=None, e1_bound=0.0, site_bounds=None):
++    """Retain every cutoff-compatible column, and couple whole-trip pickups."""
++    from gurobipy import GRB
++    import gurobipy as gp
++    p = problem.operating_policy
++    travel = travel_bounds or travel_lower_bounds(problem)
++    active = {o.satellite for o in problem.orders}
++    if set(domains) != active:
++        raise ValueError('Joint inventory requires complete domains for every active satellite')
++    backend = 'patterns' if len(active) <= 4 else 'indexed'
++    if backend == 'patterns':
++        from .multibatch_e1_routes import build_e1_routes
++        model, e1 = build_e1_routes(problem, deadline=deadline, verbose=verbose,
++            travel_bounds=travel, distance_bounds=distance_bounds)
++    else:
++        from .multibatch_e1_inventory import build_e1_inventory
++        model, e1 = build_e1_inventory(problem, deadline=deadline, verbose=verbose,
++            travel_bounds=travel, distance_bounds=distance_bounds)
++    def check():
++        if deadline is not None and time.perf_counter() >= deadline:
++            raise TimeoutError('Joint inventory build reached its original budget')
++    try:
++        e1_objective = model.getObjective()
++        if e1_bound > 0:
++            model.addConstr(e1_objective >= e1_bound, name='certified_E1_cost')
++        link = {(o.id, b.id): model.addConstr(e1['allocation'][o.id, b.id] == 0,
++                                            name=f'joint_cutoff_{o.id}_{b.id}')
++                for o in problem.orders for b in p.batches}
++        routes, all_choices, site_costs = {}, [], {}
++        for site_index, site in enumerate(sorted(active)):
++            check()
++            context, universe = domains[site]
++            rows = cutoff_domains(problem, context, universe, travel)
++            cover = {n['key']: model.addConstr(gp.LinExpr() == 1, name=f'joint_cover_{site_index}_{i}')
++                     for i, n in enumerate(context['nodes'])}
++            fleet = model.addConstr(gp.LinExpr() <= context['maximum_trips'], name=f'joint_trip_limit_{site_index}')
++            cost = model.addConstr(gp.LinExpr() >= (site_bounds or {}).get(site, 0.0), name=f'certified_E2_cost_{site_index}')
++            choices, site_cost = {}, gp.LinExpr()
++            for i, row in enumerate(rows):
++                if i % 256 == 0:
++                    check()
++                for batch_index, bid in enumerate(row['allowed_cutoffs']):
++                    coefficients = [1]*len(row['keys'])+[1, row['column']['cost']]
++                    constraints = [cover[k] for k in row['keys']]+[fleet, cost]
++                    if bid is not None:
++                        coefficients += [-1]*len(row['pickups'])
++                        constraints += [link[oid, bid] for oid in row['pickups']]
++                    var = model.addVar(vtype=GRB.BINARY, obj=row['column']['cost'],
++                        column=gp.Column(coefficients, constraints), name=f'joint_route_{site_index}_{i}_{batch_index}')
++                    choices[i, bid] = var
++                    all_choices.append(var)
++                    site_cost += row['column']['cost']*var
++            routes[site] = dict(context=context, rows=rows, choices=choices)
++            site_costs[site] = site_cost
++        model.update()
++        check()
++        return model, dict(e1=e1, backend=backend, routes=routes, e1_objective=e1_objective,
++                           site_costs=site_costs, choices=all_choices, link=link)
++    except Exception:
++        model.dispose()
++        raise
++
++
++def set_joint_projection(problem, context, initial_result, *, fix=False):
++    """Project the original task sets/cutoffs, retaining original order times."""
++    if context['backend'] == 'patterns':
++        from .multibatch_e1_routes import set_route_projection
++        set_route_projection(problem, context['e1'], initial_result, fix=fix)
++    else:
++        from .multibatch_e1_inventory import set_e1_projection
++        set_e1_projection(problem, context['e1'], initial_result, fix=fix)
++    def put(var, value):
++        var.Start = value
++        if fix:
++            var.LB = var.UB = value
++    for trip in initial_result['e2_trips']:
++        for event in trip['events']:
++            put(context['e1']['order_times'][event['order_id'], event['kind']], event['start'])
++    selected, projected_cost = {}, 0.0
++    for site, data in context['routes'].items():
++        lookup = {frozenset(row['keys']): i for i, row in enumerate(data['rows'])}
++        chosen = set()
++        for trip in initial_result['e2_trips']:
++            if trip['satellite_id'] != site:
++                continue
++            task_set = frozenset((e['order_id'], e['kind']) for e in trip['events'])
++            i = lookup[task_set]
++            bid = next(b.id for b in problem.operating_policy.batches if trip['return_complete'] <= b.cutoff) \
++                if data['rows'][i]['pickups'] else None
++            if (i, bid) not in data['choices']:
++                raise ValueError('Full-M5 trip failed to project to a joint cutoff column')
++            chosen.add((i, bid))
++            projected_cost += data['rows'][i]['column']['cost']
++        for key, var in data['choices'].items():
++            put(var, int(key in chosen))
++        selected[site] = len(chosen)
++    return dict(mapped_trips=selected, projected_e2_cost=projected_cost)
++
++
++def solve_joint_inventory(problem, domains, *, deadline, initial_result=None, seed=42,
++                          verbose=False, travel_bounds=None, distance_bounds=None,
++                          e1_bound=0.0, site_bounds=None, fallback_bound=0.0, diagnostics_dir=None):
++    """Return a solver LOWER bound on joint cost; never a full-M5 upper bound."""
++    from gurobipy import GRB
++    import gurobipy as gp
++    begun, model, context = time.perf_counter(), None, None
++    result = dict(bound=fallback_bound, raw_bound=None, margin=0.0, status='TIME_LIMIT_BUILD',
++        scope='M5_joint_E1_inventory_and_integer_E2_cutoff_cover_relaxation',
++        proven_optimal=False, proven_infeasible=False, relaxation_optimal=False,
++        relaxation_infeasible=False, relaxation_objective=None, initial_projection=None,
++        complete_route_universes=True, runtime=0.0, selected_columns=[])
++    try:
++        model, context = build_joint_inventory(problem, domains, deadline=deadline, verbose=verbose,
++            travel_bounds=travel_bounds, distance_bounds=distance_bounds, e1_bound=e1_bound, site_bounds=site_bounds)
++        model.Params.Seed = int(seed)
++        model.Params.IntFeasTol = model.Params.FeasibilityTol = 1e-9
++        if initial_result is not None:
++            result['initial_projection'] = set_joint_projection(problem, context, initial_result)
++        model.Params.TimeLimit = max(0, deadline-time.perf_counter())
++        model.optimize()
++        try:
++            raw = float(model.ObjBound)
++        except (gp.GurobiError, AttributeError):
++            raw = math.nan
++        if math.isfinite(raw) and model.Status != GRB.INFEASIBLE:
++            margin = 1e-7*max(1.0, abs(raw))
++            result.update(raw_bound=raw, margin=margin, bound=max(fallback_bound, max(0, raw-margin)))
++        result.update(status=int(model.Status), relaxation_optimal=model.Status == GRB.OPTIMAL,
++            relaxation_infeasible=model.Status == GRB.INFEASIBLE,
++            variables=model.NumVars, constraints=model.NumConstrs, general_constraints=model.NumGenConstrs,
++            route_choices=len(context['choices']), backend=context['backend'], nodes=model.NodeCount)
++        if model.SolCount:
++            result['relaxation_objective'] = float(model.ObjVal)
++            result['selected_columns'] = [dict(satellite=site, column_index=i, cutoff=bid,
++                tasks=data['rows'][i]['column']['tasks'], cost=data['rows'][i]['column']['cost'])
++                for site, data in context['routes'].items() for (i, bid), v in data['choices'].items() if v.X > .5]
++            result['candidate_covers'] = []
++            for number in range(min(5, model.SolCount)):
++                model.Params.SolutionNumber = number
++                result['candidate_covers'].append(dict(objective=float(model.PoolObjVal), columns=[
++                    dict(satellite=site, tasks=data['rows'][i]['column']['tasks'], cost=data['rows'][i]['column']['cost'])
++                    for site, data in context['routes'].items() for (i, bid), v in data['choices'].items() if v.Xn > .5]))
++            model.Params.SolutionNumber = 0
++        if diagnostics_dir is not None:
++            path = Path(diagnostics_dir)
++            path.mkdir(parents=True, exist_ok=True)
++            model.write(str(path/'joint_inventory.mps.gz'))
++        return result
++    except TimeoutError:
++        return result
++    finally:
++        result['runtime'] = time.perf_counter()-begun
++        if model is not None:
++            model.dispose()
++
++
++def recover_joint_schedule(problem, initial_result, joint, *, deadline, seed=42,
++                           verbose=False, diagnostics_dir=None):
++    """Try relaxed columns in an actual physical-slot master; audit any gain."""
++    from models.routing.common.cycle.audit import audit_solution
++    from .multibatch_route_pricing import evaluate_column, route_context
++    from .multibatch_route_pool import add_route_pool, extract_pool
++    import gurobipy as gp
++    begun, model = time.perf_counter(), None
++    audit = audit_solution(problem, initial_result)
++    if not audit['valid']:
++        raise ValueError('Schedule recovery requires an audited full-M5 incumbent')
++    result = deepcopy(initial_result)
++    metadata = dict(improved=False, status='TIME_LIMIT_BUILD', objective=audit['objective'],
++        upper_before=audit['objective'], runtime=0.0, proof_scope='restricted_joint_column_schedule_recovery')
++    try:
++        if time.perf_counter() >= deadline:
++            raise TimeoutError
++        contexts = {s: route_context(problem, s) for s in {o.satellite for o in problem.orders}}
++        by_site = {s: {} for s in contexts}
++        original = []
++        for trip in initial_result['e2_trips']:
++            column = evaluate_column(problem, contexts[trip['satellite_id']],
++                [(e['order_id'], e['kind']) for e in trip['events']])
++            if column is None:
++                raise RuntimeError('Audited original route failed recovery projection')
++            original.append(column)
++            by_site[trip['satellite_id']][column['tasks']] = column
++        proposals = list(joint['selected_columns'])
++        proposals += [row for cover in joint.get('candidate_covers', []) for row in cover['columns']]
++        for row in proposals:
++            column = evaluate_column(problem, contexts[row['satellite']], row['tasks'])
++            if column is not None:
++                by_site[row['satellite']][column['tasks']] = column
++        pools = [[own]+[c for k, c in by_site[t['satellite_id']].items() if k != own['tasks']]
++                 for t, own in zip(initial_result['e2_trips'], original)]
++        active = len(contexts)
++        backend = 'patterns' if active <= 4 and problem.operating_policy.e1_turnaround_time == 0 else 'indexed'
++        if backend == 'patterns':
++            from .multibatch_e1_routes import build_e1_routes, set_route_projection
++            model, context = build_e1_routes(problem, deadline=deadline, verbose=verbose)
++            set_route_projection(problem, context, initial_result)
++        else:
++            from .multibatch_e1_inventory import build_e1_inventory, set_e1_projection
++            model, context = build_e1_inventory(problem, deadline=deadline, verbose=verbose)
++            set_e1_projection(problem, context, initial_result)
++        add_route_pool(problem, model, context, initial_result, pools, deadline=deadline)
++        model.Params.Seed = int(seed)
++        model.Params.TimeLimit = max(0, deadline-time.perf_counter())
++        model.optimize()
++        metadata.update(status=int(model.Status), backend=backend, columns=sum(map(len, pools)))
++        if model.SolCount:
++            candidate = extract_pool(problem, context, initial_result, pools, backend)
++            checked = audit_solution(problem, candidate)
++            if not checked['valid'] or not math.isclose(checked['objective'], model.ObjVal, rel_tol=1e-7, abs_tol=1e-5):
++                raise RuntimeError('Joint-column recovery failed full schedule/distance audit')
++            if checked['objective'] < audit['objective']-1e-6:
++                result, audit = candidate, checked
++                metadata['improved'] = True
++        try:
++            local_bound = float(model.ObjBound)
++        except (gp.GurobiError, AttributeError):
++            local_bound = math.nan
++        result['info'] = dict(status='FEASIBLE', objective=audit['objective'], best_bound=None, mip_gap=None,
++            proven_optimal=False, proven_infeasible=False, proof_scope=metadata['proof_scope'],
++            route_pool_backend=backend, route_pool_complete=False,
++            route_pool_subproblem_optimal=model.Status == 2,
++            route_pool_subproblem_bound=local_bound if math.isfinite(local_bound) else None,
++            route_pool_variables=model.NumVars, route_pool_constraints=model.NumConstrs)
++        if diagnostics_dir is not None:
++            import json
++            path = Path(diagnostics_dir)
++            path.mkdir(parents=True, exist_ok=True)
++            model.write(str(path/'route_pool.mps'))
++            for name, value in [('columns.json', pools), ('initial_result.json', initial_result), ('output_result.json', result)]:
++                (path/name).write_text(json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False)+'\n')
++    except TimeoutError:
++        pass
++    finally:
++        if model is not None:
++            model.dispose()
++        metadata.update(objective=audit['objective'], runtime=time.perf_counter()-begun)
++    return result, metadata
++
++
++def joint_route_inventory_certificate(problem, *, time_limit=60, initial_result=None,
++        seed=42, joint_time_limit=25, recovery_time_limit=5, e1_time_limit=10,
++        integer_cover_time_limit=15, enumeration_time_limit=15, enumeration_max_states=2000000,
++        verbose=False, diagnostics_dir=None):
++    """Independent bounds, joint cutoff coupling, then audited schedule recovery."""
++    from models.routing.common.cycle.audit import audit_solution
++    from .multibatch_bounds import distance_certificate
++    from .multibatch_e1_inventory import e1_inventory_certificate
++    from .multibatch_route_pricing import route_context
++    from .multibatch_route_enumeration import enumerate_route_universe, enumerated_route_cover, enumeration_stats
++    from .multibatch_route_cg import site_route_cover
++    if problem.model_number != 5 or problem.free_assignment or not problem.reusable or len(problem.operating_policy.batches) <= 1:
++        raise ValueError('Joint route inventory requires fixed reusable multibatch M5')
++    if not math.isfinite(time_limit) or time_limit <= 0:
++        raise ValueError('time_limit must be finite and positive')
++    for name, value in [('joint_time_limit', joint_time_limit), ('recovery_time_limit', recovery_time_limit),
++                        ('e1_time_limit', e1_time_limit), ('integer_cover_time_limit', integer_cover_time_limit)]:
++        if not math.isfinite(value) or value < 0:
++            raise ValueError(name+' must be finite and nonnegative')
++    if not math.isfinite(enumeration_time_limit) or enumeration_time_limit <= 0:
++        raise ValueError('enumeration_time_limit must be finite and positive')
++    if not isinstance(enumeration_max_states, int) or isinstance(enumeration_max_states, bool) or enumeration_max_states < 1:
++        raise ValueError('enumeration_max_states must be a positive integer')
++    if recovery_time_limit > 0 and joint_time_limit == 0:
++        raise ValueError('Schedule recovery requires a joint stage')
++    begun = time.perf_counter()
++    deadline = begun+time_limit
++    audited = audit_solution(problem, initial_result) if initial_result is not None else None
++    if audited is not None and not audited['valid']:
++        raise ValueError('Initial result must pass the full M5 independent audit')
++    reference_deadline = deadline-min(time_limit/3, joint_time_limit+recovery_time_limit)
++    path = Path(diagnostics_dir) if diagnostics_dir is not None else None
++    payload = dict(bound=0.0, upper_bound=audited['objective'] if audited else None,
++        gap=None, reference_certificate=None, joint_certificate=None, recovery=None,
++        result=deepcopy(initial_result), scope='M5_joint_route_inventory_bounds_and_audited_primal',
++        proven_optimal=False, proven_infeasible=False, status='TIME_LIMIT_BUILD')
++    try:
++        baseline = distance_certificate(problem, deadline=reference_deadline)
++        travel = travel_lower_bounds(problem)
++        e1 = None
++        if e1_time_limit > 0 and time.perf_counter() < reference_deadline:
++            e1 = e1_inventory_certificate(problem, time_limit=min(e1_time_limit, (reference_deadline-time.perf_counter())/3),
++                initial_result=initial_result, seed=seed, verbose=verbose, travel_bounds=travel, distance_bounds=baseline,
++                diagnostics_path=path/'e1_inventory.mps' if path else None)
++        domains, sites = {}, []
++        contexts = sorted((route_context(problem, s, travel) for s in problem.satellites),
++                          key=lambda c: (len(c['nodes']), c['satellite']))
++        for index, context in enumerate(contexts):
++            now = time.perf_counter()
++            site_deadline = min(reference_deadline, now+max(0, reference_deadline-now)/(len(contexts)-index))
++            export = path/f'site_{index}_best_pricing.mps' if path else None
++            if context['nodes'] and now < site_deadline:
++                universe = enumerate_route_universe(problem, context,
++                    deadline=min(site_deadline, now+min(enumeration_time_limit, (site_deadline-now)/2)),
++                    max_states=enumeration_max_states)
++                if universe['complete']:
++                    domains[context['satellite']] = context, universe
++                    row = enumerated_route_cover(problem, context, universe, deadline=site_deadline,
++                        verbose=verbose, export_path=export, integer_cover_time_limit=integer_cover_time_limit,
++                        initial_result=initial_result, seed=seed)
++                else:
++                    row = site_route_cover(problem, context, deadline=site_deadline, initial_result=initial_result,
++                        seed=seed, verbose=verbose, pricing_export_path=export)
++                    row['enumeration'] = enumeration_stats(universe)
++            else:
++                row = site_route_cover(problem, context, deadline=site_deadline, initial_result=initial_result,
++                    seed=seed, verbose=verbose, pricing_export_path=export)
++            sites.append(row)
++        e1_distance = math.fsum(max(0, r['bound']-1e-7*max(1, r['bound']))
++                               for r in baseline['components'] if r['echelon'] == 'E1')
++        e1_bound = max(e1_distance, e1['bound'] if e1 else 0)
++        distance_sites = {r['satellite']: max(0, r['bound']-1e-7*max(1, r['bound']))
++                          for r in baseline['components'] if r['echelon'] == 'E2'}
++        components = [dict(satellite=r['satellite'], route_cover_bound=r['bound'],
++            distance_bound=distance_sites.get(r['satellite'], 0), bound=max(r['bound'], distance_sites.get(r['satellite'], 0))) for r in sites]
++        raw = e1_bound+math.fsum(c['bound'] for c in components)
++        reference_bound = max(baseline['bound'], max(0, raw-1e-7*max(1, raw)))
++        reference = dict(bound=reference_bound, raw_bound=raw, e1_bound=e1_bound, distance_e1_bound=e1_distance,
++            e1_certificate=e1, components=components, sites=sites, distance_certificate=baseline,
++            scope='M5_relaxed_E2_route_cover_plus_E1_certificate', proven_optimal=False, proven_infeasible=False,
++            runtime=time.perf_counter()-begun, time_limit=reference_deadline-begun)
++        payload.update(bound=reference_bound, reference_certificate=reference, status='SEPARATE_CERTIFIED_BOUND')
++        if joint_time_limit > 0:
++            if set(domains) == {o.satellite for o in problem.orders}:
++                joint_deadline = min(deadline, time.perf_counter()+joint_time_limit,
++                    deadline-min(recovery_time_limit, max(0, deadline-time.perf_counter())/3))
++                joint = solve_joint_inventory(problem, domains, deadline=joint_deadline, initial_result=initial_result,
++                    seed=seed, verbose=verbose, travel_bounds=travel, distance_bounds=baseline, e1_bound=e1_bound,
++                    site_bounds={r['satellite']: r['bound'] for r in sites}, fallback_bound=reference_bound,
++                    diagnostics_dir=path/'joint' if path else None)
++                payload.update(bound=joint['bound'], joint_certificate=joint, status='JOINT_CERTIFIED_BOUND')
++                if initial_result is not None and recovery_time_limit > 0 and joint['selected_columns']:
++                    result, recovered = recover_joint_schedule(problem, initial_result, joint,
++                        deadline=min(deadline, time.perf_counter()+recovery_time_limit), seed=seed, verbose=verbose,
++                        diagnostics_dir=path/'recovery' if path else None)
++                    checked = audit_solution(problem, result)
++                    if not checked['valid']:
++                        raise RuntimeError('Returned joint recovery failed the full M5 audit')
++                    payload.update(result=result, upper_bound=checked['objective'], recovery=recovered)
++            else:
++                payload['status'] = 'PARTIAL_ENUMERATION_SEPARATE_BOUND'
++    except TimeoutError:
++        pass
++    if payload['upper_bound'] is not None:
++        payload['gap'] = max(0, payload['upper_bound']-payload['bound'])/max(1e-9, abs(payload['upper_bound']))
++    payload['runtime'] = time.perf_counter()-begun
++    return payload
+--- /dev/null
++++ b/tests/routing/test_multibatch_joint_inventory.py
+@@ -0,0 +1,253 @@
++"""Full-schedule projections, valid cutoff domains, and audited primal recovery."""
++from copy import deepcopy
++from dataclasses import replace
++import math
++import time
++from types import SimpleNamespace
++
++import pytest
++
++from models.routing.common.cycle import MultiBatchInstance, Order
++from models.routing.common.cycle.audit import audit_solution
++from models.routing.common.cycle.state import empty_result
++from models.routing.common.cycle.precheck import travel_lower_bounds
++from models.routing.common.domain.instance import ProblemInstance
++from models.routing.common.domain.node import Depot, Satellite, Customer
++from models.routing.solvers.exact.multibatch_joint_inventory import (
++    build_joint_inventory, cutoff_domains, joint_route_inventory_certificate,
++    recover_joint_schedule, set_joint_projection, solve_joint_inventory,
++)
++from models.routing.solvers.exact.multibatch_route_enumeration import enumerate_route_universe
++from models.routing.solvers.exact.multibatch_route_pricing import route_context
++from tests.routing.test_multibatch_cycle import fixture, hand_solution
++from tests.routing.test_multibatch_departure_loads import nonmetric_problem
++
++
++def domains(problem):
++    return {s: (c, enumerate_route_universe(problem, c)) for s in problem.satellites
++            for c in [route_context(problem, s)] if c['nodes']}
++
++
++@pytest.mark.parametrize('seed', range(6))
++def test_known_nonmetric_full_optimum_projects_and_joint_bound_remains_below(seed):
++    gp = pytest.importorskip('gurobipy')
++    from models.routing.solvers.exact.solver import solve_exact
++    p = nonmetric_problem(seed)
++    initial = solve_exact(p, time_limit=5)
++    assert initial['info']['proven_optimal'] and initial['audit']['valid']
++    d = domains(p)
++    model, ctx = build_joint_inventory(p, d)
++    try:
++        projection = set_joint_projection(p, ctx, initial, fix=True)
++        model.optimize()
++        assert model.Status == gp.GRB.OPTIMAL
++        assert model.ObjVal <= initial['info']['objective']+1e-6
++        assert projection['projected_e2_cost'] <= initial['audit']['distances']['e2']+1e-6
++    finally:
++        model.dispose()
++    cert = solve_joint_inventory(p, d, deadline=time.perf_counter()+5, initial_result=initial)
++    assert cert['relaxation_optimal'] and cert['bound'] <= initial['info']['objective']+1e-6
++    assert not cert['proven_optimal'] and not cert['proven_infeasible']
++
++
++@pytest.mark.parametrize('returned', [29, 30, 31])
++@pytest.mark.parametrize('cleaning', [0, 20])
++def test_full_cutoff_and_cleaning_boundary_projections(returned, cleaning):
++    gp = pytest.importorskip('gurobipy')
++    p = fixture(pool=2, cleaning=cleaning)
++    initial = hand_solution(p, returned)
++    assert audit_solution(p, initial)['valid']
++    model, ctx = build_joint_inventory(p, domains(p))
++    try:
++        set_joint_projection(p, ctx, initial, fix=True)
++        model.optimize()
++        assert model.Status == gp.GRB.OPTIMAL
++        assert model.ObjVal <= audit_solution(p, initial)['objective']+1e-6
++    finally:
++        model.dispose()
++
++
++def test_later_delivery_forces_whole_trip_pickups_to_a_later_cutoff():
++    p = fixture(pool=2)
++    p = MultiBatchInstance(p.network, [replace(p.orders[0], pickup_window=(0, 89)), p.orders[1]], p.operating_policy)
++    ctx = route_context(p, 'S')
++    rows = cutoff_domains(p, ctx, enumerate_route_universe(p, ctx), travel_lower_bounds(p))
++    row = next(r for r in rows if set(r['keys']) == {('o2', 'd'), ('o1', 'p')})
++    assert row['allowed_cutoffs'] == ('b2',) and row['minimum_return_bound'] > p.batch_map['b1'].cutoff
++
++
++def test_all_pickups_of_a_selected_route_share_one_cutoff():
++    gp = pytest.importorskip('gurobipy')
++    p = fixture(pool=2)
++    model, ctx = build_joint_inventory(p, domains(p))
++    try:
++        data = ctx['routes']['S']
++        i = next(i for i, r in enumerate(data['rows']) if set(r['keys']) == {('o1', 'p'), ('o2', 'p')})
++        var = data['choices'][i, 'b2']
++        var.LB = var.UB = 1
++        first = ctx['e1']['allocation']['o1', 'b1']
++        first.LB = first.UB = 1
++        model.optimize()
++        assert model.Status == gp.GRB.INFEASIBLE
++    finally:
++        model.dispose()
++
++
++def test_cost_dominance_does_not_impose_the_retained_routes_actual_return_clock():
++    gp = pytest.importorskip('gurobipy')
++    p = fixture(pool=2)
++    d = domains(p)
++    # Same raw path/cost, valid but later serialization. The original full
++    # schedule returns at 16 and must still be able to choose the first cutoff.
++    column = next(c for g in d['S'][1]['groups'] for c in g['columns']
++                  if set(c['tasks']) == {('o1', 'd'), ('o1', 'p')})
++    column.update(starts=[25, 39], return_complete=40)
++    model, ctx = build_joint_inventory(p, d)
++    try:
++        set_joint_projection(p, ctx, hand_solution(p), fix=True)
++        model.optimize()
++        assert model.Status == gp.GRB.OPTIMAL
++    finally:
++        model.dispose()
++
++
++def test_incomplete_or_missing_site_universe_cannot_create_joint_certificate():
++    pytest.importorskip('gurobipy')
++    p = fixture(pool=2)
++    d = domains(p)
++    d['S'][1]['complete'] = False
++    with pytest.raises(ValueError, match='complete'):
++        build_joint_inventory(p, d)
++    with pytest.raises(ValueError, match='every active'):
++        build_joint_inventory(p, {})
++    out = joint_route_inventory_certificate(p, time_limit=5, initial_result=hand_solution(p), enumeration_max_states=1)
++    assert out['status'] == 'PARTIAL_ENUMERATION_SEPARATE_BOUND' and out['joint_certificate'] is None
++    assert out['bound'] <= out['upper_bound'] and not out['proven_optimal']
++
++
++def test_deadline_keeps_previous_bound_without_an_incumbent_objective(monkeypatch):
++    gp = pytest.importorskip('gurobipy')
++    import models.routing.solvers.exact.multibatch_joint_inventory as module
++    class TimedOut:
++        Params = SimpleNamespace()
++        Status, ObjBound, SolCount, NodeCount = gp.GRB.TIME_LIMIT, 4.75, 0, 1
++        NumVars = NumConstrs = NumGenConstrs = 0
++        def optimize(self): pass
++        def dispose(self): pass
++        @property
++        def ObjVal(self): raise AssertionError('No incumbent objective exists')
++    monkeypatch.setattr(module, 'build_joint_inventory', lambda *a, **kw: (TimedOut(), dict(choices=[], backend='patterns')))
++    out = solve_joint_inventory(fixture(pool=2), {}, deadline=time.perf_counter()+1, fallback_bound=4.5)
++    assert out['raw_bound'] == 4.75 and out['bound'] == pytest.approx(4.75-4.75e-7)
++    assert out['relaxation_objective'] is None and not out['relaxation_optimal']
++    assert not out['proven_optimal']
++
++
++def test_tiny_total_budget_returns_the_audited_initial_solution_unchanged():
++    p = fixture(pool=2)
++    initial = hand_solution(p)
++    before = deepcopy(initial)
++    out = joint_route_inventory_certificate(p, time_limit=1e-12, initial_result=initial)
++    assert out['bound'] == 0 and out['result'] == initial == before
++    assert out['upper_bound'] == audit_solution(p, initial)['objective'] and out['runtime'] < .1
++
++
++def test_recovery_keeps_actual_schedule_and_never_uses_a_pool_bound_as_global():
++    pytest.importorskip('gurobipy')
++    p = fixture(pool=2)
++    initial = hand_solution(p)
++    before = deepcopy(initial)
++    joint = solve_joint_inventory(p, domains(p), initial_result=initial, deadline=time.perf_counter()+2)
++    result, info = recover_joint_schedule(p, initial, joint, deadline=time.perf_counter()+2)
++    assert audit_solution(p, result)['valid'] and initial == before
++    assert info['objective'] <= audit_solution(p, initial)['objective']+1e-6
++    assert result['info']['best_bound'] is None and not result['info']['proven_optimal']
++
++
++def test_recovery_uses_physical_indexed_e1_for_positive_turnaround():
++    pytest.importorskip('gurobipy')
++    p = fixture(pool=2, e1_turnaround_time=2)
++    initial = hand_solution(p)
++    assert audit_solution(p, initial)['valid']
++    result, info = recover_joint_schedule(p, initial, dict(selected_columns=[]), deadline=time.perf_counter()+2)
++    assert info['backend'] == 'indexed' and audit_solution(p, result)['valid']
++
++
++def test_public_entry_same_total_budget_and_replayable_joint_exports(tmp_path):
++    gp = pytest.importorskip('gurobipy')
++    from models.routing.variants.model_5.exact import joint_route_inventory_certificate as public
++    p = fixture(pool=2)
++    out = public(p, time_limit=5, joint_time_limit=1, recovery_time_limit=1,
++                 initial_result=hand_solution(p), diagnostics_dir=tmp_path)
++    assert out['runtime'] < 5.25 and out['bound'] <= out['upper_bound']+1e-6
++    assert audit_solution(p, out['result'])['valid'] and not out['proven_optimal']
++    model = gp.read(str(tmp_path/'joint/joint_inventory.mps.gz'))
++    try:
++        model.Params.OutputFlag = 0
++        model.optimize()
++        assert model.Status == gp.GRB.OPTIMAL
++        assert model.ObjVal+1e-6 >= out['joint_certificate']['raw_bound']
++    finally:
++        model.dispose()
++
++
++@pytest.mark.parametrize('value', [-1, math.inf, math.nan])
++def test_parameter_guards(value):
++    p = fixture(pool=2)
++    for name in ('joint_time_limit', 'recovery_time_limit', 'e1_time_limit', 'integer_cover_time_limit', 'enumeration_time_limit'):
++        with pytest.raises(ValueError): joint_route_inventory_certificate(p, **{name: value})
++    with pytest.raises(ValueError): joint_route_inventory_certificate(p, time_limit=value)
++
++
++def test_partial_budgets_wrong_model_and_bad_initial_are_rejected():
++    with pytest.raises(ValueError): joint_route_inventory_certificate(fixture(pool=2), enumeration_max_states=True)
++    with pytest.raises(ValueError): joint_route_inventory_certificate(fixture(pool=2), joint_time_limit=0)
++    with pytest.raises(ValueError): joint_route_inventory_certificate(fixture(one_batch=True))
++    invalid = hand_solution(fixture(pool=2))
++    invalid['e2_trips'].pop()
++    with pytest.raises(ValueError, match='audit'): joint_route_inventory_certificate(fixture(pool=2), initial_result=invalid)
++
++
++def test_reference_only_mode_and_recovery_build_deadline_preserve_feasible_upper():
++    pytest.importorskip('gurobipy')
++    p = fixture(pool=2)
++    initial = hand_solution(p)
++    out = joint_route_inventory_certificate(p, time_limit=5, initial_result=initial, joint_time_limit=0, recovery_time_limit=0)
++    assert out['joint_certificate'] is None and out['result'] == initial and out['bound'] <= out['upper_bound']
++    result, metadata = recover_joint_schedule(p, initial, dict(selected_columns=[]), deadline=0)
++    assert result == initial and metadata['status'] == 'TIME_LIMIT_BUILD'
++
++
++def test_five_active_sites_use_indexed_e1_and_keep_full_schedule_projection():
++    gp = pytest.importorskip('gurobipy')
++    template = fixture(pool=5, zero=True, cleaning=0)
++    nodes, orders = {'D': Depot('D', 0, 0)}, []
++    for i in range(5):
++        site, customer = f'S{i}', f'C{i}'
++        nodes[site] = Satellite(site, 0, 0)
++        nodes[customer] = Customer(customer, 0, 0, 0, 0, (0, 125), (0, 125), site)
++        orders.extend(replace(o, id=f'{o.id}_{i}', customer=customer, satellite=site) for o in template.orders)
++    fleet = dict(E1_vehicle_count=1, vehicles_per_satellite=1, E1_Qk=500, E1_Ck=500,
++                 E2_Qv=500, E2_Cv=500, container_weight=1, container_volume=1)
++    p = MultiBatchInstance(ProblemInstance(nodes, fleet), orders, template.operating_policy)
++    initial = empty_result(p, 'manual')
++    for index, batch in enumerate(p.operating_policy.batches):
++        selected = [o for o in orders if o.batch == batch.id]
++        initial['e1_trips'].append(dict(trip_id=f'e1_{index}', vehicle_id=0, batch_id=batch.id,
++            departure=batch.start, return_complete=batch.cutoff+1,
++            events=[dict(kind='d', site_id=o.satellite, quantity=1, start=batch.start+1) for o in selected]
++                 +[dict(kind='p', site_id=o.satellite, quantity=1, start=batch.cutoff) for o in selected]))
++        for o in selected:
++            initial['e2_trips'].append(dict(trip_id=f'e2_{o.id}', vehicle_id=0, satellite_id=o.satellite,
++                trip_index=index, departure=batch.start+1, return_complete=batch.start+4,
++                events=[dict(kind='d', order_id=o.id, start=batch.start+2, quantity=1),
++                        dict(kind='p', order_id=o.id, start=batch.start+3, quantity=1)]))
++    assert audit_solution(p, initial)['valid']
++    model, ctx = build_joint_inventory(p, domains(p))
++    try:
++        assert ctx['backend'] == 'indexed'
++        set_joint_projection(p, ctx, initial, fix=True)
++        model.optimize()
++        assert model.Status == gp.GRB.OPTIMAL and model.ObjVal == 0
++    finally:
++        model.dispose()
+--- /dev/null
++++ b/tools/audit/benchmark_multibatch_joint_inventory.py
+@@ -0,0 +1,166 @@
++"""Frozen M5 separate integer bounds versus joint inventory and recovery.
++
++Both variants start with the same audited schedule and total budget.
++Joint lower bounds relax physical E2 schedules; recovered upper bounds
++are accepted only after a full M5 audit. Partial domains fall back safely.
++"""
++from __future__ import annotations
++
++import argparse
++import hashlib
++import json
++import math
++import os
++from pathlib import Path
++import platform
++import shutil
++import subprocess
++import sys
++import time
++
++ROOT = Path(__file__).resolve().parents[2]
++sys.path.insert(0, str(ROOT))
++
++
++def write(path, value):
++    path.write_text(json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False)+'\n')
++
++
++def worker(job, destination):
++    from configuration.loader import load_routing_case
++    from models.routing.common.cycle import load_instance
++    from models.routing.common.cycle.audit import audit_solution
++    problem = load_instance(*load_routing_case(job['case']))
++    initial = json.loads(Path(job['initial_result']).read_text())
++    independent = audit_solution(problem, initial)
++    if not independent['valid']:
++        raise ValueError('Frozen incumbent failed audit')
++    started = time.perf_counter()
++    from models.routing.variants.model_5.exact import joint_route_inventory_certificate
++    experiment = joint_route_inventory_certificate(problem,
++        time_limit=job['budget'], initial_result=initial, seed=job['seed'], verbose=True,
++        joint_time_limit=0 if job['variant'] == 'separate' else job['joint_time_limit'],
++        recovery_time_limit=0 if job['variant'] == 'separate' else job['recovery_time_limit'],
++        e1_time_limit=job['e1_time_limit'], integer_cover_time_limit=job['integer_cover_time_limit'],
++        enumeration_time_limit=job['enumeration_time_limit'],
++        enumeration_max_states=1 if job['variant'] == 'fallback' else job['enumeration_max_states'],
++        diagnostics_dir=destination.parent/(job['id']+'_models'))
++    checked = audit_solution(problem, experiment['result'])
++    if not checked['valid']:
++        raise ValueError('Returned full-M5 schedule failed independent audit')
++    lower, upper = experiment['bound'], checked['objective']
++    if not math.isclose(upper, experiment['upper_bound'], rel_tol=1e-9, abs_tol=1e-6):
++        raise ValueError('Upper bound differs from audited returned schedule')
++    write(destination, dict(job=job, wall_seconds=time.perf_counter()-started,
++        frozen_incumbent_audit=independent, output_audit=checked, bound=lower, upper_bound=upper,
++        fixed_incumbent_gap=max(0, independent['objective']-lower)/max(1e-9, abs(independent['objective'])),
++        gap=max(0, upper-lower)/max(1e-9, abs(upper)), result_valid=checked['valid'], experiment=experiment))
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--output', type=Path, required=True)
++    parser.add_argument('--cases', nargs='+')
++    parser.add_argument('--initial-results', nargs='+')
++    parser.add_argument('--time', type=float, default=60)
++    parser.add_argument('--joint-time', type=float, default=25)
++    parser.add_argument('--recovery-time', type=float, default=5)
++    parser.add_argument('--e1-time', type=float, default=10, help='E1 time cap inside the CG budget, further capped at one third of remaining time')
++    parser.add_argument('--integer-time', type=float, default=15)
++    parser.add_argument('--enumeration-time', type=float, default=15)
++    parser.add_argument('--enumeration-states', type=int, default=2000000)
++    parser.add_argument('--seeds', nargs='+', type=int, default=[42])
++    parser.add_argument('--variants', nargs='+', choices=['separate', 'joint', 'fallback'], default=['separate', 'joint'])
++    parser.add_argument('--worker', help=argparse.SUPPRESS)
++    args = parser.parse_args()
++    if args.worker:
++        worker(json.loads(args.worker), args.output)
++        return
++    if not args.cases or not args.initial_results or len(args.cases) != len(args.initial_results):
++        parser.error('one --initial-results file is required per case')
++    if any(not math.isfinite(v) or v <= 0 for v in (args.time, args.joint_time, args.recovery_time, args.e1_time, args.enumeration_time, args.integer_time)):
++        parser.error('budgets must be finite and positive')
++    if args.enumeration_states < 1:
++        parser.error('enumeration-states must be positive')
++    if len(set(args.variants)) != len(args.variants):
++        parser.error('variants must be distinct')
++    from configuration.loader import load_routing_case, resolve_project_path
++    from models.routing.common.cycle import load_instance
++    from models.routing.common.cycle.audit import audit_solution
++    output = args.output.resolve()
++    output.mkdir(parents=True, exist_ok=False)
++    jobs = []
++    for index, source in enumerate(args.cases):
++        config, fleet = load_routing_case(source)
++        problem = load_instance(config, fleet)
++        if problem.model_number != 5:
++            raise ValueError('M5 inputs required')
++        frozen = output/'inputs'/str(index)
++        frozen.mkdir(parents=True)
++        for field in ('data', 'orders', 'distance_matrix', 'duration_matrix', 'dataset_metadata'):
++            if config.get(field):
++                path = resolve_project_path(config[field])
++                target = frozen/(field+path.suffix)
++                shutil.copy2(path, target)
++                config[field] = str(target)
++        write(frozen/'fleet.json', fleet)
++        config['routing_config'], config['operating_policy'] = str(frozen/'fleet.json'), fleet['operating_policy']
++        for field in ('algorithm_config', 'container_pool_config'):
++            config.pop(field, None)
++        write(frozen/'case.json', config)
++        payload = json.loads(resolve_project_path(args.initial_results[index]).read_text())
++        initial = payload.get('result', payload)
++        independent = audit_solution(problem, initial)
++        if not independent['valid']:
++            raise ValueError('Initial result failed independent M5 audit')
++        write(frozen/'initial_result.json', initial)
++        write(frozen/'initial_audit.json', independent)
++        for seed in args.seeds:
++            for variant in args.variants:
++                jobs.append(dict(id=f'{index:02d}_{seed}_{variant}', variant=variant,
++                    case=str(frozen/'case.json'), source_case=source, initial_result=str(frozen/'initial_result.json'),
++                    frozen_upper_bound=independent['objective'], budget=args.time, seed=seed,
++                    joint_time_limit=args.joint_time, recovery_time_limit=args.recovery_time, e1_time_limit=args.e1_time,
++                    integer_cover_time_limit=args.integer_time, enumeration_time_limit=args.enumeration_time, enumeration_max_states=args.enumeration_states, orders=len(problem.orders),
++                    customers=len({o.customer for o in problem.orders})))
++    for source in [*ROOT.glob('models/**/*.py'), *ROOT.glob('configuration/*.py'), Path(__file__).resolve()]:
++        target = output/'source_snapshot'/source.relative_to(ROOT)
++        target.parent.mkdir(parents=True, exist_ok=True)
++        shutil.copy2(source, target)
++    for name in ('multibatch_joint_inventory.py', 'multibatch_route_pool.py', 'multibatch_e1_inventory.py', 'multibatch_e1_routes.py', 'multibatch_route_integer_cover.py', 'multibatch_route_enumeration.py', 'multibatch_route_cg.py', 'multibatch_route_pricing.py', 'multibatch_bounds.py', 'solver.py', 'formulation.py'):
++        path = output/'source_snapshot/models/routing/solvers/exact'/name
++        compile(path.read_text(), str(path), 'exec')
++    hashes = {str(p.relative_to(output)): hashlib.sha256(p.read_bytes()).hexdigest()
++              for p in sorted(output.rglob('*')) if p.is_file()}
++    write(output/'manifest.json', dict(jobs=jobs, artifact_sha256=hashes, python=sys.version,
++        platform=platform.platform(), python_hash_seed=0,
++        note='Same audited initial schedule, frozen inputs and code. Complete integer E2 coverage, joint cutoff inventory, and audited recovery share the original total budget. No full-M5 optimality proof.'))
++    summary = []
++    frozen_worker = output/'source_snapshot/tools/audit/benchmark_multibatch_joint_inventory.py'
++    for job in jobs:
++        destination = output/(job['id']+'.json')
++        started = time.perf_counter()
++        with (output/(job['id']+'.log')).open('w') as log:
++            try:
++                run = subprocess.run([sys.executable, str(frozen_worker), '--worker', json.dumps(job),
++                    '--output', str(destination)], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
++                    timeout=args.time+20, env={**os.environ, 'PYTHONHASHSEED': '0'})
++                failure = f'EXIT_{run.returncode}' if run.returncode else None
++            except subprocess.TimeoutExpired:
++                failure = 'OUTER_TIMEOUT'
++        row = dict(job=job, failure=failure, outer_seconds=time.perf_counter()-started)
++        if destination.exists():
++            payload = json.loads(destination.read_text())
++            experiment = payload['experiment']
++            row.update(bound=payload['bound'], upper_bound=payload['upper_bound'], gap=payload['gap'],
++                fixed_incumbent_gap=payload['fixed_incumbent_gap'], wall_seconds=payload['wall_seconds'],
++                result_valid=payload['result_valid'], status=experiment['status'], recovery=experiment['recovery'],
++                reference_bound=experiment['reference_certificate']['bound'],
++                joint_status=experiment['joint_certificate']['status'] if experiment['joint_certificate'] else None)
++        summary.append(row)
++        write(output/'summary.json', summary)
++        print(json.dumps(row, ensure_ascii=False), flush=True)
++
++
++if __name__ == '__main__':
++    main()
+--- /dev/null
++++ b/docs/m5_joint_inventory_20261001.md
+@@ -0,0 +1,95 @@
++# M5 第十五步：联合回收截止、清洗库存与完整路线覆盖
++
++日期：2026-10-01。
++
++本轮增加联合松弛和真实日程恢复。在相同初解、原 60 秒总预算下，50 顾客最好可行上界从 **2261.8315 降至 2247.7209**，有效 gap 从 **2.3138% 降至 1.7005%**。三个种子均改善，最终 gap 为 **1.7005%–1.8589%**。联合模型的下界没有实质提升；本轮收益来自审计合格的二层路线改进。
++
++新公开入口是 `joint_route_inventory_certificate`，不改变 `solve_exact` 的默认路径。顶层保存全局有效下界、完整可行上界、对应 gap 和实际方案；完整 M5 的最优性、不可行性标志仍为 `False`。
++
++## 1. 使用
++
++```python
++from models.routing.variants.model_5.exact import joint_route_inventory_certificate
++
++experiment = joint_route_inventory_certificate(
++    problem,
++    initial_result=audited_result,
++    time_limit=60,
++    joint_time_limit=25,
++    recovery_time_limit=5,
++    e1_time_limit=10,
++    integer_cover_time_limit=15,
++    diagnostics_dir='output/experiments/my_m5_joint_inventory',
++)
++
++lower = experiment['bound']
++upper = experiment['upper_bound']
++gap = experiment['gap']
++result = experiment['result']
++```
++
++实现位于 [`multibatch_joint_inventory.py`](../models/routing/solvers/exact/multibatch_joint_inventory.py)。先计算独立一级界和完整二层整数覆盖界，再建立联合截止/库存松弛，最后将联合松弛选出的路线加入真实日程主问题。所有阶段共用原总期限，阶段上限约束建模和求解，诊断写出时间也计入记录的总用时。本组全部正式运行均在给定总预算内完成。
++
++传入初解必须先通过完整 M5 审计。省略初解可以仅计算下界；`joint_time_limit=0, recovery_time_limit=0` 只计算独立组合界。极小预算返回已有安全界及原已审计方案。部分枚举不能进入联合模型，继续完整 MILP 定价并保留独立组合界。
++
++## 2. 联合下界为何有效
++
++联合模型保留完整一级路线、供应、订单必要服务时刻、回收数量、截止批次与清洗库存。最多四个服务仓时采用完整一级路线枚举，更多仓采用一级弧模型。其一级部分与上一轮已验证的库存松弛一致。
++
++对每个仓的**完整**二层任务集合路线域，每条最低成本路线增加截止批次选择。路线包含回收任务时，整趟所有回收订单必须进入同一个截止批次，且其选择与一级回收数量、清洗库存相连。所有配送和回收任务仍恰好覆盖一次，保留有限车队的总趟数上限。纯配送路线无需截止批次，可以在最后回收截止之后回仓。
++
++截止域只由必要回仓时间限制：每项任务的最早必要服务时刻，加服务时长、到仓的最短旅行时间和卸载时长；整趟的必要回仓界取所有任务的最大值，包含配送任务。这里使用最短路界，因此有向非度量数据也成立。
++
++相同任务集合中保留的最低成本路径，可能具有不同的服务顺序、供应或回仓时刻。**不能直接用这条路径保存的回仓时刻收紧截止域**，否则会排除原完整方案的较贵、较早路径。本轮使用与路径顺序无关的必要界：原方案的实际截止一定满足该界，替代列的成本不高于原趟次成本，仍可保留原订单时刻和实际截止来构造联合松弛投影。
++
++因此，任意完整 M5 可行方案都能投影到成本不增的联合模型。其求解器 `ObjBound` 扣除数值余量后是全局有效下界。联合目标已经包含一级和二层成本，**不能再把一级界加一次**。既有独立组合界作为保底；一级和各仓二层证书还分别作为联合模型的成本下界约束。
++
++联合模型仍放松二层实际路径时刻、真实供应与访问的联立、同一物理车辆的跨趟串行。这是下界模型，选出的组合不直接构成完整 M5 可行方案。`relaxation_objective` 是松弛当前解目标，既不是完整 M5 上界，也不能代替限时求解的 `ObjBound`。
++
++## 3. 真实方案恢复
++
++恢复阶段把原方案的二层路线、联合最好组合及至多五个已保存松弛组合的路线，加入每个仓已有物理趟位的候选池。每个原趟位先保留自己的原路线，因此初解始终可投影；仓内路线可重新分配，也可停用原趟位。这里没有新增车、趟位或修改车队限制。
++
++真实主问题保留一级供应、原始路径弧、配送/回收时间窗、全局使用时长、整趟回仓、第一可用截止、清洗库存，以及同车跨趟准备、周转和串行。一级周转时间为正时，恢复使用实际物理车辆弧模型。
++
++提取的每个候选都重新通过完整周期审计，且按原距离矩阵重算成本；只有严格改善才替换初解。该池不完整，其局部 `ObjBound`、局部最优值不能作为全局界。返回方案保留 `route_pool_complete=False`、`best_bound=None` 和 `proven_optimal=False`，顶层全局下界另行保存。
++
++## 4. 冻结、多种子、同总预算结果
++
++两组都现场枚举二层完整路线域、计算完整整数覆盖和一级证书，使用相同冻结初解。`separate` 计算独立组合界；`joint` 在原预算内再做联合松弛与审计日程恢复。没有加载探测实验的列域、最优组合或改善后的初解。
++
++| 顾客数 | 原可行上界 | 独立组合下界 | 联合下界 | 联合后可行上界 | 原 gap | 联合后 gap |
++|---:|---:|---:|---:|---:|---:|---:|
++| 20 | 1437.4738 | 1426.6488 | 1426.6490 | 1437.4738 | 0.7531% | 0.7530% |
++| 30 | 1654.8221 | 1623.9782 | 1623.9783 | 1654.8221 | 1.8639% | 1.8639% |
++| 50，种子 44 | 2261.8315 | 2209.4973 | 2209.4974 | **2247.7209** | 2.3138% | **1.7005%** |
++
++20/30 顾客的变化仅来自数值余量，没有实际上界改善。50 顾客三个种子的联合下界相同到报告精度，变化约 0.00018，也没有数学上的实质提升。
++
++| 50 顾客种子 | 恢复后可行上界 | 有效 gap | 独立组总用时 | 联合组总用时 |
++|---:|---:|---:|---:|---:|
++| 42 | 2249.2322 | 1.7666% | 23.11 秒 | 50.83 秒 |
++| 43 | 2251.3482 | 1.8589% | 21.63 秒 | 50.72 秒 |
++| 44 | **2247.7209** | **1.7005%** | 21.71 秒 | 52.09 秒 |
++
++联合阶段在 50 顾客时限时，三个种子的当前松弛组合目标为 2209.7315–2211.2428；本轮没有把这些值当作下界或完整 M5 上界。真实恢复子问题均达到其受限池最优，恢复结果随可用松弛组合而变化。新增阶段增加用时，未声称所有规模均改善或更快。
++
++最好方案的一级成本仍为 **1056.4382**，二层成本由 **1205.3933 降至 1191.2827**，减少 **14.1107**。它仍满足完整物理车辆、供应、回收与库存约束。总上下界差额约 **38.22**，其中独立一级部分的差额约 **35.10**；后续应优先强化实际供应与一级库存的联系。
++
++正式结果见 [多种子汇总](../output/experiments/m5_joint_inventory_20261001/final_60s/summary.json)。可直接复用的最好完整方案为 [best_full_result.json](../output/experiments/m5_joint_inventory_20261001/best_full_result.json)，其原始运行与证书为 [种子 44 记录](../output/experiments/m5_joint_inventory_20261001/final_60s/02_44_joint.json)。
++
++## 5. 验证与可复现文件
++
++新增 [27 项测试](../tests/routing/test_multibatch_joint_inventory.py)，覆盖六个有向非度量案例与完整 M5 已知最优值、截止边界和清洗边界、整趟共同截止、最低成本路线时刻不应排除原方案、五仓一级弧模型的完整投影、部分枚举回退、限时无解时保留求解器下界、极小总预算、输入不变、真实车辆恢复及公开入口。相关回归 **503 项通过**；见 [测试日志](../output/experiments/m5_joint_inventory_20261001/pytest.log) 和 [命令](../output/experiments/m5_joint_inventory_20261001/run_regression.sh)。原依赖产生 14 条警告。
++
++共 **34** 次正式运行：20/30/50 顾客、三个种子、两种方法共 18 次；7 个已知精确小例、两种方法共 14 次；30/50 顾客强制枚举状态上限为 1 共两次。全部输入、原初解、源码、参数和日志冻结。见 [小例汇总](../output/experiments/m5_joint_inventory_20261001/final_small_5s/summary.json)、[回退汇总](../output/experiments/m5_joint_inventory_20261001/final_fallback_60s/summary.json)、[正式执行脚本](../output/experiments/m5_joint_inventory_20261001/run_formal.py) 和 [对照工具](../tools/audit/benchmark_multibatch_joint_inventory.py)。
++
++[独立复核](../output/experiments/m5_joint_inventory_20261001/validate.py) 重审所有输入和返回方案，核对数值余量、上下界合成、LP 对偶证书、完整列域与模型。路线域复核使用独立前缀搜索重算完整载荷和时钟，并使用 Floyd-Warshall 核对必要时间界。
++
++[联合复核器](../output/experiments/m5_joint_inventory_20261001/validation_joint.py) 不调用生产建模器，逐项检查全部联合路线变量、成本、覆盖行、有限趟数行、共同截止连接、各部分成本界；核对一级基础矩阵和全部指示约束与独立一级模型一致。重新求解原导出模型后，再固定原完整日程的一级路线、订单时刻、原实际截止与最低成本同任务集合列，确认投影可行且成本不增。
++
++[恢复复核器](../output/experiments/m5_joint_inventory_20261001/validation_pool.py) 重新求解原真实主问题，直接从原始变量重建完整日程，独立回放两个周期和清洗库存，并重算原距离目标。
++
++最终复核通过全部 **34** 次正式运行，重求解 **90** 个完整连续覆盖模型、**90** 个完整整数覆盖模型、**34** 个一级模型和 **16** 个联合模型；独立重建 **16** 份真实恢复日程。检查 **1,862,754** 条连续覆盖列、**295** 份对偶证书及 **25** 个去重后的完整路线域，全部一致。
++
++最终完整复核记录见 [validation.json](../output/experiments/m5_joint_inventory_20261001/validation.json)，定向改动见 [changes.patch](../output/experiments/m5_joint_inventory_20261001/changes.patch)。本轮保留共享目录中同期的定价和其他模型变更，补丁仅包含本轮新增实现、公开入口、测试、对照工具及文档。
+--- a/models/routing/variants/model_5/exact/README.md
++++ b/models/routing/variants/model_5/exact/README.md
+@@ -59,3 +59,9 @@
+ 只有完整枚举域可以进入整数证书，限时保留已验证的 LP 界。
+ 本组 50 顾客 gap 进一步降到约 2.31%，完整 M5 最优性标志仍为 False。
+ 见 [完整整数覆盖下界](../../../../../docs/m5_integer_cover_20261001.md)。
++
++第十五步增加 `joint_route_inventory_certificate(problem, initial_result=audited_result, time_limit=60)`，
++联合完整二层覆盖的整趟截止选择与一级回收、清洗库存，再恢复真实物理车辆日程。
++完整列域才能进入联合下界；恢复只接受完整审计合格的可行上界，候选池局部界不作为全局界。
++本组 50 顾客最好上界为 2247.72、gap 约 1.70%，主要来自二层路线改进，默认求解路径不变。
++见 [联合截止库存与真实方案恢复](../../../../../docs/m5_joint_inventory_20261001.md)。
+--- a/docs/exact_solver_architecture.md
++++ b/docs/exact_solver_architecture.md
+@@ -128,3 +128,9 @@
+ `single_batch_site_flow.py` 提供显式仓库流诊断：全局二元弧按仓点分解为连续流，仓点任务度数等于顾客分仓变量。
+ 该表达保留全部整数可行解，但限时和多种子结果出现退步，因此最终默认关闭。
+ 详见 [路线编号界、建模缓存与仓库流诊断](single_batch_exact_domains_20261001.md)。
++
++M5 可显式调用 `joint_route_inventory_certificate`，在原总预算内将完整二层路线覆盖
++按整趟回收截止与一级库存连接，再用候选路线恢复真实车辆日程。最低成本任务集合列
++只使用与路径顺序无关的必要回仓界；联合目标已含两层成本，不能重复添加一级界。
++恢复候选池的局部界不作全局证书，只有完整审计方案可更新上界。见
++[联合截止库存与真实方案恢复](m5_joint_inventory_20261001.md)。
+--- a/tools/README.md
++++ b/tools/README.md
+@@ -49,3 +49,8 @@
+ 在原总预算内比较完整路线覆盖 `lp` 与 `integer`，另提供强制中断枚举的 `fallback`。
+ `--integer-time 15` 是每仓整数阶段上限；完整二元模型和连续模型分别压缩导出。
+ 见 [完整整数覆盖与全矩阵复核](../docs/m5_integer_cover_20261001.md)。
++
++`audit/benchmark_multibatch_joint_inventory.py` 冻结同一完整初解、输入和源码，在原总预算内
++比较 `separate` 独立整数覆盖界与 `joint` 联合截止库存、真实日程恢复；另提供 `fallback`。
++记录实际上界及 gap，导出完整联合模型和真实恢复模型；`--joint-time`、`--recovery-time`
++控制原预算内的阶段上限。见 [联合模型与独立日程复核](../docs/m5_joint_inventory_20261001.md)。

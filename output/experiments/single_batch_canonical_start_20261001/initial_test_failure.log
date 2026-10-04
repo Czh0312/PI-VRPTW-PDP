@@ -1,0 +1,52 @@
+.....................F.................................................. [ 16%]
+........................................................................ [ 32%]
+........................................................................ [ 49%]
+........................................................................ [ 65%]
+........................................................................ [ 81%]
+........................................................................ [ 98%]
+........                                                                 [100%]
+=================================== FAILURES ===================================
+___ test_vehicle_permutation_and_sparse_slots_produce_same_canonical_routes ____
+
+    def test_vehicle_permutation_and_sparse_slots_produce_same_canonical_routes():
+        p, original = delayed_three_trip_start()
+        p.fleet.e2_per_sat_count = 4
+        p = MultiBatchInstance(p.network, p.orders, replace(p.operating_policy, e2_max_trips_per_vehicle=3), model=1)
+        for key in p._travel:
+            p._travel[key] = 0
+>       baseline, _ = canonical_delivery_start(p, original)
+
+tests/routing/test_single_batch_schedule_start.py:160: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+problem = <models.routing.common.cycle.instance.MultiBatchInstance object at 0x1082b3c10>
+result = {'audit': {'clean_stock': [], 'container_balance': {'e2_unloaded': 0, 'issued': 3, 'pool': 0, 'returned_to_depot': 0},...: [{'kind': 'd', 'order_id': 'c', 'quantity': 1, 'start': 18}], 'return_complete': 19, 'satellite_id': 'S', ...}], ...}
+
+    def canonical_delivery_start(problem, result, *, deadline=None):
+        """Re-audit an equivalent earliest start, or expire without mutating input.
+    
+        All original proof metadata is merely preserved; no new proof or bound is
+        created. The explicit pure-delivery scope avoids any changed pickup rules.
+        """
+        if problem.model_number not in (1, 2) or problem.reusable or len(problem.operating_policy.batches) != 1:
+            raise ValueError('Earliest delivery starts support only single-batch M1/M2')
+        begun = time.perf_counter()
+        stats = dict(status='TIME_LIMIT', proof_scope='equivalent_feasible_delivery_start',
+            global_proof=False, vehicle_labels_changed=0, trip_slots_changed=0,
+            departures_advanced=0, departure_advance_ticks=0, max_departure_advance=0, events_advanced=0)
+    
+        def check():
+            if deadline is not None and time.perf_counter() >= deadline:
+                raise TimeoutError('Delivery start normalization reached its shared budget')
+    
+        try:
+            check()
+            before = audit_solution(problem, result)
+            if not before['valid']:
+>               raise ValueError('Delivery start must pass the independent audit')
+E               ValueError: Delivery start must pass the independent audit
+
+models/routing/solvers/exact/single_batch_schedule_start.py:38: ValueError
+=========================== short test summary info ============================
+FAILED tests/routing/test_single_batch_schedule_start.py::test_vehicle_permutation_and_sparse_slots_produce_same_canonical_routes
+1 failed, 439 passed in 5.79s

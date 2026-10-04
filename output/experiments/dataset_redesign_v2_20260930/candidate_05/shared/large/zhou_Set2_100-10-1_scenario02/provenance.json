@@ -1,0 +1,2053 @@
+{
+  "selection_profile": "zhou_10_per_customer_count_v4",
+  "design_version": "operational_scenarios_v2",
+  "business_assumption": "Static same-day distribution of reusable transport boxes; unloading/short use followed by collection. Scenario assumptions, not measured consumer packaging returns.",
+  "source_instance": "Set2_100-10-1",
+  "base_family_id": "zhou_Set2_100-10-1",
+  "scenario_index": 2,
+  "scenario_rule": "Paired use-duration/collection profiles; identical customer subset, territories, demand and fleet.",
+  "scale_pair_id": "Set2_100-10-1",
+  "selection_rule": "Five source blocks; source-keyed SHA256 ordering; nested 20/30/50 subsets; identical subsets within both profiles; no solver filtering.",
+  "territory_rule": "Choose source satellite subset by minimum summed nearest distance; assign distant customers first to nearest available territory with a published count cap.",
+  "territory_customer_cap": 30,
+  "cohort_rule": "Per-territory customer hash rank modulo three, independent of use/return hash streams.",
+  "time_unit": "scenario_minutes",
+  "distance_unit": "benchmark_coordinate_units_not_km",
+  "preserved_fields": [
+    "selected_source_locations",
+    "goods_weight",
+    "customer_service_time"
+  ],
+  "scenario_fields": [
+    "satellite_subset",
+    "territories",
+    "satellite_service",
+    "travel_speed",
+    "box_count",
+    "windows",
+    "use_duration",
+    "fleet",
+    "calendar"
+  ],
+  "original_windows": {
+    "C14_order": {
+      "delivery_ready": "344.0",
+      "delivery_due": "368.0",
+      "pickup_ready": "738.0",
+      "pickup_due": "978.0",
+      "assigned_sat": "S5"
+    },
+    "C16_order": {
+      "delivery_ready": "147.0",
+      "delivery_due": "171.0",
+      "pickup_ready": "541.0",
+      "pickup_due": "781.0",
+      "assigned_sat": "S0"
+    },
+    "C76_order": {
+      "delivery_ready": "185.0",
+      "delivery_due": "209.0",
+      "pickup_ready": "579.0",
+      "pickup_due": "819.0",
+      "assigned_sat": "S3"
+    },
+    "C23_order": {
+      "delivery_ready": "399.0",
+      "delivery_due": "429.0",
+      "pickup_ready": "799.0",
+      "pickup_due": "1039.0",
+      "assigned_sat": "S7"
+    },
+    "C67_order": {
+      "delivery_ready": "133.0",
+      "delivery_due": "171.0",
+      "pickup_ready": "541.0",
+      "pickup_due": "781.0",
+      "assigned_sat": "S7"
+    },
+    "C43_order": {
+      "delivery_ready": "291.0",
+      "delivery_due": "325.0",
+      "pickup_ready": "695.0",
+      "pickup_due": "935.0",
+      "assigned_sat": "S4"
+    },
+    "C88_order": {
+      "delivery_ready": "463.0",
+      "delivery_due": "489.0",
+      "pickup_ready": "859.0",
+      "pickup_due": "1099.0",
+      "assigned_sat": "S0"
+    },
+    "C56_order": {
+      "delivery_ready": "74.0",
+      "delivery_due": "110.0",
+      "pickup_ready": "480.0",
+      "pickup_due": "720.0",
+      "assigned_sat": "S9"
+    },
+    "C93_order": {
+      "delivery_ready": "496.0",
+      "delivery_due": "524.0",
+      "pickup_ready": "894.0",
+      "pickup_due": "1134.0",
+      "assigned_sat": "S9"
+    },
+    "C72_order": {
+      "delivery_ready": "253.0",
+      "delivery_due": "263.0",
+      "pickup_ready": "633.0",
+      "pickup_due": "873.0",
+      "assigned_sat": "S3"
+    },
+    "C52_order": {
+      "delivery_ready": "102.0",
+      "delivery_due": "120.0",
+      "pickup_ready": "490.0",
+      "pickup_due": "730.0",
+      "assigned_sat": "S2"
+    },
+    "C4_order": {
+      "delivery_ready": "339.0",
+      "delivery_due": "361.0",
+      "pickup_ready": "731.0",
+      "pickup_due": "971.0",
+      "assigned_sat": "S8"
+    },
+    "C59_order": {
+      "delivery_ready": "128.0",
+      "delivery_due": "154.0",
+      "pickup_ready": "524.0",
+      "pickup_due": "764.0",
+      "assigned_sat": "S5"
+    },
+    "C60_order": {
+      "delivery_ready": "229.0",
+      "delivery_due": "243.0",
+      "pickup_ready": "613.0",
+      "pickup_due": "853.0",
+      "assigned_sat": "S2"
+    },
+    "C33_order": {
+      "delivery_ready": "160.0",
+      "delivery_due": "194.0",
+      "pickup_ready": "564.0",
+      "pickup_due": "804.0",
+      "assigned_sat": "S5"
+    },
+    "C80_order": {
+      "delivery_ready": "428.0",
+      "delivery_due": "454.0",
+      "pickup_ready": "824.0",
+      "pickup_due": "1064.0",
+      "assigned_sat": "S1"
+    },
+    "C96_order": {
+      "delivery_ready": "112.0",
+      "delivery_due": "122.0",
+      "pickup_ready": "492.0",
+      "pickup_due": "732.0",
+      "assigned_sat": "S1"
+    },
+    "C82_order": {
+      "delivery_ready": "296.0",
+      "delivery_due": "318.0",
+      "pickup_ready": "688.0",
+      "pickup_due": "928.0",
+      "assigned_sat": "S2"
+    },
+    "C48_order": {
+      "delivery_ready": "518.0",
+      "delivery_due": "548.0",
+      "pickup_ready": "918.0",
+      "pickup_due": "1158.0",
+      "assigned_sat": "S5"
+    },
+    "C27_order": {
+      "delivery_ready": "381.0",
+      "delivery_due": "393.0",
+      "pickup_ready": "763.0",
+      "pickup_due": "1003.0",
+      "assigned_sat": "S9"
+    },
+    "C1_order": {
+      "delivery_ready": "117.0",
+      "delivery_due": "129.0",
+      "pickup_ready": "499.0",
+      "pickup_due": "739.0",
+      "assigned_sat": "S7"
+    },
+    "C74_order": {
+      "delivery_ready": "268.0",
+      "delivery_due": "302.0",
+      "pickup_ready": "672.0",
+      "pickup_due": "912.0",
+      "assigned_sat": "S7"
+    },
+    "C92_order": {
+      "delivery_ready": "264.0",
+      "delivery_due": "284.0",
+      "pickup_ready": "654.0",
+      "pickup_due": "894.0",
+      "assigned_sat": "S2"
+    },
+    "C9_order": {
+      "delivery_ready": "573.0",
+      "delivery_due": "607.0",
+      "pickup_ready": "977.0",
+      "pickup_due": "1217.0",
+      "assigned_sat": "S5"
+    },
+    "C42_order": {
+      "delivery_ready": "60.0",
+      "delivery_due": "90.0",
+      "pickup_ready": "460.0",
+      "pickup_due": "700.0",
+      "assigned_sat": "S9"
+    },
+    "C38_order": {
+      "delivery_ready": "492.0",
+      "delivery_due": "516.0",
+      "pickup_ready": "886.0",
+      "pickup_due": "1126.0",
+      "assigned_sat": "S3"
+    },
+    "C57_order": {
+      "delivery_ready": "196.0",
+      "delivery_due": "214.0",
+      "pickup_ready": "584.0",
+      "pickup_due": "824.0",
+      "assigned_sat": "S1"
+    },
+    "C19_order": {
+      "delivery_ready": "611.0",
+      "delivery_due": "649.0",
+      "pickup_ready": "1019.0",
+      "pickup_due": "1259.0",
+      "assigned_sat": "S1"
+    },
+    "C15_order": {
+      "delivery_ready": "538.0",
+      "delivery_due": "576.0",
+      "pickup_ready": "946.0",
+      "pickup_due": "1186.0",
+      "assigned_sat": "S5"
+    },
+    "C68_order": {
+      "delivery_ready": "395.0",
+      "delivery_due": "427.0",
+      "pickup_ready": "797.0",
+      "pickup_due": "1037.0",
+      "assigned_sat": "S1"
+    },
+    "C44_order": {
+      "delivery_ready": "388.0",
+      "delivery_due": "420.0",
+      "pickup_ready": "790.0",
+      "pickup_due": "1030.0",
+      "assigned_sat": "S5"
+    },
+    "C26_order": {
+      "delivery_ready": "139.0",
+      "delivery_due": "169.0",
+      "pickup_ready": "539.0",
+      "pickup_due": "779.0",
+      "assigned_sat": "S2"
+    },
+    "C69_order": {
+      "delivery_ready": "224.0",
+      "delivery_due": "242.0",
+      "pickup_ready": "612.0",
+      "pickup_due": "852.0",
+      "assigned_sat": "S9"
+    },
+    "C36_order": {
+      "delivery_ready": "69.0",
+      "delivery_due": "79.0",
+      "pickup_ready": "449.0",
+      "pickup_due": "689.0",
+      "assigned_sat": "S2"
+    },
+    "C99_order": {
+      "delivery_ready": "245.0",
+      "delivery_due": "259.0",
+      "pickup_ready": "629.0",
+      "pickup_due": "869.0",
+      "assigned_sat": "S7"
+    },
+    "C84_order": {
+      "delivery_ready": "511.0",
+      "delivery_due": "523.0",
+      "pickup_ready": "893.0",
+      "pickup_due": "1133.0",
+      "assigned_sat": "S7"
+    },
+    "C64_order": {
+      "delivery_ready": "256.0",
+      "delivery_due": "270.0",
+      "pickup_ready": "640.0",
+      "pickup_due": "880.0",
+      "assigned_sat": "S2"
+    },
+    "C10_order": {
+      "delivery_ready": "496.0",
+      "delivery_due": "522.0",
+      "pickup_ready": "892.0",
+      "pickup_due": "1132.0",
+      "assigned_sat": "S9"
+    },
+    "C40_order": {
+      "delivery_ready": "594.0",
+      "delivery_due": "608.0",
+      "pickup_ready": "978.0",
+      "pickup_due": "1218.0",
+      "assigned_sat": "S7"
+    },
+    "C34_order": {
+      "delivery_ready": "123.0",
+      "delivery_due": "141.0",
+      "pickup_ready": "511.0",
+      "pickup_due": "751.0",
+      "assigned_sat": "S8"
+    },
+    "C45_order": {
+      "delivery_ready": "492.0",
+      "delivery_due": "524.0",
+      "pickup_ready": "894.0",
+      "pickup_due": "1134.0",
+      "assigned_sat": "S5"
+    },
+    "C21_order": {
+      "delivery_ready": "256.0",
+      "delivery_due": "272.0",
+      "pickup_ready": "642.0",
+      "pickup_due": "882.0",
+      "assigned_sat": "S2"
+    },
+    "C94_order": {
+      "delivery_ready": "422.0",
+      "delivery_due": "440.0",
+      "pickup_ready": "810.0",
+      "pickup_due": "1050.0",
+      "assigned_sat": "S5"
+    },
+    "C5_order": {
+      "delivery_ready": "424.0",
+      "delivery_due": "440.0",
+      "pickup_ready": "810.0",
+      "pickup_due": "1050.0",
+      "assigned_sat": "S9"
+    },
+    "C39_order": {
+      "delivery_ready": "359.0",
+      "delivery_due": "369.0",
+      "pickup_ready": "739.0",
+      "pickup_due": "979.0",
+      "assigned_sat": "S2"
+    },
+    "C46_order": {
+      "delivery_ready": "281.0",
+      "delivery_due": "291.0",
+      "pickup_ready": "661.0",
+      "pickup_due": "901.0",
+      "assigned_sat": "S8"
+    },
+    "C12_order": {
+      "delivery_ready": "458.0",
+      "delivery_due": "474.0",
+      "pickup_ready": "844.0",
+      "pickup_due": "1084.0",
+      "assigned_sat": "S5"
+    },
+    "C62_order": {
+      "delivery_ready": "264.0",
+      "delivery_due": "278.0",
+      "pickup_ready": "648.0",
+      "pickup_due": "888.0",
+      "assigned_sat": "S3"
+    },
+    "C58_order": {
+      "delivery_ready": "84.0",
+      "delivery_due": "116.0",
+      "pickup_ready": "486.0",
+      "pickup_due": "726.0",
+      "assigned_sat": "S2"
+    },
+    "C0_order": {
+      "delivery_ready": "312.0",
+      "delivery_due": "350.0",
+      "pickup_ready": "720.0",
+      "pickup_due": "960.0",
+      "assigned_sat": "S6"
+    },
+    "C31_order": {
+      "delivery_ready": "472.0",
+      "delivery_due": "500.0",
+      "pickup_ready": "870.0",
+      "pickup_due": "1110.0",
+      "assigned_sat": "S9"
+    },
+    "C86_order": {
+      "delivery_ready": "511.0",
+      "delivery_due": "527.0",
+      "pickup_ready": "897.0",
+      "pickup_due": "1137.0",
+      "assigned_sat": "S6"
+    },
+    "C17_order": {
+      "delivery_ready": "140.0",
+      "delivery_due": "158.0",
+      "pickup_ready": "528.0",
+      "pickup_due": "768.0",
+      "assigned_sat": "S7"
+    },
+    "C25_order": {
+      "delivery_ready": "418.0",
+      "delivery_due": "454.0",
+      "pickup_ready": "824.0",
+      "pickup_due": "1064.0",
+      "assigned_sat": "S2"
+    },
+    "C30_order": {
+      "delivery_ready": "173.0",
+      "delivery_due": "207.0",
+      "pickup_ready": "577.0",
+      "pickup_due": "817.0",
+      "assigned_sat": "S3"
+    },
+    "C89_order": {
+      "delivery_ready": "168.0",
+      "delivery_due": "178.0",
+      "pickup_ready": "548.0",
+      "pickup_due": "788.0",
+      "assigned_sat": "S7"
+    },
+    "C50_order": {
+      "delivery_ready": "529.0",
+      "delivery_due": "555.0",
+      "pickup_ready": "925.0",
+      "pickup_due": "1165.0",
+      "assigned_sat": "S6"
+    },
+    "C7_order": {
+      "delivery_ready": "249.0",
+      "delivery_due": "287.0",
+      "pickup_ready": "657.0",
+      "pickup_due": "897.0",
+      "assigned_sat": "S8"
+    },
+    "C73_order": {
+      "delivery_ready": "81.0",
+      "delivery_due": "115.0",
+      "pickup_ready": "485.0",
+      "pickup_due": "725.0",
+      "assigned_sat": "S7"
+    },
+    "C63_order": {
+      "delivery_ready": "278.0",
+      "delivery_due": "304.0",
+      "pickup_ready": "674.0",
+      "pickup_due": "914.0",
+      "assigned_sat": "S2"
+    },
+    "C98_order": {
+      "delivery_ready": "398.0",
+      "delivery_due": "410.0",
+      "pickup_ready": "780.0",
+      "pickup_due": "1020.0",
+      "assigned_sat": "S2"
+    },
+    "C75_order": {
+      "delivery_ready": "102.0",
+      "delivery_due": "122.0",
+      "pickup_ready": "492.0",
+      "pickup_due": "732.0",
+      "assigned_sat": "S9"
+    },
+    "C2_order": {
+      "delivery_ready": "336.0",
+      "delivery_due": "358.0",
+      "pickup_ready": "728.0",
+      "pickup_due": "968.0",
+      "assigned_sat": "S5"
+    },
+    "C11_order": {
+      "delivery_ready": "440.0",
+      "delivery_due": "462.0",
+      "pickup_ready": "832.0",
+      "pickup_due": "1072.0",
+      "assigned_sat": "S6"
+    },
+    "C78_order": {
+      "delivery_ready": "562.0",
+      "delivery_due": "580.0",
+      "pickup_ready": "950.0",
+      "pickup_due": "1190.0",
+      "assigned_sat": "S5"
+    },
+    "C85_order": {
+      "delivery_ready": "553.0",
+      "delivery_due": "569.0",
+      "pickup_ready": "939.0",
+      "pickup_due": "1179.0",
+      "assigned_sat": "S1"
+    },
+    "C37_order": {
+      "delivery_ready": "129.0",
+      "delivery_due": "157.0",
+      "pickup_ready": "527.0",
+      "pickup_due": "767.0",
+      "assigned_sat": "S8"
+    },
+    "C32_order": {
+      "delivery_ready": "98.0",
+      "delivery_due": "112.0",
+      "pickup_ready": "482.0",
+      "pickup_due": "722.0",
+      "assigned_sat": "S7"
+    },
+    "C18_order": {
+      "delivery_ready": "88.0",
+      "delivery_due": "116.0",
+      "pickup_ready": "486.0",
+      "pickup_due": "726.0",
+      "assigned_sat": "S6"
+    },
+    "C24_order": {
+      "delivery_ready": "111.0",
+      "delivery_due": "127.0",
+      "pickup_ready": "497.0",
+      "pickup_due": "737.0",
+      "assigned_sat": "S2"
+    },
+    "C81_order": {
+      "delivery_ready": "335.0",
+      "delivery_due": "355.0",
+      "pickup_ready": "725.0",
+      "pickup_due": "965.0",
+      "assigned_sat": "S6"
+    },
+    "C6_order": {
+      "delivery_ready": "198.0",
+      "delivery_due": "224.0",
+      "pickup_ready": "594.0",
+      "pickup_due": "834.0",
+      "assigned_sat": "S0"
+    },
+    "C83_order": {
+      "delivery_ready": "432.0",
+      "delivery_due": "462.0",
+      "pickup_ready": "832.0",
+      "pickup_due": "1072.0",
+      "assigned_sat": "S7"
+    },
+    "C66_order": {
+      "delivery_ready": "584.0",
+      "delivery_due": "620.0",
+      "pickup_ready": "990.0",
+      "pickup_due": "1230.0",
+      "assigned_sat": "S5"
+    },
+    "C35_order": {
+      "delivery_ready": "480.0",
+      "delivery_due": "492.0",
+      "pickup_ready": "862.0",
+      "pickup_due": "1102.0",
+      "assigned_sat": "S1"
+    },
+    "C22_order": {
+      "delivery_ready": "546.0",
+      "delivery_due": "574.0",
+      "pickup_ready": "944.0",
+      "pickup_due": "1184.0",
+      "assigned_sat": "S6"
+    },
+    "C79_order": {
+      "delivery_ready": "212.0",
+      "delivery_due": "242.0",
+      "pickup_ready": "612.0",
+      "pickup_due": "852.0",
+      "assigned_sat": "S4"
+    },
+    "C13_order": {
+      "delivery_ready": "299.0",
+      "delivery_due": "313.0",
+      "pickup_ready": "683.0",
+      "pickup_due": "923.0",
+      "assigned_sat": "S4"
+    },
+    "C54_order": {
+      "delivery_ready": "607.0",
+      "delivery_due": "639.0",
+      "pickup_ready": "1009.0",
+      "pickup_due": "1249.0",
+      "assigned_sat": "S9"
+    },
+    "C41_order": {
+      "delivery_ready": "188.0",
+      "delivery_due": "214.0",
+      "pickup_ready": "584.0",
+      "pickup_due": "824.0",
+      "assigned_sat": "S0"
+    },
+    "C20_order": {
+      "delivery_ready": "108.0",
+      "delivery_due": "140.0",
+      "pickup_ready": "510.0",
+      "pickup_due": "750.0",
+      "assigned_sat": "S9"
+    },
+    "C47_order": {
+      "delivery_ready": "560.0",
+      "delivery_due": "580.0",
+      "pickup_ready": "950.0",
+      "pickup_due": "1190.0",
+      "assigned_sat": "S1"
+    },
+    "C87_order": {
+      "delivery_ready": "475.0",
+      "delivery_due": "487.0",
+      "pickup_ready": "857.0",
+      "pickup_due": "1097.0",
+      "assigned_sat": "S8"
+    },
+    "C51_order": {
+      "delivery_ready": "166.0",
+      "delivery_due": "202.0",
+      "pickup_ready": "572.0",
+      "pickup_due": "812.0",
+      "assigned_sat": "S8"
+    },
+    "C29_order": {
+      "delivery_ready": "568.0",
+      "delivery_due": "590.0",
+      "pickup_ready": "960.0",
+      "pickup_due": "1200.0",
+      "assigned_sat": "S4"
+    },
+    "C70_order": {
+      "delivery_ready": "489.0",
+      "delivery_due": "511.0",
+      "pickup_ready": "881.0",
+      "pickup_due": "1121.0",
+      "assigned_sat": "S0"
+    },
+    "C71_order": {
+      "delivery_ready": "119.0",
+      "delivery_due": "141.0",
+      "pickup_ready": "511.0",
+      "pickup_due": "751.0",
+      "assigned_sat": "S6"
+    },
+    "C61_order": {
+      "delivery_ready": "555.0",
+      "delivery_due": "573.0",
+      "pickup_ready": "943.0",
+      "pickup_due": "1183.0",
+      "assigned_sat": "S0"
+    },
+    "C77_order": {
+      "delivery_ready": "294.0",
+      "delivery_due": "330.0",
+      "pickup_ready": "700.0",
+      "pickup_due": "940.0",
+      "assigned_sat": "S1"
+    },
+    "C65_order": {
+      "delivery_ready": "455.0",
+      "delivery_due": "475.0",
+      "pickup_ready": "845.0",
+      "pickup_due": "1085.0",
+      "assigned_sat": "S5"
+    },
+    "C91_order": {
+      "delivery_ready": "230.0",
+      "delivery_due": "254.0",
+      "pickup_ready": "624.0",
+      "pickup_due": "864.0",
+      "assigned_sat": "S2"
+    },
+    "C49_order": {
+      "delivery_ready": "149.0",
+      "delivery_due": "175.0",
+      "pickup_ready": "545.0",
+      "pickup_due": "785.0",
+      "assigned_sat": "S8"
+    },
+    "C8_order": {
+      "delivery_ready": "580.0",
+      "delivery_due": "618.0",
+      "pickup_ready": "988.0",
+      "pickup_due": "1228.0",
+      "assigned_sat": "S2"
+    },
+    "C53_order": {
+      "delivery_ready": "382.0",
+      "delivery_due": "406.0",
+      "pickup_ready": "776.0",
+      "pickup_due": "1016.0",
+      "assigned_sat": "S4"
+    },
+    "C97_order": {
+      "delivery_ready": "223.0",
+      "delivery_due": "241.0",
+      "pickup_ready": "611.0",
+      "pickup_due": "851.0",
+      "assigned_sat": "S9"
+    },
+    "C95_order": {
+      "delivery_ready": "552.0",
+      "delivery_due": "576.0",
+      "pickup_ready": "946.0",
+      "pickup_due": "1186.0",
+      "assigned_sat": "S2"
+    },
+    "C28_order": {
+      "delivery_ready": "390.0",
+      "delivery_due": "402.0",
+      "pickup_ready": "772.0",
+      "pickup_due": "1012.0",
+      "assigned_sat": "S9"
+    },
+    "C3_order": {
+      "delivery_ready": "60.0",
+      "delivery_due": "88.0",
+      "pickup_ready": "458.0",
+      "pickup_due": "698.0",
+      "assigned_sat": "S4"
+    },
+    "C55_order": {
+      "delivery_ready": "298.0",
+      "delivery_due": "322.0",
+      "pickup_ready": "692.0",
+      "pickup_due": "932.0",
+      "assigned_sat": "S9"
+    },
+    "C90_order": {
+      "delivery_ready": "497.0",
+      "delivery_due": "525.0",
+      "pickup_ready": "895.0",
+      "pickup_due": "1135.0",
+      "assigned_sat": "S5"
+    }
+  },
+  "reference_e2_routes": [
+    {
+      "satellite": "S2",
+      "vehicle": 0,
+      "depart_after": 516.85,
+      "tasks": [
+        [
+          "C21_order",
+          "d"
+        ],
+        [
+          "C60_order",
+          "d"
+        ],
+        [
+          "C21_order",
+          "p"
+        ],
+        [
+          "C60_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S2",
+      "vehicle": 1,
+      "depart_after": 516.85,
+      "tasks": [
+        [
+          "C25_order",
+          "d"
+        ],
+        [
+          "C98_order",
+          "d"
+        ],
+        [
+          "C25_order",
+          "p"
+        ],
+        [
+          "C98_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S2",
+      "vehicle": 2,
+      "depart_after": 516.85,
+      "tasks": [
+        [
+          "C64_order",
+          "d"
+        ],
+        [
+          "C23_order",
+          "d"
+        ],
+        [
+          "C64_order",
+          "p"
+        ],
+        [
+          "C23_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S2",
+      "vehicle": 3,
+      "depart_after": 756.85,
+      "tasks": [
+        [
+          "C26_order",
+          "d"
+        ],
+        [
+          "C92_order",
+          "d"
+        ],
+        [
+          "C26_order",
+          "p"
+        ],
+        [
+          "C92_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S2",
+      "vehicle": 4,
+      "depart_after": 756.85,
+      "tasks": [
+        [
+          "C95_order",
+          "d"
+        ],
+        [
+          "C91_order",
+          "d"
+        ],
+        [
+          "C95_order",
+          "p"
+        ],
+        [
+          "C91_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S2",
+      "vehicle": 1,
+      "depart_after": 756.85,
+      "tasks": [
+        [
+          "C8_order",
+          "d"
+        ],
+        [
+          "C82_order",
+          "d"
+        ],
+        [
+          "C8_order",
+          "p"
+        ],
+        [
+          "C82_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S2",
+      "vehicle": 2,
+      "depart_after": 996.85,
+      "tasks": [
+        [
+          "C63_order",
+          "d"
+        ],
+        [
+          "C24_order",
+          "d"
+        ],
+        [
+          "C63_order",
+          "p"
+        ],
+        [
+          "C24_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S2",
+      "vehicle": 0,
+      "depart_after": 996.85,
+      "tasks": [
+        [
+          "C36_order",
+          "d"
+        ],
+        [
+          "C52_order",
+          "d"
+        ],
+        [
+          "C36_order",
+          "p"
+        ],
+        [
+          "C52_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S2",
+      "vehicle": 3,
+      "depart_after": 996.85,
+      "tasks": [
+        [
+          "C39_order",
+          "d"
+        ],
+        [
+          "C58_order",
+          "d"
+        ],
+        [
+          "C39_order",
+          "p"
+        ],
+        [
+          "C58_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S3",
+      "vehicle": 0,
+      "depart_after": 514.7,
+      "tasks": [
+        [
+          "C30_order",
+          "d"
+        ],
+        [
+          "C76_order",
+          "d"
+        ],
+        [
+          "C30_order",
+          "p"
+        ],
+        [
+          "C76_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S3",
+      "vehicle": 1,
+      "depart_after": 514.7,
+      "tasks": [
+        [
+          "C29_order",
+          "d"
+        ],
+        [
+          "C3_order",
+          "d"
+        ],
+        [
+          "C29_order",
+          "p"
+        ],
+        [
+          "C3_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S3",
+      "vehicle": 2,
+      "depart_after": 514.7,
+      "tasks": [
+        [
+          "C68_order",
+          "d"
+        ],
+        [
+          "C19_order",
+          "d"
+        ],
+        [
+          "C68_order",
+          "p"
+        ],
+        [
+          "C19_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S3",
+      "vehicle": 3,
+      "depart_after": 514.7,
+      "tasks": [
+        [
+          "C57_order",
+          "d"
+        ],
+        [
+          "C57_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S3",
+      "vehicle": 4,
+      "depart_after": 754.7,
+      "tasks": [
+        [
+          "C38_order",
+          "d"
+        ],
+        [
+          "C62_order",
+          "d"
+        ],
+        [
+          "C38_order",
+          "p"
+        ],
+        [
+          "C62_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S3",
+      "vehicle": 0,
+      "depart_after": 754.7,
+      "tasks": [
+        [
+          "C13_order",
+          "d"
+        ],
+        [
+          "C67_order",
+          "d"
+        ],
+        [
+          "C13_order",
+          "p"
+        ],
+        [
+          "C67_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S3",
+      "vehicle": 3,
+      "depart_after": 754.7,
+      "tasks": [
+        [
+          "C83_order",
+          "d"
+        ],
+        [
+          "C1_order",
+          "d"
+        ],
+        [
+          "C83_order",
+          "p"
+        ],
+        [
+          "C1_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S3",
+      "vehicle": 2,
+      "depart_after": 754.7,
+      "tasks": [
+        [
+          "C99_order",
+          "d"
+        ],
+        [
+          "C99_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S3",
+      "vehicle": 1,
+      "depart_after": 994.7,
+      "tasks": [
+        [
+          "C72_order",
+          "d"
+        ],
+        [
+          "C74_order",
+          "d"
+        ],
+        [
+          "C72_order",
+          "p"
+        ],
+        [
+          "C74_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S3",
+      "vehicle": 2,
+      "depart_after": 994.7,
+      "tasks": [
+        [
+          "C43_order",
+          "d"
+        ],
+        [
+          "C53_order",
+          "d"
+        ],
+        [
+          "C43_order",
+          "p"
+        ],
+        [
+          "C53_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S3",
+      "vehicle": 4,
+      "depart_after": 994.7,
+      "tasks": [
+        [
+          "C35_order",
+          "d"
+        ],
+        [
+          "C77_order",
+          "d"
+        ],
+        [
+          "C35_order",
+          "p"
+        ],
+        [
+          "C77_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S3",
+      "vehicle": 0,
+      "depart_after": 994.7,
+      "tasks": [
+        [
+          "C40_order",
+          "d"
+        ],
+        [
+          "C40_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S5",
+      "vehicle": 0,
+      "depart_after": 524.2,
+      "tasks": [
+        [
+          "C66_order",
+          "d"
+        ],
+        [
+          "C16_order",
+          "d"
+        ],
+        [
+          "C66_order",
+          "p"
+        ],
+        [
+          "C16_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S5",
+      "vehicle": 1,
+      "depart_after": 524.2,
+      "tasks": [
+        [
+          "C14_order",
+          "d"
+        ],
+        [
+          "C45_order",
+          "d"
+        ],
+        [
+          "C14_order",
+          "p"
+        ],
+        [
+          "C45_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S5",
+      "vehicle": 2,
+      "depart_after": 524.2,
+      "tasks": [
+        [
+          "C48_order",
+          "d"
+        ],
+        [
+          "C70_order",
+          "d"
+        ],
+        [
+          "C48_order",
+          "p"
+        ],
+        [
+          "C70_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S5",
+      "vehicle": 3,
+      "depart_after": 524.2,
+      "tasks": [
+        [
+          "C59_order",
+          "d"
+        ],
+        [
+          "C33_order",
+          "d"
+        ],
+        [
+          "C59_order",
+          "p"
+        ],
+        [
+          "C33_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S5",
+      "vehicle": 4,
+      "depart_after": 764.2,
+      "tasks": [
+        [
+          "C12_order",
+          "d"
+        ],
+        [
+          "C6_order",
+          "d"
+        ],
+        [
+          "C12_order",
+          "p"
+        ],
+        [
+          "C6_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S5",
+      "vehicle": 3,
+      "depart_after": 764.2,
+      "tasks": [
+        [
+          "C78_order",
+          "d"
+        ],
+        [
+          "C94_order",
+          "d"
+        ],
+        [
+          "C78_order",
+          "p"
+        ],
+        [
+          "C94_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S5",
+      "vehicle": 2,
+      "depart_after": 764.2,
+      "tasks": [
+        [
+          "C88_order",
+          "d"
+        ],
+        [
+          "C9_order",
+          "d"
+        ],
+        [
+          "C88_order",
+          "p"
+        ],
+        [
+          "C9_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S5",
+      "vehicle": 1,
+      "depart_after": 764.2,
+      "tasks": [
+        [
+          "C65_order",
+          "d"
+        ],
+        [
+          "C65_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S5",
+      "vehicle": 0,
+      "depart_after": 1004.2,
+      "tasks": [
+        [
+          "C15_order",
+          "d"
+        ],
+        [
+          "C41_order",
+          "d"
+        ],
+        [
+          "C15_order",
+          "p"
+        ],
+        [
+          "C41_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S5",
+      "vehicle": 1,
+      "depart_after": 1004.2,
+      "tasks": [
+        [
+          "C79_order",
+          "d"
+        ],
+        [
+          "C2_order",
+          "d"
+        ],
+        [
+          "C79_order",
+          "p"
+        ],
+        [
+          "C2_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S5",
+      "vehicle": 3,
+      "depart_after": 1004.2,
+      "tasks": [
+        [
+          "C44_order",
+          "d"
+        ],
+        [
+          "C90_order",
+          "d"
+        ],
+        [
+          "C44_order",
+          "p"
+        ],
+        [
+          "C90_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S5",
+      "vehicle": 2,
+      "depart_after": 1004.2,
+      "tasks": [
+        [
+          "C61_order",
+          "d"
+        ],
+        [
+          "C61_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S6",
+      "vehicle": 0,
+      "depart_after": 520.48333333,
+      "tasks": [
+        [
+          "C86_order",
+          "d"
+        ],
+        [
+          "C0_order",
+          "d"
+        ],
+        [
+          "C86_order",
+          "p"
+        ],
+        [
+          "C0_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S6",
+      "vehicle": 1,
+      "depart_after": 520.48333333,
+      "tasks": [
+        [
+          "C18_order",
+          "d"
+        ],
+        [
+          "C7_order",
+          "d"
+        ],
+        [
+          "C18_order",
+          "p"
+        ],
+        [
+          "C7_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S6",
+      "vehicle": 2,
+      "depart_after": 520.48333333,
+      "tasks": [
+        [
+          "C49_order",
+          "d"
+        ],
+        [
+          "C37_order",
+          "d"
+        ],
+        [
+          "C49_order",
+          "p"
+        ],
+        [
+          "C37_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S6",
+      "vehicle": 3,
+      "depart_after": 760.48333333,
+      "tasks": [
+        [
+          "C81_order",
+          "d"
+        ],
+        [
+          "C71_order",
+          "d"
+        ],
+        [
+          "C81_order",
+          "p"
+        ],
+        [
+          "C71_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S6",
+      "vehicle": 4,
+      "depart_after": 760.48333333,
+      "tasks": [
+        [
+          "C34_order",
+          "d"
+        ],
+        [
+          "C87_order",
+          "d"
+        ],
+        [
+          "C34_order",
+          "p"
+        ],
+        [
+          "C87_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S6",
+      "vehicle": 1,
+      "depart_after": 760.48333333,
+      "tasks": [
+        [
+          "C50_order",
+          "d"
+        ],
+        [
+          "C46_order",
+          "d"
+        ],
+        [
+          "C50_order",
+          "p"
+        ],
+        [
+          "C46_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S6",
+      "vehicle": 0,
+      "depart_after": 1000.48333333,
+      "tasks": [
+        [
+          "C22_order",
+          "d"
+        ],
+        [
+          "C11_order",
+          "d"
+        ],
+        [
+          "C22_order",
+          "p"
+        ],
+        [
+          "C11_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S6",
+      "vehicle": 2,
+      "depart_after": 1000.48333333,
+      "tasks": [
+        [
+          "C4_order",
+          "d"
+        ],
+        [
+          "C51_order",
+          "d"
+        ],
+        [
+          "C4_order",
+          "p"
+        ],
+        [
+          "C51_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S6",
+      "vehicle": 1,
+      "depart_after": 1000.48333333,
+      "tasks": [
+        [
+          "C47_order",
+          "d"
+        ],
+        [
+          "C85_order",
+          "d"
+        ],
+        [
+          "C47_order",
+          "p"
+        ],
+        [
+          "C85_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S9",
+      "vehicle": 0,
+      "depart_after": 502.51666667,
+      "tasks": [
+        [
+          "C31_order",
+          "d"
+        ],
+        [
+          "C93_order",
+          "d"
+        ],
+        [
+          "C31_order",
+          "p"
+        ],
+        [
+          "C93_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S9",
+      "vehicle": 1,
+      "depart_after": 502.51666667,
+      "tasks": [
+        [
+          "C42_order",
+          "d"
+        ],
+        [
+          "C69_order",
+          "d"
+        ],
+        [
+          "C42_order",
+          "p"
+        ],
+        [
+          "C69_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S9",
+      "vehicle": 2,
+      "depart_after": 502.51666667,
+      "tasks": [
+        [
+          "C97_order",
+          "d"
+        ],
+        [
+          "C96_order",
+          "d"
+        ],
+        [
+          "C97_order",
+          "p"
+        ],
+        [
+          "C96_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S9",
+      "vehicle": 3,
+      "depart_after": 502.51666667,
+      "tasks": [
+        [
+          "C73_order",
+          "d"
+        ],
+        [
+          "C73_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S9",
+      "vehicle": 4,
+      "depart_after": 742.51666667,
+      "tasks": [
+        [
+          "C10_order",
+          "d"
+        ],
+        [
+          "C27_order",
+          "d"
+        ],
+        [
+          "C10_order",
+          "p"
+        ],
+        [
+          "C27_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S9",
+      "vehicle": 3,
+      "depart_after": 742.51666667,
+      "tasks": [
+        [
+          "C20_order",
+          "d"
+        ],
+        [
+          "C56_order",
+          "d"
+        ],
+        [
+          "C20_order",
+          "p"
+        ],
+        [
+          "C56_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S9",
+      "vehicle": 0,
+      "depart_after": 742.51666667,
+      "tasks": [
+        [
+          "C17_order",
+          "d"
+        ],
+        [
+          "C32_order",
+          "d"
+        ],
+        [
+          "C17_order",
+          "p"
+        ],
+        [
+          "C32_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S9",
+      "vehicle": 1,
+      "depart_after": 742.51666667,
+      "tasks": [
+        [
+          "C80_order",
+          "d"
+        ],
+        [
+          "C80_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S9",
+      "vehicle": 2,
+      "depart_after": 982.51666667,
+      "tasks": [
+        [
+          "C75_order",
+          "d"
+        ],
+        [
+          "C55_order",
+          "d"
+        ],
+        [
+          "C75_order",
+          "p"
+        ],
+        [
+          "C55_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S9",
+      "vehicle": 1,
+      "depart_after": 982.51666667,
+      "tasks": [
+        [
+          "C5_order",
+          "d"
+        ],
+        [
+          "C28_order",
+          "d"
+        ],
+        [
+          "C5_order",
+          "p"
+        ],
+        [
+          "C28_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S9",
+      "vehicle": 3,
+      "depart_after": 982.51666667,
+      "tasks": [
+        [
+          "C54_order",
+          "d"
+        ],
+        [
+          "C84_order",
+          "d"
+        ],
+        [
+          "C54_order",
+          "p"
+        ],
+        [
+          "C84_order",
+          "p"
+        ]
+      ]
+    },
+    {
+      "satellite": "S9",
+      "vehicle": 4,
+      "depart_after": 982.51666667,
+      "tasks": [
+        [
+          "C89_order",
+          "d"
+        ],
+        [
+          "C89_order",
+          "p"
+        ]
+      ]
+    }
+  ],
+  "reference_time_unit": "minutes",
+  "reference_purpose": "Feasibility construction only; no objective optimization or performance filtering.",
+  "reference_rule": "Per-territory hash cohorts; nearest feasible capacity groups; earliest available vehicle; delivery then collection.",
+  "usage_profile": 2,
+  "appointment_rule": "Separate hash streams for cohort, use and collection delay; window slack around disclosed constructive service times.",
+  "window_rule": "One operating day; delivery and return appointment windows around disclosed feasible reference tours.",
+  "limitation": "Derived short-use transport-box scenarios, not original benchmark windows or observed operations.",
+  "family_id": "zhou_Set2_100-10-1_scenario02",
+  "source_kind": "zhou_derived_scenario",
+  "size": "large",
+  "input_source_sha256": {
+    "data/zhou_later_pickup/large/standard_same_day/Set2_100-10-1.csv": "9a85280b23fc23596bc0b60fe1852d38616c16945bf9d47a9bfb69f2ba28715c",
+    "config/datasets/static_batch_v2.json": "e0cc2d2dc3dff66771f5cdb6038bda557b17becfdf712ce344c8799847b5fdae",
+    "tools/data/design_static_scenarios.py": "1fe395af69c63e66dfc9794b4351f303c7b4910e3537e66916584bbd90c1e79c"
+  },
+  "original_fleet": {
+    "schema_version": 1,
+    "source_type": "scenario_assumption",
+    "parameter_scope": "operational_scenarios_v2_zhou",
+    "units": {
+      "weight": "benchmark demand units",
+      "volume": "benchmark volume units",
+      "speed": "benchmark coordinate units per minute"
+    },
+    "E1_vehicle_count": 5,
+    "E1_Qk": 3000,
+    "E1_Ck": 200,
+    "vehicles_per_satellite": 5,
+    "E2_Qv": 180,
+    "E2_Cv": 6,
+    "container_weight": 2,
+    "container_volume": 1,
+    "speed": 2.0
+  },
+  "fleet_rule": "Published size-based fleet and capacities; identical across paired profiles and B1/B2/B3; no demand-driven expansion.",
+  "cohort_by_order": {
+    "C98_order": 0,
+    "C82_order": 1,
+    "C24_order": 2,
+    "C60_order": 0,
+    "C95_order": 1,
+    "C36_order": 2,
+    "C64_order": 0,
+    "C26_order": 1,
+    "C63_order": 2,
+    "C25_order": 0,
+    "C92_order": 1,
+    "C58_order": 2,
+    "C21_order": 0,
+    "C91_order": 1,
+    "C52_order": 2,
+    "C23_order": 0,
+    "C8_order": 1,
+    "C39_order": 2,
+    "C29_order": 0,
+    "C67_order": 1,
+    "C77_order": 2,
+    "C30_order": 0,
+    "C83_order": 1,
+    "C72_order": 2,
+    "C57_order": 0,
+    "C62_order": 1,
+    "C35_order": 2,
+    "C76_order": 0,
+    "C1_order": 1,
+    "C40_order": 2,
+    "C68_order": 0,
+    "C99_order": 1,
+    "C43_order": 2,
+    "C3_order": 0,
+    "C38_order": 1,
+    "C74_order": 2,
+    "C19_order": 0,
+    "C13_order": 1,
+    "C53_order": 2,
+    "C70_order": 0,
+    "C12_order": 1,
+    "C61_order": 2,
+    "C66_order": 0,
+    "C78_order": 1,
+    "C79_order": 2,
+    "C14_order": 0,
+    "C9_order": 1,
+    "C44_order": 2,
+    "C59_order": 0,
+    "C65_order": 1,
+    "C2_order": 2,
+    "C48_order": 0,
+    "C94_order": 1,
+    "C15_order": 2,
+    "C33_order": 0,
+    "C88_order": 1,
+    "C90_order": 2,
+    "C45_order": 0,
+    "C6_order": 1,
+    "C41_order": 2,
+    "C16_order": 0,
+    "C7_order": 0,
+    "C50_order": 1,
+    "C51_order": 2,
+    "C37_order": 0,
+    "C81_order": 1,
+    "C85_order": 2,
+    "C18_order": 0,
+    "C46_order": 1,
+    "C22_order": 2,
+    "C49_order": 0,
+    "C71_order": 1,
+    "C47_order": 2,
+    "C86_order": 0,
+    "C87_order": 1,
+    "C4_order": 2,
+    "C0_order": 0,
+    "C34_order": 1,
+    "C11_order": 2,
+    "C97_order": 0,
+    "C56_order": 1,
+    "C75_order": 2,
+    "C42_order": 0,
+    "C20_order": 1,
+    "C28_order": 2,
+    "C31_order": 0,
+    "C32_order": 1,
+    "C84_order": 2,
+    "C69_order": 0,
+    "C80_order": 1,
+    "C55_order": 2,
+    "C73_order": 0,
+    "C27_order": 1,
+    "C89_order": 2,
+    "C96_order": 0,
+    "C10_order": 1,
+    "C5_order": 2,
+    "C93_order": 0,
+    "C17_order": 1,
+    "C54_order": 2
+  },
+  "pairing_contract": "All order fields except delivery_batch_id are identical; same network, fleet, pool, cycle and final cutoff.",
+  "return_batch": "Not an input. Derived by the solver/auditor from actual unload times."
+}

@@ -1,0 +1,36 @@
+{
+  "created_utc": "2026-10-01T16:40:20.427242+00:00",
+  "candidate": "opt-in bound_pruning: certified frontier closure plus relaxed nonmetric return-cost floor",
+  "scope": "B1 M1/M2 delivery label pricer only; M3/M4 remain complete original kernel",
+  "proof": "Each frontier key lower-bounds every completion. Shortest path to sink in the full task graph, allowing already visited and infeasible intermediates, lower-bounds future nonnegative edge costs. If minimum frontier bound cannot beat best replayed feasible route, pricing is complete without enumerating all dominated completions. Interrupted return-floor construction must use all-zero floors.",
+  "baseline_sha256": {
+    "models/routing/solvers/exact/single_batch_route_pricing.py": "84f27c570a83f885189fb8f427d20b92f61bcd61d7d4b7be2dadb629bd675f7b",
+    "models/routing/solvers/exact/single_batch_columns.py": "dfec47152735a887a8a0c54d7ad8303c41dcfad2fade02f462c306e99542aa81"
+  },
+  "correctness": "Independent permutation minima; all deadline/label/column interruptions; nonmetric expensive direct returns; duplicate locations, zero duration, capacities, phase one and nonnegative time penalties; root LP against complete enumerated relaxation and original integer oracle",
+  "diagnostics": "Frozen independently enumerated complete-pricing problems and actual captured root duals; compare min/bound safety, generated/expanded states and wall CPU without interpreting label count as end-to-end gain",
+  "primary_timing": {
+    "customers": [
+      20,
+      30
+    ],
+    "models": [
+      2
+    ],
+    "seeds": [
+      42,
+      43
+    ],
+    "total_time": 60,
+    "root_time": 30,
+    "pool_time": 5,
+    "methods": [
+      "baseline_label",
+      "bounded_label"
+    ],
+    "reverse_seed43": true,
+    "notes": "Only after correctness and diagnostic mechanism gain; sequential with common audited starts. If other heavy runs persist, record interference and defer adoption."
+  },
+  "gate": "At least two sources and multiple seeds/short-long budgets before default adoption; all incomplete pricing certificates independently safe; mixed results default False",
+  "no_overwrite_or_retries": true
+}

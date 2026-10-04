@@ -1,0 +1,127 @@
+diff --git a/models/routing/solvers/exact/multibatch_subset_rows.py b/models/routing/solvers/exact/multibatch_subset_rows.py
+new file mode 100644
+index 0000000..c71afc0
+--- /dev/null
++++ b/models/routing/solvers/exact/multibatch_subset_rows.py
+@@ -0,0 +1,60 @@
++"""Necessary subset-row inequalities on the complete timed route domain.
++
++For three distinct tasks, at most one selected physical trip can contain two
++or more of them: two such trips would repeat a task. Hence the column sum
++over those routes is <=1. This remains valid under supply compression, and
++cuts fractional route covers without adding route binary variables.
++"""
++from itertools import combinations
++import math
++
++
++def separate_task_triangles(tasks, weighted_sets, *, limit=16, tolerance=1e-7):
++    known = tuple(sorted(tuple(key) for key in tasks))
++    if len(set(known)) != len(known):
++        raise ValueError('Duplicate known task')
++    if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
++        raise ValueError('Positive integer triangle limit required')
++    if not math.isfinite(tolerance) or tolerance < 0:
++        raise ValueError('Nonnegative finite tolerance required')
++    rows = []
++    for keys, weight in weighted_sets:
++        keys = frozenset(tuple(key) for key in keys)
++        if not keys <= set(known) or not math.isfinite(weight) or weight < 0:
++            raise ValueError('Known task sets and nonnegative finite weights required')
++        rows.append((keys, weight))
++    violated = []
++    for triangle in combinations(known, 3):
++        subset = frozenset(triangle)
++        lhs = math.fsum(weight for keys, weight in rows if len(keys & subset) >= 2)
++        if lhs > 1+tolerance:
++            violated.append(dict(tasks=triangle, lhs=lhs, violation=lhs-1))
++    return sorted(violated, key=lambda row: (-row['violation'], row['tasks']))[:limit]
++
++
++def add_triangle_rows(problem, model, context, site, triangles, *, name='subset_row'):
++    import gurobipy as gp
++    if site not in context['routes']:
++        raise ValueError('Unknown triangle satellite')
++    known = {(o.id, kind) for o in problem.orders if o.satellite==site for kind in ('d', 'p')}
++    normalized = []
++    for triangle in triangles:
++        keys = tuple(sorted(tuple(key) for key in triangle))
++        if len(keys)!=3 or len(set(keys))!=3 or not set(keys)<=known:
++            raise ValueError('Three distinct known site tasks required')
++        if keys in normalized:
++            raise ValueError('Duplicate triangle')
++        normalized.append(keys)
++    data = context['routes'][site]
++    task_sets = [frozenset(row['keys']) for row in data['rows']]
++    records = []
++    for i, triangle in enumerate(normalized):
++        subset = frozenset(triangle)
++        matching = {j for j, keys in enumerate(task_sets) if len(keys & subset)>=2}
++        expression = gp.quicksum(var for (j, _), var in data['choices'].items() if j in matching)
++        row = model.addConstr(expression<=1, name=f'{name}_{i}')
++        records.append(dict(site=site, tasks=triangle, row=row,
++                            scope='necessary_complete_M5_task_triangle_subset_row',
++                            proven_optimal=False, proven_infeasible=False))
++    model.update()
++    return records
+diff --git a/tests/routing/test_multibatch_subset_rows.py b/tests/routing/test_multibatch_subset_rows.py
+new file mode 100644
+index 0000000..976ae7a
+--- /dev/null
++++ b/tests/routing/test_multibatch_subset_rows.py
+@@ -0,0 +1,55 @@
++"""Independent integer covers and known complete optimum projections."""
++from itertools import combinations, product
++from types import SimpleNamespace
++import pytest
++from models.routing.solvers.exact.multibatch_subset_rows import add_triangle_rows, separate_task_triangles
++from models.routing.solvers.exact.multibatch_joint_inventory import build_joint_inventory, set_joint_projection
++from models.routing.solvers.exact.solver import solve_exact
++from tests.routing.test_multibatch_departure_loads import nonmetric_problem
++from tests.routing.test_multibatch_joint_inventory import domains
++
++
++def test_half_triangle_cut_and_independent_integer_cover():
++    gp = pytest.importorskip('gurobipy')
++    tasks = [('a', 'd'), ('b', 'd'), ('c', 'd')]
++    sets = [set(keys) for keys in combinations(tasks, 2)]+[{key} for key in tasks]
++    optimum = min(sum(bits) for bits in product((0, 1), repeat=6)
++                  if all(sum(bit for bit, keys in zip(bits, sets) if key in keys)==1 for key in tasks))
++    violations = separate_task_triangles(tasks, [(keys, .5) for keys in sets[:3]])
++    assert len(violations)==1 and violations[0]['lhs']==pytest.approx(1.5)
++    problem = SimpleNamespace(orders=[SimpleNamespace(id=oid, satellite='S') for oid, _ in tasks])
++    model = gp.Model(); model.Params.OutputFlag=0; model.Params.Threads=1
++    try:
++        variables = [model.addVar(obj=1) for _ in sets]
++        for key in tasks:model.addConstr(gp.quicksum(v for v, keys in zip(variables, sets) if key in keys)==1)
++        context={'routes': {'S': {'rows': [{'keys': keys} for keys in sets],
++                                  'choices': {(i, None): v for i, v in enumerate(variables)}}}}
++        model.optimize(); assert model.ObjVal==pytest.approx(1.5)
++        add_triangle_rows(problem, model, context, 'S', [tasks])
++        model.optimize(); assert model.ObjVal==pytest.approx(optimum)==2
++        assert model.NumBinVars==0
++    finally:model.dispose()
++
++
++@pytest.mark.parametrize('seed', range(6))
++@pytest.mark.parametrize('timed', [False, True])
++def test_all_triangles_preserve_known_full_optimum(seed, timed):
++    gp=pytest.importorskip('gurobipy');problem=nonmetric_problem(seed)
++    initial=solve_exact(problem,time_limit=5);assert initial['info']['proven_optimal']
++    model,context=build_joint_inventory(problem,domains(problem,timed=timed))
++    try:
++        for site in context['routes']:
++            tasks=[(o.id,k) for o in problem.orders if o.satellite==site for k in ('d','p')]
++            add_triangle_rows(problem,model,context,site,list(combinations(tasks,3)),name='triangle_'+site)
++        model.optimize();assert model.Status==gp.GRB.OPTIMAL
++        assert model.ObjBound<=initial['info']['objective']+1e-6
++        set_joint_projection(problem,context,initial,fix=True)
++        model.optimize();assert model.Status==gp.GRB.OPTIMAL
++        assert model.ObjVal<=initial['info']['objective']+1e-6
++    finally:model.dispose()
++
++
++def test_full_cover_with_one_three_task_trip_counts_once():
++    tasks=[('a','d'),('b','d'),('c','d')]
++    assert separate_task_triangles(tasks,[(tasks,1)])==[]
++    assert separate_task_triangles(tasks,[([key],1) for key in tasks])==[]

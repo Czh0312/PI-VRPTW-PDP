@@ -1,0 +1,100 @@
+{
+  "selection_profile": "zhou_5_per_scale_v1",
+  "source_instance": "Set1_7-2-1",
+  "scale_pair_id": null,
+  "selection_rule": "Explicit five sources per scale; SHA256 order, first 50 for medium; all 7/100 customers for small/large; no solver-dependent filtering.",
+  "cohort_rule": "SHA256 order index modulo 3; B2 merges first two cohorts; B1 merges all.",
+  "time_unit": "scenario_minutes",
+  "distance_unit": "benchmark_coordinate_units_not_km",
+  "preserved_fields": [
+    "locations",
+    "assigned_satellite",
+    "goods_weight",
+    "service_time"
+  ],
+  "original_windows": {
+    "C3_order": {
+      "delivery_ready": "244.0",
+      "delivery_due": "264.0",
+      "pickup_ready": "634.0",
+      "pickup_due": "874.0"
+    },
+    "C6_order": {
+      "delivery_ready": "111.0",
+      "delivery_due": "131.0",
+      "pickup_ready": "501.0",
+      "pickup_due": "741.0"
+    },
+    "C2_order": {
+      "delivery_ready": "51.0",
+      "delivery_due": "71.0",
+      "pickup_ready": "441.0",
+      "pickup_due": "681.0"
+    },
+    "C1_order": {
+      "delivery_ready": "174.0",
+      "delivery_due": "194.0",
+      "pickup_ready": "564.0",
+      "pickup_due": "804.0"
+    },
+    "C4_order": {
+      "delivery_ready": "244.0",
+      "delivery_due": "264.0",
+      "pickup_ready": "634.0",
+      "pickup_due": "874.0"
+    },
+    "C0_order": {
+      "delivery_ready": "183.0",
+      "delivery_due": "203.0",
+      "pickup_ready": "573.0",
+      "pickup_due": "813.0"
+    },
+    "C5_order": {
+      "delivery_ready": "181.0",
+      "delivery_due": "201.0",
+      "pickup_ready": "571.0",
+      "pickup_due": "811.0"
+    }
+  },
+  "window_rule": "New scenario windows: delivery anchor+120+(source ready mod 60), width 120; pickup early 360..420, flexible 440..560 or forced-late 560..600; last cohort early. Each cohort anchor is 720 minutes apart.",
+  "limitation": "These are derived benchmark scenarios, not the original Zhou time-window instances.",
+  "family_id": "zhou_Set1_7-2-1",
+  "source_kind": "zhou_derived_scenario",
+  "size": "small",
+  "input_source_sha256": {
+    "data/zhou_later_pickup/small/standard_same_day/Set1_7-2-1.csv": "b23e585a1ed4d2bb9c33d31ffcf8cd6d35a65a72e9def4c08996a75203fde8a3",
+    "config/routing/validation/zhou_small.json": "89d4708b22cb6b0e7d0ab25a0bbf1dff502fe83f80d71c63851082712ad68ea6"
+  },
+  "original_fleet": {
+    "schema_version": 1,
+    "parameter_scope": "benchmark_validation_small",
+    "source_type": "scenario_assumption",
+    "description": "Fleet and reusable-container assumptions for Zhou small benchmark instances.",
+    "units": {
+      "weight": "benchmark demand units",
+      "volume": "benchmark volume units",
+      "speed": "coordinate units per time unit"
+    },
+    "E1_vehicle_count": 2,
+    "E1_Qk": 1500.0,
+    "E1_Ck": 40.0,
+    "vehicles_per_satellite": 4,
+    "E2_Qv": 300.0,
+    "E2_Cv": 5.0,
+    "container_weight": 2.0,
+    "container_volume": 1.0,
+    "speed": 1.0
+  },
+  "fleet_rule": "Same fleet in B1/B2/B3; E1 can carry one complete satellite shipment; one E1 per satellite available; E2 count >= largest designed cohort per satellite.",
+  "cohort_by_order": {
+    "C3_order": 0,
+    "C6_order": 1,
+    "C2_order": 2,
+    "C1_order": 0,
+    "C4_order": 1,
+    "C0_order": 2,
+    "C5_order": 0
+  },
+  "pairing_contract": "All order fields except delivery_batch_id are identical; same network, fleet, pool, cycle and final cutoff.",
+  "return_batch": "Not an input. Derived by the solver/auditor from actual unload times."
+}

@@ -1,0 +1,393 @@
+--- before/models/routing/solvers/exact/formulation.py
++++ after/models/routing/solvers/exact/formulation.py
+@@ -5,7 +5,8 @@
+ 
+ 
+ def build_model(problem, *, verbose=False, deadline=None, share_e2=True, travel_bounds=None, domain_check=None,
+-                strengthen_multibatch=True, share_cutoff=True, e2_capacity_cuts=True):
++                strengthen_multibatch=True, share_cutoff=True, e2_capacity_cuts=True,
++                linear_e2_links=True, trip_symmetry=True):
+     if len(problem.operating_policy.batches) == 1:
+         from .single_batch_formulation import build_model as build_single
+         return build_single(problem, verbose=verbose, deadline=deadline, share_e2=share_e2,
+@@ -20,6 +21,7 @@
+     compact = share_e2
+     strengthen = not single and strengthen_multibatch
+     compact_cutoff = not single and share_cutoff
++    linear_links = compact and linear_e2_links
+     windows, site_windows = {}, {}
+     if free:
+         from .domains import assignment_domains
+@@ -76,6 +78,11 @@
+             m.addConstr(counts[s]*f.container_volume <= f.e1_volume_cap)
+     deliveries = {(s, b.id): m.addVar(vtype=GRB.INTEGER, ub=H, name=f'delivery_{s}_{b.id}')
+                   for (s, bid), n in problem.demands.items() for b in p.batches if bid == b.id and (n or free)}
++    if linear_links:
++        for (s, bid), variable in deliveries.items():
++            batch = problem.batch_map[bid]
++            variable.LB = batch.start+p.e1_load_time+outward[s]+problem.service(s)
++            variable.UB = batch.cutoff
+     order_times = {(o.id, k): m.addVar(vtype=GRB.INTEGER, ub=H, name=f'{o.id}_{k}')
+                    for o in problem.orders for k in problem.task_kinds}
+     # Each task is visited exactly once across all vehicles and trip slots.
+@@ -94,6 +101,10 @@
+                 task_load_v[key].LB = volume
+     shared_arcs, aggregate_arcs = {}, {}
+     causal_limit = max(10, 4*len(problem.orders)+4*len(problem.satellites)*f.e2_per_sat_count*p.e2_max_trips_per_vehicle)
++    if linear_links:
++        # At most one trip per task. A satellite's causal DAG has its task
++        # nodes plus two endpoints per active trip, hence at most 3*T nodes.
++        causal_limit = max(1, 3*len(order_times)-1)
+     order_steps = {(o.id, k): m.addVar(ub=causal_limit) for o in problem.orders for k in problem.task_kinds}
+ 
+     def check_budget():
+@@ -154,7 +165,10 @@
+                 outgoing[a].append(x[a, b])
+         m.addConstr(start <= H*used)
+         m.addConstr(end <= H*used)
+-        m.addConstr((used == 1) >> (start >= p.cycle_start))
++        if shared and linear_links:
++            m.addConstr(start >= p.cycle_start*used)
++        else:
++            m.addConstr((used == 1) >> (start >= p.cycle_start))
+         m.addConstr(gp.quicksum(x[a, b] for a, b in arcs if a == -1) == used)
+         m.addConstr(gp.quicksum(x[a, b] for a, b in arcs if b == -2) == used)
+         initial_w = gp.quicksum(n['w'] if free and layer == 'e1' else n['w']*visit[i]
+@@ -200,14 +214,31 @@
+             right = base if b == -2 else nodes[b]['site']
+             objective += problem.distance(left, right)*x[a, b]
+             if a == -1:
+-                m.addConstr((x[a, b] == 1) >> (times[b] >= start+problem.travel(left, right)))
++                if shared and linear_links:
++                    lower = nodes[b]['window'][0]
++                    travel = problem.travel(left, right)
++                    m.addConstr(times[b] >= start+travel-(H+travel-lower)*(1-x[a, b]))
++                else:
++                    m.addConstr((x[a, b] == 1) >> (times[b] >= start+problem.travel(left, right)))
+                 if rank is not None:
+                     m.addConstr((x[a, b] == 1) >> (rank[b] == 1))
+                 sign = -1 if nodes[b]['kind'] == 'd' else 1
+-                m.addConstr((x[a, b] == 1) >> (load_w[b] == initial_w+sign*nodes[b]['w']))
+-                m.addConstr((x[a, b] == 1) >> (load_v[b] == initial_v+sign*nodes[b]['v']))
++                for load, initial, amount, capacity in (
++                        (load_w[b], initial_w, nodes[b]['w'], cap_w),
++                        (load_v[b], initial_v, nodes[b]['v'], cap_v)):
++                    if shared and linear_links:
++                        lower = amount if strengthen and sign == 1 else 0
++                        upper = max(0, capacity-amount) if strengthen and sign == -1 else capacity
++                        m.addConstr(load >= initial+sign*amount-(capacity+sign*amount-lower)*(1-x[a, b]))
++                        m.addConstr(load <= initial+sign*amount+(upper-sign*amount)*(1-x[a, b]))
++                    else:
++                        m.addConstr((x[a, b] == 1) >> (load == initial+sign*amount))
+             elif b == -2:
+-                m.addConstr((x[a, b] == 1) >> (end >= times[a]+nodes[a]['service']+problem.travel(left, right)+unload))
++                tail = nodes[a]['service']+problem.travel(left, right)+unload
++                if shared and linear_links:
++                    m.addConstr(end >= times[a]+tail-(nodes[a]['window'][1]+tail)*(1-x[a, b]))
++                else:
++                    m.addConstr((x[a, b] == 1) >> (end >= times[a]+tail))
+             else:
+                 if shared:
+                     shared_arcs.setdefault((keys[a], keys[b]), []).append(x[a, b])
+@@ -314,9 +345,13 @@
+         if not orders:
+             continue
+         first_slots = []
++        vehicle_trips = []
++        task_count = len(orders)*len(problem.task_kinds)
+         for v in range(min(f.e2_per_sat_count, len(orders)*len(problem.task_kinds))):
+             previous = None
+-            for slot in range(min(p.e2_max_trips_per_vehicle, len(orders)*len(problem.task_kinds))):
++            used_slots = []
++            slot_limit = min(p.e2_max_trips_per_vehicle, task_count//(v+1) if trip_symmetry else task_count)
++            for slot in range(slot_limit):
+                 nodes = []
+                 for o in orders:
+                     for kind in problem.task_kinds:
+@@ -327,18 +362,25 @@
+                 r = route(nodes, s, f.e2_weight_cap, f.e2_volume_cap,
+                           p.e2_return_unload_time, f'e2_{s}_{v}_{slot}', 'e2')
+                 r.update(satellite=s, vehicle=v, slot=slot)
++                used_slots.append(r['used'])
+                 if slot == 0:
+                     if first_slots:
+                         m.addConstr(r['used'] <= first_slots[-1])
+                     first_slots.append(r['used'])
+                 r['step_start'] = m.addVar(ub=causal_limit)
+                 r['step_end'] = m.addVar(ub=causal_limit)
+-                m.addConstr((r['used'] == 1) >> (r['end']+p.e2_turnaround_time <= H))
++                if linear_links:
++                    m.addConstr(r['end'] <= (H-p.e2_turnaround_time)*r['used'])
++                else:
++                    m.addConstr((r['used'] == 1) >> (r['end']+p.e2_turnaround_time <= H))
+                 previous_route = previous
+                 if previous_route is not None:
+                     m.addConstr(r['used'] <= previous['used'])
+-                    m.addConstr((r['used'] == 1) >> (r['start'] >= previous['end']+p.e2_turnaround_time))
+-                    m.addConstr((r['used'] == 1) >> (r['step_start'] >= previous['step_end']+1))
++                    if linear_links:
++                        m.addConstr(r['step_start'] >= previous['step_end']+1-(causal_limit+1)*(1-r['used']))
++                    else:
++                        m.addConstr((r['used'] == 1) >> (r['start'] >= previous['end']+p.e2_turnaround_time))
++                        m.addConstr((r['used'] == 1) >> (r['step_start'] >= previous['step_end']+1))
+                 previous = r
+                 # Calendar order makes variable creation independent of the
+                 # interpreter hash seed, which matters in timed comparisons.
+@@ -349,12 +391,22 @@
+                 # Dispatch preparation for a loaded trip occupies its vehicle.
+                 # It starts after both inbound goods and the previous trip are ready.
+                 if previous_route is not None:
+-                    m.addConstr((r['used'] == 1) >> (
+-                        r['start'] >= previous_route['end']+p.e2_turnaround_time
+-                        +p.e2_dispatch_prep_time*gp.quicksum(selects.values())))
++                    occupied = (previous_route['end']+p.e2_turnaround_time
++                                +p.e2_dispatch_prep_time*gp.quicksum(selects.values()))
++                    if linear_links:
++                        # When unused, all batch selectors are zero, and the
++                        # previous route returns by H-turnaround.
++                        m.addConstr(r['start'] >= occupied-H*(1-r['used']))
++                    else:
++                        m.addConstr((r['used'] == 1) >> (r['start'] >= occupied))
+                 for b in batches:
+                     dvis = [r['visit'][i] for i, n in enumerate(nodes) if n['kind'] == 'd' and n['order'].batch == b]
+                     m.addConstr(selects[b] <= gp.quicksum(dvis))
++                    if linear_links:
++                        # selects[b] is exactly the OR of this batch's delivery
++                        # visits. One supply link replaces one per order copy.
++                        latest = problem.batch_map[b].cutoff+p.e2_dispatch_prep_time
++                        m.addConstr(r['start'] >= deliveries[s, b]+p.e2_dispatch_prep_time-latest*(1-selects[b]))
+                     if strengthen:
+                         for resource, capacity in (('w', f.e2_weight_cap), ('v', f.e2_volume_cap)):
+                             m.addConstr(gp.quicksum(n[resource]*r['visit'][i] for i, n in enumerate(nodes)
+@@ -365,19 +417,29 @@
+                         m.addConstr((r['visit'][i] == 1) >> (order_times[o.id, n['kind']] == r['times'][i]))
+                     if n['kind'] == 'd':
+                         m.addConstr(r['visit'][i] <= selects[o.batch])
+-                        m.addConstr((r['visit'][i] == 1) >> (r['start'] >= deliveries[s, o.batch]+p.e2_dispatch_prep_time))
++                        if not linear_links:
++                            m.addConstr((r['visit'][i] == 1) >> (r['start'] >= deliveries[s, o.batch]+p.e2_dispatch_prep_time))
+                         if len(p.batches) == 1:
+                             m.addConstr((r['visit'][i] == 1) >> (r['times'][i]+o.service_time <= p.batches[0].cutoff))
+                     elif single:
+                         m.addConstr((r['visit'][i] == 1) >> (r['end'] <= p.batches[0].cutoff))
+                     elif compact_cutoff:
+-                        m.addConstr((r['visit'][i] == 1) >> (pickup_returns[o.id] == r['end']))
++                        if linear_links:
++                            lower = windows[o.id, 'p'][0]+o.service_time+travel_bounds['inward'][s][o.customer]+p.e2_return_unload_time
++                            upper = min(p.batches[-1].cutoff, H-p.e2_turnaround_time)
++                            m.addConstr(pickup_returns[o.id] >= r['end']-(H-lower)*(1-r['visit'][i]))
++                            m.addConstr(pickup_returns[o.id] <= r['end']+upper*(1-r['visit'][i]))
++                        else:
++                            m.addConstr((r['visit'][i] == 1) >> (pickup_returns[o.id] == r['end']))
+                 for (i, j), arc in r['x'].items():
+                     if compact and i >= 0 and j >= 0:
+                         continue
+                     left = r['step_start'] if i == -1 else order_steps[nodes[i]['order'].id, nodes[i]['kind']]
+                     right = r['step_end'] if j == -2 else order_steps[nodes[j]['order'].id, nodes[j]['kind']]
+-                    m.addConstr((arc == 1) >> (right >= left+1))
++                    if linear_links:
++                        m.addConstr(right >= left+1-(causal_limit+1)*(1-arc))
++                    else:
++                        m.addConstr((arc == 1) >> (right >= left+1))
+                 prior_h = 0
+                 gs = []
+                 for b in (() if single or compact_cutoff else p.batches):
+@@ -403,6 +465,9 @@
+                         allocated.append(w)
+                     m.addConstr(gp.quicksum(allocated) == r['visit'][i])
+                 routes2.append(r)
++            if trip_symmetry and vehicle_trips:
++                m.addConstr(gp.quicksum(used_slots) <= gp.quicksum(vehicle_trips[-1]))
++            vehicle_trips.append(used_slots)
+     if compact:
+         for key, variable in order_times.items():
+             variable.LB, variable.UB = windows[key]
+@@ -412,13 +477,32 @@
+             aggregate_arcs[left, right] = active
+             m.addConstr(active == gp.quicksum(indexed))
+             a, b = problem.order_map[left[0]], problem.order_map[right[0]]
+-            m.addConstr((active == 1) >> (order_times[right] >= order_times[left]
+-                        +a.service_time+problem.travel(a.customer, b.customer)))
++            travel = a.service_time+problem.travel(a.customer, b.customer)
++            if linear_links:
++                slack = max(0, windows[left][1]+travel-windows[right][0])
++                m.addConstr(order_times[right] >= order_times[left]+travel-slack*(1-active))
++            else:
++                m.addConstr((active == 1) >> (order_times[right] >= order_times[left]+travel))
+             _, weight, volume = problem.task(*right)
+             sign = -1 if right[1] == 'd' else 1
+-            m.addConstr((active == 1) >> (task_load_w[right] == task_load_w[left]+sign*weight))
+-            m.addConstr((active == 1) >> (task_load_v[right] == task_load_v[left]+sign*volume))
+-            m.addConstr((active == 1) >> (order_steps[right] >= order_steps[left]+1))
++            for loads, resource, amount, capacity in (
++                    (task_load_w, 1, weight, f.e2_weight_cap), (task_load_v, 2, volume, f.e2_volume_cap)):
++                if linear_links:
++                    left_amount = problem.task(*left)[resource]
++                    lo_left = left_amount if strengthen and left[1] == 'p' else 0
++                    hi_left = max(0, capacity-left_amount) if strengthen and left[1] == 'd' else capacity
++                    lo_right = amount if strengthen and right[1] == 'p' else 0
++                    hi_right = max(0, capacity-amount) if strengthen and right[1] == 'd' else capacity
++                    lower_slack = max(0, hi_left+sign*amount-lo_right)
++                    upper_slack = max(0, hi_right-lo_left-sign*amount)
++                    m.addConstr(loads[right] >= loads[left]+sign*amount-lower_slack*(1-active))
++                    m.addConstr(loads[right] <= loads[left]+sign*amount+upper_slack*(1-active))
++                else:
++                    m.addConstr((active == 1) >> (loads[right] == loads[left]+sign*amount))
++            if linear_links:
++                m.addConstr(order_steps[right] >= order_steps[left]+1-(causal_limit+1)*(1-active))
++            else:
++                m.addConstr((active == 1) >> (order_steps[right] >= order_steps[left]+1))
+     capacity_separator = None
+     if strengthen and compact and e2_capacity_cuts:
+         from .multibatch_cuts import build_capacity_separator
+@@ -470,4 +554,5 @@
+     return m, dict(e1=routes1, e2=routes2, shared_e2=compact, shared_e2_arcs=len(shared_arcs),
+                    assignments=assignments, capacity_activation_cuts=strengthen,
+                    pickup_returns=pickup_returns, shared_cutoff=compact_cutoff,
+-                   capacity_separator=capacity_separator)
++                   capacity_separator=capacity_separator, trip_count_symmetry=trip_symmetry,
++                   linear_e2_links=linear_links)
+--- before/models/routing/solvers/exact/solver.py
++++ after/models/routing/solvers/exact/solver.py
+@@ -183,6 +183,7 @@
+                     mip_node_count=model.NodeCount,
+                     runtime=time.perf_counter()-begun, sol_count=model.SolCount,
+                     variables=model.NumVars, constraints=model.NumConstrs+model.NumGenConstrs,
++                    general_constraints=model.NumGenConstrs, e2_route_slots=len(ctx['e2']),
+                     time_tick_seconds=problem.operating_policy.time_tick_seconds,
+                     formulation_features=['sparse_time_arcs', 'vehicle_symmetry', 'causal_steps']+
+                         (['B1_supply_and_load_bounds', 'trip_count_symmetry', 'triangular_trip_slots',
+@@ -195,6 +196,9 @@
+                         (['multibatch_capacity_activation', 'multibatch_load_bounds_and_arc_pruning']
+                          if ctx.get('capacity_activation_cuts') else [])+
+                         (['shared_order_cutoff_states'] if ctx.get('shared_cutoff') else [])+
++                        (['multibatch_linear_E2_links'] if ctx.get('linear_e2_links') else [])+
++                        (['multibatch_trip_count_symmetry_and_slots'] if ctx.get('trip_count_symmetry')
++                         and len(problem.operating_policy.batches) > 1 else [])+
+                         (['separated_order_subset_capacity_cuts'] if separator is not None and separator.candidates else [])+
+                         (['joint_customer_assignment'] if problem.free_assignment else []),
+                     shared_e2_arcs=ctx['shared_e2_arcs'],
+--- before/tools/audit/benchmark_multibatch_primal.py
++++ after/tools/audit/benchmark_multibatch_primal.py
+@@ -3,6 +3,7 @@
+ Primal mode disables only primal construction in its control arm. Formulation
+ mode disables the newer capacity cuts, pruning and order-level cutoff sharing.
+ Incumbent mode compares the original seed portfolio with insertion/E1 merging.
++Root mode compares indicator/rectangular routes with linear E2 links and trip symmetry.
+ Both arms use the same total budget and seed; this is not a historical snapshot.
+ This small diagnostic does not establish large-instance speed improvements.
+ """
+@@ -73,7 +74,7 @@
+     parser.add_argument('--cases', nargs='+', default=DEFAULT_CASES)
+     parser.add_argument('--time', type=float, default=5)
+     parser.add_argument('--seeds', type=int, nargs='+', default=[42])
+-    parser.add_argument('--mode', choices=['primal', 'formulation', 'incumbent'], default='primal')
++    parser.add_argument('--mode', choices=['primal', 'formulation', 'incumbent', 'root'], default='primal')
+     parser.add_argument('--worker', help=argparse.SUPPRESS)
+     args = parser.parse_args(argv)
+     if args.worker:
+@@ -110,6 +111,8 @@
+             'formulation': [('reference', True, dict(strengthen_multibatch=False, share_cutoff=False)),
+                             ('strengthened', True, {})],
+             'incumbent': [('reference', True, {}), ('improved', True, {})],
++            'root': [('reference', True, dict(linear_e2_links=False, trip_symmetry=False)),
++                     ('compact', True, {})],
+         }[args.mode]
+         for seed in args.seeds:
+             for variant, warm, options in variants:
+--- before/tests/routing/test_multibatch_root.py
++++ after/tests/routing/test_multibatch_root.py
+@@ -0,0 +1,93 @@
++"""Linear-link equivalence and homogeneous multi-batch vehicle relabeling."""
++from copy import deepcopy
++from dataclasses import replace
++from unittest.mock import patch
++
++import pytest
++
++from models.routing.common.cycle import MultiBatchInstance
++from models.routing.common.cycle.audit import audit_solution
++from models.routing.common.cycle.state import empty_result
++from tests.routing.test_multibatch_cycle import fixture, hand_solution
++from tests.routing.test_single_batch_solver_audit import tiny_problem
++
++
++@pytest.mark.parametrize('seed', [0, 2, 5])
++def test_all_link_and_symmetry_variants_match_on_nonmetric_networks(seed):
++    pytest.importorskip('gurobipy')
++    from models.routing.solvers.exact import solver
++    from models.routing.solvers.exact.formulation import build_model
++    base = tiny_problem(3, seed)
++    policy = fixture(pool=4, e2_max_trips_per_vehicle=3,
++                     e2_dispatch_prep_time=1, e2_return_unload_time=1,
++                     e2_turnaround_time=1, depot_return_unload_time=1).operating_policy
++    orders = [replace(o, batch='b1' if i == 0 else 'b2',
++                      delivery_window=(0, 25) if i == 0 else (60, 85),
++                      pickup_window=(8, 75) if i == 0 else (68, 88)) for i, o in enumerate(base.orders)]
++    problem = MultiBatchInstance(base.network, orders, policy)
++    problem.fleet.e2_per_sat_count = 2
++    objectives = []
++    for linear, symmetry in ((False, False), (False, True), (True, False), (True, True)):
++        with patch.object(solver, 'build_model', side_effect=lambda *a, **kw: build_model(
++                *a, **kw, linear_e2_links=linear, trip_symmetry=symmetry)):
++            result = solver.solve_exact(problem, time_limit=5)
++        assert result['info']['proven_optimal'], result['info']
++        assert audit_solution(problem, result)['valid']
++        objectives.append(result['info']['objective'])
++    assert objectives == pytest.approx([objectives[0]]*4)
++
++
++@pytest.mark.parametrize('one_vehicle', [False, True])
++def test_zero_travel_split_trips_fit_reduced_slots_after_relabeling(one_vehicle):
++    gp = pytest.importorskip('gurobipy')
++    from models.routing.solvers.exact.formulation import build_model
++    from models.routing.solvers.exact.solver import _set_start
++    problem = fixture(pool=2, zero=True, e2_max_trips_per_vehicle=4)
++    problem.fleet.e2_per_sat_count = 2
++    result = empty_result(problem, 'manual')
++    result['e1_trips'] = hand_solution(problem)['e1_trips']
++    for trip, batch in zip(result['e1_trips'], problem.operating_policy.batches):
++        trip.update(departure=batch.start, return_complete=batch.cutoff)
++        trip['events'][0]['start'] = batch.start
++    tasks = [('o1', 'd', 0), ('o1', 'p', 1), ('o2', 'd', 60), ('o2', 'p', 61)]
++    for index, (oid, kind, when) in enumerate(tasks):
++        # Before relabeling the higher-numbered vehicle has three trips and
++        # the lower-numbered one has one; their slots must be swapped intact.
++        vehicle = 0 if one_vehicle or index == 0 else 1
++        slot = index if one_vehicle else max(0, index-1)
++        result['e2_trips'].append(dict(trip_id=f't{index}', vehicle_id=vehicle, satellite_id='S',
++            trip_index=slot, departure=when, return_complete=when,
++            events=[dict(kind=kind, order_id=oid, start=when, quantity=1)]))
++    audit = audit_solution(problem, result)
++    assert audit['valid'], audit['errors']
++    saved = deepcopy(result)
++    for linear in (False, True):
++        model, ctx = build_model(problem, linear_e2_links=linear)
++        try:
++            assert [sum(r['vehicle'] == v for r in ctx['e2']) for v in range(2)] == [4, 2]
++            assert _set_start(problem, model, ctx, result)
++            model.update()
++            for variable in model.getVars():
++                if variable.Start != gp.GRB.UNDEFINED:
++                    variable.LB = variable.UB = variable.Start
++            model.Params.TimeLimit = 3
++            model.optimize()
++            assert model.SolCount and model.ObjVal == pytest.approx(audit['objective'])
++        finally:
++            model.dispose()
++    assert result == saved
++
++
++def test_linear_links_reduce_indicator_expansion_and_slot_copies():
++    pytest.importorskip('gurobipy')
++    from models.routing.solvers.exact.formulation import build_model
++    problem = fixture(pool=2, e2_max_trips_per_vehicle=4)
++    problem.fleet.e2_per_sat_count = 2
++    sizes = []
++    for compact in (False, True):
++        model, ctx = build_model(problem, linear_e2_links=compact, trip_symmetry=compact)
++        try:
++            sizes.append((model.NumVars, model.NumGenConstrs, len(ctx['e2'])))
++        finally:
++            model.dispose()
++    assert all(new < old for old, new in zip(sizes[0], sizes[1]))

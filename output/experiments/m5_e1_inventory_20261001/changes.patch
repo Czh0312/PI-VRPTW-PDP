@@ -1,0 +1,844 @@
+--- a/tools/audit/benchmark_multibatch_route_cg.py
++++ b/tools/audit/benchmark_multibatch_route_cg.py
+@@ -48,6 +48,7 @@
+         from models.routing.solvers.exact.multibatch_route_cg import route_cover_certificate
+         certificate = route_cover_certificate(problem, time_limit=job['budget'], initial_result=initial,
+             seed=job['seed'], pricing_time_limit=job['pricing_time_limit'], verbose=True,
++            e1_time_limit=job['e1_time_limit'] if job['variant'] == 'cg-e1' else 0,
+             diagnostics_dir=destination.parent/(job['id']+'_pricing_models'))
+         lower = certificate['bound']
+         payload, valid = dict(certificate=certificate), None
+@@ -65,8 +66,9 @@
+     parser.add_argument('--initial-results', nargs='+')
+     parser.add_argument('--time', type=float, default=30)
+     parser.add_argument('--pricing-time', type=float, default=2)
++    parser.add_argument('--e1-time', type=float, default=10, help='E1 time cap inside the CG budget, further capped at one third of remaining time')
+     parser.add_argument('--seeds', nargs='+', type=int, default=[42])
+-    parser.add_argument('--variants', nargs='+', choices=['milp', 'cg'], default=['milp', 'cg'])
++    parser.add_argument('--variants', nargs='+', choices=['milp', 'cg', 'cg-e1'], default=['milp', 'cg'])
+     parser.add_argument('--worker', help=argparse.SUPPRESS)
+     args = parser.parse_args()
+     if args.worker:
+@@ -74,7 +76,7 @@
+         return
+     if not args.cases or not args.initial_results or len(args.cases) != len(args.initial_results):
+         parser.error('one --initial-results file is required per case')
+-    if any(not math.isfinite(v) or v <= 0 for v in (args.time, args.pricing_time)):
++    if any(not math.isfinite(v) or v <= 0 for v in (args.time, args.pricing_time, args.e1_time)):
+         parser.error('budgets must be finite and positive')
+     if len(set(args.variants)) != len(args.variants):
+         parser.error('variants must be distinct')
+@@ -114,7 +116,7 @@
+                 jobs.append(dict(id=f'{index:02d}_{seed}_{variant}', variant=variant,
+                     case=str(frozen/'case.json'), source_case=source, initial_result=str(frozen/'initial_result.json'),
+                     frozen_upper_bound=independent['objective'], budget=args.time, seed=seed,
+-                    pricing_time_limit=args.pricing_time, orders=len(problem.orders),
++                    pricing_time_limit=args.pricing_time, e1_time_limit=args.e1_time, orders=len(problem.orders),
+                     customers=len({o.customer for o in problem.orders})))
+     for source in [*ROOT.glob('models/**/*.py'), *ROOT.glob('configuration/*.py'), Path(__file__).resolve()]:
+         target = output/'source_snapshot'/source.relative_to(ROOT)
+@@ -146,8 +148,10 @@
+             payload = json.loads(destination.read_text())
+             row.update(bound=payload['bound'], fixed_incumbent_gap=payload['fixed_incumbent_gap'],
+                        wall_seconds=payload['wall_seconds'], result_valid=payload['result_valid'])
+-            if job['variant'] == 'cg':
++            if job['variant'] in ('cg', 'cg-e1'):
+                 row.update(status=payload['certificate']['status'],
++                    e1_bound=payload['certificate']['e1_bound'],
++                    e1_certificate=payload['certificate'].get('e1_certificate'),
+                     sites=[{key: s[key] for key in ('satellite', 'bound', 'status', 'lp_converged', 'runtime')}
+                            for s in payload['certificate']['sites']])
+             else:
+--- a/models/routing/variants/model_5/exact/__init__.py
++++ b/models/routing/variants/model_5/exact/__init__.py
+@@ -1,5 +1,5 @@
+ """M5 exact entry."""
+ from .solver import solve_exact
+-from .bounds import route_cover_certificate
++from .bounds import e1_inventory_certificate, route_cover_certificate
+ 
+-__all__ = ["solve_exact", "route_cover_certificate"]
++__all__ = ["solve_exact", "route_cover_certificate", "e1_inventory_certificate"]
+--- a/models/routing/variants/model_5/exact/bounds.py
++++ b/models/routing/variants/model_5/exact/bounds.py
+@@ -6,3 +6,9 @@
+     validate_problem(problem)
+     from models.routing.solvers.exact.multibatch_route_cg import route_cover_certificate as compute
+     return compute(problem, **options)
++
++
++def e1_inventory_certificate(problem, **options):
++    validate_problem(problem)
++    from models.routing.solvers.exact.multibatch_e1_inventory import e1_inventory_certificate as compute
++    return compute(problem, **options)
+--- a/models/routing/solvers/exact/multibatch_route_cg.py
++++ b/models/routing/solvers/exact/multibatch_route_cg.py
+@@ -153,11 +153,14 @@
+ 
+ 
+ def route_cover_certificate(problem, *, time_limit=30, initial_result=None, seed=42,
+-                            pricing_time_limit=2.0, verbose=False, diagnostics_dir=None, heuristic_pricing=True):
++                            pricing_time_limit=2.0, verbose=False, diagnostics_dir=None, heuristic_pricing=True,
++                            e1_time_limit=0.0, e1_inventory=True):
+     if not math.isfinite(time_limit) or time_limit <= 0:
+         raise ValueError('time_limit must be finite and positive')
+     if not math.isfinite(pricing_time_limit) or pricing_time_limit <= 0:
+         raise ValueError('pricing_time_limit must be finite and positive')
++    if not math.isfinite(e1_time_limit) or e1_time_limit < 0:
++        raise ValueError('e1_time_limit must be finite and nonnegative')
+     if (problem.model_number != 5 or problem.free_assignment or not problem.reusable
+             or len(problem.operating_policy.batches) <= 1):
+         raise ValueError('Route-cover certificates require fixed, reusable multibatch M5')
+@@ -172,6 +175,16 @@
+                     status='TIME_LIMIT_CERTIFICATE', sites=[], runtime=time.perf_counter()-begun,
+                     proven_optimal=False, proven_infeasible=False)
+     travel = travel_lower_bounds(problem)
++    e1_certificate = None
++    remaining = max(0.0, deadline-time.perf_counter())
++    if e1_time_limit > 0 and remaining > 0:
++        from .multibatch_e1_inventory import e1_inventory_certificate
++        # E1 shares the original total budget; reserve at least two thirds
++        # of the remaining time for the existing E2 column generation.
++        e1_certificate = e1_inventory_certificate(problem, time_limit=min(e1_time_limit, remaining/3),
++            initial_result=initial_result, seed=seed, inventory=e1_inventory, verbose=verbose,
++            travel_bounds=travel, distance_bounds=baseline,
++            diagnostics_path=Path(diagnostics_dir)/'e1_inventory.mps' if diagnostics_dir else None)
+     site_rows = []
+     contexts = sorted((route_context(problem, site, travel) for site in problem.satellites),
+                       key=lambda context: (len(context['nodes']), context['satellite']))
+@@ -184,7 +197,8 @@
+             initial_result=initial_result, seed=seed, pricing_time_limit=pricing_time_limit, verbose=verbose,
+             heuristic_pricing=heuristic_pricing,
+             pricing_export_path=Path(diagnostics_dir)/f'site_{index}_best_pricing.mps' if diagnostics_dir else None))
+-    e1 = math.fsum(max(0.0, row['bound']-1e-7*max(1.0, row['bound'])) for row in baseline['components'] if row['echelon'] == 'E1')
++    distance_e1 = math.fsum(max(0.0, row['bound']-1e-7*max(1.0, row['bound'])) for row in baseline['components'] if row['echelon'] == 'E1')
++    e1 = max(distance_e1, e1_certificate['bound'] if e1_certificate else 0.0)
+     old_sites = {row['satellite']: max(0.0, row['bound']-1e-7*max(1.0, row['bound']))
+                  for row in baseline['components'] if row['echelon'] == 'E2'}
+     components = [dict(satellite=row['satellite'], route_cover_bound=row['bound'],
+@@ -192,7 +206,8 @@
+                        bound=max(row['bound'], old_sites.get(row['satellite'], 0.0))) for row in site_rows]
+     raw = e1+math.fsum(row['bound'] for row in components)
+     bound = max(baseline['bound'], max(0.0, raw-1e-7*max(1.0, raw)))
+-    return dict(bound=bound, raw_bound=raw, e1_bound=e1, components=components, sites=site_rows,
++    return dict(bound=bound, raw_bound=raw, e1_bound=e1, distance_e1_bound=distance_e1,
++                e1_certificate=e1_certificate, components=components, sites=site_rows,
+                 distance_certificate=baseline, scope='M5_relaxed_E2_route_cover_plus_E1_certificate',
+                 status='LP_CONVERGED' if all(row['lp_converged'] for row in site_rows) else 'PARTIAL_CERTIFIED_BOUND',
+                 runtime=time.perf_counter()-begun, proven_optimal=False, proven_infeasible=False,
+--- a/models/routing/solvers/exact/multibatch_e1_inventory.py
++++ b/models/routing/solvers/exact/multibatch_e1_inventory.py
+@@ -0,0 +1,337 @@
++"""E1 routing/inventory relaxation: a bound on E1 cost, not a M5 solver.
++
++Every complete M5 schedule projects with unchanged E1 routes and cost.
++E2 trips are replaced by independent order return times subject to necessary
++supply/use/shortest-time bounds. Cutoff quantities, E1 capacity, physical
++vehicles and clean stock remain. Never use a relaxation incumbent as a bound.
++"""
++from __future__ import annotations
++
++import math
++from pathlib import Path
++import time
++
++from models.routing.common.cycle.audit import audit_solution
++from models.routing.common.cycle.precheck import travel_lower_bounds
++
++
++def add_order_returns(problem, m, deliveries, travel, check):
++    """Common necessary E2 supply/use/return conditions for both E1 models."""
++    import gurobipy as gp
++    from gurobipy import GRB
++    p, returns, allocation = problem.operating_policy, {}, {}
++    for order in problem.orders:
++        check()
++        site, bid = order.satellite, order.batch
++        outward = travel['outward'][site][order.customer]
++        inward = travel['inward'][site][order.customer]
++        supplied = deliveries[site, bid]+p.e2_dispatch_prep_time+outward
++        m.addConstr(supplied <= order.delivery_window[1])
++        d = m.addVar(vtype=GRB.INTEGER, lb=order.delivery_window[0], ub=order.delivery_window[1], name=f'delivery_{order.id}')
++        pick = m.addVar(vtype=GRB.INTEGER, lb=order.pickup_window[0], ub=order.pickup_window[1], name=f'pickup_time_{order.id}')
++        m.addConstr(d >= supplied)
++        m.addConstr(pick >= d+order.service_time+order.min_use_time)
++        returned = m.addVar(vtype=GRB.INTEGER, lb=p.cycle_start,
++            ub=min(p.batches[-1].cutoff, p.cycle_end-p.e2_turnaround_time), name=f'e2_return_{order.id}')
++        m.addConstr(returned >= pick+order.service_time+inward+p.e2_return_unload_time)
++        returns[order.id] = returned
++        choices = []
++        for index, b in enumerate(p.batches):
++            z = m.addVar(vtype=GRB.BINARY, name=f'cutoff_{order.id}_{b.id}')
++            allocation[order.id, b.id] = z
++            low = p.cycle_start if index == 0 else p.batches[index-1].cutoff+1
++            m.addConstr((z == 1) >> (returned >= low))
++            m.addConstr((z == 1) >> (returned <= b.cutoff))
++            choices.append(z)
++        m.addConstr(gp.quicksum(choices) == 1)
++    return returns, allocation
++
++
++def build_e1_inventory(problem, *, deadline=None, inventory=True, verbose=False, travel_bounds=None,
++                       symmetry=True, distance_bounds=None):
++    import gurobipy as gp
++    from gurobipy import GRB
++    if (problem.model_number != 5 or problem.free_assignment or not problem.reusable
++            or len(problem.operating_policy.batches) <= 1):
++        raise ValueError('E1 inventory certificates require fixed reusable multibatch M5')
++    p, f = problem.operating_policy, problem.fleet
++    H, total = p.cycle_end, max(1, problem.total)
++    travel = travel_bounds or travel_lower_bounds(problem)
++    m = gp.Model('M5_E1_inventory_relaxation')
++    m.Params.OutputFlag = int(verbose)
++    m.Params.Threads = 1
++    m.Params.MIPGap = m.Params.MIPGapAbs = 0
++    m.Params.DualReductions = 0
++    routes, objective, costs = [], gp.LinExpr(), {}
++    deliveries = {(s, b.id): m.addVar(vtype=GRB.INTEGER, ub=H, name=f'supply_{s}_{b.id}')
++                  for b in p.batches for s in problem.satellites if problem.demands[s, b.id]}
++    counts = {s: sum(o.count for o in problem.orders if o.satellite == s) for s in problem.satellites}
++    def check():
++        if deadline is not None and time.perf_counter() >= deadline:
++            raise TimeoutError('E1 inventory build reached its total budget')
++    try:
++        for b in p.batches:
++            costs[b.id] = gp.LinExpr()
++            for vehicle in range(f.e1_count):
++                check()
++                label = f'{b.id}_{vehicle}'
++                used = m.addVar(vtype=GRB.BINARY, name=f'used_{label}')
++                has_d = m.addVar(vtype=GRB.BINARY, name=f'delivery_trip_{label}')
++                only_p = m.addVar(vtype=GRB.BINARY, name=f'pickup_only_{label}')
++                m.addConstr(only_p == used-has_d)
++                start = m.addVar(vtype=GRB.INTEGER, ub=H, name=f'departure_{label}')
++                end = m.addVar(vtype=GRB.INTEGER, ub=H, name=f'return_{label}')
++                m.addConstr(start <= H*used)
++                m.addConstr(end <= H*used)
++                m.addConstr((used == 1) >> (start >= b.start))
++                m.addConstr((has_d == 1) >> (start == b.start+p.e1_load_time))
++                m.addConstr((only_p == 1) >> (start >= b.cutoff))
++                m.addConstr((used == 1) >> (end <= b.end))
++                m.addConstr((used == 1) >> (end+p.e1_turnaround_time <= H))
++                nodes = []
++                for site in problem.satellites:
++                    if problem.demands[site, b.id]:
++                        q = problem.demands[site, b.id]
++                        nodes.append(dict(site=site, kind='d', quantity=q,
++                            weight=problem.weights[site, b.id], volume=q*f.container_volume))
++                    if counts[site]:
++                        q = m.addVar(vtype=GRB.INTEGER, ub=counts[site], name=f'pickup_{label}_{site}')
++                        nodes.append(dict(site=site, kind='p', quantity=q,
++                            weight=q*f.container_weight, volume=q*f.container_volume))
++                n = len(nodes)
++                visit = m.addVars(n, vtype=GRB.BINARY, name=f'visit_{label}')
++                times = m.addVars(n, vtype=GRB.INTEGER, ub=H, name=f'time_{label}')
++                rank = m.addVars(n, ub=n, name=f'rank_{label}')
++                arcs = [(-1, i) for i in range(n)]+[(i, -2) for i in range(n)]
++                arcs += [(i, j) for i in range(n) for j in range(n) if i != j
++                         and not (nodes[i]['kind'] == 'p' and nodes[j]['kind'] == 'd')]
++                x = m.addVars(arcs, vtype=GRB.BINARY, name=f'arc_{label}')
++                m.addConstr(gp.quicksum(x[-1, i] for i in range(n)) == used)
++                m.addConstr(gp.quicksum(x[i, -2] for i in range(n)) == used)
++                dvis = [visit[i] for i, node in enumerate(nodes) if node['kind'] == 'd']
++                m.addConstr(has_d <= gp.quicksum(dvis))
++                for v in dvis:
++                    m.addConstr(v <= has_d)
++                for i, node in enumerate(nodes):
++                    m.addConstr(gp.quicksum(active for (a, c), active in x.items() if c == i) == visit[i])
++                    m.addConstr(gp.quicksum(active for (a, c), active in x.items() if a == i) == visit[i])
++                    m.addConstr(visit[i] <= used)
++                    m.addConstr(rank[i] >= visit[i])
++                    m.addConstr(rank[i] <= n*visit[i])
++                    m.addConstr(times[i] <= H*visit[i])
++                    if node['kind'] == 'd':
++                        m.addConstr((visit[i] == 1) >> (times[i]+problem.service(node['site']) <= b.cutoff))
++                        m.addConstr((visit[i] == 1) >> (deliveries[node['site'], b.id]
++                                                       == times[i]+problem.service(node['site'])))
++                    else:
++                        m.addConstr(node['quantity'] >= visit[i])
++                        m.addConstr(node['quantity'] <= counts[node['site']]*visit[i])
++                        m.addConstr((visit[i] == 1) >> (end+p.cleaning_duration <= H))
++                for resource, cap in (('weight', f.e1_weight_cap), ('volume', f.e1_volume_cap)):
++                    capacity = cap+1e-6
++                    loads = m.addVars(n, ub=capacity, name=f'{resource}_{label}')
++                    initial = gp.quicksum(node[resource]*visit[i] for i, node in enumerate(nodes) if node['kind'] == 'd')
++                    m.addConstr(initial <= capacity)
++                    for i in range(n):
++                        m.addConstr(loads[i] <= capacity*visit[i])
++                    for (a, c), active in x.items():
++                        if c == -2:
++                            continue
++                        delta = nodes[c][resource]*(1 if nodes[c]['kind'] == 'p' else -1)
++                        before = initial if a == -1 else loads[a]
++                        m.addConstr((active == 1) >> (loads[c] == before+delta))
++                for (a, c), active in x.items():
++                    left = problem.depot if a == -1 else nodes[a]['site']
++                    right = problem.depot if c == -2 else nodes[c]['site']
++                    objective += problem.distance(left, right)*active
++                    costs[b.id] += problem.distance(left, right)*active
++                    if c == -2:
++                        m.addConstr((active == 1) >> (end >= times[a]+problem.service(left)
++                                                     +problem.travel(left, right)+p.depot_return_unload_time))
++                    else:
++                        previous = start if a == -1 else times[a]+problem.service(left)
++                        m.addConstr((active == 1) >> (times[c] >= previous+problem.travel(left, right)))
++                        if nodes[c]['kind'] == 'p' and (a == -1 or nodes[a]['kind'] == 'd'):
++                            # The return leg starts at its last delivery site
++                            # (or depot) only after the cutoff snapshot.
++                            m.addConstr((active == 1) >> (times[c] >= b.cutoff+problem.travel(left, right)))
++                        if a != -1:
++                            m.addConstr(rank[c] >= rank[a]+1-(n+1)*(1-active))
++                quantity = gp.quicksum(node['quantity'] for node in nodes if node['kind'] == 'p')
++                for previous in routes:
++                    if previous['vehicle'] == vehicle:
++                        both = m.addVar(vtype=GRB.BINARY)
++                        m.addConstr(both <= previous['used'])
++                        m.addConstr(both <= used)
++                        m.addConstr(both >= previous['used']+used-1)
++                        m.addConstr((both == 1) >> (start-p.e1_load_time*has_d
++                                                   >= previous['end']+p.e1_turnaround_time))
++                routes.append(dict(batch=b, vehicle=vehicle, used=used, has_delivery=has_d,
++                                   start=start, end=end, nodes=nodes, visit=visit, times=times,
++                                   rank=rank, x=x, quantity=quantity))
++                if symmetry and p.e1_turnaround_time == 0 and vehicle:
++                    # Nonoverlapping calendars make E1 vehicle identities
++                    # interchangeable separately in each batch only when
++                    # turnaround is zero. Sort nonempty routes by their
++                    # smallest task index; each task has at most one visitor.
++                    previous = routes[-2]
++                    for i in range(n):
++                        m.addConstr(visit[i] <= gp.quicksum(previous['visit'][j] for j in range(i)))
++        for key in deliveries:
++            site, bid = key
++            m.addConstr(gp.quicksum(r['visit'][i] for r in routes if r['batch'].id == bid
++                for i, node in enumerate(r['nodes']) if node['site'] == site and node['kind'] == 'd') == 1)
++        returns, allocation = add_order_returns(problem, m, deliveries, travel, check)
++        for site in problem.satellites:
++            for b in p.batches:
++                picked = [(r, i, node) for r in routes if r['batch'].id == b.id
++                          for i, node in enumerate(r['nodes']) if node['site'] == site and node['kind'] == 'p']
++                m.addConstr(gp.quicksum(node['quantity'] for _, _, node in picked)
++                    == gp.quicksum(o.count*allocation[o.id, b.id] for o in problem.orders if o.satellite == site))
++                m.addConstr(gp.quicksum(r['visit'][i] for r, i, _ in picked) <= 1)
++        releases = {}
++        if inventory:
++            cumulative = 0
++            for b in p.batches:
++                cumulative += problem.batch_demands[b.id]
++                released = []
++                for index, r in enumerate(routes):
++                    if problem.batch_index[r['batch'].id] >= problem.batch_index[b.id]:
++                        continue
++                    ready = m.addVar(vtype=GRB.BINARY, name=f'clean_ready_{index}_{b.id}')
++                    m.addConstr(ready <= r['used'])
++                    m.addConstr((ready == 1) >> (r['end']+p.cleaning_duration <= b.start))
++                    q = m.addVar(vtype=GRB.INTEGER, ub=total, name=f'clean_quantity_{index}_{b.id}')
++                    m.addConstr(q <= r['quantity'])
++                    m.addConstr(q <= total*ready)
++                    m.addConstr(q >= r['quantity']-total*(1-ready))
++                    releases[index, b.id] = (ready, q)
++                    released.append(q)
++                m.addConstr(p.container_pool_size+gp.quicksum(released) >= cumulative, f'clean_stock_{b.id}')
++        for row in (distance_bounds or {}).get('components', []):
++            if row['echelon'] == 'E1':
++                lower = max(0, row['bound']-1e-7*max(1, row['bound']))
++                m.addConstr(costs[row['batch']] >= lower, f'delivery_distance_{row["batch"]}')
++        m.setObjective(objective)
++        m.update()
++        check()
++        return m, dict(routes=routes, deliveries=deliveries, returns=returns, allocation=allocation,
++                       releases=releases, inventory=inventory,
++                       batch_symmetry=symmetry and p.e1_turnaround_time == 0)
++    except Exception:
++        m.dispose()
++        raise
++
++
++def set_e1_projection(problem, context, initial_result, *, fix=False):
++    """Set a full audited schedule's projection; fixing supports proof tests."""
++    def put(var, value):
++        var.Start = value
++        if fix:
++            var.LB = var.UB = value
++    mapped = {(trip['batch_id'], trip['vehicle_id']): trip for trip in initial_result['e1_trips']}
++    if context['batch_symmetry']:
++        mapped = {}
++        for batch in problem.operating_policy.batches:
++            template = next(r for r in context['routes'] if r['batch'].id == batch.id)
++            indices = {(node['site'], node['kind']): i for i, node in enumerate(template['nodes'])}
++            trips = [t for t in initial_result['e1_trips'] if t['batch_id'] == batch.id]
++            ordered = sorted(trips, key=lambda t: min(indices[e['site_id'], e['kind']] for e in t['events']))
++            mapped.update({(batch.id, i): t for i, t in enumerate(ordered)})
++    for r in context['routes']:
++        trip = mapped.get((r['batch'].id, r['vehicle']))
++        events = trip['events'] if trip else []
++        has_d = int(any(e['kind'] == 'd' for e in events))
++        put(r['used'], int(bool(trip)))
++        put(r['has_delivery'], has_d)
++        put(r['start'], trip['departure'] if trip else 0)
++        put(r['end'], trip['return_complete'] if trip else 0)
++        indices = {(node['site'], node['kind']): i for i, node in enumerate(r['nodes'])}
++        order = [indices[e['site_id'], e['kind']] for e in events]
++        selected = set(zip([-1]+order, order+[-2])) if order else set()
++        event_map = {(e['site_id'], e['kind']): e for e in events}
++        for i, node in enumerate(r['nodes']):
++            event = event_map.get((node['site'], node['kind']))
++            put(r['visit'][i], int(bool(event)))
++            put(r['times'][i], event['start'] if event else 0)
++            put(r['rank'][i], order.index(i)+1 if event else 0)
++            if node['kind'] == 'p':
++                put(node['quantity'], event['quantity'] if event else 0)
++        for edge, var in r['x'].items():
++            put(var, int(edge in selected))
++    returned = {e['order_id']: trip['return_complete'] for trip in initial_result['e2_trips']
++                for e in trip['events'] if e['kind'] == 'p'}
++    for oid, var in context['returns'].items():
++        put(var, returned[oid])
++        first = next(b.id for b in problem.operating_policy.batches if returned[oid] <= b.cutoff)
++        for b in problem.operating_policy.batches:
++            put(context['allocation'][oid, b.id], int(first == b.id))
++    for (index, bid), (ready, quantity) in context['releases'].items():
++        r = context['routes'][index]
++        trip = mapped.get((r['batch'].id, r['vehicle']))
++        eligible = bool(trip and trip['return_complete']+problem.operating_policy.cleaning_duration <= problem.batch_map[bid].start)
++        put(ready, int(eligible))
++        put(quantity, sum(e['quantity'] for e in trip['events'] if e['kind'] == 'p') if eligible else 0)
++
++
++def e1_inventory_certificate(problem, *, time_limit=10, initial_result=None, inventory=True,
++                             seed=42, verbose=False, diagnostics_path=None, travel_bounds=None,
++                             symmetry=True, distance_bounds=None, backend='auto'):
++    import gurobipy as gp
++    from gurobipy import GRB
++    if not math.isfinite(time_limit) or time_limit <= 0:
++        raise ValueError('time_limit must be finite and positive')
++    if backend not in ('auto', 'patterns', 'indexed'):
++        raise ValueError('backend must be auto, patterns or indexed')
++    active = len({o.satellite for o in problem.orders})
++    selected = 'patterns' if backend == 'auto' and active <= 4 else 'indexed' if backend == 'auto' else backend
++    if selected == 'patterns' and active > 4:
++        raise ValueError('Complete E1 enumeration is limited to four active satellites')
++    begun = time.perf_counter()
++    deadline = begun+time_limit
++    if initial_result is not None and not audit_solution(problem, initial_result)['valid']:
++        raise ValueError('Initial result must pass the full M5 independent audit')
++    model = None
++    try:
++        if selected == 'patterns':
++            from .multibatch_e1_routes import build_e1_routes, set_route_projection
++            model, context = build_e1_routes(problem, deadline=deadline, inventory=inventory,
++                verbose=verbose, travel_bounds=travel_bounds, distance_bounds=distance_bounds)
++        else:
++            model, context = build_e1_inventory(problem, deadline=deadline, inventory=inventory,
++                verbose=verbose, travel_bounds=travel_bounds, symmetry=symmetry, distance_bounds=distance_bounds)
++        model.Params.Seed = int(seed)
++        if initial_result is not None:
++            if selected == 'patterns':
++                set_route_projection(problem, context, initial_result)
++            else:
++                set_e1_projection(problem, context, initial_result)
++        model.Params.TimeLimit = max(0, deadline-time.perf_counter())
++        model.optimize()
++        try:
++            raw = model.ObjBound
++        except (gp.GurobiError, AttributeError):
++            raw = None
++        raw = float(raw) if raw is not None and math.isfinite(raw) and model.Status != GRB.INFEASIBLE else None
++        margin = 1e-7*max(1, abs(raw)) if raw is not None else 0
++        if diagnostics_path is not None:
++            path = Path(diagnostics_path)
++            path.parent.mkdir(parents=True, exist_ok=True)
++            model.write(str(path))
++        return dict(bound=max(0, raw-margin) if raw is not None else 0.0,
++            raw_bound=raw, margin=margin, status=int(model.Status), relaxation_optimal=model.Status == GRB.OPTIMAL,
++            relaxation_infeasible=model.Status == GRB.INFEASIBLE,
++            relaxation_objective=float(model.ObjVal) if model.SolCount else None,
++            scope='M5_E1_routing_cutoff_and_clean_inventory_relaxation', inventory=inventory,
++            backend=selected, enumeration_complete=context.get('enumeration_complete', False),
++            route_columns=len(context['patterns']) if selected == 'patterns' else None,
++            proven_optimal=False, proven_infeasible=False, variables=model.NumVars,
++            constraints=model.NumConstrs, general_constraints=model.NumGenConstrs,
++            work=model.Work, runtime=time.perf_counter()-begun)
++    except TimeoutError:
++        return dict(bound=0.0, raw_bound=None, status='TIME_LIMIT_BUILD', relaxation_optimal=False,
++                    scope='M5_E1_routing_cutoff_and_clean_inventory_relaxation', inventory=inventory,
++                    runtime=time.perf_counter()-begun, proven_optimal=False, proven_infeasible=False)
++    finally:
++        if model is not None:
++            model.dispose()
+--- a/models/routing/solvers/exact/multibatch_e1_routes.py
++++ b/models/routing/solvers/exact/multibatch_e1_routes.py
+@@ -0,0 +1,165 @@
++"""Complete E1 route enumeration for small-site M5 lower bounds.
++
++Unlike a restricted route pool, this enumerates every elementary delivery
++sequence followed by every elementary pickup sequence. Quantities remain
++integer variables. Full E1 routes project at identical raw distance cost,
++with earlier optimistic service/clean times. Cross-batch vehicle turnaround
++is relaxed; the finite number of vehicles per batch is retained.
++"""
++from __future__ import annotations
++
++from itertools import permutations
++import time
++
++from models.routing.common.cycle.precheck import travel_lower_bounds
++
++
++def enumerate_e1_routes(problem, batch, check=lambda: None):
++    p, f = problem.operating_policy, problem.fleet
++    ds = [s for s in problem.satellites if problem.demands[s, batch.id]]
++    ps = [s for s in problem.satellites if any(o.satellite == s for o in problem.orders)]
++    def sequences(sites):
++        for length in range(len(sites)+1):
++            yield from permutations(sites, length)
++    patterns = []
++    for delivery in sequences(ds):
++        check()
++        if (sum(problem.weights[s, batch.id] for s in delivery) > f.e1_weight_cap+1e-6
++                or sum(problem.demands[s, batch.id]*f.container_volume for s in delivery) > f.e1_volume_cap+1e-6):
++            continue
++        for pickup in sequences(ps):
++            check()
++            if not delivery and not pickup:
++                continue
++            # Every visited pickup site has a positive integer quantity.
++            if (len(pickup)*f.container_weight > f.e1_weight_cap+1e-6
++                    or len(pickup)*f.container_volume > f.e1_volume_cap+1e-6):
++                continue
++            start = batch.start+p.e1_load_time if delivery else batch.cutoff
++            current, previous, cost, completions, valid = start, problem.depot, 0.0, {}, True
++            for site in delivery:
++                current += problem.travel(previous, site)+problem.service(site)
++                cost += problem.distance(previous, site)
++                previous = site
++                completions[site] = current
++                if current > batch.cutoff:
++                    valid = False
++                    break
++            if not valid:
++                continue
++            if pickup:
++                current = max(current, batch.cutoff)
++            for site in pickup:
++                current += problem.travel(previous, site)+problem.service(site)
++                cost += problem.distance(previous, site)
++                previous = site
++            returned = current+problem.travel(previous, problem.depot)+p.depot_return_unload_time
++            cost += problem.distance(previous, problem.depot)
++            if returned > batch.end or returned+p.e1_turnaround_time > p.cycle_end:
++                continue
++            if pickup and returned+p.cleaning_duration > p.cycle_end:
++                continue
++            patterns.append(dict(batch=batch.id, delivery=delivery, pickup=pickup,
++                cost=cost, departure=start, return_complete=returned, supply=completions))
++    return patterns
++
++
++def build_e1_routes(problem, *, deadline=None, inventory=True, verbose=False, travel_bounds=None,
++                    distance_bounds=None):
++    import gurobipy as gp
++    from gurobipy import GRB
++    from .multibatch_e1_inventory import add_order_returns
++    if (problem.model_number != 5 or problem.free_assignment or not problem.reusable
++            or len(problem.operating_policy.batches) <= 1):
++        raise ValueError('E1 route certificates require fixed reusable multibatch M5')
++    p, f = problem.operating_policy, problem.fleet
++    def check():
++        if deadline is not None and time.perf_counter() >= deadline:
++            raise TimeoutError('Complete E1 enumeration reached its total budget')
++    # Finish the complete domain before constructing or reporting a bound.
++    patterns = [r for b in p.batches for r in enumerate_e1_routes(problem, b, check)]
++    travel = travel_bounds or travel_lower_bounds(problem)
++    m = gp.Model('M5_complete_E1_route_inventory_relaxation')
++    m.Params.OutputFlag = int(verbose)
++    m.Params.Threads = 1
++    m.Params.MIPGap = m.Params.MIPGapAbs = 0
++    m.Params.DualReductions = 0
++    try:
++        chosen = m.addVars(len(patterns), vtype=GRB.BINARY,
++                           obj={i: r['cost'] for i, r in enumerate(patterns)}, name='route')
++        counts = {s: sum(o.count for o in problem.orders if o.satellite == s) for s in problem.satellites}
++        quantities = {(i, site): m.addVar(vtype=GRB.INTEGER, ub=counts[site], name=f'quantity_{i}_{site}')
++                      for i, r in enumerate(patterns) for site in r['pickup']}
++        for i, r in enumerate(patterns):
++            check()
++            for site in r['pickup']:
++                m.addConstr(quantities[i, site] >= chosen[i])
++                m.addConstr(quantities[i, site] <= counts[site]*chosen[i])
++            q = gp.quicksum(quantities[i, site] for site in r['pickup'])
++            m.addConstr(q*f.container_weight <= (f.e1_weight_cap+1e-6)*chosen[i])
++            m.addConstr(q*f.container_volume <= (f.e1_volume_cap+1e-6)*chosen[i])
++        supplies = {}
++        for b in p.batches:
++            indices = [i for i, r in enumerate(patterns) if r['batch'] == b.id]
++            m.addConstr(gp.quicksum(chosen[i] for i in indices) <= f.e1_count)
++            for site in problem.satellites:
++                delivering = [i for i in indices if site in patterns[i]['delivery']]
++                if problem.demands[site, b.id]:
++                    m.addConstr(gp.quicksum(chosen[i] for i in delivering) == 1)
++                    supply = m.addVar(vtype=GRB.INTEGER, ub=p.cycle_end, name=f'supply_{site}_{b.id}')
++                    m.addConstr(supply == gp.quicksum(patterns[i]['supply'][site]*chosen[i] for i in delivering))
++                    supplies[site, b.id] = supply
++                collecting = [i for i in indices if site in patterns[i]['pickup']]
++                m.addConstr(gp.quicksum(chosen[i] for i in collecting) <= 1)
++        returns, allocation = add_order_returns(problem, m, supplies, travel, check)
++        for b in p.batches:
++            for site in problem.satellites:
++                m.addConstr(gp.quicksum(q for (i, s), q in quantities.items()
++                    if s == site and patterns[i]['batch'] == b.id)
++                    == gp.quicksum(o.count*allocation[o.id, b.id] for o in problem.orders if o.satellite == site))
++        if inventory:
++            cumulative = 0
++            for b in p.batches:
++                cumulative += problem.batch_demands[b.id]
++                released = gp.quicksum(q for (i, _), q in quantities.items()
++                                      if patterns[i]['return_complete']+p.cleaning_duration <= b.start)
++                m.addConstr(p.container_pool_size+released >= cumulative, f'clean_stock_{b.id}')
++        for row in (distance_bounds or {}).get('components', []):
++            if row['echelon'] == 'E1':
++                lower = max(0, row['bound']-1e-7*max(1, row['bound']))
++                m.addConstr(gp.quicksum(r['cost']*chosen[i] for i, r in enumerate(patterns)
++                                       if r['batch'] == row['batch']) >= lower)
++        m.update()
++        check()
++        return m, dict(patterns=patterns, chosen=chosen, quantities=quantities,
++                       returns=returns, allocation=allocation, inventory=inventory,
++                       enumeration_complete=True)
++    except Exception:
++        m.dispose()
++        raise
++
++
++def set_route_projection(problem, context, initial_result, *, fix=False):
++    def put(var, value):
++        var.Start = value
++        if fix:
++            var.LB = var.UB = value
++    lookup = {(r['batch'], r['delivery'], r['pickup']): i for i, r in enumerate(context['patterns'])}
++    selected, amounts = set(), {}
++    for trip in initial_result['e1_trips']:
++        delivery = tuple(e['site_id'] for e in trip['events'] if e['kind'] == 'd')
++        pickup = tuple(e['site_id'] for e in trip['events'] if e['kind'] == 'p')
++        i = lookup[trip['batch_id'], delivery, pickup]
++        selected.add(i)
++        amounts.update({(i, e['site_id']): e['quantity'] for e in trip['events'] if e['kind'] == 'p'})
++    for i, var in context['chosen'].items():
++        put(var, int(i in selected))
++    for key, var in context['quantities'].items():
++        put(var, amounts.get(key, 0))
++    returned = {e['order_id']: trip['return_complete'] for trip in initial_result['e2_trips']
++                for e in trip['events'] if e['kind'] == 'p'}
++    for oid, var in context['returns'].items():
++        put(var, returned[oid])
++        first = next(b.id for b in problem.operating_policy.batches if returned[oid] <= b.cutoff)
++        for b in problem.operating_policy.batches:
++            put(context['allocation'][oid, b.id], int(first == b.id))
+--- a/tests/routing/test_multibatch_e1_inventory.py
++++ b/tests/routing/test_multibatch_e1_inventory.py
+@@ -0,0 +1,205 @@
++"""Check E1 relaxation projections, stock boundaries and lower-bound semantics."""
++from copy import deepcopy
++from itertools import permutations
++import math
++
++import pytest
++
++from models.routing.common.cycle import MultiBatchInstance
++from models.routing.common.cycle.audit import audit_solution
++from models.routing.solvers.exact.multibatch_e1_inventory import (
++    build_e1_inventory, e1_inventory_certificate, set_e1_projection,
++)
++from models.routing.solvers.exact.multibatch_route_cg import route_cover_certificate
++from models.routing.solvers.exact.multibatch_e1_routes import build_e1_routes, enumerate_e1_routes, set_route_projection
++from tests.routing.test_multibatch_cycle import fixture, hand_solution
++from tests.routing.test_multibatch_departure_loads import nonmetric_problem
++
++
++def fix_and_check(problem, schedule, *, symmetry=True):
++    gp = pytest.importorskip('gurobipy')
++    audited = audit_solution(problem, schedule)
++    assert audited['valid'], audited['errors']
++    model, ctx = build_e1_inventory(problem, symmetry=symmetry)
++    try:
++        set_e1_projection(problem, ctx, schedule, fix=True)
++        model.optimize()
++        assert model.Status == gp.GRB.OPTIMAL
++        assert model.ObjVal == pytest.approx(audited['distances']['e1'])
++    finally:
++        model.dispose()
++    model, ctx = build_e1_routes(problem)
++    try:
++        set_route_projection(problem, ctx, schedule, fix=True)
++        model.optimize()
++        assert model.Status == gp.GRB.OPTIMAL
++        assert model.ObjVal == pytest.approx(audited['distances']['e1'])
++    finally:
++        model.dispose()
++
++
++@pytest.mark.parametrize('unloaded,pool', [(29, 1), (30, 2), (31, 2)])
++@pytest.mark.parametrize('cleaning', [0, 20])
++def test_full_hand_schedule_projects_at_exact_cutoff_and_clean_boundaries(unloaded, pool, cleaning):
++    p = fixture(pool=pool, cleaning=cleaning)
++    fix_and_check(p, hand_solution(p, unloaded))
++
++
++@pytest.mark.parametrize('seed', range(6))
++@pytest.mark.parametrize('backend', ['indexed', 'patterns'])
++def test_nonmetric_full_optimum_projects_and_relaxation_bounds_its_e1_cost(seed, backend):
++    pytest.importorskip('gurobipy')
++    from models.routing.solvers.exact.solver import solve_exact
++    p = nonmetric_problem(seed)
++    full = solve_exact(p, time_limit=5)
++    assert full['info']['proven_optimal'] and full['audit']['valid']
++    fix_and_check(p, full)
++    with_stock = e1_inventory_certificate(p, time_limit=5, initial_result=full, backend=backend)
++    without_stock = e1_inventory_certificate(p, time_limit=5, inventory=False, backend=backend)
++    assert with_stock['relaxation_optimal'] and without_stock['relaxation_optimal']
++    assert without_stock['bound'] <= with_stock['bound']+1e-6
++    assert with_stock['bound'] <= full['audit']['distances']['e1']+1e-6
++    assert not with_stock['proven_optimal'] and not with_stock['proven_infeasible']
++
++
++@pytest.mark.parametrize('seed', range(6))
++def test_complete_e1_enumeration_matches_independent_mixed_task_permutations(seed):
++    p = nonmetric_problem(seed)
++    policy, f = p.operating_policy, p.fleet
++    for batch in policy.batches:
++        tasks = [(s, k) for s in p.satellites for k in ('d', 'p')
++                 if (p.demands[s, batch.id] if k == 'd' else any(o.satellite == s for o in p.orders))]
++        oracle = {}
++        for length in range(1, len(tasks)+1):
++            for sequence in permutations(tasks, length):
++                delivery = tuple(s for s, k in sequence if k == 'd')
++                pickup = tuple(s for s, k in sequence if k == 'p')
++                if sequence != tuple((s, 'd') for s in delivery)+tuple((s, 'p') for s in pickup):
++                    continue
++                if (sum(p.weights[s, batch.id] for s in delivery) > f.e1_weight_cap+1e-6
++                        or sum(p.demands[s, batch.id]*f.container_volume for s in delivery) > f.e1_volume_cap+1e-6
++                        or len(pickup)*f.container_weight > f.e1_weight_cap+1e-6
++                        or len(pickup)*f.container_volume > f.e1_volume_cap+1e-6):
++                    continue
++                now = batch.start+policy.e1_load_time if delivery else batch.cutoff
++                previous, cost, picked, valid = p.depot, 0, False, True
++                for site, kind in sequence:
++                    if kind == 'p' and not picked:
++                        now = max(now, batch.cutoff)
++                        picked = True
++                    now += p.travel(previous, site)+p.service(site)
++                    cost += p.distance(previous, site)
++                    previous = site
++                    if kind == 'd' and now > batch.cutoff:
++                        valid = False
++                        break
++                returned = now+p.travel(previous, p.depot)+policy.depot_return_unload_time
++                if (not valid or returned > batch.end or returned+policy.e1_turnaround_time > policy.cycle_end
++                        or pickup and returned+policy.cleaning_duration > policy.cycle_end):
++                    continue
++                oracle[delivery, pickup] = cost+p.distance(previous, p.depot), returned
++        enumerated = {(r['delivery'], r['pickup']): (r['cost'], r['return_complete']) for r in enumerate_e1_routes(p, batch)}
++        assert enumerated == oracle
++
++
++def test_clean_inventory_rejects_too_late_reuse_without_claiming_m5_infeasibility():
++    pytest.importorskip('gurobipy')
++    p = fixture(cleaning=25)
++    without = e1_inventory_certificate(p, time_limit=2, inventory=False)
++    with_stock = e1_inventory_certificate(p, time_limit=2)
++    assert without['relaxation_optimal'] and without['bound'] == pytest.approx(40, abs=1e-4)
++    assert with_stock['relaxation_infeasible']
++    assert with_stock['bound'] == 0 and not with_stock['proven_infeasible']
++
++
++def test_old_stock_pickup_only_route_projects_without_current_supply():
++    original = fixture(pool=2)
++    p = MultiBatchInstance(original.network, original.orders[:1], original.operating_policy)
++    r = hand_solution(original, 31)
++    r['e2_trips'].pop()
++    r['e1_trips'][1].update(departure=90, return_complete=110)
++    r['e1_trips'][1]['events'] = [dict(kind='p', site_id='S', quantity=1, start=100)]
++    r['batches'][1]['container_demand'] = 0
++    fix_and_check(p, r)
++
++
++def test_zero_times_and_positive_turnaround_do_not_apply_batch_vehicle_symmetry():
++    p = fixture(pool=2, zero=True, cleaning=0, e1_turnaround_time=2)
++    r = hand_solution(p)
++    for trip in r['e1_trips']:
++        b = p.batch_map[trip['batch_id']]
++        trip.update(departure=b.start, return_complete=b.cutoff)
++        trip['events'][0]['start'] = b.start
++        trip['events'][1]['start'] = b.cutoff
++    for trip in r['e2_trips']:
++        trip.update(departure=p.batch_map[p.order_map[trip['events'][0]['order_id']].batch].start)
++        trip['events'][0]['start'] = trip['departure']
++        trip['events'][1]['start'] = trip['departure']
++        trip['return_complete'] = trip['departure']
++    fix_and_check(p, r)
++    m, ctx = build_e1_inventory(p)
++    try:
++        assert not ctx['batch_symmetry']
++    finally:
++        m.dispose()
++
++
++def test_noncanonical_vehicle_labels_are_reordered_only_with_zero_turnaround():
++    p = nonmetric_problem(2)
++    from models.routing.solvers.exact.solver import solve_exact
++    full = solve_exact(p, time_limit=5)
++    copied = deepcopy(full)
++    for trip in copied['e1_trips']:
++        trip['vehicle_id'] = p.fleet.e1_count-1-trip['vehicle_id']
++    fix_and_check(p, copied)
++
++
++def test_combined_certificate_replaces_e1_component_and_counts_total_budget(tmp_path):
++    gp = pytest.importorskip('gurobipy')
++    from models.routing.variants.model_5.exact import e1_inventory_certificate as public
++    p = fixture(pool=1)
++    base = route_cover_certificate(p, time_limit=2, initial_result=hand_solution(p))
++    combined = route_cover_certificate(p, time_limit=2, e1_time_limit=1,
++        initial_result=hand_solution(p), diagnostics_dir=tmp_path)
++    assert combined['e1_bound'] == pytest.approx(40, abs=1e-4)
++    assert combined['bound'] >= base['bound']-1e-4
++    assert combined['bound'] <= 44 and combined['runtime'] < 2.25
++    assert combined['e1_certificate']['relaxation_optimal']
++    assert not combined['proven_optimal']
++    alone = public(p, time_limit=2)
++    assert alone['bound'] == pytest.approx(combined['e1_bound'])
++    replay = gp.read(str(tmp_path/'e1_inventory.mps'))
++    try:
++        replay.Params.OutputFlag = 0
++        replay.optimize()
++        assert replay.Status == gp.GRB.OPTIMAL
++        assert replay.ObjVal >= combined['e1_certificate']['bound']
++    finally:
++        replay.dispose()
++
++
++def test_budget_scope_invalid_schedule_and_unfinished_bound():
++    p = fixture(pool=2)
++    tiny = e1_inventory_certificate(p, time_limit=1e-12)
++    assert tiny['bound'] == 0 and not tiny['proven_optimal']
++    for value in (0, -1, math.inf, math.nan):
++        with pytest.raises(ValueError):
++            e1_inventory_certificate(p, time_limit=value)
++    for value in (-1, math.inf, math.nan):
++        with pytest.raises(ValueError, match='e1_time_limit'):
++            route_cover_certificate(p, e1_time_limit=value)
++    with pytest.raises(ValueError, match='multibatch M5'):
++        e1_inventory_certificate(fixture(one_batch=True))
++    with pytest.raises(ValueError, match='independent audit'):
++        e1_inventory_certificate(p, initial_result={})
++
++
++def test_timeout_uses_objbound_never_the_relaxation_incumbent():
++    pytest.importorskip('gurobipy')
++    # The difficult site geometry is not needed: a zero budget suffices to
++    # verify no bound is synthesized from a feasible projection or objective.
++    p = fixture(pool=2)
++    result = e1_inventory_certificate(p, time_limit=.001, initial_result=hand_solution(p))
++    assert result['bound'] <= 40
++    if result['raw_bound'] is not None:
++        assert result['bound'] == max(0, result['raw_bound']-result['margin'])

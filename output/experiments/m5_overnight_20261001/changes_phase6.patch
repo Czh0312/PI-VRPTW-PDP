@@ -1,0 +1,128 @@
+--- /dev/null
++++ b/models/routing/solvers/exact/multibatch_task_pairs.py
+@@ -0,0 +1,52 @@
++"""Experimental integrality of task co-location in the complete route domain.
++
++In a full schedule, two distinct tasks either share one E2 trip or do not.
++Their common-route column sum is therefore 0 or 1, including compressed
++continuous route columns. This adds necessary integrality, not a complete
++physical vehicle model or a full optimality claim.
++"""
++
++
++def add_task_pair_integrality(problem, model, context, site, pairs, *, name='task_pair'):
++    import gurobipy as gp
++    if site not in context['routes']:
++        raise ValueError('Unknown pair satellite')
++    known = {(o.id, kind) for o in problem.orders if o.satellite == site for kind in ('d', 'p')}
++    normalized = []
++    for pair in pairs:
++        keys = tuple(sorted(tuple(key) for key in pair))
++        if len(keys) != 2 or keys[0] == keys[1] or any(key not in known for key in keys):
++            raise ValueError('Task pairs require two distinct known site tasks')
++        if keys in normalized:
++            raise ValueError('Duplicate task pair')
++        normalized.append(keys)
++    data = context['routes'][site]
++    task_sets = {i: frozenset(row['keys']) for i, row in enumerate(data['rows'])}
++    records = []
++    for i, keys in enumerate(normalized):
++        required = frozenset(keys)
++        expression = gp.quicksum(var for (row, _), var in data['choices'].items()
++                                 if required <= task_sets[row])
++        flag = model.addVar(vtype=gp.GRB.BINARY, name=f'{name}_{i}')
++        model.addConstr(flag == expression, name=f'{name}_match_{i}')
++        records.append(dict(site=site, tasks=keys, flag=flag, expression=expression,
++                            scope='necessary_full_schedule_task_pair_integrality',
++                            proven_optimal=False, proven_infeasible=False))
++    model.update()
++    return records
++
++
++def project_task_pairs(problem, initial, records, *, fix=False):
++    from models.routing.common.cycle.audit import audit_solution
++    if not audit_solution(problem, initial)['valid']:
++        raise ValueError('Task pair projection requires an audited full M5 schedule')
++    trips = {}
++    for trip in initial['e2_trips']:
++        trips.setdefault(trip['satellite_id'], []).append(
++            {(e['order_id'], e['kind']) for e in trip['events']})
++    for record in records:
++        tasks = set(record['tasks'])
++        value = int(any(tasks <= keys for keys in trips.get(record['site'], [])))
++        record['flag'].Start = value
++        if fix:
++            record['flag'].LB = record['flag'].UB = value
+--- /dev/null
++++ b/tests/routing/test_multibatch_task_pairs.py
+@@ -0,0 +1,70 @@
++"""Independent set-cover counterexample and full optimum projections."""
++from types import SimpleNamespace
++import itertools
++import pytest
++from models.routing.solvers.exact.multibatch_task_pairs import (
++    add_task_pair_integrality, project_task_pairs)
++from models.routing.solvers.exact.multibatch_joint_inventory import build_joint_inventory, set_joint_projection
++from models.routing.solvers.exact.solver import solve_exact
++from tests.routing.test_multibatch_departure_loads import nonmetric_problem
++from tests.routing.test_multibatch_joint_inventory import domains
++
++
++def test_half_triangle_reaches_independently_enumerated_integer_cover():
++    gp = pytest.importorskip('gurobipy')
++    tasks = [('a', 'd'), ('b', 'd'), ('c', 'd')]
++    sets = [set(pair) for pair in itertools.combinations(tasks, 2)] + [{key} for key in tasks]
++    optimum = min(sum(bits) for bits in itertools.product((0, 1), repeat=len(sets))
++                  if all(sum(bit for bit, row in zip(bits, sets) if key in row) == 1 for key in tasks))
++    problem = SimpleNamespace(orders=[SimpleNamespace(id=oid, satellite='S') for oid, _ in tasks])
++    model = gp.Model(); model.Params.OutputFlag = 0; model.Params.Threads = 1
++    try:
++        variables = [model.addVar(obj=1) for _ in sets]
++        for key in tasks:
++            model.addConstr(gp.quicksum(v for v, row in zip(variables, sets) if key in row) == 1)
++        context = {'routes': {'S': {'rows': [{'keys': row} for row in sets],
++                                   'choices': {(i, None): v for i, v in enumerate(variables)}}}}
++        model.optimize(); assert model.ObjVal == pytest.approx(1.5)
++        add_task_pair_integrality(problem, model, context, 'S', [tasks[:2]])
++        model.optimize(); assert model.Status == gp.GRB.OPTIMAL
++        assert model.ObjVal == pytest.approx(optimum) == 2
++    finally:
++        model.dispose()
++
++
++@pytest.mark.parametrize('seed', range(6))
++@pytest.mark.parametrize('timed', [False, True])
++def test_all_pair_indicators_preserve_known_full_optimum(seed, timed):
++    gp = pytest.importorskip('gurobipy')
++    problem = nonmetric_problem(seed)
++    initial = solve_exact(problem, time_limit=5)
++    assert initial['info']['proven_optimal']
++    model, context = build_joint_inventory(problem, domains(problem, timed=timed))
++    try:
++        records = []
++        for site in context['routes']:
++            tasks = [(o.id, k) for o in problem.orders if o.satellite == site for k in ('d', 'p')]
++            records += add_task_pair_integrality(problem, model, context, site,
++                list(itertools.combinations(tasks, 2)), name='pair_' + site)
++        model.optimize(); assert model.Status == gp.GRB.OPTIMAL
++        assert model.ObjBound <= initial['info']['objective'] + 1e-6
++        set_joint_projection(problem, context, initial, fix=True)
++        project_task_pairs(problem, initial, records, fix=True)
++        model.optimize(); assert model.Status == gp.GRB.OPTIMAL
++        assert model.ObjVal <= initial['info']['objective'] + 1e-6
++    finally:
++        model.dispose()
++
++
++@pytest.mark.parametrize('pair', [[], [('a', 'd')], [('a', 'd'), ('a', 'd')],
++                                 [('a', 'd'), ('missing', 'p')]])
++def test_invalid_pair_rejected_before_model_mutation(pair):
++    gp = pytest.importorskip('gurobipy')
++    model = gp.Model(); model.Params.OutputFlag = 0
++    problem = SimpleNamespace(orders=[SimpleNamespace(id='a', satellite='S')])
++    try:
++        with pytest.raises(ValueError, match='two distinct'):
++            add_task_pair_integrality(problem, model, {'routes': {'S': {}}}, 'S', [pair])
++        model.update(); assert model.NumVars == model.NumConstrs == 0
++    finally:
++        model.dispose()

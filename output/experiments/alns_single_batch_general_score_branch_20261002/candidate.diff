@@ -1,0 +1,91 @@
+--- before/models/routing/solvers/alns/single_batch_scoring.py
++++ after/models/routing/solvers/alns/single_batch_scoring.py
+@@ -9,10 +9,11 @@
+ 
+ 
+ class SingleBatchRouteScorer:
+-    def __init__(self, problem):
++    def __init__(self, problem, *, branch_route_score=True):
+         if len(problem.operating_policy.batches) != 1:
+             raise ValueError('Single-batch scoring requires B=1')
+         self.problem = problem
++        self.branch_route_score = branch_route_score and problem.reusable
+         self.policy, self.fleet = problem.operating_policy, problem.fleet
+         self.batch = self.policy.batches[0]
+         self.tasks = {}
+@@ -33,6 +34,8 @@
+         return _PickupInsertions(self, route, goods, vehicle_ready)
+ 
+     def __call__(self, problem, route, goods, vehicle_ready):
++        if self.branch_route_score:
++            return self._branch_score(problem, route, goods, vehicle_ready)
+         if problem is not self.problem:
+             raise ValueError('Prepared scorer belongs to one problem instance')
+         p, f = self.policy, self.fleet
+@@ -75,6 +78,66 @@
+         return distance+1e6*(load_penalty+0)+late*p.time_tick_seconds/60*1e4, completed
+ 
+ 
++    def _branch_score(self, problem, route, goods, vehicle_ready):
++        if problem is not self.problem:
++            raise ValueError('Prepared scorer belongs to one problem instance')
++        p, f = self.policy, self.fleet
++        if not route['tasks']:
++            return 0.0, vehicle_ready
++        tasks = [self.tasks[t] for t in route['tasks']]
++        site = route['satellite']
++        delivery = any(t[3] == 'd' for t in tasks)
++        current = max(p.cycle_start, vehicle_ready, route.get('depart_after', p.cycle_start))
++        if delivery:
++            goods_ready = goods[site, self.batch.id]
++            if goods_ready > current:
++                current = goods_ready
++            current += p.e2_dispatch_prep_time
++        weight = sum(t[1] for t in tasks if t[3] == 'd')
++        volume = sum(t[2] for t in tasks if t[3] == 'd')
++        weight_cap, volume_cap = f.e2_weight_cap, f.e2_volume_cap
++        weight_scale = weight_cap if weight_cap > 1 else 1
++        volume_scale = volume_cap if volume_cap > 1 else 1
++        excess = weight-weight_cap
++        load_penalty = (excess if excess > 0 else 0)/weight_scale
++        excess = volume-volume_cap
++        load_penalty += (excess if excess > 0 else 0)/volume_scale
++        distance, late, delivered, previous = 0.0, 0, {}, site
++        distance_to, travel_to = self.distance, self.travel
++        for order, w, vol, kind, ready, due in tasks:
++            current = current+travel_to(previous, order.customer)
++            if ready > current:
++                current = ready
++            if kind == 'p':
++                pickup_ready = delivered.get(order.id, order.delivery_window[0]+order.service_time)+order.min_use_time
++                if pickup_ready > current:
++                    current = pickup_ready
++            lateness = current-due
++            late += lateness if lateness > 0 else 0
++            current += order.service_time
++            if kind == 'd':
++                delivered[order.id] = current
++            distance += distance_to(previous, order.customer)
++            previous = order.customer
++            weight += w if kind == 'p' else -w
++            volume += vol if kind == 'p' else -vol
++            excess = weight-weight_cap
++            load_penalty += (excess if excess > 0 else 0)/weight_scale
++            excess = volume-volume_cap
++            load_penalty += (excess if excess > 0 else 0)/volume_scale
++        completed = current+travel_to(previous, site)+p.e2_return_unload_time
++        return_after = route.get('return_after', p.cycle_start)
++        if return_after > completed:
++            completed = return_after
++        lateness = completed+p.e2_turnaround_time-p.cycle_end
++        late += lateness if lateness > 0 else 0
++        if any(t[3] == 'p' for t in tasks):
++            lateness = completed-self.batch.cutoff
++            late += lateness if lateness > 0 else 0
++        distance += distance_to(previous, site)
++        return distance+1e6*(load_penalty+0)+late*p.time_tick_seconds/60*1e4, completed
++
++
+ class _PickupInsertions:
+     """Lazy route prefixes for one unchanged route and readiness context.
+ 

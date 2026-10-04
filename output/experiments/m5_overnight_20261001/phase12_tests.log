@@ -1,0 +1,95 @@
+..................................................FFF................... [ 57%]
+.....................................................                    [100%]
+=================================== FAILURES ===================================
+_______ test_other_business_models_cannot_accept_group_schedule_cuts[3] ________
+
+number = 3
+
+    @pytest.mark.parametrize('number',[3,4,6])
+    def test_other_business_models_cannot_accept_group_schedule_cuts(number):
+        pytest.importorskip('gurobipy')
+        from models.routing.common.cycle import MultiBatchInstance
+>       base=fixture(pool=2);p=MultiBatchInstance(base.network,base.orders,base.operating_policy,model=number)
+
+tests/routing/test_multibatch_group_cuts.py:78: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+models/routing/common/cycle/instance.py:36: in __init__
+    self.operating_policy.require_model(model)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = MultiBatchPolicy(cycle_start=0, cycle_end=125, batches=(Batch(id='b1', start=0, cutoff=30, end=60), Batch(id='b2', sta..._turnaround_time=0, e2_turnaround_time=0, policy_version='multi_batch_cutoff_v1', terminal_policy='all_clean_at_depot')
+model = 3
+
+    def require_model(self, model):
+        number = integer(model, 'model', 1)
+        if len(self.batches) == 1 and number in (1, 2, 3, 4):
+            return
+        if len(self.batches) > 1 and number == 5:
+            return
+>       raise ValueError('M1-M4 require B=1; current Model 5 requires B>1 (multi_batch_cutoff_v1)')
+E       ValueError: M1-M4 require B=1; current Model 5 requires B>1 (multi_batch_cutoff_v1)
+
+models/routing/common/cycle/policy.py:66: ValueError
+_______ test_other_business_models_cannot_accept_group_schedule_cuts[4] ________
+
+number = 4
+
+    @pytest.mark.parametrize('number',[3,4,6])
+    def test_other_business_models_cannot_accept_group_schedule_cuts(number):
+        pytest.importorskip('gurobipy')
+        from models.routing.common.cycle import MultiBatchInstance
+>       base=fixture(pool=2);p=MultiBatchInstance(base.network,base.orders,base.operating_policy,model=number)
+
+tests/routing/test_multibatch_group_cuts.py:78: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+models/routing/common/cycle/instance.py:36: in __init__
+    self.operating_policy.require_model(model)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = MultiBatchPolicy(cycle_start=0, cycle_end=125, batches=(Batch(id='b1', start=0, cutoff=30, end=60), Batch(id='b2', sta..._turnaround_time=0, e2_turnaround_time=0, policy_version='multi_batch_cutoff_v1', terminal_policy='all_clean_at_depot')
+model = 4
+
+    def require_model(self, model):
+        number = integer(model, 'model', 1)
+        if len(self.batches) == 1 and number in (1, 2, 3, 4):
+            return
+        if len(self.batches) > 1 and number == 5:
+            return
+>       raise ValueError('M1-M4 require B=1; current Model 5 requires B>1 (multi_batch_cutoff_v1)')
+E       ValueError: M1-M4 require B=1; current Model 5 requires B>1 (multi_batch_cutoff_v1)
+
+models/routing/common/cycle/policy.py:66: ValueError
+_______ test_other_business_models_cannot_accept_group_schedule_cuts[6] ________
+
+number = 6
+
+    @pytest.mark.parametrize('number',[3,4,6])
+    def test_other_business_models_cannot_accept_group_schedule_cuts(number):
+        pytest.importorskip('gurobipy')
+        from models.routing.common.cycle import MultiBatchInstance
+>       base=fixture(pool=2);p=MultiBatchInstance(base.network,base.orders,base.operating_policy,model=number)
+
+tests/routing/test_multibatch_group_cuts.py:78: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+models/routing/common/cycle/instance.py:36: in __init__
+    self.operating_policy.require_model(model)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = MultiBatchPolicy(cycle_start=0, cycle_end=125, batches=(Batch(id='b1', start=0, cutoff=30, end=60), Batch(id='b2', sta..._turnaround_time=0, e2_turnaround_time=0, policy_version='multi_batch_cutoff_v1', terminal_policy='all_clean_at_depot')
+model = 6
+
+    def require_model(self, model):
+        number = integer(model, 'model', 1)
+        if len(self.batches) == 1 and number in (1, 2, 3, 4):
+            return
+        if len(self.batches) > 1 and number == 5:
+            return
+>       raise ValueError('M1-M4 require B=1; current Model 5 requires B>1 (multi_batch_cutoff_v1)')
+E       ValueError: M1-M4 require B=1; current Model 5 requires B>1 (multi_batch_cutoff_v1)
+
+models/routing/common/cycle/policy.py:66: ValueError
+=========================== short test summary info ============================
+FAILED tests/routing/test_multibatch_group_cuts.py::test_other_business_models_cannot_accept_group_schedule_cuts[3]
+FAILED tests/routing/test_multibatch_group_cuts.py::test_other_business_models_cannot_accept_group_schedule_cuts[4]
+FAILED tests/routing/test_multibatch_group_cuts.py::test_other_business_models_cannot_accept_group_schedule_cuts[6]
+3 failed, 122 passed in 1.53s

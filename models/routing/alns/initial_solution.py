@@ -507,7 +507,9 @@ def _insert_e1_pickups_after_e2_returns(problem, evaluator, depot_id, routes,
 
 
 def _e1_pickups_late_enough(route, evaluator, min_pickup_time_by_sat):
-    current_time = 0.0
+    from models.routing.common.operating_policy import policy_for
+    policy = policy_for(evaluator.problem)
+    current_time = policy.dispatch_time
     prev = route.base
     for node_id in route.nodes:
         current_time += evaluator.travel(prev, node_id)
@@ -529,4 +531,8 @@ def _e1_pickups_late_enough(route, evaluator, min_pickup_time_by_sat):
                     current_time = min_time
             current_time += evaluator.service_time(node_id)
         prev = node_id
+    if policy.single_day and route.nodes:
+        if (current_time + evaluator.travel(prev, route.base) + policy.depot_return_unload_time
+                > policy.day_end + FEAS_TOL):
+            return False
     return True

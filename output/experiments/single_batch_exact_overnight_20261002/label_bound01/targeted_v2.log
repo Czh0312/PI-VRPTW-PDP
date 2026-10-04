@@ -1,0 +1,40 @@
+................................................................F....... [ 11%]
+........................................................................ [ 23%]
+........................................................................ [ 35%]
+........................................................................ [ 47%]
+........................................................................ [ 59%]
+........................................................................ [ 71%]
+........................................................................ [ 83%]
+........................................................................ [ 95%]
+............................                                             [100%]
+=================================== FAILURES ===================================
+___ test_batch_discovery_keeps_all_possible_negative_columns_before_closure ____
+
+    def test_batch_discovery_keeps_all_possible_negative_columns_before_closure():
+        base = tiny_problem(2,1)
+        base.fleet.e2_weight_cap = base.fleet.e2_volume_cap = 100
+        orders = [replace(o,service_time=0,delivery_window=(0,40)) for o in base.orders]
+        p = MultiBatchInstance(base.network,orders,base.operating_policy,model=2)
+        for key in p._travel:
+            p._travel[key] = 0
+        _,_,by_site = contexts(p)
+        for c in by_site.values():
+            prices = {n['key']:1 for n in c['nodes']}
+            expected = {trip['tasks'] for trip in independently_enumerated_trips(p,c)}
+            batch = price_delivery_routes(p,c,prices,phase_one=True,bound_pruning=True,
+                                          stop_after_columns=True,column_limit=len(expected)+1)
+            single = price_delivery_routes(p,c,prices,phase_one=True,bound_pruning=True)
+            assert batch['complete'] and batch['minimum_reduced_cost']==-len(c['nodes'])
+>           assert {col['tasks'] for col in batch['columns']}==expected
+E           AssertionError: assert {('o0',), ('o... ('o1',), ...} == {('o0',), ('o... ('o1',), ...}
+E             
+E             Extra items in the right set:
+E             ('o2', 'o0', 'o1')
+E             ('o2', 'o1', 'o0')
+E             ('o1', 'o0', 'o2')
+E             Use -v to get more diff
+
+tests/routing/test_single_batch_label_bound.py:136: AssertionError
+=========================== short test summary info ============================
+FAILED tests/routing/test_single_batch_label_bound.py::test_batch_discovery_keeps_all_possible_negative_columns_before_closure
+1 failed, 603 passed in 5.61s

@@ -1,0 +1,88 @@
+.........FF.....                                                         [100%]
+=================================== FAILURES ===================================
+_______ test_linear_relaxation_projection_and_sparsity_are_preserved[0] ________
+
+seed = 0
+
+    @pytest.mark.parametrize('seed', [0, 2, 5])
+    def test_linear_relaxation_projection_and_sparsity_are_preserved(seed):
+        gp = pytest.importorskip('gurobipy')
+        from models.routing.solvers.exact.formulation import build_model
+        values, sizes = [], []
+        for factored in (False, True):
+            model, ctx = build_model(nonmetric_problem(seed), compress_multibatch_routes=True,
+                                     factor_e2_loads=factored)
+            relaxed = None
+            try:
+                # Both relaxations drop the same untouched E1 indicators. Retain
+                # all capacity candidates as static rows in both comparisons.
+                separator = ctx['capacity_separator']
+                for terms, rhs in separator.candidates:
+                    model.addConstr(gp.quicksum(separator.variables[i] for i in terms) <= rhs)
+                model.update()
+                sizes.append(model.NumNZs)
+                relaxed = model.relax()
+                relaxed.Params.Presolve = 0
+                relaxed.optimize()
+                assert relaxed.Status == gp.GRB.OPTIMAL
+                values.append(relaxed.ObjVal)
+                if factored:
+                    for route in ctx['e2']:
+                        for resource, var in zip(('w', 'v'), route['departure_loads']):
+                            demand = sum(node[resource]*relaxed.getVarByName(route['visit'][i].VarName).X
+                                         for i, node in enumerate(route['nodes']) if node['kind'] == 'd')
+                            assert relaxed.getVarByName(var.VarName).X == pytest.approx(demand, abs=1e-6)
+            finally:
+                if relaxed is not None:
+                    relaxed.dispose()
+                model.dispose()
+        assert values[0] == pytest.approx(values[1])
+>       assert sizes[1] < sizes[0]
+E       assert 982 < 958
+
+tests/routing/test_multibatch_departure_loads.py:80: AssertionError
+_______ test_linear_relaxation_projection_and_sparsity_are_preserved[2] ________
+
+seed = 2
+
+    @pytest.mark.parametrize('seed', [0, 2, 5])
+    def test_linear_relaxation_projection_and_sparsity_are_preserved(seed):
+        gp = pytest.importorskip('gurobipy')
+        from models.routing.solvers.exact.formulation import build_model
+        values, sizes = [], []
+        for factored in (False, True):
+            model, ctx = build_model(nonmetric_problem(seed), compress_multibatch_routes=True,
+                                     factor_e2_loads=factored)
+            relaxed = None
+            try:
+                # Both relaxations drop the same untouched E1 indicators. Retain
+                # all capacity candidates as static rows in both comparisons.
+                separator = ctx['capacity_separator']
+                for terms, rhs in separator.candidates:
+                    model.addConstr(gp.quicksum(separator.variables[i] for i in terms) <= rhs)
+                model.update()
+                sizes.append(model.NumNZs)
+                relaxed = model.relax()
+                relaxed.Params.Presolve = 0
+                relaxed.optimize()
+                assert relaxed.Status == gp.GRB.OPTIMAL
+                values.append(relaxed.ObjVal)
+                if factored:
+                    for route in ctx['e2']:
+                        for resource, var in zip(('w', 'v'), route['departure_loads']):
+                            demand = sum(node[resource]*relaxed.getVarByName(route['visit'][i].VarName).X
+                                         for i, node in enumerate(route['nodes']) if node['kind'] == 'd')
+                            assert relaxed.getVarByName(var.VarName).X == pytest.approx(demand, abs=1e-6)
+            finally:
+                if relaxed is not None:
+                    relaxed.dispose()
+                model.dispose()
+        assert values[0] == pytest.approx(values[1])
+>       assert sizes[1] < sizes[0]
+E       assert 982 < 958
+
+tests/routing/test_multibatch_departure_loads.py:80: AssertionError
+=========================== short test summary info ============================
+FAILED tests/routing/test_multibatch_departure_loads.py::test_linear_relaxation_projection_and_sparsity_are_preserved[0]
+FAILED tests/routing/test_multibatch_departure_loads.py::test_linear_relaxation_projection_and_sparsity_are_preserved[2]
+2 failed, 14 passed in 0.82s

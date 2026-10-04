@@ -1,0 +1,358 @@
+--- a/models/routing/solvers/exact/multibatch_route_pool.py
++++ b/models/routing/solvers/exact/multibatch_route_pool.py
+@@ -8,7 +8,7 @@
+ 
+ from collections import defaultdict
+ from copy import deepcopy
+-from itertools import permutations
++from itertools import combinations, permutations
+ import math
+ from pathlib import Path
+ import time
+@@ -20,7 +20,7 @@
+ from .multibatch_route_pricing import evaluate_column, route_context
+ 
+ 
+-def candidate_pools(problem, initial, *, deadline=None, max_columns=128, transfers=True):
++def candidate_pools(problem, initial, *, deadline=None, max_columns=128, transfers=True, exchanges=False):
+     """Keep original routes, reorder tasks, and transfer tasks/whole orders.
+ 
+     Each domain belongs to one existing physical trip slot. Empty slots are
+@@ -89,6 +89,41 @@
+                                 break
+                             if add(j, proposed) is not None and rest:
+                                 add(i, rest)
++    if exchanges:
++        # Full slots cannot accept an extra task before a matching removal.
++        # Add complementary exchanges together so both replacements remain
++        # available to the exact-cover master. Preserve the original positions.
++        units = [[(key,) for key in sequence]+[
++            tuple(key for key in sequence if key[0] == oid)
++            for oid in sorted({key[0] for key in sequence})
++            if sum(key[0] == oid for key in sequence) == 2]+[
++            pair for pair in combinations(sequence, 2) if pair[0][1] == pair[1][1]]
++            for sequence in originals]
++        for i, source in enumerate(originals):
++            if expired():
++                break
++            for j in range(i+1, len(originals)):
++                if expired():
++                    break
++                if trips[i]['satellite_id'] != trips[j]['satellite_id']:
++                    continue
++                target = originals[j]
++                for left in units[i]:
++                    if expired():
++                        break
++                    for right in units[j]:
++                        if expired():
++                            break
++                        if len(left) != len(right):
++                            continue
++                        replacement_i = dict(zip(left, right))
++                        replacement_j = dict(zip(right, left))
++                        changed_i = tuple(replacement_i.get(key, key) for key in source)
++                        changed_j = tuple(replacement_j.get(key, key) for key in target)
++                        ci, cj = evaluate(i, changed_i), evaluate(j, changed_j)
++                        if ci is not None and cj is not None:
++                            pools[i][ci['tasks']] = ci
++                            pools[j][cj['tasks']] = cj
+     output = []
+     for original, pool in zip(originals, pools):
+         # Preserve both a cheap path and an early-return path for each task
+@@ -229,7 +264,7 @@
+ 
+ 
+ def _reoptimize_once(problem, initial_result, *, time_limit=10, seed=42, verbose=False,
+-                     max_columns=128, transfers=True, diagnostics_dir=None):
++                     max_columns=128, transfers=True, exchanges=False, e1_backend='auto', diagnostics_dir=None):
+     if not math.isfinite(time_limit) or time_limit <= 0:
+         raise ValueError('time_limit must be finite and positive')
+     if not isinstance(max_columns, int) or isinstance(max_columns, bool) or max_columns < 1:
+@@ -242,20 +277,27 @@
+     before = audit_solution(problem, initial_result)
+     if not before['valid']:
+         raise ValueError('Initial result must pass the full M5 independent audit')
+-    backend = 'patterns' if len({o.satellite for o in problem.orders}) <= 4 and problem.operating_policy.e1_turnaround_time == 0 else 'indexed'
++    active = len({o.satellite for o in problem.orders})
++    if e1_backend not in ('auto', 'patterns', 'indexed'):
++        raise ValueError('e1_backend must be auto, patterns or indexed')
++    backend = ('patterns' if active <= 4 and problem.operating_policy.e1_turnaround_time == 0
++               else 'indexed') if e1_backend == 'auto' else e1_backend
++    if backend == 'patterns' and (active > 5 or problem.operating_policy.e1_turnaround_time != 0):
++        raise ValueError('Primal E1 patterns require at most five active satellites and zero E1 turnaround')
+     result = deepcopy(initial_result)
+     for field in ('audit', 'cutoff_snapshots', 'depot_releases'):
+         result.pop(field, None)
+     result['info'] = dict(status='FEASIBLE', objective=before['objective'], best_bound=None, mip_gap=None,
+         proven_optimal=False, proven_infeasible=False, proof_scope='restricted_E2_route_pool_primal',
+         upper_before=before['objective'], route_pool_backend=backend, route_pool_subproblem_optimal=False,
+-        route_pool_subproblem_bound=None, route_pool_complete=False, route_pool_transfers=bool(transfers))
++        route_pool_subproblem_bound=None, route_pool_complete=False, route_pool_transfers=bool(transfers),
++        route_pool_exchanges=bool(exchanges))
+     status = 'TIME_LIMIT_BUILD'
+     try:
+         import gurobipy as gp
+         from gurobipy import GRB
+         pools = candidate_pools(problem, initial_result, deadline=begun+time_limit*.2,
+-                                max_columns=max_columns, transfers=transfers)
++                                max_columns=max_columns, transfers=transfers, exchanges=exchanges)
+         result['info'].update(route_pool_columns=sum(map(len, pools)), route_pool_candidates=[len(row) for row in pools])
+         if time.perf_counter() >= deadline:
+             raise TimeoutError
+@@ -314,7 +356,7 @@
+ 
+ 
+ def reoptimize_route_pool(problem, initial_result, *, time_limit=10, seed=42, verbose=False,
+-                          max_columns=128, transfers=True, max_passes=4, diagnostics_dir=None):
++                          max_columns=128, transfers=True, exchanges=False, e1_backend='auto', max_passes=4, diagnostics_dir=None):
+     """Rebuild the candidate neighborhood after each audited improvement.
+ 
+     All passes share the original total budget. Stop at an unchanged upper
+@@ -328,7 +370,7 @@
+     for index in range(max_passes):
+         remaining = max(1e-12, time_limit-(time.perf_counter()-begun))
+         result = _reoptimize_once(problem, result, time_limit=remaining, seed=seed,
+-            verbose=verbose, max_columns=max_columns, transfers=transfers,
++            verbose=verbose, max_columns=max_columns, transfers=transfers, exchanges=exchanges, e1_backend=e1_backend,
+             diagnostics_dir=Path(diagnostics_dir)/f'pass_{index}' if diagnostics_dir is not None else None)
+         info = result['info']
+         trace.append(dict(pass_index=index, upper_before=info['upper_before'], upper_after=info['objective'],
+--- a/models/routing/solvers/exact/multibatch_e1_inventory.py
++++ b/models/routing/solvers/exact/multibatch_e1_inventory.py
+@@ -286,8 +286,8 @@
+         raise ValueError('backend must be auto, patterns or indexed')
+     active = len({o.satellite for o in problem.orders})
+     selected = 'patterns' if backend == 'auto' and active <= 4 else 'indexed' if backend == 'auto' else backend
+-    if selected == 'patterns' and active > 4:
+-        raise ValueError('Complete E1 enumeration is limited to four active satellites')
++    if selected == 'patterns' and active > 5:
++        raise ValueError('Complete E1 enumeration is limited to five active satellites')
+     begun = time.perf_counter()
+     deadline = begun+time_limit
+     if initial_result is not None and not audit_solution(problem, initial_result)['valid']:
+--- a/models/routing/solvers/exact/multibatch_route_cg.py
++++ b/models/routing/solvers/exact/multibatch_route_cg.py
+@@ -30,7 +30,8 @@
+ 
+ 
+ def site_route_cover(problem, context, *, deadline, initial_result=None, seed=42,
+-                     pricing_time_limit=2.0, verbose=False, pricing_export_path=None, heuristic_pricing=True):
++                     pricing_time_limit=2.0, verbose=False, pricing_export_path=None, heuristic_pricing=True,
++                     pricing_backend='milp', enumeration_time_limit=15.0, enumeration_max_states=2000000):
+     import gurobipy as gp
+     from gurobipy import GRB
+     begun = time.perf_counter()
+@@ -39,6 +40,21 @@
+         return dict(satellite=site, bound=0.0, status='EMPTY', lp_converged=True, iterations=[], columns=[], runtime=0.0)
+     if time.perf_counter() >= deadline:
+         return dict(satellite=site, bound=0.0, status='TIME_LIMIT_BUILD', lp_converged=False, iterations=[], columns=[], runtime=0.0)
++    enumeration = None
++    if pricing_backend == 'hybrid':
++        from .multibatch_route_enumeration import enumerate_route_universe, enumerated_route_cover, enumeration_stats
++        universe = enumerate_route_universe(problem, context,
++            deadline=min(deadline, time.perf_counter()+min(enumeration_time_limit, max(0, deadline-time.perf_counter())/3)),
++            max_states=enumeration_max_states)
++        enumeration = enumeration_stats(universe)
++        if universe['complete']:
++            result = enumerated_route_cover(problem, context, universe, deadline=deadline,
++                verbose=verbose, export_path=pricing_export_path)
++            result['runtime'] = time.perf_counter()-begun
++            return result
++        # An incomplete pool cannot certify min reduced cost. Retain the
++        # full original MILP pricing domain, including unvisited categories.
++        del universe
+     m = gp.Model('M5_relaxed_E2_route_cover')
+     m.Params.OutputFlag = int(verbose)
+     m.Params.Threads = 1
+@@ -142,7 +158,7 @@
+         return dict(satellite=site, bound=max(0.0, best), status=status, lp_converged=converged,
+                     best_witness=best_witness, iterations=iterations, columns=columns,
+                     variables=m.NumVars, pricing_variables=pricer.model.NumVars if pricer else None,
+-                    runtime=time.perf_counter()-begun)
++                    runtime=time.perf_counter()-begun, enumeration=enumeration, pricing_backend='milp')
+     except TimeoutError:
+         return dict(satellite=site, bound=max(0.0, best), status='TIME_LIMIT_BUILD', lp_converged=False,
+                     best_witness=best_witness, iterations=iterations, columns=columns, runtime=time.perf_counter()-begun)
+@@ -154,13 +170,22 @@
+ 
+ def route_cover_certificate(problem, *, time_limit=30, initial_result=None, seed=42,
+                             pricing_time_limit=2.0, verbose=False, diagnostics_dir=None, heuristic_pricing=True,
+-                            e1_time_limit=0.0, e1_inventory=True):
++                            e1_time_limit=0.0, e1_inventory=True, e1_backend='auto', pricing_backend='milp',
++                            enumeration_time_limit=15.0, enumeration_max_states=2000000):
+     if not math.isfinite(time_limit) or time_limit <= 0:
+         raise ValueError('time_limit must be finite and positive')
+     if not math.isfinite(pricing_time_limit) or pricing_time_limit <= 0:
+         raise ValueError('pricing_time_limit must be finite and positive')
+     if not math.isfinite(e1_time_limit) or e1_time_limit < 0:
+         raise ValueError('e1_time_limit must be finite and nonnegative')
++    if e1_backend not in ('auto', 'patterns', 'indexed'):
++        raise ValueError('e1_backend must be auto, patterns or indexed')
++    if pricing_backend not in ('milp', 'hybrid'):
++        raise ValueError('pricing_backend must be milp or hybrid')
++    if not math.isfinite(enumeration_time_limit) or enumeration_time_limit <= 0:
++        raise ValueError('enumeration_time_limit must be finite and positive')
++    if not isinstance(enumeration_max_states, int) or isinstance(enumeration_max_states, bool) or enumeration_max_states < 1:
++        raise ValueError('enumeration_max_states must be a positive integer')
+     if (problem.model_number != 5 or problem.free_assignment or not problem.reusable
+             or len(problem.operating_policy.batches) <= 1):
+         raise ValueError('Route-cover certificates require fixed, reusable multibatch M5')
+@@ -183,6 +208,7 @@
+         # of the remaining time for the existing E2 column generation.
+         e1_certificate = e1_inventory_certificate(problem, time_limit=min(e1_time_limit, remaining/3),
+             initial_result=initial_result, seed=seed, inventory=e1_inventory, verbose=verbose,
++            backend=e1_backend,
+             travel_bounds=travel, distance_bounds=baseline,
+             diagnostics_path=Path(diagnostics_dir)/'e1_inventory.mps' if diagnostics_dir else None)
+     site_rows = []
+@@ -195,7 +221,8 @@
+         site_deadline = min(deadline, time.perf_counter()+remaining/(len(contexts)-index))
+         site_rows.append(site_route_cover(problem, context, deadline=site_deadline,
+             initial_result=initial_result, seed=seed, pricing_time_limit=pricing_time_limit, verbose=verbose,
+-            heuristic_pricing=heuristic_pricing,
++            heuristic_pricing=heuristic_pricing, pricing_backend=pricing_backend,
++            enumeration_time_limit=enumeration_time_limit, enumeration_max_states=enumeration_max_states,
+             pricing_export_path=Path(diagnostics_dir)/f'site_{index}_best_pricing.mps' if diagnostics_dir else None))
+     distance_e1 = math.fsum(max(0.0, row['bound']-1e-7*max(1.0, row['bound'])) for row in baseline['components'] if row['echelon'] == 'E1')
+     e1 = max(distance_e1, e1_certificate['bound'] if e1_certificate else 0.0)
+@@ -209,6 +236,7 @@
+     return dict(bound=bound, raw_bound=raw, e1_bound=e1, distance_e1_bound=distance_e1,
+                 e1_certificate=e1_certificate, components=components, sites=site_rows,
+                 distance_certificate=baseline, scope='M5_relaxed_E2_route_cover_plus_E1_certificate',
++                pricing_backend=pricing_backend,
+                 status='LP_CONVERGED' if all(row['lp_converged'] for row in site_rows) else 'PARTIAL_CERTIFIED_BOUND',
+                 runtime=time.perf_counter()-begun, proven_optimal=False, proven_infeasible=False,
+                 relaxed_constraints=['actual_E1_supply_times', 'cross_trip_delivery_pickup_use_times',
+--- a/tests/routing/test_multibatch_joint_exchanges.py
++++ b/tests/routing/test_multibatch_joint_exchanges.py
+@@ -0,0 +1,129 @@
++"""Full slots need complementary exchanges; five-site proofs remain scoped."""
++from copy import deepcopy
++
++import pytest
++
++from models.routing.common.cycle import MultiBatchInstance, Order
++from models.routing.common.cycle.audit import audit_solution
++from models.routing.common.cycle.state import empty_result
++from models.routing.common.domain.instance import ProblemInstance
++from models.routing.common.domain.node import Customer, Depot, Satellite
++from models.routing.solvers.exact.multibatch_route_pool import candidate_pools, reoptimize_route_pool
++from models.routing.solvers.exact.multibatch_e1_inventory import e1_inventory_certificate
++from tests.routing.test_multibatch_cycle import policy_config
++
++
++def full_slot_fixture():
++    nodes={'D':Depot('D',0,0),'S':Satellite('S',0,0)}
++    orders=[]
++    for oid,x in [('A',1),('B',2),('C',-1),('E',-2)]:
++        nodes[oid]=Customer(oid,x,0,0,0,(0,125),(0,125),'S')
++        orders.append(Order(oid,oid,'S','b1',1,0,(0,25),(0,29),0,0))
++    fleet=dict(E1_vehicle_count=1,vehicles_per_satellite=2,E1_Qk=10,E1_Ck=10,
++        E2_Qv=2,E2_Cv=2,container_weight=1,container_volume=1)
++    cfg=policy_config();cfg.update(container_pool_size=4,e2_max_trips_per_vehicle=1)
++    p=MultiBatchInstance(ProblemInstance(nodes,fleet),orders,cfg)
++    result=empty_result(p,'hand_full_slots')
++    result['e1_trips']=[dict(trip_id='e1',vehicle_id=0,batch_id='b1',departure=0,
++        return_complete=30,events=[dict(kind='d',site_id='S',quantity=4,start=0),
++            dict(kind='p',site_id='S',quantity=4,start=30)])]
++    for vehicle,ids in enumerate([('A','C'),('B','E')]):
++        now,previous,events=0,'S',[]
++        for oid,kind in [(i,'d') for i in ids]+[(i,'p') for i in ids]:
++            now+=p.travel(previous,oid)
++            events.append(dict(order_id=oid,kind=kind,quantity=1,start=now))
++            previous=oid
++        result['e2_trips'].append(dict(trip_id=f'e2_{vehicle}',satellite_id='S',vehicle_id=vehicle,
++            trip_index=0,departure=0,return_complete=now+p.travel(previous,'S'),events=events))
++    audit=audit_solution(p,result)
++    assert audit['valid'] and audit['periodic_replay']['valid'],audit['errors']
++    result['info']['objective']=audit['objective']
++    return p,result
++
++
++def five_site_fixture(count=5):
++    nodes={'D':Depot('D',0,0)};orders=[]
++    fleet=dict(E1_vehicle_count=count,vehicles_per_satellite=1,E1_Qk=1,E1_Ck=1,
++        E2_Qv=1,E2_Cv=1,container_weight=1,container_volume=1)
++    for i in range(count):
++        site,oid=f'S{i}',f'C{i}'
++        nodes[site]=Satellite(site,0,0)
++        nodes[oid]=Customer(oid,0,0,0,0,(0,125),(0,125),site)
++        orders.append(Order(oid,oid,site,'b1',1,0,(0,25),(0,29),0,0))
++    cfg=policy_config();cfg.update(container_pool_size=count,e2_max_trips_per_vehicle=1)
++    p=MultiBatchInstance(ProblemInstance(nodes,fleet),orders,cfg)
++    r=empty_result(p,'hand_five_sites')
++    for i,o in enumerate(orders):
++        r['e1_trips'].append(dict(trip_id=f'e1_{i}',vehicle_id=i,batch_id='b1',departure=0,
++            return_complete=30,events=[dict(kind='d',site_id=o.satellite,quantity=1,start=0),
++                dict(kind='p',site_id=o.satellite,quantity=1,start=30)]))
++        r['e2_trips'].append(dict(trip_id=f'e2_{i}',satellite_id=o.satellite,vehicle_id=0,
++            trip_index=0,departure=0,return_complete=1,events=[dict(order_id=o.id,kind='d',quantity=1,start=0),
++                dict(order_id=o.id,kind='p',quantity=1,start=1)]))
++    a=audit_solution(p,r);assert a['valid'] and a['periodic_replay']['valid'],a['errors']
++    r['info']['objective']=a['objective']
++    return p,r
++
++
++def test_complementary_whole_order_exchange_unlocks_full_capacity_slots():
++    pytest.importorskip('gurobipy')
++    p,initial=full_slot_fixture();untouched=deepcopy(initial)
++    plain=candidate_pools(p,initial,exchanges=False,max_columns=256)
++    swapped=candidate_pools(p,initial,exchanges=True,max_columns=256)
++    tasksets=lambda rows:{frozenset(c['tasks']) for c in rows}
++    wanted0=frozenset((o,k) for o in ('A','B') for k in ('d','p'))
++    wanted1=frozenset((o,k) for o in ('C','E') for k in ('d','p'))
++    assert wanted0 not in tasksets(plain[0]) and wanted1 not in tasksets(plain[1])
++    assert wanted0 in tasksets(swapped[0]) and wanted1 in tasksets(swapped[1])
++    # Two pickup tasks from different orders need a complementary exchange,
++    # rather than a succession of infeasible additions to a full route.
++    pickup_pair0=frozenset([('A','d'),('C','d'),('B','p'),('E','p')])
++    pickup_pair1=frozenset([('B','d'),('E','d'),('A','p'),('C','p')])
++    assert pickup_pair0 in tasksets(swapped[0]) and pickup_pair1 in tasksets(swapped[1])
++    before=reoptimize_route_pool(p,initial,time_limit=5,exchanges=False)
++    after=reoptimize_route_pool(p,initial,time_limit=5,exchanges=True,max_columns=256)
++    assert initial==untouched
++    assert after['info']['objective']==pytest.approx(8)
++    assert after['info']['objective']<before['info']['objective']
++    assert after['audit']['valid'] and after['audit']['periodic_replay']['valid']
++    assert after['info']['best_bound'] is None and after['info']['mip_gap'] is None
++    assert not after['info']['proven_optimal'] and not after['info']['route_pool_complete']
++    from models.routing.solvers.exact.solver import solve_exact
++    full=solve_exact(p,time_limit=5,initial_result=after)
++    assert full['info']['proven_optimal'] and full['info']['objective']==pytest.approx(8)
++
++
++def test_explicit_five_site_patterns_produce_audited_ub_and_scoped_lb():
++    pytest.importorskip('gurobipy')
++    p,initial=five_site_fixture()
++    cert=e1_inventory_certificate(p,time_limit=5,initial_result=initial,backend='patterns')
++    assert cert['backend']=='patterns' and cert['enumeration_complete'] and cert['relaxation_optimal']
++    assert cert['bound']<=audit_solution(p,initial)['distances']['e1']+1e-6
++    assert not cert['proven_optimal'] and not cert['proven_infeasible']
++    result=reoptimize_route_pool(p,initial,time_limit=5,e1_backend='patterns',exchanges=True)
++    assert result['info']['route_pool_backend']=='patterns' and result['audit']['valid']
++    assert result['info']['objective']==0 and result['info']['best_bound'] is None
++    default=reoptimize_route_pool(p,initial,time_limit=5)
++    assert default['info']['route_pool_backend']=='indexed'
++    from models.routing.variants.model_5.exact import route_cover_certificate
++    combined=route_cover_certificate(p,initial_result=result,time_limit=5,e1_time_limit=2,e1_backend='patterns')
++    assert combined['e1_certificate']['backend']=='patterns'
++    assert combined['bound']<=result['info']['objective']+1e-6
++    assert not combined['proven_optimal'] and not combined['proven_infeasible']
++
++
++def test_explicit_pattern_primal_rejects_unrepresented_physical_turnaround():
++    from dataclasses import replace
++    p,initial=five_site_fixture()
++    p.operating_policy=replace(p.operating_policy,e1_turnaround_time=1)
++    initial['operating_policy']=empty_result(p,'updated_policy')['operating_policy']
++    with pytest.raises(ValueError,match='zero E1 turnaround'):
++        reoptimize_route_pool(p,initial,time_limit=1,e1_backend='patterns')
++
++
++def test_six_active_sites_keep_the_bounded_enumeration_gate():
++    p,initial=five_site_fixture(6)
++    with pytest.raises(ValueError,match='five active satellites'):
++        e1_inventory_certificate(p,time_limit=1,backend='patterns')
++    with pytest.raises(ValueError,match='five active satellites'):
++        reoptimize_route_pool(p,initial,time_limit=1,e1_backend='patterns')

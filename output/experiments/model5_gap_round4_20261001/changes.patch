@@ -1,0 +1,346 @@
+--- before/models/routing/solvers/exact/multibatch_route_cg.py
++++ after/models/routing/solvers/exact/multibatch_route_cg.py
+@@ -67,17 +67,23 @@
+ def site_route_cover(problem, context, *, deadline, initial_result=None, seed=42,
+                      pricing_time_limit=2.0, verbose=False, pricing_export_path=None, heuristic_pricing=True,
+                      pricing_backend='milp', enumeration_time_limit=15.0, enumeration_max_states=2000000,
+-                     integer_cover_time_limit=0.0, batch_pricing=False, dual_repair=False):
++                     integer_cover_time_limit=0.0, batch_pricing=False, dual_repair=False, delivery_count_cuts=False, subset_cuts=None):
+     import gurobipy as gp
+     from gurobipy import GRB
+     begun = time.perf_counter()
+     site, K = context['satellite'], context['maximum_trips']
++    from .multibatch_capacity_cuts import capacity_floor, capacity_subsets
++    subset_keys, subset_required = capacity_subsets(problem, context, subset_cuts)
++    if integer_cover_time_limit > 0 and (delivery_count_cuts or subset_keys):
++        raise ValueError('Capacity-cut pricing currently requires the full-domain MILP backend')
+     if not context['nodes']:
+         return dict(satellite=site, bound=0.0, status='EMPTY', lp_converged=True, iterations=[], columns=[], runtime=0.0)
+     if time.perf_counter() >= deadline:
+         return dict(satellite=site, bound=0.0, status='TIME_LIMIT_BUILD', lp_converged=False, iterations=[], columns=[], runtime=0.0)
+     enumeration = None
+-    if pricing_backend == 'hybrid':
++    # Complete enumeration currently has no capacity rows. Keep exact MILP
++    # pricing whenever cuts are requested instead of silently ignoring them.
++    if pricing_backend == 'hybrid' and not delivery_count_cuts and not subset_keys:
+         from .multibatch_route_enumeration import enumerate_route_universe, enumerated_route_cover, enumeration_stats
+         universe = enumerate_route_universe(problem, context,
+             deadline=min(deadline, time.perf_counter()+min(enumeration_time_limit, max(0, deadline-time.perf_counter())/3)),
+@@ -99,6 +105,15 @@
+     m.Params.DualReductions = 0
+     rows = {node['key']: m.addConstr(gp.LinExpr() == 1, name=f'cover_{i}') for i, node in enumerate(context['nodes'])}
+     fleet = m.addConstr(gp.LinExpr() <= K, name='aggregate_trip_limit')
++    required, count_rows = {}, {}
++    if delivery_count_cuts:
++        for bid in context['release']:
++            ns = [n for n in context['nodes'] if n['key'][1]=='d' and n['order'].batch==bid]
++            if not ns:continue
++            required[bid] = capacity_floor(problem, ns)
++            count_rows[bid]=m.addConstr(gp.LinExpr()>=required[bid],name='minimum_delivery_routes_'+bid)
++    subset_rows = {sid: m.addConstr(gp.LinExpr() >= rhs, name='subset_route_count_'+str(sid))
++                   for sid, rhs in subset_required.items()}
+     artificial = [m.addVar(obj=1, column=gp.Column([1], [row]), name=f'artificial_{i}') for i, row in enumerate(rows.values())]
+     columns, variables, known = [], [], set()
+     phase_one, best, best_witness = True, 0.0, None
+@@ -109,8 +124,11 @@
+         if key in known:
+             return False
+         known.add(key)
++        batches = {problem.order_map[oid].batch for oid,kind in key if kind=='d'}
++        extra = [count_rows[bid] for bid in batches if bid in count_rows]
++        extra += [row for sid,row in subset_rows.items() if subset_keys[sid].intersection(key)]
+         variables.append(m.addVar(obj=0 if phase_one else column['cost'],
+-            column=gp.Column([1]*(len(key)+1), [rows[task] for task in key]+[fleet]), name=f'route_{len(columns)}'))
++            column=gp.Column([1]*(len(key)+1+len(extra)), [rows[task] for task in key]+[fleet]+extra), name=f'route_{len(columns)}'))
+         columns.append(column)
+         return True
+     try:
+@@ -127,7 +145,7 @@
+             column = evaluate_column(problem, context, [node['key']])
+             if column is not None:
+                 add(column)
+-        pricer = RoutePricer(problem, context, deadline=deadline, seed=seed, verbose=verbose)
++        pricer = RoutePricer(problem, context, deadline=deadline, seed=seed, verbose=verbose, subset_keys=subset_keys)
+         while time.perf_counter() < deadline:
+             m.Params.TimeLimit = max(0.0, deadline-time.perf_counter())
+             m.optimize()
+@@ -144,11 +162,15 @@
+                 continue
+             duals = {key: row.Pi for key, row in rows.items()}
+             nu = min(0.0, fleet.Pi)
++            category_duals={bid:max(0.0,row.Pi) for bid,row in count_rows.items()}
++            count_term=math.fsum(required[bid]*value for bid,value in category_duals.items())
++            subset_duals={sid:max(0.0,row.Pi) for sid,row in subset_rows.items()}
++            count_term += math.fsum(subset_required[sid]*value for sid,value in subset_duals.items())
+             if heuristic_pricing:
+                 found = insertion_columns(problem, context, duals, columns, phase_one=phase_one, deadline=deadline)
+                 # nu <= 0 contributes a nonnegative constant to reduced cost.
+                 added = sum(add(column) for column in found if (
+-                    (0.0 if phase_one else column['cost'])-math.fsum(duals[key] for key in column['tasks'])-nu < -1e-6))
++                    (0.0 if phase_one else column['cost'])-math.fsum(duals[key] for key in column['tasks'])-nu-math.fsum(category_duals.get(bid,0) for bid in {problem.order_map[oid].batch for oid,kind in column['tasks'] if kind=='d'})-math.fsum(value for sid,value in subset_duals.items() if subset_keys[sid].intersection(column['tasks'])) < -1e-6))
+                 if added:
+                     unresolved = 0
+                     iterations.append(dict(phase='feasibility' if phase_one else 'distance', method='insertion',
+@@ -158,9 +180,10 @@
+             if remaining <= 0:
+                 break
+             priced = pricer.price(duals, nu, time_limit=min(pricing_time_limit*(2**min(unresolved, 6)), remaining),
+-                                  phase_one=phase_one, stop_at_negative=not batch_pricing)
+-            lower = dual_certificate(duals, nu, K, priced['lower_bound']) if not phase_one else None
++                                  phase_one=phase_one, stop_at_negative=not batch_pricing, category_duals=category_duals, subset_duals=subset_duals)
++            lower = dual_certificate(duals, nu, K, priced['lower_bound'])+count_term if not phase_one else None
+             repaired = repair_category_duals(context, duals, nu, priced) if dual_repair and not phase_one else None
++            if repaired is not None:repaired['bound'] += count_term
+             standard_lower = lower
+             if repaired is not None:
+                 lower = max(lower, repaired['bound'])
+@@ -168,6 +191,8 @@
+                 master_objective=m.ObjVal, duals=[[list(key), value] for key, value in duals.items()],
+                 fleet_dual=nu, maximum_trips=K, pricing={k: v for k, v in priced.items() if k not in ('column', 'columns')},
+                 candidate_bound=lower, new_column=priced['column'])
++            if delivery_count_cuts:witness['delivery_counts']=[[bid,required[bid],value] for bid,value in category_duals.items()]
++            if subset_rows:witness['subset_counts']=[[sid,[list(k) for k in sorted(subset_keys[sid])],subset_required[sid],value] for sid,value in subset_duals.items()]
+             if repaired is not None:
+                 witness.update(standard_candidate_bound=standard_lower, dual_repair=repaired)
+             if batch_pricing:
+@@ -184,7 +209,7 @@
+                 unresolved = 0
+                 proposals = priced['columns'] if batch_pricing else [priced['column']]
+                 added = sum(add(column) for column in proposals if (
+-                    (0.0 if phase_one else column['cost'])-math.fsum(duals[key] for key in column['tasks'])-nu < -1e-6))
++                    (0.0 if phase_one else column['cost'])-math.fsum(duals[key] for key in column['tasks'])-nu-math.fsum(category_duals.get(bid,0) for bid in {problem.order_map[oid].batch for oid,kind in column['tasks'] if kind=='d'})-math.fsum(value for sid,value in subset_duals.items() if subset_keys[sid].intersection(column['tasks'])) < -1e-6))
+                 if batch_pricing:
+                     witness['columns_added'] = added
+                 if not added:
+@@ -222,7 +247,7 @@
+                             pricing_time_limit=2.0, verbose=False, diagnostics_dir=None, heuristic_pricing=True,
+                             e1_time_limit=0.0, e1_inventory=True, e1_backend='auto', pricing_backend='milp',
+                             enumeration_time_limit=15.0, enumeration_max_states=2000000,
+-                            integer_cover_time_limit=0.0, batch_pricing=False, dual_repair=False):
++                            integer_cover_time_limit=0.0, batch_pricing=False, dual_repair=False, delivery_count_cuts=False):
+     if not math.isfinite(time_limit) or time_limit <= 0:
+         raise ValueError('time_limit must be finite and positive')
+     if not math.isfinite(pricing_time_limit) or pricing_time_limit <= 0:
+@@ -241,6 +266,8 @@
+         raise ValueError('integer_cover_time_limit must be finite and nonnegative')
+     if integer_cover_time_limit > 0 and pricing_backend != 'hybrid':
+         raise ValueError('integer_cover_time_limit requires hybrid complete enumeration')
++    if integer_cover_time_limit > 0 and delivery_count_cuts:
++        raise ValueError('Capacity-cut pricing currently requires the full-domain MILP backend')
+     if (problem.model_number != 5 or problem.free_assignment or not problem.reusable
+             or len(problem.operating_policy.batches) <= 1):
+         raise ValueError('Route-cover certificates require fixed, reusable multibatch M5')
+@@ -279,7 +306,7 @@
+             heuristic_pricing=heuristic_pricing, pricing_backend=pricing_backend,
+             enumeration_time_limit=enumeration_time_limit, enumeration_max_states=enumeration_max_states,
+             integer_cover_time_limit=integer_cover_time_limit,
+-            batch_pricing=batch_pricing, dual_repair=dual_repair,
++            batch_pricing=batch_pricing, dual_repair=dual_repair, delivery_count_cuts=delivery_count_cuts,
+             pricing_export_path=Path(diagnostics_dir)/f'site_{index}_best_pricing.mps' if diagnostics_dir else None))
+     distance_e1 = math.fsum(max(0.0, row['bound']-1e-7*max(1.0, row['bound'])) for row in baseline['components'] if row['echelon'] == 'E1')
+     e1 = max(distance_e1, e1_certificate['bound'] if e1_certificate else 0.0)
+--- before/models/routing/solvers/exact/multibatch_route_pool.py
++++ after/models/routing/solvers/exact/multibatch_route_pool.py
+@@ -20,13 +20,20 @@
+ from .multibatch_route_pricing import evaluate_column, route_context
+ 
+ 
+-def candidate_pools(problem, initial, *, deadline=None, max_columns=128, transfers=True, exchanges=False, recombinations=False):
++def candidate_pools(problem, initial, *, deadline=None, max_columns=128, transfers=True, exchanges=False,
++                    recombinations=False, additional_columns=None, additional_columns_per_slot=128):
+     """Keep original routes, reorder tasks, and transfer tasks/whole orders.
+ 
+     Each domain belongs to one existing physical trip slot. Empty slots are
+     allowed by the master, but no new slots are introduced. The original
+     sequence is always retained. Pruning is heuristic, never a proof.
+     """
++    final_deadline = deadline
++    if additional_columns:
++        if not isinstance(additional_columns_per_slot, int) or isinstance(additional_columns_per_slot, bool) or additional_columns_per_slot < 1:
++            raise ValueError('additional_columns_per_slot must be a positive integer')
++        if deadline is not None:
++            deadline = time.perf_counter()+max(0, deadline-time.perf_counter())*.75
+     ordinary_deadline = (time.perf_counter()+max(0,deadline-time.perf_counter())*.5
+                          if recombinations and deadline is not None else deadline)
+     def expired():
+@@ -176,6 +183,22 @@
+         ranked = sorted((c for key, c in kept.items() if key != original),
+                         key=lambda c: (c['cost']/len(c['tasks']), c['cost'], c['tasks']))
+         output.append([pool[original]]+ranked[:max_columns-1])
++    if additional_columns:
++        # Rebuild every proposal from its task sequence. Cached costs/clocks
++        # from a relaxation or another run cannot enter the physical master.
++        extra = {}
++        for site, context in contexts.items():
++            known = {}
++            for proposal in additional_columns.get(site, []):
++                if final_deadline is not None and time.perf_counter() >= final_deadline:
++                    break
++                column = evaluate_column(problem, context, proposal['tasks'])
++                if column is not None:
++                    known[column['tasks']] = column
++            extra[site] = sorted(known.values(), key=lambda c: (c['cost']/len(c['tasks']), c['cost'], c['tasks']))
++        for trip, pool in zip(trips, output):
++            known = {c['tasks'] for c in pool}
++            pool.extend([c for c in extra[trip['satellite_id']] if c['tasks'] not in known][:additional_columns_per_slot])
+     return output
+ 
+ 
+@@ -300,7 +323,8 @@
+ 
+ 
+ def _reoptimize_once(problem, initial_result, *, time_limit=10, seed=42, verbose=False,
+-                     max_columns=128, transfers=True, exchanges=False, recombinations=False, e1_backend='auto', diagnostics_dir=None):
++                     max_columns=128, transfers=True, exchanges=False, recombinations=False, e1_backend='auto',
++                     additional_columns=None, additional_columns_per_slot=128, diagnostics_dir=None):
+     if not math.isfinite(time_limit) or time_limit <= 0:
+         raise ValueError('time_limit must be finite and positive')
+     if not isinstance(max_columns, int) or isinstance(max_columns, bool) or max_columns < 1:
+@@ -333,7 +357,8 @@
+         import gurobipy as gp
+         from gurobipy import GRB
+         pools = candidate_pools(problem, initial_result, deadline=begun+time_limit*.2,
+-                                max_columns=max_columns, transfers=transfers, exchanges=exchanges, recombinations=recombinations)
++                                max_columns=max_columns, transfers=transfers, exchanges=exchanges, recombinations=recombinations,
++                                additional_columns=additional_columns, additional_columns_per_slot=additional_columns_per_slot)
+         result['info'].update(route_pool_columns=sum(map(len, pools)), route_pool_candidates=[len(row) for row in pools])
+         if time.perf_counter() >= deadline:
+             raise TimeoutError
+@@ -392,7 +417,8 @@
+ 
+ 
+ def reoptimize_route_pool(problem, initial_result, *, time_limit=10, seed=42, verbose=False,
+-                          max_columns=128, transfers=True, exchanges=False, recombinations=False, e1_backend='auto', max_passes=4, diagnostics_dir=None):
++                          max_columns=128, transfers=True, exchanges=False, recombinations=False, e1_backend='auto', max_passes=4,
++                          additional_columns=None, additional_columns_per_slot=128, diagnostics_dir=None):
+     """Rebuild the candidate neighborhood after each audited improvement.
+ 
+     All passes share the original total budget. Stop at an unchanged upper
+@@ -407,6 +433,7 @@
+         remaining = max(1e-12, time_limit-(time.perf_counter()-begun))
+         result = _reoptimize_once(problem, result, time_limit=remaining, seed=seed,
+             verbose=verbose, max_columns=max_columns, transfers=transfers, exchanges=exchanges, recombinations=recombinations, e1_backend=e1_backend,
++            additional_columns=additional_columns, additional_columns_per_slot=additional_columns_per_slot,
+             diagnostics_dir=Path(diagnostics_dir)/f'pass_{index}' if diagnostics_dir is not None else None)
+         info = result['info']
+         trace.append(dict(pass_index=index, upper_before=info['upper_before'], upper_after=info['objective'],
+--- before/models/routing/solvers/exact/multibatch_route_pricing.py
++++ after/models/routing/solvers/exact/multibatch_route_pricing.py
+@@ -125,7 +125,7 @@
+ class TripPricingModel:
+     """One reusable integer pricing model per satellite, without trip copies."""
+ 
+-    def __init__(self, problem, context, *, deadline=None, seed=42, verbose=False, linear_links=True, require_batch=None):
++    def __init__(self, problem, context, *, deadline=None, seed=42, verbose=False, linear_links=True, require_batch=None, subset_keys=None):
+         import gurobipy as gp
+         from gurobipy import GRB
+         self.problem, self.context = problem, context
+@@ -148,6 +148,15 @@
+                 raise TimeoutError('route pricing build reached its budget')
+         try:
+             self.visit = y = m.addVars(n, vtype=GRB.BINARY, name='visit')
++            self.subset_keys = {sid: frozenset(keys) for sid, keys in (subset_keys or {}).items()}
++            self.subset_flags = {}
++            for sid, keys in self.subset_keys.items():
++                selected = [y[i] for i, node in enumerate(nodes) if node['key'] in keys]
++                if selected:
++                    flag = m.addVar(vtype=GRB.BINARY, name='hits_subset_'+str(sid))
++                    m.addConstr(flag <= gp.quicksum(selected))
++                    for variable in selected:m.addConstr(variable <= flag)
++                    self.subset_flags[sid] = flag
+             valid = [node['window'][0] <= node['window'][1] for node in nodes]
+             times = {i: m.addVar(vtype=GRB.INTEGER,
+                 lb=node['window'][0] if linear_links and valid[i] else 0,
+@@ -270,19 +279,21 @@
+             m.dispose()
+             raise
+ 
+-    def set_prices(self, duals, fleet_dual, phase_one):
++    def set_prices(self, duals, fleet_dual, phase_one, subset_duals=None):
+         import gurobipy as gp
+         m, nodes = self.model, self.context['nodes']
+         fleet_dual = min(0.0, float(fleet_dual))
+         m.setObjective((0 if phase_one else self.cost)
+-                       -gp.quicksum(float(duals.get(node['key'], 0))*self.visit[i] for i, node in enumerate(nodes))-fleet_dual)
+-
+-    def price(self, duals, fleet_dual=0.0, *, time_limit=2, phase_one=False, stop_at_negative=False):
++                       -gp.quicksum(float(duals.get(node['key'], 0))*self.visit[i] for i, node in enumerate(nodes))-fleet_dual
++                       -gp.quicksum(float((subset_duals or {}).get(sid,0))*flag for sid,flag in self.subset_flags.items()))
++
++    def price(self, duals, fleet_dual=0.0, *, time_limit=2, phase_one=False, stop_at_negative=False, subset_duals=None):
+         import gurobipy as gp
+         from gurobipy import GRB
+         m, nodes = self.model, self.context['nodes']
+         fleet_dual = min(0.0, float(fleet_dual))
+-        self.set_prices(duals, fleet_dual, phase_one)
++        subset_duals = subset_duals or {}
++        self.set_prices(duals, fleet_dual, phase_one, subset_duals)
+         m.Params.TimeLimit = max(0.0, time_limit)
+         def negative(model, where):
+             if where == GRB.Callback.MIPSOL and model.cbGet(GRB.Callback.MIPSOL_OBJ) < -1e-6:
+@@ -290,11 +301,13 @@
+         m.optimize(negative if stop_at_negative else None)
+         status = m.Status
+         analytic = -math.fsum(max(0.0, float(duals.get(node['key'], 0))) for node in nodes)-fleet_dual
++        analytic -= math.fsum(max(0,float(subset_duals.get(sid,0))) for sid in self.subset_flags)
+         try:
+             raw = m.ObjBound if status != GRB.INFEASIBLE else None
+         except (gp.GurobiError, AttributeError):
+             raw = None
+-        margin = 1e-7*max(1.0, math.fsum(abs(float(duals.get(node['key'], 0))) for node in nodes), abs(fleet_dual))
++        margin = 1e-7*max(1.0, math.fsum(abs(float(duals.get(node['key'], 0))) for node in nodes)
++            +math.fsum(abs(float(subset_duals.get(sid,0))) for sid in self.subset_flags), abs(fleet_dual))
+         lower = max(analytic, raw-margin) if raw is not None and math.isfinite(raw) else analytic
+         column, reduced = None, None
+         if m.SolCount:
+@@ -310,6 +323,7 @@
+             if column is None:
+                 raise RuntimeError('Pricing column failed independent relaxed trip replay')
+             reduced = (0.0 if phase_one else column['cost'])-math.fsum(float(duals.get(key, 0)) for key in column['tasks'])-fleet_dual
++            reduced -= math.fsum(float(subset_duals.get(sid,0)) for sid,keys in self.subset_keys.items() if keys.intersection(column['tasks']))
+             if not math.isclose(reduced, m.ObjVal, rel_tol=1e-7, abs_tol=1e-5):
+                 raise RuntimeError('Pricing objective differs from raw route reduced cost')
+         return dict(status=int(status), optimal=status == GRB.OPTIMAL, infeasible=status == GRB.INFEASIBLE,
+@@ -355,28 +369,37 @@
+         for i, (_, pricer) in enumerate(self.groups):
+             pricer.model.write(str(path.with_name(path.stem+f'_group_{i}'+path.suffix)))
+ 
+-    def price(self, duals, fleet_dual=0.0, *, time_limit=2, phase_one=False, stop_at_negative=False):
++    def price(self, duals, fleet_dual=0.0, *, time_limit=2, phase_one=False, stop_at_negative=False, category_duals=None, subset_duals=None):
+         begun, deadline = time.perf_counter(), time.perf_counter()+time_limit
+         nu = min(0.0, float(fleet_dual))
+         reports, candidates, stopped = [], [], False
++        category_duals = category_duals or {}
+         for _, pricer in self.groups:
+-            pricer.set_prices(duals, nu, phase_one)
++            pricer.set_prices(duals, nu, phase_one, subset_duals)
+         # A high prize total is promising for discovering a negative column.
+         ordered = sorted(self.groups, key=lambda group: -math.fsum(max(0.0, duals.get(n['key'], 0))
+                          for n in group[1].context['nodes']))
+         for i, (category, pricer) in enumerate(ordered):
+             analytic = -math.fsum(max(0.0, duals.get(n['key'], 0)) for n in pricer.context['nodes'])-nu
++            analytic -= math.fsum(max(0,float((subset_duals or {}).get(sid,0))) for sid in pricer.subset_flags)
+             remaining = deadline-time.perf_counter()
+             if not stopped and remaining > 0:
+                 report = pricer.price(duals, nu, time_limit=remaining/(len(ordered)-i),
+-                    phase_one=phase_one, stop_at_negative=stop_at_negative)
++                    phase_one=phase_one, stop_at_negative=stop_at_negative, subset_duals=subset_duals)
++                prize = float(category_duals.get(category, 0.0))
++                if prize:
++                    report = {**report}
++                    report['lower_bound'] -= prize
++                    if report['raw_lower_bound'] is not None:report['raw_lower_bound'] -= prize
++                    if report['reduced_cost'] is not None:report['reduced_cost'] -= prize
++                    report['category_dual'] = prize
+                 if report['column'] is not None:
+                     candidates.append(report)
+                     if stop_at_negative and report['reduced_cost'] < -1e-6:
+                         stopped = True
+             else:
+-                report = dict(status=9, optimal=False, infeasible=False, lower_bound=analytic,
+-                              raw_lower_bound=analytic, margin=0, reduced_cost=None, column=None, runtime=0, work=0)
++                report = dict(status=9, optimal=False, infeasible=False, lower_bound=analytic-float(category_duals.get(category,0)),
++                              raw_lower_bound=analytic-float(category_duals.get(category,0)), margin=0, reduced_cost=None, column=None, runtime=0, work=0)
+             reports.append(dict(category=category, **{key: value for key, value in report.items() if key != 'column'}))
+         feasible_groups = [r for r in reports if not r['infeasible']]
+         best = min(candidates, key=lambda r: r['reduced_cost']) if candidates else None

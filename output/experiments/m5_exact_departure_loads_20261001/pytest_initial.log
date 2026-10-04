@@ -1,0 +1,66 @@
+....................................................................F... [ 31%]
+........................................................................ [ 62%]
+........................................................................ [ 93%]
+...............                                                          [100%]
+=================================== FAILURES ===================================
+_____ test_feasible_time_limit_without_finite_bound_serializes_unknown_gap _____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1085a7dc0>
+
+    def test_feasible_time_limit_without_finite_bound_serializes_unknown_gap(monkeypatch):
+        gp = pytest.importorskip('gurobipy')
+        from models.routing.solvers.exact import solver
+        original = solver.build_model
+        class MissingBound:
+            def __init__(self, model):
+                self.model = model
+            def __getattr__(self, name):
+                if name == 'Status':
+                    return gp.GRB.TIME_LIMIT
+                if name == 'ObjBound':
+                    return -float('inf')
+                if name == 'MIPGap':
+                    return float('inf')
+                return getattr(self.model, name)
+        def build(*a, **kw):
+            model, ctx = original(*a, **kw)
+            return MissingBound(model), ctx
+        monkeypatch.setattr(solver, 'build_model', build)
+        problem = fixture()
+        result = solver.solve_exact(problem, time_limit=3)
+        assert result['info']['status'] == 'TIME_LIMIT'
+>       assert result['info']['best_bound'] is None and result['info']['mip_gap'] is None
+E       assert (43.9999956 is None)
+
+tests/routing/test_multibatch_strengthening.py:162: AssertionError
+=============================== warnings summary ===============================
+tests/routing/test_multibatch_cycle.py::test_cli_roundtrip_and_no_overwrite
+  /Users/chenzeheng/Desktop/2E-VRPTW-PDD/.venv/lib/python3.9/site-packages/matplotlib/_fontconfig_pattern.py:64: PyparsingDeprecationWarning: 'oneOf' deprecated - use 'one_of'
+    prop = Group((name + Suppress("=") + comma_separated(value)) | oneOf(_CONSTANTS))
+
+tests/routing/test_multibatch_cycle.py::test_cli_roundtrip_and_no_overwrite
+tests/routing/test_multibatch_cycle.py::test_cli_roundtrip_and_no_overwrite
+tests/routing/test_multibatch_cycle.py::test_cli_roundtrip_and_no_overwrite
+tests/routing/test_multibatch_cycle.py::test_cli_roundtrip_and_no_overwrite
+tests/routing/test_multibatch_cycle.py::test_cli_roundtrip_and_no_overwrite
+tests/routing/test_multibatch_cycle.py::test_cli_roundtrip_and_no_overwrite
+  /Users/chenzeheng/Desktop/2E-VRPTW-PDD/.venv/lib/python3.9/site-packages/matplotlib/_fontconfig_pattern.py:85: PyparsingDeprecationWarning: 'parseString' deprecated - use 'parse_string'
+    parse = parser.parseString(pattern)
+
+tests/routing/test_multibatch_cycle.py::test_cli_roundtrip_and_no_overwrite
+tests/routing/test_multibatch_cycle.py::test_cli_roundtrip_and_no_overwrite
+tests/routing/test_multibatch_cycle.py::test_cli_roundtrip_and_no_overwrite
+tests/routing/test_multibatch_cycle.py::test_cli_roundtrip_and_no_overwrite
+tests/routing/test_multibatch_cycle.py::test_cli_roundtrip_and_no_overwrite
+tests/routing/test_multibatch_cycle.py::test_cli_roundtrip_and_no_overwrite
+  /Users/chenzeheng/Desktop/2E-VRPTW-PDD/.venv/lib/python3.9/site-packages/matplotlib/_fontconfig_pattern.py:89: PyparsingDeprecationWarning: 'resetCache' deprecated - use 'reset_cache'
+    parser.resetCache()
+
+tests/routing/test_multibatch_cycle.py::test_cli_roundtrip_and_no_overwrite
+  /Users/chenzeheng/Desktop/2E-VRPTW-PDD/.venv/lib/python3.9/site-packages/matplotlib/_mathtext.py:45: PyparsingDeprecationWarning: 'enablePackrat' deprecated - use 'enable_packrat'
+    ParserElement.enablePackrat()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/routing/test_multibatch_strengthening.py::test_feasible_time_limit_without_finite_bound_serializes_unknown_gap
+1 failed, 230 passed, 14 warnings in 19.53s

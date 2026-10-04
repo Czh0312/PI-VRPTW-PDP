@@ -1,0 +1,51 @@
+--- before/neighborhoods.py
+
++++ after/neighborhoods.py
+
+@@ -113,7 +113,7 @@
+
+     return repaired if repaired is not None else clone_state(original)
+ 
+ 
+-def repair_orders(problem, original, removed, deadline, *, screen=True):
++def repair_orders(problem, original, removed, deadline, *, screen=True, cache_scores=True):
+     """Reinsert complete requests; interruption never exposes a partial state.
+ 
+     The distance-only bound safely screens this *local ranking score* because
+@@ -131,6 +131,9 @@
+
+     # at a later position or a different vehicle/trip.
+     tasks = [(o.id, kind) for kind in problem.task_kinds
+              for o in sorted(removed, key=lambda o: (o.delivery_window if kind == 'd' else o.pickup_window)[1])]
++    # Scoped to this repair: goods-ready times and the problem stay fixed.
++    # Keep the route object alive with its score to prevent object-id reuse.
++    route_scores = {}
+     for task in tasks:
+         if time.perf_counter() >= deadline:
+             return None
+@@ -139,12 +142,21 @@
+
+         ready, before, scores, distances = {}, {}, {}, {}
+         counts = Counter((r['satellite'], r['vehicle']) for r in routes)
+         for index, route in enumerate(routes):
++            # Other satellites cannot share this physical vehicle or supply.
++            if route['satellite'] != order.satellite:
++                continue
+             key = route['satellite'], route['vehicle']
+             before[index] = ready.get(key, p.cycle_start)
+-            scores[index], end = _route_score(problem, route, goods, before[index])
++            saved = route_scores.get(id(route)) if cache_scores else None
++            if saved is not None and saved[0] is route and saved[1] == before[index]:
++                _, _, scores[index], end, distances[index] = saved
++            else:
++                scores[index], end = _route_score(problem, route, goods, before[index])
++                locations = [route['satellite']]+[problem.order_map[o].customer for o, _ in route['tasks']]+[route['satellite']]
++                distances[index] = sum(problem.distance(a, b) for a, b in zip(locations, locations[1:]))
++                if cache_scores:
++                    route_scores[id(route)] = (route, before[index], scores[index], end, distances[index])
+             ready[key] = end+p.e2_turnaround_time
+-            locations = [route['satellite']]+[problem.order_map[o].customer for o, _ in route['tasks']]+[route['satellite']]
+-            distances[index] = sum(problem.distance(a, b) for a, b in zip(locations, locations[1:]))
+         best = None
+         for index, route in enumerate(routes):
+             if route['satellite'] != order.satellite:

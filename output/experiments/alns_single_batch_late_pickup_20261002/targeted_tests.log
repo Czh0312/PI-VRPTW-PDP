@@ -1,0 +1,75 @@
+..........FFFF.......................................................... [ 85%]
+............                                                             [100%]
+=================================== FAILURES ===================================
+______________ test_public_scope_and_fresh_independent_audit[3-1] ______________
+
+model = 1, seed = 3
+
+    @pytest.mark.parametrize('model', [1,2,3,4])
+    @pytest.mark.parametrize('seed', [1,2,3])
+    def test_public_scope_and_fresh_independent_audit(model, seed):
+        p = tiny_problem(model, seed)
+        before = deepcopy(p.orders)
+        r = solve_routing(model=model, method='alns', problem=p, alns_time=5, alns_iter=100, seed=seed+11)
+        assert p.orders == before
+        expected = 'greedy_last_half' if model == 3 else 'original'
+>       assert r['info']['late_pickup_policy'] == expected
+E       KeyError: 'late_pickup_policy'
+
+tests/routing/test_single_batch_late_pickup.py:65: KeyError
+______________ test_public_scope_and_fresh_independent_audit[3-2] ______________
+
+model = 2, seed = 3
+
+    @pytest.mark.parametrize('model', [1,2,3,4])
+    @pytest.mark.parametrize('seed', [1,2,3])
+    def test_public_scope_and_fresh_independent_audit(model, seed):
+        p = tiny_problem(model, seed)
+        before = deepcopy(p.orders)
+        r = solve_routing(model=model, method='alns', problem=p, alns_time=5, alns_iter=100, seed=seed+11)
+        assert p.orders == before
+        expected = 'greedy_last_half' if model == 3 else 'original'
+>       assert r['info']['late_pickup_policy'] == expected
+E       KeyError: 'late_pickup_policy'
+
+tests/routing/test_single_batch_late_pickup.py:65: KeyError
+______________ test_public_scope_and_fresh_independent_audit[3-3] ______________
+
+model = 3, seed = 3
+
+    @pytest.mark.parametrize('model', [1,2,3,4])
+    @pytest.mark.parametrize('seed', [1,2,3])
+    def test_public_scope_and_fresh_independent_audit(model, seed):
+        p = tiny_problem(model, seed)
+        before = deepcopy(p.orders)
+        r = solve_routing(model=model, method='alns', problem=p, alns_time=5, alns_iter=100, seed=seed+11)
+        assert p.orders == before
+        expected = 'greedy_last_half' if model == 3 else 'original'
+>       assert r['info']['late_pickup_policy'] == expected
+E       KeyError: 'late_pickup_policy'
+
+tests/routing/test_single_batch_late_pickup.py:65: KeyError
+______________ test_public_scope_and_fresh_independent_audit[3-4] ______________
+
+model = 4, seed = 3
+
+    @pytest.mark.parametrize('model', [1,2,3,4])
+    @pytest.mark.parametrize('seed', [1,2,3])
+    def test_public_scope_and_fresh_independent_audit(model, seed):
+        p = tiny_problem(model, seed)
+        before = deepcopy(p.orders)
+        r = solve_routing(model=model, method='alns', problem=p, alns_time=5, alns_iter=100, seed=seed+11)
+        assert p.orders == before
+        expected = 'greedy_last_half' if model == 3 else 'original'
+        assert r['info']['late_pickup_policy'] == expected
+        audit = audit_solution(p,r)
+>       assert audit['valid'] and audit['periodic_replay']['valid']
+E       assert (False)
+
+tests/routing/test_single_batch_late_pickup.py:67: AssertionError
+=========================== short test summary info ============================
+FAILED tests/routing/test_single_batch_late_pickup.py::test_public_scope_and_fresh_independent_audit[3-1]
+FAILED tests/routing/test_single_batch_late_pickup.py::test_public_scope_and_fresh_independent_audit[3-2]
+FAILED tests/routing/test_single_batch_late_pickup.py::test_public_scope_and_fresh_independent_audit[3-3]
+FAILED tests/routing/test_single_batch_late_pickup.py::test_public_scope_and_fresh_independent_audit[3-4]
+4 failed, 80 passed in 0.78s

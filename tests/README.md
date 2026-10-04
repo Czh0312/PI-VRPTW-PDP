@@ -1,12 +1,9 @@
-# 测试目录
+# 回归测试
 
-本目录只保存能够验证业务计算、数据语义或数学模型约束的自动化回归测试，
-不检查目录结构，也不替代论文实验。
+运行 `.venv/bin/python -m pytest -q`。
 
-- `cost/`：成本恒等式、盈亏平衡、清洗成本和路径方案选择。
-- `data/`：真实场景数据解析、容器数量聚合和非对称道路矩阵。
-- `routing/`：Model 1–4 的精确证书、独立路线审计，Model 5/6 的接力流与交接时序，以及 Model 7 自由分仓 + 异步交接的精确分区证明和 ALNS 回归。
+当前周期与数据验收：test_multibatch_cycle.py、test_static_batch_suite.py、test_model_scope.py。
+历史 M1–M4 算法测试导入 models.routing.baselines，证明仅适用于相应旧规则。
+旧 M5–M8 专属测试已随模型归档。
 
-仍依赖已删除旧数据集的测试位于 `archive/tests/legacy_data/`，不会被默认收集。
-
-完整运行：`python -m pytest -q`。需要 Gurobi 的测试在不可用时自动跳过。
+`routing/test_single_batch_comparison.py` 覆盖四模型任务差异、自由分仓修复不可行、未闭合枚举的证明边界、时间规范化、寿命补购、价格敏感性及冻结执行。

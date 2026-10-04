@@ -1,0 +1,74 @@
+--- before/models/routing/solvers/alns/neighborhoods.py
++++ m3/models/routing/solvers/alns/neighborhoods.py
+@@ -96,7 +96,7 @@
+     return distance+1e6*(load_penalty+max(0, len(dbatches)-1))+late*p.time_tick_seconds/60*1e4, completed
+ 
+ 
+-def destroy_repair(problem, original, rng, mode, deadline, *, scorer=None):
++def destroy_repair(problem, original, rng, mode, deadline, *, scorer=None, cache_distances=False):
+     if not problem.orders:
+         return clone_state(original)
+     orders = list(problem.orders)
+@@ -109,12 +109,13 @@
+         removed = orders[:count]
+     else:
+         removed = rng.sample(orders, count)
+-    repaired = repair_orders(problem, original, removed, deadline, scorer=scorer)
++    repaired = repair_orders(problem, original, removed, deadline, scorer=scorer,
++                             cache_distances=cache_distances)
+     return repaired if repaired is not None else clone_state(original)
+ 
+ 
+ def repair_orders(problem, original, removed, deadline, *, screen=True, cache_scores=True,
+-                  fast_scores=True, scorer=None):
++                  fast_scores=True, scorer=None, cache_distances=False):
+     """Reinsert complete requests; interruption never exposes a partial state.
+ 
+     The distance-only bound safely screens this *local ranking score* because
+@@ -133,9 +134,14 @@
+     tasks = [(o.id, kind) for kind in problem.task_kinds
+              for o in sorted(removed, key=lambda o: (o.delivery_window if kind == 'd' else o.pickup_window)[1])]
+     score_route = _route_score
++    distance = problem.distance
+     if tasks and fast_scores and len(p.batches) == 1:
+         from .single_batch_scoring import SingleBatchRouteScorer
+         score_route = scorer if scorer is not None else SingleBatchRouteScorer(problem)
++        if cache_distances and isinstance(score_route, SingleBatchRouteScorer):
++            # Static directed arcs belong to the same fixed problem as the
++            # scorer. Reuse its bounded cache; scores and ready times stay fresh.
++            distance = score_route.distance
+     # Scoped to this repair: goods-ready times and the problem stay fixed.
+     # Keep the route object alive with its score to prevent object-id reuse.
+     route_scores = {}
+@@ -158,7 +164,7 @@
+             else:
+                 scores[index], end = score_route(problem, route, goods, before[index])
+                 locations = [route['satellite']]+[problem.order_map[o].customer for o, _ in route['tasks']]+[route['satellite']]
+-                distances[index] = sum(problem.distance(a, b) for a, b in zip(locations, locations[1:]))
++                distances[index] = sum(distance(a, b) for a, b in zip(locations, locations[1:]))
+                 if cache_scores:
+                     route_scores[id(route)] = (route, before[index], scores[index], end, distances[index])
+             ready[key] = end+p.e2_turnaround_time
+@@ -179,8 +185,8 @@
+                 if screen and best is not None:
+                     left = route['satellite'] if pos == 0 else problem.order_map[existing[pos-1][0]].customer
+                     right = route['satellite'] if pos == len(existing) else problem.order_map[existing[pos][0]].customer
+-                    bound = (distances[index]+problem.distance(left, order.customer)
+-                             +problem.distance(order.customer, right)-problem.distance(left, right)-scores[index])
++                    bound = (distances[index]+distance(left, order.customer)
++                             +distance(order.customer, right)-distance(left, right)-scores[index])
+                     tolerance = 1e-9*max(1, abs(bound), abs(best[0]), abs(scores[index]))
+                     if bound > best[0]+tolerance:
+                         continue
+--- before/models/routing/solvers/alns/single_batch.py
++++ m3/models/routing/solvers/alns/single_batch.py
+@@ -213,7 +213,8 @@
+             proposed = initial_state(problem, rng, randomized=True)
+         elif op.startswith('destroy_'):
+             proposed = destroy_repair(problem, current, rng, op.split('_')[1], begun+max_time,
+-                                      scorer=cached.route_scorer)
++                                      scorer=cached.route_scorer,
++                                      cache_distances=problem.reusable and _assignment_search is None)
+         else:
+             proposed = _move(problem, current, rng, op)
+         if proposed_problem is problem and state_key(proposed) == state_key(current):

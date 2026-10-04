@@ -32,8 +32,12 @@ def cache_static_evaluator(evaluator, *, catalogue=None):
     simulate = getattr(evaluator, 'simulate_e2_route', None)
     if simulate is not None:
         @lru_cache(maxsize=8192)
-        def schedule(base, nodes, satellite, start):
+        def schedule(base, nodes, satellite, start, pickup_ready):
+            if pickup_ready:
+                return simulate(Route(base, list(nodes)), satellite, start,
+                                pickup_ready=dict(pickup_ready))
             return simulate(Route(base, list(nodes)), satellite, start)
 
-        evaluator.simulate_e2_route = lambda route, satellite, start_time=0.0: schedule(
-            route.base, tuple(route.nodes), satellite, start_time)
+        evaluator.simulate_e2_route = lambda route, satellite, start_time=0.0, pickup_ready=None: schedule(
+            route.base, tuple(route.nodes), satellite, start_time,
+            tuple(sorted((pickup_ready or {}).items())))

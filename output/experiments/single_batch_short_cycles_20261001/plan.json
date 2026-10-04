@@ -1,0 +1,78 @@
+{
+  "mode": "continuous user-authorized implementation and sequential frozen full-MILP comparisons",
+  "candidate": "_single_batch_cycle_cuts=True; add static x[a,b]+x[b,a]<=1 for reciprocal E2 task arcs",
+  "scope": "single-batch M1-M4, shared indexed or compressed task arcs; retain all delivery and pickup semantics",
+  "default": false,
+  "primary": {
+    "customers": 20,
+    "models": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "seeds": [
+      42,
+      43
+    ],
+    "budget": 20,
+    "methods": [
+      "baseline",
+      "cycles"
+    ]
+  },
+  "unchanged": [
+    "original full formulation",
+    "default capacity-cut callback",
+    "integer clocks",
+    "finite vehicles/trips",
+    "primal constructor and common audited supplied start",
+    "distance objective and zero MIP gap"
+  ],
+  "no_cg_or_route_pool": true,
+  "execution": "single-thread sequential isolated processes, reverse order seed 43, no retries or overwrites",
+  "evaluation": "compare feasible distance, certified bound/gap, actual optimal proofs, MIP work and construction overhead; retain every positive/negative outcome",
+  "possible_followup": "If primary results show repeatable positive bound/gap/proof progress, test affected models at 30 customers using the same seeds, budget and source; development comparisons, not a held-out generalization claim",
+  "validation": "all output schedules independently audited and two-cycle replayed, preserved snapshots/hashes, full regression after timed comparisons",
+  "second_candidate": {
+    "candidate": "_single_batch_causal_bounds=True; implied task and route endpoint bounds, endpoint-specific causal Big-M",
+    "default": false,
+    "primary": {
+      "customers": 20,
+      "models": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "seeds": [
+        42,
+        43
+      ],
+      "budget": 20,
+      "methods": [
+        "baseline",
+        "causal"
+      ]
+    },
+    "reason": "First candidate mixed; mathematical endpoint implications allow tighter bounds without additional variables or constraints",
+    "same_process": "same direct full-MILP budget, seeds, frozen inputs and audited starts; no CG or route pool",
+    "followup": "Only if primary causal results show repeatable gap or proof progress; retained developmental comparisons",
+    "followup_executed": {
+      "customers": 30,
+      "models": [
+        4
+      ],
+      "budget": 20,
+      "seeds": [
+        42,
+        43
+      ],
+      "methods": [
+        "baseline",
+        "causal"
+      ],
+      "selection": "M4 certified bound rose at both primary seeds; gap and incumbent mixed. Followup checks persistence only, not held-out superiority. All M1-M4 primary negative outcomes retained."
+    }
+  }
+}

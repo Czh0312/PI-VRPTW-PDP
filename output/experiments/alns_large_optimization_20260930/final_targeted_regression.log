@@ -1,0 +1,40 @@
+........................................................................ [ 63%]
+......................................F...                               [100%]
+=================================== FAILURES ===================================
+________ test_solver_runs_without_importing_the_other_algorithm[exact] _________
+
+method = 'exact'
+
+    @pytest.mark.parametrize('method', ['exact', 'alns', 'shared'])
+    def test_solver_runs_without_importing_the_other_algorithm(method):
+        if method == 'exact':
+            gp = pytest.importorskip('gurobipy')
+            try:
+                model = gp.Model()
+                model.dispose()
+            except gp.GurobiError as exc:
+                pytest.skip(f'Gurobi unavailable: {exc}')
+        completed = subprocess.run([sys.executable, '-c', SCRIPT, method], cwd=ROOT,
+                                   capture_output=True, text=True, timeout=60)
+>       assert completed.returncode == 0, completed.stdout+'\n'+completed.stderr
+E       AssertionError: 
+E         Traceback (most recent call last):
+E           File "<string>", line 45, in <module>
+E           File "/Users/chenzeheng/Desktop/2E-VRPTW-PDD/models/routing/service.py", line 32, in solve_routing
+E             return module.solve_exact(problem, time_limit=exact_time if exact_time is not None else 60, seed=seed)
+E           File "/Users/chenzeheng/Desktop/2E-VRPTW-PDD/models/routing/variants/model_1/__init__.py", line 12, in solve_exact
+E             return solve(*args, **kwargs)
+E           File "/Users/chenzeheng/Desktop/2E-VRPTW-PDD/models/routing/variants/model_1/exact/solver.py", line 8, in solve_exact
+E             from models.routing.solvers.exact.solver import solve_exact as solve_shared
+E           File "/Users/chenzeheng/Desktop/2E-VRPTW-PDD/models/routing/solvers/exact/solver.py", line 174
+E             info.update(status=status, proven_optimal=model.Status == GRB.OPTIMAL,
+E                         ^
+E         SyntaxError: keyword argument repeated: mip_work
+E         
+E       assert 1 == 0
+E        +  where 1 = CompletedProcess(args=['/Users/chenzeheng/Desktop/2E-VRPTW-PDD/.venv/bin/python', '-c', "\nimport importlib.abc\nimpor...s, proven_optimal=model.Status == GRB.OPTIMAL,\n                ^\nSyntaxError: keyword argument repeated: mip_work\n').returncode
+
+tests/routing/test_solver_isolation.py:79: AssertionError
+=========================== short test summary info ============================
+FAILED tests/routing/test_solver_isolation.py::test_solver_runs_without_importing_the_other_algorithm[exact]
+1 failed, 113 passed in 4.50s

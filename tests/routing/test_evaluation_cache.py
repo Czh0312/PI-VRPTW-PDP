@@ -1,6 +1,6 @@
 """Cached route schedules must invalidate on path or departure changes."""
 import pytest
-from models.routing.alns.variants import model_3, model_4
+from models.routing.baselines.alns import model_3, model_4
 from models.routing.alns.types import Route
 from models.routing.common.task_builder import build_tasks_for_model
 from tests.routing.test_alns_fast_neighborhoods import problem

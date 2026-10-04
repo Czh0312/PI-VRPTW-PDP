@@ -1,0 +1,30 @@
+{
+  "created_utc": "2026-10-01T17:58:08.602377+00:00",
+  "candidate": "M3/M4 all-task E2 route-cover lower-bound prototype; first projection proof only",
+  "hypothesis": "A route-cover relaxation with delivery AND pickup tasks, variable load profiles and shared assignment can strengthen M3/M4 lower bounds. Check embedding of every original trip before evaluating strength.",
+  "defaults": "No new default. No original business data or physical schedule constraints changed.",
+  "first_stage": {
+    "models": [
+      3,
+      4
+    ],
+    "frozen_originals": "single_batch_short_cycles_20261001/causal20 baseline42/43 originals; original input/assignment/route/task/clock preserved",
+    "tiny": "Independent M3/M4 original integer enumeration, cross-trip/serial examples, duplicate-order/nonmetric/zero-duration cases",
+    "budget": "Projection and tiny verification first; no large end-to-end runs until this gate passes."
+  },
+  "correctness_boundary": [
+    "Full original solve keeps all deliveries/pickups, cross-trip use-time precedence, actual E2/E1 vehicles, stocks, turnaround and integer clocks.",
+    "A separately named lower-bound relaxation may omit coupling only after proving every full original integer schedule embeds. It never substitutes a relaxed pool proof for original exactness.",
+    "For fixed M3, every site must cover all its individual (order_id,d/p) tasks exactly once; aggregate trip count must be an upper bound on actual possible nonempty trips.",
+    "For free M4 use shared customer/site assignment z for BOTH task kinds. Never sum independent full-site bounds for every possible warehouse; that double counts incompatible assignments.",
+    "Raw projected trip sequence retains TASK IDs and every arc, including repeated customer locations. No shortcutting on nonmetric data.",
+    "Necessary earliest pickup is bounded by the same-site earliest feasible delivery+service+min_use, not actual relaxed cross-trip pickup schedules. Validate raw feasible schedules project despite this lower bound.",
+    "Certified interrupted pricing uses an actual valid global/category lower bound or conservative analytic fallback, never the best reduced-cost incumbent or restricted-master objective.",
+    "E1 cost component added only if independently valid for every original assignment; never reuse fixed-satellite bound for M4 or delivery-only raw tours that remove pickup detours on nonmetric graphs.",
+    "Scope/fingerprint binding must remain M3/M4. Do not convert to M5 to evade guards; any reused mixed-task pricing context must be independently audited as a relaxation of ORIGINAL semantics."
+  ],
+  "implementation_scope": "New owned modules/files only. Reuse frozen mixed-task pricing implementation if proven compatible; preserve other M5 ongoing edits and do not modify their modules.",
+  "after_projection": "Register lower-bound strength/budget experiment and then any full-kernel integration as separate candidates. Independent sources, multiple seeds and short/long shared TOTAL budgets remain mandatory for adoption.",
+  "adoption_gate": "Stable audited end-to-end gain across independent sources; all proof and necessary regression checks. Mixed/negative results disabled, all retained.",
+  "stop_rules": "07:00 stop new large work;08:00 end this night only."
+}

@@ -1,0 +1,22 @@
+F...........                                                             [100%]
+=================================== FAILURES ===================================
+_______ test_pickups_fit_between_delivery_waves_on_one_physical_vehicle ________
+
+    def test_pickups_fit_between_delivery_waves_on_one_physical_vehicle():
+        p = split_problem()
+        orders = deepcopy(p.orders)
+        result = construct_incumbent(p, time.perf_counter()+1)
+        assert result is not None and result['info']['primal_strategy'].startswith('split_insertion')
+        audit = audit_solution(p, result)
+        assert audit['valid'], audit['errors']
+        assert audit['periodic_replay']['valid']
+>       assert [r['trip_index'] for r in result['e2_trips']] == list(range(6))
+E       assert [0, 1, 2, 3] == [0, 1, 2, 3, 4, 5]
+E         
+E         Right contains 2 more items, first extra item: 4
+E         Use -v to get more diff
+
+tests/routing/test_single_batch_primal.py:43: AssertionError
+=========================== short test summary info ============================
+FAILED tests/routing/test_single_batch_primal.py::test_pickups_fit_between_delivery_waves_on_one_physical_vehicle
+1 failed, 11 passed in 0.45s

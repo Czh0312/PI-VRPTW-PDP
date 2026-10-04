@@ -1,0 +1,1774 @@
+--- before/models/routing/common/cycle/assignment.py
++++ after/models/routing/common/cycle/assignment.py
+@@ -1,5 +1,5 @@
+ """Solver-independent customer assignment validation and result conversion."""
+-from copy import deepcopy
++from copy import copy, deepcopy
+ from dataclasses import replace
+ 
+ from .instance import MultiBatchInstance
+@@ -16,9 +16,21 @@
+ 
+ def assigned_problem(problem, assignment):
+     assignment = validate_assignment(problem, assignment)
+-    orders = [replace(o, satellite=assignment[o.customer]) for o in problem.orders]
+-    return MultiBatchInstance(problem.network, orders, problem.operating_policy,
+-                              model=3 if problem.reusable else 1)
++    # Assignment changes only order ownership and its aggregates. Reusing the
++    # validated, read-only network avoids O(|V|^2) matrix validation and Decimal
++    # time conversion on every candidate and every independent replay.
++    fixed = copy(problem)
++    fixed.model_number = 3 if problem.reusable else 1
++    fixed.free_assignment = False
++    fixed.orders = tuple(replace(o, satellite=assignment[o.customer]) for o in problem.orders)
++    fixed.order_map = {o.id: o for o in fixed.orders}
++    fixed.demands = {key: 0 for key in problem.demands}
++    fixed.weights = {key: 0.0 for key in problem.weights}
++    for order in fixed.orders:
++        key = order.satellite, order.batch
++        fixed.demands[key] += order.count
++        fixed.weights[key] += order.goods_weight+order.count*fixed.fleet.container_weight
++    return fixed
+ 
+ 
+ def input_assignment(problem):
+--- before/models/routing/common/cycle/instance.py
++++ after/models/routing/common/cycle/instance.py
+@@ -1,7 +1,7 @@
+ """Order identity is separate from location identity and delivery wave."""
+ from __future__ import annotations
+ 
+-from dataclasses import dataclass
++from dataclasses import dataclass, replace
+ import csv
+ import json
+ from pathlib import Path
+@@ -38,7 +38,11 @@
+         self.reusable = self.model_number in (3, 4, 5)
+         self.free_assignment = self.model_number in (2, 4)
+         self.task_kinds = ('d', 'p') if self.reusable else ('d',)
+-        self.orders = tuple(orders)
++        # Direct Python callers can supply an integral float, just as JSON/CSV
++        # loaders accept 1.0. Canonicalize it before quantities enter schedules
++        # and MILP extraction, which require actual integer container counts.
++        self.orders = tuple(o if isinstance(o.count, int) else
++                            replace(o, count=integer(o.count, 'container_count', 1)) for o in orders)
+         self.order_map = {o.id: o for o in self.orders}
+         self.fleet = network.fleet
+         self.satellites = tuple(s.id for s in network.satellites)
+--- before/models/routing/solvers/exact/formulation.py
++++ after/models/routing/solvers/exact/formulation.py
+@@ -8,6 +8,22 @@
+     import gurobipy as gp
+     from gurobipy import GRB
+     p, f = problem.operating_policy, problem.fleet
++    single = len(p.batches) == 1
++    windows = {}
++    if single:
++        from models.routing.common.cycle.precheck import _shortest_times
++        outward = _shortest_times(problem, problem.depot)
++        for s in problem.satellites:
++            travel_out = _shortest_times(problem, s)
++            travel_in = _shortest_times(problem, s, reverse=True)
++            supplied = p.batches[0].start+p.e1_load_time+outward[s]+problem.service(s)+p.e2_dispatch_prep_time
++            for o in problem.orders:
++                if o.satellite != s:
++                    continue
++                delivered = max(o.delivery_window[0], supplied+travel_out[o.customer])
++                windows[o.id, 'd'] = (delivered, min(o.delivery_window[1], p.batches[0].cutoff-o.service_time))
++                windows[o.id, 'p'] = (max(o.pickup_window[0], delivered+o.service_time+o.min_use_time),
++                    min(o.pickup_window[1], p.batches[0].cutoff-o.service_time-travel_in[o.customer]-p.e2_return_unload_time))
+     H, total = p.cycle_end, max(1, problem.total)
+     m = gp.Model('multi_batch_cutoff_v1')
+     m.Params.OutputFlag = int(verbose)
+@@ -36,40 +52,64 @@
+         end = m.addVar(vtype=GRB.INTEGER, ub=H, name=label+'_end')
+         visit = m.addVars(count, vtype=GRB.BINARY, name=label+'_visit')
+         times = m.addVars(count, vtype=GRB.INTEGER, ub=H, name=label+'_time')
+-        rank = m.addVars(count, lb=0, ub=max(1, count), name=label+'_rank')
++        # E2 already has strictly increasing global causal steps below.
++        rank = m.addVars(count, lb=0, ub=max(1, count), name=label+'_rank') if layer == 'e1' else None
+         load_w = m.addVars(count, ub=cap_w, name=label+'_weight')
+         load_v = m.addVars(count, ub=cap_v, name=label+'_volume')
+         # -1 = source, -2 = sink. There is no empty source-to-sink route.
+-        arcs = [(-1, j) for j in range(count)] + [(i, -2) for i in range(count)]
+-        arcs += [(i, j) for i in range(count) for j in range(count) if i != j
+-                 and not (layer == 'e1' and nodes[i]['kind'] == 'p' and nodes[j]['kind'] == 'd')]
++        end_limit = min(H-p.e1_turnaround_time, batch.end) if layer == 'e1' else H-p.e2_turnaround_time
++        arcs = [(-1, j) for j in range(count)
++                if p.cycle_start+problem.travel(base, nodes[j]['site']) <= nodes[j]['window'][1]]
++        arcs += [(i, -2) for i in range(count)
++                 if nodes[i]['window'][0]+nodes[i]['service']+problem.travel(nodes[i]['site'], base)+unload <= end_limit]
++        for i, left in enumerate(nodes):
++            check_budget()
++            for j, right in enumerate(nodes):
++                if i == j or (layer == 'e1' and left['kind'] == 'p' and right['kind'] == 'd'):
++                    continue
++                if (layer == 'e2' and left['kind'] == 'p' and right['kind'] == 'd'
++                        and left['order'].id == right['order'].id):
++                    continue
++                if left['window'][0]+left['service']+problem.travel(left['site'], right['site']) <= right['window'][1]:
++                    arcs.append((i, j))
+         x = m.addVars(arcs, vtype=GRB.BINARY, name=label+'_arc')
++        incoming, outgoing = {i: [] for i in range(count)}, {i: [] for i in range(count)}
++        for a, b in arcs:
++            if b >= 0:
++                incoming[b].append(x[a, b])
++            if a >= 0:
++                outgoing[a].append(x[a, b])
+         m.addConstr(start <= H*used)
+         m.addConstr(end <= H*used)
+         m.addConstr((used == 1) >> (start >= p.cycle_start))
+-        m.addConstr(gp.quicksum(x[-1, j] for j in range(count)) == used)
+-        m.addConstr(gp.quicksum(x[i, -2] for i in range(count)) == used)
++        m.addConstr(gp.quicksum(x[a, b] for a, b in arcs if a == -1) == used)
++        m.addConstr(gp.quicksum(x[a, b] for a, b in arcs if b == -2) == used)
+         initial_w = gp.quicksum(n['w']*visit[i] for i, n in enumerate(nodes) if n['kind'] == 'd')
+         initial_v = gp.quicksum(n['v']*visit[i] for i, n in enumerate(nodes) if n['kind'] == 'd')
+         m.addConstr(initial_w <= cap_w)
+         m.addConstr(initial_v <= cap_v)
+         for i, n in enumerate(nodes):
+-            m.addConstr(gp.quicksum(x[a, i] for a, b in arcs if b == i) == visit[i])
+-            m.addConstr(gp.quicksum(x[i, b] for a, b in arcs if a == i) == visit[i])
++            if i % 64 == 0:
++                check_budget()
++            m.addConstr(gp.quicksum(incoming[i]) == visit[i])
++            m.addConstr(gp.quicksum(outgoing[i]) == visit[i])
+             m.addConstr(visit[i] <= used)
+             m.addConstr(times[i] <= H*visit[i])
+-            if n['kind'] == 'p' and layer == 'e1':
++            if n['kind'] == 'p' and layer == 'e1' and not single:
+                 m.addConstr(n['quantity'] <= total*visit[i])
+                 m.addConstr(n['quantity'] >= visit[i])
+             m.addConstr((visit[i] == 1) >> (times[i] >= n['window'][0]))
+             m.addConstr((visit[i] == 1) >> (times[i] <= n['window'][1]))
+-        for a, b in arcs:
++        for arc_index, (a, b) in enumerate(arcs):
++            if arc_index % 64 == 0:
++                check_budget()
+             left = base if a == -1 else nodes[a]['site']
+             right = base if b == -2 else nodes[b]['site']
+             objective += problem.distance(left, right)*x[a, b]
+             if a == -1:
+                 m.addConstr((x[a, b] == 1) >> (times[b] >= start+problem.travel(left, right)))
+-                m.addConstr((x[a, b] == 1) >> (rank[b] == 1))
++                if rank is not None:
++                    m.addConstr((x[a, b] == 1) >> (rank[b] == 1))
+                 sign = -1 if nodes[b]['kind'] == 'd' else 1
+                 m.addConstr((x[a, b] == 1) >> (load_w[b] == initial_w+sign*nodes[b]['w']))
+                 m.addConstr((x[a, b] == 1) >> (load_v[b] == initial_v+sign*nodes[b]['v']))
+@@ -77,7 +117,8 @@
+                 m.addConstr((x[a, b] == 1) >> (end >= times[a]+nodes[a]['service']+problem.travel(left, right)+unload))
+             else:
+                 m.addConstr((x[a, b] == 1) >> (times[b] >= times[a]+nodes[a]['service']+problem.travel(left, right)))
+-                m.addConstr((x[a, b] == 1) >> (rank[b] >= rank[a]+1))
++                if rank is not None:
++                    m.addConstr((x[a, b] == 1) >> (rank[b] >= rank[a]+1))
+                 sign = -1 if nodes[b]['kind'] == 'd' else 1
+                 m.addConstr((x[a, b] == 1) >> (load_w[b] == load_w[a]+sign*nodes[b]['w']))
+                 m.addConstr((x[a, b] == 1) >> (load_v[b] == load_v[a]+sign*nodes[b]['v']))
+@@ -95,8 +136,10 @@
+                     nodes.append(dict(site=s, kind='d', quantity=n, w=problem.weights[s, b.id],
+                                       v=n*f.container_volume, service=problem.service(s),
+                                       window=(b.start, b.cutoff-problem.service(s))))
+-                if problem.reusable:
+-                    q = m.addVar(vtype=GRB.INTEGER, ub=total, name=f'q_{b.id}_{k}_{s}')
++                if problem.reusable and (not single or n):
++                    # B=1: all orders must be unloaded by its sole cutoff, so
++                    # every satellite's pickup quantity is known in advance.
++                    q = n if single else m.addVar(vtype=GRB.INTEGER, ub=total, name=f'q_{b.id}_{k}_{s}')
+                     nodes.append(dict(site=s, kind='p', quantity=q, w=q*f.container_weight,
+                                       v=q*f.container_volume, service=problem.service(s),
+                                       window=(b.cutoff, b.end)))
+@@ -114,7 +157,8 @@
+             m.addConstr((only_pick == 1) >> (r['start'] >= b.cutoff))
+             m.addConstr((r['used'] == 1) >> (r['end'] <= b.end))
+             m.addConstr((r['used'] == 1) >> (r['end']+p.e1_turnaround_time <= H))
+-            r['quantity'] = gp.quicksum(n['quantity'] for n in nodes if n['kind'] == 'p')
++            r['quantity'] = gp.quicksum(n['quantity']*r['visit'][i] if single else n['quantity']
++                                       for i, n in enumerate(nodes) if n['kind'] == 'p')
+             for i, n in enumerate(nodes):
+                 if n['kind'] == 'd':
+                     m.addConstr((r['visit'][i] == 1) >> (deliveries[n['site'], b.id] == r['times'][i]+n['service']))
+@@ -129,6 +173,8 @@
+                     # Loading is occupied time; pickup-only trips have no loading.
+                     m.addConstr((both == 1) >> (r['start']-p.e1_load_time*r['has_delivery'] >= previous['end']+p.e1_turnaround_time))
+             routes1.append(r)
++            if single and k:
++                m.addConstr(r['used'] <= routes1[-2]['used'])
+     for (s, bid), count in problem.demands.items():
+         if count:
+             m.addConstr(gp.quicksum(r['visit'][i] for r in routes1 if r['batch'].id == bid
+@@ -137,19 +183,27 @@
+     q_expected = {(s, b.id): gp.LinExpr() for s in problem.satellites for b in p.batches}
+     for s in problem.satellites:
+         orders = [o for o in problem.orders if o.satellite == s]
+-        for v in range(f.e2_per_sat_count):
++        if not orders:
++            continue
++        first_slots = []
++        for v in range(min(f.e2_per_sat_count, len(orders)*len(problem.task_kinds))):
+             previous = None
+-            for slot in range(p.e2_max_trips_per_vehicle):
++            for slot in range(min(p.e2_max_trips_per_vehicle, len(orders)*len(problem.task_kinds))):
+                 nodes = []
+                 for o in orders:
+                     for kind in problem.task_kinds:
+                         _, w, volume = problem.task(o.id, kind)
+                         nodes.append(dict(site=o.customer, order=o, kind=kind, quantity=o.count,
+                                           w=w, v=volume, service=o.service_time,
+-                                          window=o.delivery_window if kind == 'd' else o.pickup_window))
++                                          window=windows[o.id, kind] if single else
++                                              (o.delivery_window if kind == 'd' else o.pickup_window)))
+                 r = route(nodes, s, f.e2_weight_cap, f.e2_volume_cap,
+                           p.e2_return_unload_time, f'e2_{s}_{v}_{slot}', 'e2')
+                 r.update(satellite=s, vehicle=v, slot=slot)
++                if slot == 0:
++                    if first_slots:
++                        m.addConstr(r['used'] <= first_slots[-1])
++                    first_slots.append(r['used'])
+                 r['step_start'] = m.addVar(ub=causal_limit)
+                 r['step_end'] = m.addVar(ub=causal_limit)
+                 m.addConstr((r['used'] == 1) >> (r['end']+p.e2_turnaround_time <= H))
+@@ -179,13 +233,15 @@
+                         m.addConstr((r['visit'][i] == 1) >> (r['start'] >= deliveries[s, o.batch]+p.e2_dispatch_prep_time))
+                         if len(p.batches) == 1:
+                             m.addConstr((r['visit'][i] == 1) >> (r['times'][i]+o.service_time <= p.batches[0].cutoff))
++                    elif single:
++                        m.addConstr((r['visit'][i] == 1) >> (r['end'] <= p.batches[0].cutoff))
+                 for (i, j), arc in r['x'].items():
+                     left = r['step_start'] if i == -1 else order_steps[nodes[i]['order'].id, nodes[i]['kind']]
+                     right = r['step_end'] if j == -2 else order_steps[nodes[j]['order'].id, nodes[j]['kind']]
+                     m.addConstr((arc == 1) >> (right >= left+1))
+                 prior_h = 0
+                 gs = []
+-                for b in p.batches:
++                for b in (() if single else p.batches):
+                     h, late, g = (m.addVar(vtype=GRB.BINARY) for _ in range(3))
+                     m.addConstr(late == r['used']-h)
+                     m.addConstr((h == 1) >> (r['end'] <= b.cutoff))
+@@ -195,6 +251,8 @@
+                     gs.append((b, g))
+                 for i, n in enumerate(nodes):
+                     if n['kind'] != 'p':
++                        continue
++                    if single:
+                         continue
+                     allocated = []
+                     for b, g in gs:
+@@ -215,14 +273,22 @@
+             m.addConstr(order_steps[o.id, 'p'] >= order_steps[o.id, 'd']+1)
+     for s in problem.satellites:
+         for b in p.batches:
++            check_budget()
+             nodes = [(r, i, n) for r in routes1 if r['batch'].id == b.id
+                      for i, n in enumerate(r['nodes']) if n['site'] == s and n['kind'] == 'p']
+-            m.addConstr(gp.quicksum(n['quantity'] for r, i, n in nodes) == q_expected[s, b.id])
++            if single:
++                m.addConstr(gp.quicksum(r['visit'][i] for r, i, n in nodes)
++                            == (1 if problem.reusable and problem.demands[s, b.id] else 0))
++            else:
++                m.addConstr(gp.quicksum(n['quantity'] for r, i, n in nodes) == q_expected[s, b.id])
+             m.addConstr(gp.quicksum(r['visit'][i] for r, i, n in nodes) <= 1)
+ 
+     cumulative = 0
+     for b in p.batches if problem.reusable else ():
+         cumulative += problem.batch_demands[b.id]
++        if single:
++            m.addConstr(gp.LinExpr(p.container_pool_size) >= cumulative, f'clean_stock_{b.id}')
++            continue
+         released = []
+         for r in routes1:
+             ready, late = (m.addVar(vtype=GRB.BINARY) for _ in range(2))
+--- before/models/routing/solvers/exact/solver.py
++++ after/models/routing/solvers/exact/solver.py
+@@ -10,7 +10,38 @@
+ from models.routing.common.cycle.precheck import check_necessary_conditions, rejected_result
+ 
+ 
+-def solve_exact(problem, time_limit=60, seed=42, verbose=False):
++def _set_start(problem, model, ctx, result):
++    """Load a partial MIP start only after independent validation."""
++    if result is None or not audit_solution(problem, result)['valid']:
++        return False
++    for layer in ('e1', 'e2'):
++        for trip in result[layer+'_trips']:
++            matches = [r for r in ctx[layer] if r['vehicle'] == trip['vehicle_id'] and
++                       (r['batch'].id == trip['batch_id'] if layer == 'e1' else
++                        r['satellite'] == trip['satellite_id'] and r['slot'] == trip['trip_index'])]
++            if not matches:
++                return False
++            r = matches[0]
++            order = []
++            for event in trip['events']:
++                index = next(i for i, n in enumerate(r['nodes']) if n['kind'] == event['kind'] and
++                             (n['site'] == event['site_id'] if layer == 'e1' else
++                              n['order'].id == event['order_id']))
++                order.append(index)
++                r['times'][index].Start = event['start']
++                quantity = r['nodes'][index]['quantity']
++                if layer == 'e1' and event['kind'] == 'p' and not isinstance(quantity, int):
++                    quantity.Start = event['quantity']
++            arcs = set(zip([-1]+order, order+[-2]))
++            r['used'].Start, r['start'].Start, r['end'].Start = 1, trip['departure'], trip['return_complete']
++            for arc, variable in r['x'].items():
++                variable.Start = int(arc in arcs)
++            for i, variable in r['visit'].items():
++                variable.Start = int(i in order)
++    return True
++
++
++def solve_exact(problem, time_limit=60, seed=42, verbose=False, initial_result=None):
+     if not math.isfinite(time_limit) or time_limit <= 0:
+         raise ValueError('time_limit must be finite and positive')
+     begun = time.perf_counter()
+@@ -27,6 +58,7 @@
+         result['info'].update(status='TIME_LIMIT_BUILD', runtime=time.perf_counter()-begun)
+         return result
+     try:
++        result['info']['mip_start_supplied'] = _set_start(problem, model, ctx, initial_result)
+         build_time = time.perf_counter()-begun
+         model.Params.TimeLimit = max(0, time_limit-build_time)
+         model.Params.Seed = int(seed)
+@@ -41,6 +73,8 @@
+                     runtime=time.perf_counter()-begun, sol_count=model.SolCount,
+                     variables=model.NumVars, constraints=model.NumConstrs+model.NumGenConstrs,
+                     time_tick_seconds=problem.operating_policy.time_tick_seconds,
++                    formulation_features=['sparse_time_arcs', 'vehicle_symmetry', 'causal_steps']+
++                        (['fixed_B1_pickup_quantities'] if len(problem.operating_policy.batches) == 1 else []),
+                     e2_max_trips_per_vehicle=problem.operating_policy.e2_max_trips_per_vehicle)
+         try:
+             info['best_bound'] = float(model.ObjBound) if math.isfinite(model.ObjBound) else None
+--- before/models/routing/solvers/exact/assignment.py
++++ after/models/routing/solvers/exact/assignment.py
+@@ -2,9 +2,11 @@
+ import itertools
+ import math
+ import time
++from collections import OrderedDict
+ 
+ from models.routing.common.cycle.assignment import assigned_problem, input_assignment, lift_result
+ from models.routing.common.cycle.state import empty_result
++from .bounds import distance_lower_bound
+ 
+ 
+ def _assignment_stream(problem):
+@@ -12,9 +14,12 @@
+     yield initial
+     customers = sorted(initial)
+     options = [sorted(problem.satellites, key=lambda s: problem.distance(s, c)) for c in customers]
++    nearest = {c: sites[0] for c, sites in zip(customers, options)}
++    if nearest != initial:
++        yield nearest
+     for values in itertools.product(*options):
+         candidate = dict(zip(customers, values))
+-        if candidate != initial:
++        if candidate != initial and candidate != nearest:
+             yield candidate
+ 
+ 
+@@ -25,6 +30,33 @@
+     start = time.perf_counter()
+     total = len(problem.satellites)**len({o.customer for o in problem.orders})
+     best, best_cost, records = None, math.inf, []
++    incumbents = OrderedDict()
++
++    def solve_partition(fixed, assignment, budget, record=None):
++        nonlocal best, best_cost
++        key = tuple(sorted(assignment.items()))
++        solved = solve_fixed(fixed, time_limit=budget, seed=seed, verbose=verbose,
++                             initial_result=incumbents.get(key))
++        info = solved['info']
++        valid = bool(solved.get('audit', {}).get('valid'))
++        if valid:
++            incumbents[key] = solved
++            incumbents.move_to_end(key)
++            if len(incumbents) > 32:
++                incumbents.popitem(last=False)
++        closed = bool(info.get('proven_infeasible') or (info.get('proven_optimal') and valid))
++        if record is None:
++            record = dict(assignment=assignment, lower_bound=distance_lower_bound(fixed), solves=0)
++            records.append(record)
++        record.update(status=info['status'], closed=closed,
++                      infeasible=bool(info.get('proven_infeasible')), solves=record['solves']+1,
++                      objective=info.get('objective') if valid else record.get('objective'),
++                      lower_bound=max(record['lower_bound'], info.get('best_bound') or 0))
++        if valid and info['objective'] < best_cost:
++            candidate = lift_result(problem, solved, assignment)
++            if candidate.get('audit', {}).get('valid'):
++                best, best_cost = candidate, info['objective']
++
+     for assignment in _assignment_stream(problem):
+         remaining = time_limit-(time.perf_counter()-start)
+         if remaining <= 0:
+@@ -33,19 +65,37 @@
+         remaining = time_limit-(time.perf_counter()-start)
+         if remaining <= 0:
+             break
+-        budget = min(remaining, max(.05, remaining/min(8, total-len(records))))
+-        solved = solve_fixed(fixed, time_limit=budget, seed=seed, verbose=verbose)
+-        info = solved['info']
+-        valid = bool(solved.get('audit', {}).get('valid'))
+-        closed = bool(info.get('proven_infeasible') or (info.get('proven_optimal') and valid))
+-        records.append(dict(assignment=assignment, status=info['status'], closed=closed,
+-                            infeasible=bool(info.get('proven_infeasible')),
+-                            objective=info.get('objective') if valid else None,
+-                            lower_bound=info.get('best_bound')))
+-        if valid and info['objective'] < best_cost:
+-            candidate = lift_result(problem, solved, assignment)
+-            if candidate.get('audit', {}).get('valid'):
+-                best, best_cost = candidate, info['objective']
++        bound = distance_lower_bound(fixed)
++        if bound >= best_cost:
++            records.append(dict(assignment=assignment, status='BOUND_PRUNED', closed=True,
++                                infeasible=False, objective=None, lower_bound=bound, solves=0))
++            continue
++        remaining = time_limit-(time.perf_counter()-start)
++        if remaining <= 0:
++            break
++        # Establish the fixed-assignment incumbent before fragmenting the
++        # budget across exponentially many alternatives. Unused solve time
++        # stays available to later partitions when the first one closes early.
++        share = remaining*.4 if not records and total > 1 else remaining/min(8, total-len(records))
++        budget = min(remaining, max(.05, share))
++        solve_partition(fixed, assignment, budget)
++    # A once-visited time-limited subproblem remains open. Spend the remaining
++    # budget on its proof instead of returning immediately after enumeration.
++    while len(records) == total:
++        pending = [r for r in records if not r['closed']]
++        for record in pending:
++            if record['lower_bound'] >= best_cost:
++                record.update(closed=True, status='BOUND_PRUNED')
++        pending = [r for r in pending if not r['closed']]
++        remaining = time_limit-(time.perf_counter()-start)
++        if not pending or remaining <= 0:
++            break
++        record = min(pending, key=lambda r: (r['solves'], r['lower_bound']))
++        fixed = assigned_problem(problem, record['assignment'])
++        remaining = time_limit-(time.perf_counter()-start)
++        if remaining <= 0:
++            break
++        solve_partition(fixed, record['assignment'], remaining/min(4, len(pending)), record)
+     all_closed = len(records) == total and all(r['closed'] for r in records)
+     infeasible = all_closed and all(r['infeasible'] for r in records)
+     bounds = [r['lower_bound'] if r['lower_bound'] is not None else 0
+@@ -59,6 +109,8 @@
+                           proof_scope='all_customer_assignments_integer_time_cycle',
+                           runtime=time.perf_counter()-start, assignment_count=total,
+                           assignments_visited=len(records), assignments_closed=sum(r['closed'] for r in records),
++                          assignments_pruned=sum(r['status'] == 'BOUND_PRUNED' for r in records),
++                          subproblem_solves=sum(r['solves'] for r in records),
+                           best_bound=best_cost if best and all_closed else lower,
+                           mip_gap=0.0 if best and all_closed else
+                               (max(0.0, best_cost-lower)/max(1e-9, abs(best_cost)) if best and lower is not None else None),
+--- before/models/routing/solvers/exact/bounds.py
++++ after/models/routing/solvers/exact/bounds.py
+@@ -0,0 +1,33 @@
++"""Conservative distance bounds on mandatory visits, including nonmetric arcs."""
++import math
++
++
++def _visit_bound(problem, base, tasks, delivery_first=False):
++    if not tasks:
++        return 0.0
++    incoming = outgoing = 0.0
++    for i, (site, kind) in enumerate(tasks):
++        incoming += min([problem.distance(base, site)]+[
++            problem.distance(other, site) for j, (other, previous) in enumerate(tasks)
++            if j != i and not (delivery_first and previous == 'p' and kind == 'd')])
++        outgoing += min([problem.distance(site, base)]+[
++            problem.distance(site, other) for j, (other, following) in enumerate(tasks)
++            if j != i and not (delivery_first and kind == 'p' and following == 'd')])
++    # At least one trip must leave and return to this base. Allow any task as
++    # predecessor/successor: this relaxation cannot exclude a feasible route.
++    incoming += min(problem.distance(s, base) for s, _ in tasks)
++    outgoing += min(problem.distance(base, s) for s, _ in tasks)
++    return max(incoming, outgoing)
++
++
++def distance_lower_bound(problem):
++    if len(problem.operating_policy.batches) != 1:
++        return 0.0
++    active = {o.satellite for o in problem.orders}
++    bound = _visit_bound(problem, problem.depot,
++                         [(s, k) for s in sorted(active) for k in problem.task_kinds], True)
++    for site in problem.satellites:
++        bound += _visit_bound(problem, site, [(o.customer, k) for o in problem.orders
++                                             if o.satellite == site for k in problem.task_kinds])
++    # Round conservatively before using the bound to prune another partition.
++    return max(0.0, bound-1e-7*max(1.0, bound)) if math.isfinite(bound) else 0.0
+--- before/models/routing/solvers/alns/evaluator.py
++++ after/models/routing/solvers/alns/evaluator.py
+@@ -64,7 +64,7 @@
+             trip, issues = _e1_trip(problem, b, k, sites, [], {}, p.cycle_start)
+             # A delivery-only return may be late whereas the eventual mixed
+             # route fits. Validate final return only after inserting pickups.
+-            violations.extend(x for x in issues if x not in ('E1_RETURN_DEADLINE',))
++            violations.extend(x for x in issues if x not in ('E1_RETURN_DEADLINE', 'E1_TERMINAL_VEHICLE'))
+             if trip:
+                 for e in trip['events']:
+                     goods_ready[e['site_id'], b.id] = e['start']+problem.service(e['site_id'])
+@@ -235,7 +235,8 @@
+                 _, w, v = problem.task(o.id, 'd')
+                 if packed and (weight+w > f.e2_weight_cap or volume+v > f.e2_volume_cap):
+                     state['e2'].append(dict(satellite=s, vehicle=route_count % f.e2_per_sat_count,
+-                                            tasks=[(o.id, k) for o in packed for k in problem.task_kinds]))
++                                            tasks=[(o.id, 'd') for o in packed]+
++                                                  ([(o.id, 'p') for o in packed] if problem.reusable else [])))
+                     route_count += 1
+                     packed, weight, volume = [], 0, 0
+                 packed.append(o)
+--- before/models/routing/solvers/alns/solver.py
++++ after/models/routing/solvers/alns/solver.py
+@@ -11,10 +11,11 @@
+ from models.routing.common.cycle.audit import audit_solution
+ from models.routing.common.cycle.precheck import check_necessary_conditions, rejected_result
+ from .construction import chronological_state
++from .neighborhoods import EvaluationCache, clone_state, destroy_repair, state_key, state_from_result
+ 
+ 
+ def _move(problem, original, rng, operator):
+-    state = deepcopy(original)
++    state = clone_state(original)
+     p, f = problem.operating_policy, problem.fleet
+     routes = state['e2']
+     if operator in ('relocate', 'pair') and routes:
+@@ -75,10 +76,15 @@
+         if problem.satellites:
+             s = rng.choice(problem.satellites)
+             state['pickup_vehicle'][b.id][s] = rng.randrange(f.e1_count)
++    elif operator == 'reverse' and routes:
++        r = rng.choice(routes)
++        if len(r['tasks']) >= 2:
++            a, b = sorted(rng.sample(range(len(r['tasks'])), 2))
++            r['tasks'][a:b+1] = reversed(r['tasks'][a:b+1])
+     return state
+ 
+ 
+-def solve_alns(problem, max_time=10, max_iterations=5000, seed=42):
++def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_result=None):
+     if not math.isfinite(max_time) or max_time <= 0 or max_iterations < 0:
+         raise ValueError('Invalid ALNS time/iteration budget')
+     begun = time.perf_counter()
+@@ -86,26 +92,39 @@
+     if not precheck['passed']:
+         return rejected_result(problem, 'alns', precheck, time.perf_counter()-begun)
+     rng = random.Random(seed)
++    cached = EvaluationCache(problem, evaluate)
+     current = initial_state(problem, rng)
+-    score, decoded, issues = evaluate(problem, current)
++    score, decoded, issues = cached(current)
+     initial_strategy = 'packed'
+     if issues and time.perf_counter()-begun < max_time:
+         alternative = chronological_state(problem, rng)
+-        alt_score, alt_result, alt_issues = evaluate(problem, alternative)
++        alt_score, alt_result, alt_issues = cached(alternative)
+         if (not alt_issues or alt_score < score):
+             current, score, decoded, issues = alternative, alt_score, alt_result, alt_issues
+             initial_strategy = 'chronological_paired_trips'
+     best, best_cost = None, math.inf
++    if initial_result is not None and audit_solution(problem, initial_result)['valid']:
++        best, best_cost = deepcopy(initial_result), initial_result['info']['objective']
++        alternative = state_from_result(problem, initial_result)
++        alt_score, alt_result, alt_issues = cached(alternative)
++        if alt_score < score:
++            current, score, decoded, issues = alternative, alt_score, alt_result, alt_issues
++            initial_strategy = 'audited_warm_start'
+     if not issues:
+         audited = audit_solution(problem, decoded)
+-        if audited['valid']:
++        if audited['valid'] and decoded['info']['objective'] < best_cost:
+             best, best_cost = decoded, decoded['info']['objective']
+-    operators = ['relocate', 'pair', 'split_merge', 'vehicle', 'cutoff', 'e1_delivery', 'e1_pickup']
++    operators = ['relocate', 'split_merge', 'vehicle', 'e1_delivery', 'reverse', 'destroy_random', 'destroy_related']
++    if problem.reusable:
++        operators += ['pair', 'e1_pickup']
++    if len(problem.operating_policy.batches) > 1:
++        operators.append('cutoff')
+     weights = [1.0]*len(operators)
+     attempts = {op: 0 for op in operators}
+     improved = {op: 0 for op in operators}
++    noops = {op: 0 for op in operators}
+     seen_issues, iterations, audit_rejections = set(issues), 0, 0
+-    for iteration in range(max_iterations):
++    for iteration in range(max_iterations if problem.orders else 0):
+         if time.perf_counter()-begun >= max_time:
+             break
+         iterations = iteration+1
+@@ -114,9 +133,15 @@
+         attempts[op] += 1
+         if iteration and iteration % 150 == 0:
+             proposed = initial_state(problem, rng, randomized=True)
++        elif op.startswith('destroy_'):
++            proposed = destroy_repair(problem, current, rng, op.split('_')[1], begun+max_time)
+         else:
+             proposed = _move(problem, current, rng, op)
+-        new_score, candidate, problems = evaluate(problem, proposed)
++        if state_key(proposed) == state_key(current):
++            noops[op] += 1
++            weights[index] = .9*weights[index]+.01
++            continue
++        new_score, candidate, problems = cached(proposed)
+         seen_issues.update(problems)
+         reward = .5
+         if not problems and candidate['info']['objective'] < best_cost-1e-9:
+@@ -128,7 +153,10 @@
+             else:
+                 audit_rejections += 1
+                 new_score = 1e12
+-        progress = min(1, (time.perf_counter()-begun)/max_time)
++        # Expensive repair moves may hit the wall-clock budget long before the
++        # iteration cap. Cool against whichever budget is being consumed faster.
++        progress = min(1.0, max((iteration+1)/max(1, max_iterations),
++                                (time.perf_counter()-begun)/max_time))
+         temperature = max(.01, (decoded['info'].get('objective') or 100)*.05*(1-progress)**2)
+         accept = new_score <= score or rng.random() < math.exp(min(0, (score-new_score)/temperature))
+         if accept:
+@@ -142,6 +170,9 @@
+                           proven_optimal=False, proof_scope=None, best_bound=None, mip_gap=None,
+                           runtime=time.perf_counter()-begun, seed=seed, iterations=iterations,
+                           initial_strategy=initial_strategy,
++                          algorithm='adaptive_destroy_repair_cycle_search', cooling_schedule='max_time_and_iteration_progress',
++                          evaluation_cache_hits=cached.hits, evaluation_cache_misses=cached.misses,
++                          operator_noops=noops,
+                           operator_attempts=attempts, operator_improvements=improved,
+                           encountered_violations=sorted(seen_issues), audit_rejections=audit_rejections,
+                           e2_max_trips_per_vehicle=problem.operating_policy.e2_max_trips_per_vehicle)
+--- before/models/routing/solvers/alns/assignment.py
++++ after/models/routing/solvers/alns/assignment.py
+@@ -2,6 +2,7 @@
+ import math
+ import random
+ import time
++from collections import OrderedDict
+ 
+ from models.routing.common.cycle.assignment import assigned_problem, input_assignment, lift_result
+ from models.routing.common.cycle.state import empty_result
+@@ -16,6 +17,7 @@
+     customers = sorted(current)
+     nearest = {c: min(problem.satellites, key=lambda s: problem.distance(s, c)) for c in customers}
+     best, best_cost, attempts, iterations = None, math.inf, 0, 0
++    incumbents, reused = OrderedDict(), 0
+     while time.perf_counter()-start < max_time:
+         if attempts and (iterations >= max_iterations or not customers):
+             break
+@@ -36,13 +38,20 @@
+         if remaining <= 0:
+             break
+         iteration_budget = min(max_iterations-iterations, max(1, max_iterations//10)) if max_iterations else 0
++        key = tuple(sorted(candidate.items()))
++        warm = incumbents.get(key)
++        reused += int(warm is not None)
+         solved = solve_fixed(fixed, max_time=min(remaining, max(.01, max_time/10)),
+-                             max_iterations=iteration_budget, seed=seed+attempts)
++                             max_iterations=iteration_budget, seed=seed+attempts, initial_result=warm)
+         attempts += 1
+         used = solved['info'].get('iterations', 0)
+         # A precheck-rejected partition still consumes a proposal budget.
+         iterations += max(1, used) if max_iterations else 0
+         if solved.get('audit', {}).get('valid'):
++            incumbents[key] = solved
++            incumbents.move_to_end(key)
++            if len(incumbents) > 32:
++                incumbents.popitem(last=False)
+             lifted = lift_result(problem, solved, candidate)
+             if lifted['audit']['valid'] and solved['info']['objective'] < best_cost:
+                 best, best_cost, current = lifted, solved['info']['objective'], dict(candidate)
+@@ -51,5 +60,5 @@
+                           proven_infeasible=False, best_bound=None, mip_gap=None, proof_scope=None,
+                           algorithm='customer_assignment_search_with_cycle_alns',
+                           runtime=time.perf_counter()-start, seed=seed, iterations=iterations,
+-                          assignment_attempts=attempts)
++                          assignment_attempts=attempts, assignment_warm_starts=reused)
+     return result
+--- before/models/routing/solvers/alns/neighborhoods.py
++++ after/models/routing/solvers/alns/neighborhoods.py
+@@ -0,0 +1,197 @@
++"""Request removal and greedy time/capacity-aware reinsertion for cycle ALNS.
++
++Local scores rank proposals only. The complete decoder and independent audit
++remain the authorities; no local estimate proves infeasibility or optimality.
++"""
++from collections import Counter, OrderedDict
++import time
++
++
++def clone_state(state):
++    return dict(deliveries={b: [list(r) for r in rows] for b, rows in state['deliveries'].items()},
++                pickup_order={b: list(row) for b, row in state['pickup_order'].items()},
++                pickup_vehicle={b: dict(row) for b, row in state['pickup_vehicle'].items()},
++                e2=[{**r, 'tasks': list(r['tasks'])} for r in state['e2']])
++
++
++def state_key(state):
++    return (tuple((b, tuple(map(tuple, rows))) for b, rows in state['deliveries'].items()),
++            tuple((b, tuple(row)) for b, row in state['pickup_order'].items()),
++            tuple((b, tuple(sorted(row.items()))) for b, row in state['pickup_vehicle'].items()),
++            tuple((r['satellite'], r['vehicle'], tuple(r['tasks']),
++                   r.get('depart_after'), r.get('return_after')) for r in state['e2']))
++
++
++class EvaluationCache:
++    def __init__(self, problem, evaluator, capacity=256):
++        self.problem, self.evaluator, self.capacity = problem, evaluator, capacity
++        self.entries = OrderedDict()
++        self.hits = self.misses = 0
++
++    def __call__(self, state):
++        key = state_key(state)
++        if key in self.entries:
++            self.hits += 1
++            self.entries.move_to_end(key)
++            return self.entries[key]
++        self.misses += 1
++        value = self.evaluator(self.problem, state)
++        self.entries[key] = value
++        if len(self.entries) > self.capacity:
++            self.entries.popitem(last=False)
++        return value
++
++
++def _goods_ready(problem, state):
++    ready = {}
++    for b in problem.operating_policy.batches:
++        for sites in state['deliveries'][b.id]:
++            current, previous = b.start+problem.operating_policy.e1_load_time, problem.depot
++            for site in sites:
++                current += problem.travel(previous, site)+problem.service(site)
++                ready[site, b.id] = current
++                previous = site
++    return ready
++
++
++def _route_score(problem, route, goods, vehicle_ready):
++    p, f = problem.operating_policy, problem.fleet
++    tasks, site = route['tasks'], route['satellite']
++    if not tasks:
++        return 0.0, vehicle_ready
++    dbatches = {problem.order_map[oid].batch for oid, kind in tasks if kind == 'd'}
++    current = max(p.cycle_start, vehicle_ready, route.get('depart_after', p.cycle_start))
++    if dbatches:
++        current = max(current, *(goods[site, b] for b in dbatches))+p.e2_dispatch_prep_time
++    weight = sum(problem.task(oid, kind)[1] for oid, kind in tasks if kind == 'd')
++    volume = sum(problem.task(oid, kind)[2] for oid, kind in tasks if kind == 'd')
++    load_penalty = max(0, weight-f.e2_weight_cap)/max(1, f.e2_weight_cap)
++    load_penalty += max(0, volume-f.e2_volume_cap)/max(1, f.e2_volume_cap)
++    distance, late, delivered, previous = 0.0, 0, {}, site
++    for oid, kind in tasks:
++        order, w, vol = problem.task(oid, kind)
++        window = order.delivery_window if kind == 'd' else order.pickup_window
++        current = max(current+problem.travel(previous, order.customer), window[0])
++        if kind == 'p':
++            current = max(current, delivered.get(oid, order.delivery_window[0]+order.service_time)+order.min_use_time)
++        due = window[1]
++        if kind == 'd' and len(p.batches) == 1:
++            due = min(due, p.batches[0].cutoff-order.service_time)
++        late += max(0, current-due)
++        current += order.service_time
++        if kind == 'd':
++            delivered[oid] = current
++        distance += problem.distance(previous, order.customer)
++        previous = order.customer
++        weight += w if kind == 'p' else -w
++        volume += vol if kind == 'p' else -vol
++        load_penalty += max(0, weight-f.e2_weight_cap)/max(1, f.e2_weight_cap)
++        load_penalty += max(0, volume-f.e2_volume_cap)/max(1, f.e2_volume_cap)
++    completed = max(current+problem.travel(previous, site)+p.e2_return_unload_time,
++                    route.get('return_after', p.cycle_start))
++    late += max(0, completed+p.e2_turnaround_time-p.cycle_end)
++    if any(k == 'p' for _, k in tasks):
++        late += max(0, completed-p.batches[-1].cutoff)
++    distance += problem.distance(previous, site)
++    return distance+1e6*(load_penalty+max(0, len(dbatches)-1))+late*p.time_tick_seconds/60*1e4, completed
++
++
++def destroy_repair(problem, original, rng, mode, deadline):
++    if not problem.orders:
++        return clone_state(original)
++    state = clone_state(original)
++    orders = list(problem.orders)
++    count = min(len(orders), max(2, min(5, len(orders)//5)))
++    if mode == 'related':
++        anchor = rng.choice(orders)
++        orders.sort(key=lambda o: (o.satellite != anchor.satellite,
++                                  problem.distance(anchor.customer, o.customer)+
++                                  abs(o.delivery_window[0]-anchor.delivery_window[0])*.01))
++        removed = orders[:count]
++    else:
++        removed = rng.sample(orders, count)
++    ids = {o.id for o in removed}
++    for route in state['e2']:
++        route['tasks'] = [t for t in route['tasks'] if t[0] not in ids]
++    state['e2'] = [r for r in state['e2'] if r['tasks']]
++    goods = _goods_ready(problem, state)
++    p, f = problem.operating_policy, problem.fleet
++    # Deliveries are inserted first; each pickup may then join the same route
++    # at a later position or a different vehicle/trip.
++    tasks = [(o.id, kind) for kind in problem.task_kinds
++             for o in sorted(removed, key=lambda o: (o.delivery_window if kind == 'd' else o.pickup_window)[1])]
++    for task in tasks:
++        if time.perf_counter() >= deadline:
++            return clone_state(original)
++        oid, kind = task
++        order, routes = problem.order_map[oid], state['e2']
++        ready, before, scores = {}, {}, {}
++        counts = Counter((r['satellite'], r['vehicle']) for r in routes)
++        for index, route in enumerate(routes):
++            key = route['satellite'], route['vehicle']
++            before[index] = ready.get(key, p.cycle_start)
++            scores[index], end = _route_score(problem, route, goods, before[index])
++            ready[key] = end+p.e2_turnaround_time
++        best = None
++        for index, route in enumerate(routes):
++            if route['satellite'] != order.satellite:
++                continue
++            existing = route['tasks']
++            if kind == 'd' and any(k == 'd' and problem.order_map[i].batch != order.batch for i, k in existing):
++                continue
++            for pos in range(len(existing)+1):
++                if time.perf_counter() >= deadline:
++                    return clone_state(original)
++                if kind == 'd' and (oid, 'p') in existing[:pos]:
++                    continue
++                if kind == 'p' and (oid, 'd') in existing[pos:]:
++                    continue
++                candidate = {**route, 'tasks': existing[:pos]+[task]+existing[pos:]}
++                score, _ = _route_score(problem, candidate, goods, before[index])
++                option = (score-scores[index], index, candidate, False)
++                if best is None or option[0] < best[0]:
++                    best = option
++        for vehicle in range(f.e2_per_sat_count):
++            if counts[order.satellite, vehicle] >= p.e2_max_trips_per_vehicle:
++                continue
++            candidate = dict(satellite=order.satellite, vehicle=vehicle, tasks=[task])
++            window = order.delivery_window if kind == 'd' else order.pickup_window
++            pos = next((i for i, route in enumerate(routes)
++                        if route['satellite'] == order.satellite and route['vehicle'] == vehicle
++                        and min((problem.order_map[o].delivery_window if k == 'd' else
++                                 problem.order_map[o].pickup_window)[0] for o, k in route['tasks']) > window[0]), len(routes))
++            begin = before[pos] if pos < len(routes) else ready.get((order.satellite, vehicle), p.cycle_start)
++            score, _ = _route_score(problem, candidate, goods, begin)
++            if best is None or score < best[0]:
++                best = (score, pos, candidate, True)
++        if best is None:
++            return clone_state(original)
++        _, index, candidate, new_route = best
++        if new_route:
++            routes.insert(index, candidate)
++        else:
++            routes[index] = candidate
++    return state
++
++
++def state_from_result(problem, result):
++    state = dict(deliveries={b.id: [[] for _ in range(problem.fleet.e1_count)] for b in problem.operating_policy.batches},
++                 pickup_order={b.id: [] for b in problem.operating_policy.batches},
++                 pickup_vehicle={b.id: {} for b in problem.operating_policy.batches}, e2=[])
++    for trip in result['e1_trips']:
++        batch, vehicle = trip['batch_id'], trip['vehicle_id']
++        for event in trip['events']:
++            site = event['site_id']
++            if event['kind'] == 'd':
++                state['deliveries'][batch][vehicle].append(site)
++            else:
++                state['pickup_order'][batch].append(site)
++                state['pickup_vehicle'][batch][site] = vehicle
++    for sites in state['pickup_order'].values():
++        sites.extend(s for s in problem.satellites if s not in sites)
++    for trip in sorted(result['e2_trips'], key=lambda r: (r['trip_index'], r['satellite_id'], r['vehicle_id'])):
++        state['e2'].append(dict(satellite=trip['satellite_id'], vehicle=trip['vehicle_id'],
++                               tasks=[(e['order_id'], e['kind']) for e in trip['events']]))
++        if len(problem.operating_policy.batches) > 1:
++            state['e2'][-1].update(depart_after=trip['departure'], return_after=trip['return_complete'])
++    return state
+--- before/tests/routing/test_single_batch_comparison.py
++++ after/tests/routing/test_single_batch_comparison.py
+@@ -103,7 +103,11 @@
+     assert result['audit']['valid']
+     assert result['info']['assignments_visited'] == 2
+     assert not result['info']['proven_optimal'] and not result['info']['proven_infeasible']
+-    assert result['info']['status'] == 'TIME_LIMIT' and result['info']['best_bound'] == 0
++    assert result['info']['status'] == 'TIME_LIMIT'
++    # A valid combinatorial bound may improve zero without closing the timed
++    # out partition. It must still not be promoted to an optimality proof.
++    assert 0 <= result['info']['best_bound'] <= result['info']['objective']
++    assert result['info']['subproblem_solves'] > 2
+ 
+ 
+ def test_normalization_removes_arbitrary_slack_and_preserves_distance():
+--- before/tests/routing/test_single_batch_solver_audit.py
++++ after/tests/routing/test_single_batch_solver_audit.py
+@@ -0,0 +1,222 @@
++"""Independent tiny enumeration and counterexamples from the 2026-09-30 audit."""
++from copy import deepcopy
++from dataclasses import replace
++import itertools
++import math
++import random
++
++import pytest
++
++from models.routing.common.cycle import MultiBatchInstance, MultiBatchPolicy, Order
++from models.routing.common.cycle.assignment import assigned_problem
++from models.routing.common.cycle.audit import audit_solution
++from models.routing.common.cycle.state import empty_result
++from models.routing.common.domain.instance import ProblemInstance
++from models.routing.common.domain.node import Customer, Depot, Satellite
++from models.routing.service import solve_routing
++from models.routing.solvers.alns.evaluator import evaluate, initial_state
++from models.routing.solvers.alns.neighborhoods import EvaluationCache, clone_state, destroy_repair, state_key
++from models.routing.solvers.exact.bounds import distance_lower_bound
++
++
++def nonmetric_problem():
++    policy = MultiBatchPolicy.from_config(dict(policy_version='multi_batch_cutoff_v1', cycle_start=0,
++        cycle_end=65, batches=[dict(id='b1', delivery_duration=30, return_duration=30)],
++        container_pool_size=2, cleaning_duration=5, time_tick_seconds=60, e2_max_trips_per_vehicle=1))
++    nodes = {'D': Depot('D', 0, 0), 'S': Satellite('S', 0, 0), 'T': Satellite('T', 0, 0),
++             'A': Customer('A', 0, 0, 0, 0, (0, 65), (0, 65), 'S'),
++             'B': Customer('B', 0, 0, 0, 0, (0, 65), (0, 65), 'T')}
++    matrix = {a: {b: 0 if a == b else (100 if (a, b) == ('S', 'D') else 1)
++                  for b in nodes} for a in nodes}
++    fleet = dict(E1_vehicle_count=1, vehicles_per_satellite=1, E1_Qk=50, E1_Ck=50,
++                 E2_Qv=50, E2_Cv=50, container_weight=1, container_volume=1)
++    orders = [Order('a', 'A', 'S', 'b1', 1, 1, (0, 25), (0, 25), 0),
++              Order('b', 'B', 'T', 'b1', 1, 1, (0, 25), (0, 25), 0)]
++    return MultiBatchInstance(ProblemInstance(nodes, fleet, distance_matrix=matrix,
++                                               travel_time_matrix=matrix), orders, policy)
++
++
++def test_nonmetric_provisional_return_cannot_reject_valid_mixed_trip():
++    p = nonmetric_problem()
++    state = dict(deliveries={'b1': [['T', 'S']]}, pickup_order={'b1': ['S', 'T']},
++                 pickup_vehicle={'b1': {}}, e2=[
++                     dict(satellite='S', vehicle=0, tasks=[('a', 'd'), ('a', 'p')]),
++                     dict(satellite='T', vehicle=0, tasks=[('b', 'd'), ('b', 'p')])])
++    score, result, violations = evaluate(p, state)
++    assert audit_solution(p, result)['valid']
++    assert violations == []
++    assert score == 8
++
++
++def test_assignment_copy_preserves_network_but_not_order_aggregates():
++    p = nonmetric_problem()
++    before = deepcopy(p.demands)
++    fixed = assigned_problem(p, {'A': 'T', 'B': 'T'})
++    assert fixed._travel is p._travel and fixed.network is p.network
++    assert fixed.demands['S', 'b1'] == 0 and fixed.demands['T', 'b1'] == 2
++    assert p.demands == before
++    assert fixed.order_map['a'].satellite == 'T' and p.order_map['a'].satellite == 'S'
++    with pytest.raises(ValueError, match='exactly'):
++        assigned_problem(p, {'A': 'T'})
++
++
++@pytest.mark.parametrize('method', ['alns', 'exact'])
++@pytest.mark.parametrize('model', [1, 2, 3, 4])
++def test_integral_float_count_is_canonicalized_for_both_solvers(model, method):
++    if method == 'exact':
++        pytest.importorskip('gurobipy')
++    from tests.routing.test_single_batch_comparison import problem
++    original = problem(model)
++    p = MultiBatchInstance(original.network, [replace(o, count=1.0) for o in original.orders],
++                           original.operating_policy, model=model)
++    assert all(type(o.count) is int for o in p.orders)
++    result = solve_routing(model=model, method=method, problem=p,
++                           alns_time=.1, alns_iter=0, exact_time=2)
++    assert result['audit']['valid']
++    assert result['audit']['periodic_replay']['valid']
++
++
++def test_cache_key_covers_waits_vehicle_order_and_pickup_hints():
++    p = nonmetric_problem()
++    state = initial_state(p, random.Random(1))
++    cache = EvaluationCache(p, evaluate)
++    a = cache(state)
++    assert cache(clone_state(state)) is a and cache.hits == 1
++    changed = clone_state(state)
++    changed['e2'][0]['return_after'] = 31
++    assert state_key(changed) != state_key(state)
++    b = cache(changed)
++    assert 'TERMINAL_OUTSTANDING' in b[2]
++    assert cache.misses == 2
++    changed = clone_state(state)
++    changed['pickup_vehicle']['b1']['S'] = 0
++    assert state_key(changed) != state_key(state)
++
++
++def test_destroy_repair_preserves_complete_task_multiset_and_input():
++    import time
++    p = nonmetric_problem()
++    state = initial_state(p, random.Random(1))
++    before = deepcopy(state)
++    candidate = destroy_repair(p, state, random.Random(2), 'related', time.perf_counter()+1)
++    assert sorted(t for r in candidate['e2'] for t in r['tasks']) == [('a', 'd'), ('a', 'p'), ('b', 'd'), ('b', 'p')]
++    assert state == before
++    assert destroy_repair(p, state, random.Random(2), 'random', 0) == state
++
++
++def tiny_problem(model, seed):
++    rng = random.Random(seed)
++    policy = MultiBatchPolicy.from_config(dict(policy_version='multi_batch_cutoff_v1', cycle_start=0,
++        cycle_end=100, batches=[dict(id='b1', delivery_duration=65, return_duration=30)],
++        container_pool_size=3, cleaning_duration=3, time_tick_seconds=60, e2_max_trips_per_vehicle=1,
++        e1_load_time=1, e2_dispatch_prep_time=1, e2_return_unload_time=1, depot_return_unload_time=1))
++    nodes = {'D': Depot('D', 0, 0), 'S': Satellite('S', 0, 0), 'T': Satellite('T', 0, 0)}
++    orders = []
++    for i in range(2+(seed % 2)):
++        cid = f'C{i}'
++        nodes[cid] = Customer(cid, 0, 0, 0, 0, (0, 100), (0, 100), 'S' if i % 2 else 'T')
++        orders.append(Order(f'o{i}', cid, 'S' if i % 2 else 'T', 'b1', 1, 1,
++                            (0, 8 if seed == 3 else 45), (8, 60), 1, 2))
++    # Directed and nonmetric; seed 0 is a zero-distance/zero-travel case.
++    distance = {a: {b: 0 if a == b or seed == 0 else rng.randint(1, 12) for b in nodes} for a in nodes}
++    duration = {a: {b: 0 if a == b or seed == 0 else rng.randint(1, 7) for b in nodes} for a in nodes}
++    fleet = dict(E1_vehicle_count=1, vehicles_per_satellite=1, E1_Qk=20, E1_Ck=20,
++                 E2_Qv=4 if seed == 4 else 20, E2_Cv=2 if seed == 4 else 20,
++                 container_weight=1, container_volume=1)
++    return MultiBatchInstance(ProblemInstance(nodes, fleet, distance_matrix=distance,
++                                               travel_time_matrix=duration), orders, policy, model=model)
++
++
++def enumerate_tiny(problem):
++    """One E1 vehicle and one E2 trip per site, explicitly enumerated.
++
++    No MILP, ALNS evaluator, normalization, or search helpers are used. Build
++    earliest schedules directly for all permissible task permutations; then
++    replay them with the independent auditor, including load and inventory.
++    """
++    customers = sorted({o.customer for o in problem.orders})
++    assignments = itertools.product(problem.satellites, repeat=len(customers)) if problem.free_assignment else [None]
++    best = math.inf
++    for values in assignments:
++        assignment = dict(zip(customers, values)) if values is not None else {o.customer: o.satellite for o in problem.orders}
++        fixed = MultiBatchInstance(problem.network,
++            [replace(o, satellite=assignment[o.customer]) for o in problem.orders],
++            problem.operating_policy, model=3 if problem.reusable else 1)
++        p = fixed.operating_policy
++        b = p.batches[0]
++        sites = sorted({o.satellite for o in fixed.orders})
++        choices = []
++        for s in sites:
++            tasks = [(o.id, k) for o in fixed.orders if o.satellite == s for k in fixed.task_kinds]
++            choices.append([seq for seq in itertools.permutations(tasks) if all(
++                seq.index((o.id, 'd')) < seq.index((o.id, 'p')) for o in fixed.orders
++                if fixed.reusable and o.satellite == s)])
++        for delivery in itertools.permutations(sites):
++            for pickup in (itertools.permutations(sites) if fixed.reusable else [()]):
++                e1events, ready = [], {}
++                now, previous = b.start+p.e1_load_time, fixed.depot
++                for s in delivery:
++                    now += fixed.travel(previous, s)
++                    e1events.append(dict(site_id=s, kind='d', start=now, quantity=fixed.demands[s, b.id]))
++                    now += fixed.service(s)
++                    ready[s] = now
++                    previous = s
++                if pickup:
++                    now = max(now, b.cutoff)
++                for s in pickup:
++                    now += fixed.travel(previous, s)
++                    e1events.append(dict(site_id=s, kind='p', start=now, quantity=fixed.demands[s, b.id]))
++                    now += fixed.service(s)
++                    previous = s
++                returned = now+fixed.travel(previous, fixed.depot)+p.depot_return_unload_time
++                for sequences in itertools.product(*choices):
++                    result = empty_result(fixed, 'oracle')
++                    result['e1_trips'] = [dict(trip_id='e1', vehicle_id=0, batch_id=b.id,
++                        departure=b.start+p.e1_load_time, return_complete=returned, events=e1events)]
++                    for s, seq in zip(sites, sequences):
++                        now, previous, done, events = ready[s]+p.e2_dispatch_prep_time, s, {}, []
++                        for oid, kind in seq:
++                            o = fixed.order_map[oid]
++                            now = max(now+fixed.travel(previous, o.customer),
++                                      (o.delivery_window if kind == 'd' else o.pickup_window)[0])
++                            if kind == 'p':
++                                now = max(now, done[oid]+o.min_use_time)
++                            events.append(dict(order_id=oid, kind=kind, start=now, quantity=o.count))
++                            now += o.service_time
++                            if kind == 'd':
++                                done[oid] = now
++                            previous = o.customer
++                        result['e2_trips'].append(dict(trip_id='e2_'+s, satellite_id=s, vehicle_id=0,
++                            trip_index=0, departure=ready[s]+p.e2_dispatch_prep_time,
++                            return_complete=now+fixed.travel(previous, s)+p.e2_return_unload_time, events=events))
++                    audited = audit_solution(fixed, result)
++                    if audited['valid']:
++                        best = min(best, audited['objective'])
++    return best
++
++
++@pytest.mark.parametrize('model', [1, 2, 3, 4])
++@pytest.mark.parametrize('seed', range(6))
++def test_exact_matches_independent_enumeration(model, seed):
++    pytest.importorskip('gurobipy')
++    p = tiny_problem(model, seed)
++    expected = enumerate_tiny(p)
++    result = solve_routing(model=model, method='exact', problem=p, exact_time=8)
++    info = result['info']
++    if math.isinf(expected):
++        assert info['proven_infeasible'], info
++    else:
++        assert result['audit']['valid'], result
++        assert info['proven_optimal'], info
++        assert info['objective'] == pytest.approx(expected)
++        if not p.free_assignment:
++            assert distance_lower_bound(p) <= expected
++
++
++def test_same_seed_iteration_limited_alns_is_reproducible():
++    p = tiny_problem(3, 2)
++    a = solve_routing(model=3, method='alns', problem=p, alns_time=20, alns_iter=80, seed=17)
++    b = solve_routing(model=3, method='alns', problem=p, alns_time=20, alns_iter=80, seed=17)
++    assert a['info']['iterations'] == b['info']['iterations'] == 80
++    assert a['e1_trips'] == b['e1_trips'] and a['e2_trips'] == b['e2_trips']
++    assert a['info']['objective'] == b['info']['objective']
+--- before/tools/audit/benchmark_single_batch_solvers.py
++++ after/tools/audit/benchmark_single_batch_solvers.py
+@@ -0,0 +1,132 @@
++"""Bounded, sequential before/after audit runs; retain every failed run.
++
++The manifest is written before solving. Use the same manifest for both versions.
++This is a diagnostic benchmark, not the full research experiment.
++"""
++from __future__ import annotations
++
++import argparse
++import hashlib
++import json
++import os
++from pathlib import Path
++import platform
++import shutil
++import subprocess
++import sys
++import time
++
++ROOT = Path(__file__).resolve().parents[2]
++sys.path.insert(0, str(ROOT))
++
++
++def write(path, value):
++    path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')
++
++
++def worker(job, destination):
++    from configuration.loader import load_routing_case
++    from models.routing.common.cycle import load_instance
++    from models.routing.common.cycle.audit import audit_solution
++    from models.routing.service import solve_routing
++    config, fleet = load_routing_case(job['case'])
++    problem = load_instance({**config, 'model': job['model']}, fleet)
++    begun = time.perf_counter()
++    result = solve_routing(model=job['model'], method=job['solver'], problem=problem,
++                           exact_time=job['budget'], alns_time=job['budget'],
++                           alns_iter=job['iterations'], seed=job['seed'])
++    wall = time.perf_counter()-begun
++    audit = audit_solution(problem, result)
++    write(destination, dict(job=job, solve_wall_seconds=wall, result=result,
++                           independent_audit=audit, orders=len(problem.orders),
++                           customers=len({o.customer for o in problem.orders}),
++                           satellites=len(problem.satellites)))
++
++
++def main(argv=None):
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--output', required=True, type=Path)
++    parser.add_argument('--phase', default='before')
++    parser.add_argument('--worker', help=argparse.SUPPRESS)
++    args = parser.parse_args(argv)
++    if args.worker:
++        worker(json.loads(args.worker), args.output)
++        return
++    args.output.mkdir(parents=True, exist_ok=True)
++    manifest_path = args.output/'benchmark_manifest.json'
++    if not manifest_path.exists():
++        families = ['mechanism_forced_late', 'mechanism_cutoff_choice',
++                    'zhou_Set1_7-2-1', 'zhou_Set1_7-2-1b', 'lade_0823_10aoi',
++                    'zhou_Set2_100-5-1b_subset50', 'lade_0823_30aoi']
++        dataset = json.loads((ROOT/'data/manifest.json').read_text())
++        cases = {f['family_id']: f['cases']['b1'] for f in dataset['families']}
++        from configuration.loader import load_routing_case, resolve_project_path
++        frozen = args.output.resolve()/'benchmark_inputs'
++        frozen.mkdir()
++        for family in families:
++            config, fleet = load_routing_case(cases[family])
++            folder = frozen/family
++            folder.mkdir()
++            for field in ('data', 'orders', 'distance_matrix', 'duration_matrix'):
++                if config.get(field):
++                    source = resolve_project_path(config[field])
++                    target = folder/(field+source.suffix)
++                    shutil.copy2(source, target)
++                    config[field] = str(target)
++            write(folder/'fleet.json', fleet)
++            config['routing_config'] = str(folder/'fleet.json')
++            config['operating_policy'] = fleet['operating_policy']
++            for field in ('algorithm_config', 'container_pool_config'):
++                config.pop(field, None)
++            write(folder/'case.json', config)
++            cases[family] = str(folder/'case.json')
++        jobs = [dict(family=family, case=cases[family], model=model, solver=solver,
++                     seed=seed, budget=5.0 if solver == 'exact' else 1.0, iterations=2000)
++                for family in families for model in range(1, 5)
++                for solver, seed in [('exact', 42), ('alns', 42), ('alns', 43), ('alns', 44)]]
++        write(manifest_path, dict(purpose='diagnostic_before_after_not_full_study', jobs=jobs,
++                                 outer_timeout_overhead=20, created=time.strftime('%Y-%m-%dT%H:%M:%S'),
++                                 python=sys.version, platform=platform.platform()))
++    manifest = json.loads(manifest_path.read_text())
++    out = args.output/args.phase
++    out.mkdir()
++    sources = {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
++               for base in ('models', 'configuration') for p in (ROOT/base).rglob('*.py')}
++    inputs = {str(p.relative_to(args.output)): hashlib.sha256(p.read_bytes()).hexdigest()
++              for p in (args.output/'benchmark_inputs').rglob('*') if p.is_file()}
++    write(out/'hashes.json', dict(sources=sources, inputs=inputs))
++    rows = []
++    for index, job in enumerate(manifest['jobs']):
++        name = f'{index:03d}_{job["family"]}_M{job["model"]}_{job["solver"]}_{job["seed"]}'
++        dest = out/(name+'.json')
++        command = [sys.executable, str(Path(__file__).resolve()), '--worker', json.dumps(job),
++                   '--output', str(dest)]
++        row = dict(job)
++        try:
++            completed = subprocess.run(command, cwd=ROOT, capture_output=True, text=True,
++                                       timeout=job['budget']+manifest['outer_timeout_overhead'],
++                                       env={**os.environ, 'PYTHONHASHSEED': '0'})
++            (out/(name+'.log')).write_text(completed.stdout+completed.stderr)
++            if completed.returncode:
++                row.update(status='ERROR', error=completed.stderr[-3000:], valid=False)
++            else:
++                saved = json.loads(dest.read_text())
++                info, audit = saved['result']['info'], saved['independent_audit']
++                row.update(status=info['status'], valid=audit['valid'],
++                           periodic=audit.get('periodic_replay', {}).get('valid', False),
++                           objective=info.get('objective'), optimal=info.get('proven_optimal', False),
++                           infeasible=info.get('proven_infeasible', False),
++                           bound=info.get('best_bound'), gap=info.get('mip_gap'),
++                           wall=saved['solve_wall_seconds'], build=info.get('build_time'),
++                           variables=info.get('variables'), constraints=info.get('constraints'),
++                           iterations=info.get('iterations'), visited=info.get('assignments_visited'))
++        except subprocess.TimeoutExpired as exc:
++            row.update(status='OUTER_TIMEOUT', valid=False)
++            (out/(name+'.log')).write_bytes((exc.stdout or b'')+(exc.stderr or b''))
++        rows.append(row)
++        write(out/'summary.json', rows)
++        print(name, row['status'], row.get('objective'), 'valid=', row['valid'], flush=True)
++
++
++if __name__ == '__main__':
++    main()
+--- before/tools/audit/summarize_single_batch_audit.py
++++ after/tools/audit/summarize_single_batch_audit.py
+@@ -0,0 +1,55 @@
++"""Summarize paired diagnostic runs without dropping failures or regressions."""
++import argparse
++import json
++from pathlib import Path
++import statistics
++
++
++def main(argv=None):
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--output', required=True, type=Path)
++    parser.add_argument('--after', default='verified')
++    args = parser.parse_args(argv)
++    read = lambda path: json.loads((args.output/path).read_text())
++    before, after = read(Path('before/summary.json')), read(Path(args.after)/'summary.json')
++    manifest = read(Path('benchmark_manifest.json'))
++    assert len(before) == len(after) == len(manifest['jobs']), 'Incomplete benchmark'
++    assert read(Path('before/hashes.json'))['inputs'] == read(Path(args.after)/'hashes.json')['inputs']
++    paired, groups = [], []
++    for old, new in zip(before, after):
++        keys = ('family', 'model', 'solver', 'seed', 'budget', 'iterations')
++        # The summary's iterations field is actual work, not the preset cap.
++        assert all(old[k] == new[k] for k in keys if k != 'iterations')
++        change = (100*(new['objective']-old['objective'])/old['objective']
++                  if old['valid'] and new['valid'] and old['objective'] else None)
++        paired.append(dict(family=old['family'], model=old['model'], solver=old['solver'], seed=old['seed'],
++            before_status=old['status'], after_status=new['status'],
++            before_valid=old['valid'], after_valid=new['valid'],
++            before_objective=old.get('objective'), after_objective=new.get('objective'),
++            distance_change_percent=change, before_wall=old.get('wall'), after_wall=new.get('wall'),
++            before_optimal=old.get('optimal'), after_optimal=new.get('optimal'),
++            before_variables=old.get('variables'), after_variables=new.get('variables'),
++            before_constraints=old.get('constraints'), after_constraints=new.get('constraints')))
++    for model in range(1, 5):
++        for solver in ('exact', 'alns'):
++            rows = [r for r in paired if r['model'] == model and r['solver'] == solver]
++            changes = [r['distance_change_percent'] for r in rows if r['distance_change_percent'] is not None]
++            speeds = [r['before_wall']/r['after_wall'] for r in rows
++                      if r['before_optimal'] and r['after_optimal'] and
++                      abs(r['before_objective']-r['after_objective']) <= 1e-6]
++            groups.append(dict(model=model, solver=solver, runs=len(rows),
++                before_valid=sum(r['before_valid'] for r in rows), after_valid=sum(r['after_valid'] for r in rows),
++                before_optimal=sum(bool(r['before_optimal']) for r in rows),
++                after_optimal=sum(bool(r['after_optimal']) for r in rows),
++                better=sum(c < -1e-6 for c in changes), equal=sum(abs(c) <= 1e-6 for c in changes),
++                worse=sum(c > 1e-6 for c in changes),
++                mean_distance_change_percent=statistics.mean(changes) if changes else None,
++                common_optimal_count=len(speeds), median_common_optimal_speedup=statistics.median(speeds) if speeds else None))
++    payload = dict(input_hashes_match=True, before='before', after=args.after, groups=groups, pairs=paired,
++                   limitations='Paired diagnostic cases, three ALNS seeds, single timing run; no significance claim.')
++    (args.output/'comparison.json').write_text(json.dumps(payload, ensure_ascii=False, indent=2))
++    print(json.dumps(groups, ensure_ascii=False, indent=2))
++
++
++if __name__ == '__main__':
++    main()
+--- before/tools/audit/reaudit_single_batch_history.py
++++ after/tools/audit/reaudit_single_batch_history.py
+@@ -0,0 +1,74 @@
++"""Read-only replay of saved single-batch results against hash-verified inputs."""
++import argparse
++import hashlib
++import json
++from pathlib import Path
++import sys
++
++ROOT = Path(__file__).resolve().parents[2]
++sys.path.insert(0, str(ROOT))
++
++from models.routing.common.cycle import load_instance
++from models.routing.common.cycle.audit import audit_solution
++from configuration.loader import apply_container_pool_size
++
++
++def main(argv=None):
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--history', required=True, type=Path)
++    parser.add_argument('--output', required=True, type=Path)
++    args = parser.parse_args(argv)
++    if args.output.exists():
++        raise ValueError('Refusing to overwrite history audit')
++    rows = []
++    for path in sorted(args.history.glob('*/result.json')):
++        result = json.loads(path.read_text())
++        row = dict(run=path.parent.name, model=result['model'], status=result['info']['status'],
++                   claimed_valid=result.get('audit', {}).get('valid', False),
++                   claimed_optimal=result['info'].get('proven_optimal', False),
++                   objective=result['info'].get('objective'))
++        try:
++            manifest = json.loads((path.parent/'manifest.json').read_text())
++            config = dict(manifest['config'])
++            local = {hashlib.sha256(p.read_bytes()).hexdigest(): p.resolve()
++                     for p in (path.parent/'inputs').glob('*') if p.is_file()}
++            verified_paths = {}
++            for original, expected in manifest['input_sha256'].items():
++                if expected in local:
++                    verified_paths[original] = str(local[expected])
++                elif Path(original).exists() and hashlib.sha256(Path(original).read_bytes()).hexdigest() == expected:
++                    verified_paths[original] = original
++                else:
++                    raise ValueError('Missing or altered frozen input: '+original)
++            for field in ('data', 'orders', 'routing_config', 'operating_policy', 'distance_matrix', 'duration_matrix'):
++                if isinstance(config.get(field), str):
++                    config[field] = verified_paths[config[field]]
++            fleet = json.loads(Path(config['routing_config']).read_text())
++            policy = config.get('operating_policy', fleet.get('operating_policy'))
++            fleet['operating_policy'] = json.loads(Path(policy).read_text()) if isinstance(policy, str) else policy
++            if 'container_pool_size' in config:
++                config, fleet = apply_container_pool_size(config, fleet, config['container_pool_size'])
++            if fleet != manifest['fleet']:
++                raise ValueError('Recorded fleet differs from reconstructed frozen inputs')
++            problem = load_instance(config, fleet)
++            if len(problem.operating_policy.batches) != 1:
++                raise ValueError('Expected B=1')
++            row['input_hashes_verified'] = True
++            row['fleet_reconstructed_matches_manifest'] = True
++            if row['objective'] is None:
++                row.update(replayed=False, reason='NO_INCUMBENT', valid=False)
++            else:
++                audited = audit_solution(problem, result)
++                row.update(replayed=True, valid=audited['valid'], errors=audited['errors'],
++                           periodic=audited.get('periodic_replay', {}).get('valid', False),
++                           recomputed_objective=audited.get('objective'))
++        except Exception as exc:
++            row.update(replayed=False, valid=False, error=f'{type(exc).__name__}: {exc}')
++        rows.append(row)
++    args.output.write_text(json.dumps(rows, ensure_ascii=False, indent=2))
++    print('saved', len(rows), 'replayed', sum(r.get('replayed', False) for r in rows),
++          'valid', sum(r['valid'] for r in rows), 'errors', sum('error' in r for r in rows))
++
++
++if __name__ == '__main__':
++    main()
+--- before/models/routing/solvers/README.md
++++ after/models/routing/solvers/README.md
+@@ -8,10 +8,12 @@
+ | `exact/` | `formulation.py` | 固定分仓的车辆索引 MILP |
+ | `exact/` | `solver.py` | 调用 Gurobi、提取时间表和最优性证明信息 |
+ | `exact/` | `assignment.py` | M2/M4 的完整分仓枚举、子问题界与全局证明汇总 |
++| `exact/` | `bounds.py` | 非度量距离也适用的保守必访弧下界 |
+ | `alns/` | `solver.py` | 路线与跨批修复搜索 |
+ | `alns/` | `construction.py` | 构造初始解 |
+ | `alns/` | `evaluator.py` | 候选解的日程解码和全周期评价 |
+ | `alns/` | `assignment.py` | M2/M4 的启发式分仓搜索 |
++| `alns/` | `neighborhoods.py` | 多请求破坏/插入修复、有界评价缓存及可行解热启动转换 |
+ 
+ `../common/cycle/` 只提供输入、业务规则、结果格式、分仓转换和独立审计。
+ ALNS 不导入精确求解或 Gurobi；精确求解不导入 ALNS；共同审计不调用任一求解器的评价结论。
+@@ -21,4 +23,9 @@
+ ALNS 的可行方案不带最优性证明；精确求解遇到时间上限也不能直接视为已证明最优。
+ 
+ 独立加载和实际求解的回归测试：`tests/routing/test_solver_isolation.py`。
+-目录分离未改变数学约束或搜索函数的计算逻辑。详见 [模型布局](../../../docs/model_layout.md)。
++2026-09-29 的目录分离本身未改变数学约束或搜索函数逻辑。详见 [模型布局](../../../docs/model_layout.md)。
++
++2026-09-30 增加了 B=1 等价简化、时间窗稀疏弧、车辆对称性、分仓界剪枝与未闭合分区再求解。
++ALNS 新增破坏/修复、反转、缓存、双预算降温和分仓热启动，并修复非度量矩阵下临时回程的误判。
++`BOUND_PRUNED` 表示该分仓不能改善已审计 incumbent，不表示不可行。
++诊断实验的改进与退步均见 [详细检查报告](../../../docs/single_batch_solver_audit_20260930.md)。
+--- before/docs/exact_solver_architecture.md
++++ after/docs/exact_solver_architecture.md
+@@ -6,6 +6,12 @@
+ M2/M4 在此基础上枚举分仓；只有覆盖全部组合并取得足够证明，才报告自由分仓的全局最优。
+ 求解器遵守输入的整数时间刻度及二级趟次上限；ALNS 位于独立 `alns/` 目录。
+ 
+-只有完整 MILP 返回最优并且独立审计通过，才能报告 `proven_optimal=true`。限时可行解、未找到解与已证明不可行必须区分。
++固定分仓只有完整 MILP 返回最优并且独立审计通过，才能报告 `proven_optimal=true`。
++自由分仓还要求全部组合被最优、不可行证明或有效成本下界闭合。`BOUND_PRUNED` 仅表示不能改善
++现有已审计可行解，不表示该组合不可行。限时可行解、未找到解与已证明不可行必须区分。
++
++B=1 专门化将回收量固定为各仓全部订单箱数，直接约束带箱二级趟次在唯一截止前卸回，保留清洗末态。
++另有基于安全时间界的弧删除、同质车辆对称性、分仓距离界剪枝、未闭合分区重访和经过独立审计的
++MIP 初始解。详见 [2026-09-30 检查与对照](single_batch_solver_audit_20260930.md)。
+ 
+ 历史 M1–M4 的 indexed 和 commodity_flow 后端保存在 `models/routing/baselines/`，需要 `--baseline` 或 `allow_baseline=True`。这些证明只针对历史业务规则，不能作为新版四模型的证明。
+--- before/docs/single_batch_comparison.md
++++ after/docs/single_batch_comparison.md
+@@ -35,7 +35,7 @@
+ ## 最优性范围
+ 
+ M1/M3 的精确解来自当前车辆索引 MILP。M2/M4 枚举顾客到仓的所有组合，并逐个求解固定分仓子问题。
+-只有全部组合都被证明最优或不可行，且最佳方案审计通过，才报告全局距离最优。
++只有全部组合都被证明最优、不可行或由有效成本下界证明不能改善当前方案，且最佳方案审计通过，才报告全局距离最优。
+ `assignments_visited`、`assignments_closed`、`assignment_count` 和 `subproblems` 保存证明进度。
+ 未访问组合采用非负距离的零下界；部分子问题超时不能成为全局最优或不可行证明。
+ 
+@@ -86,9 +86,9 @@
+ ## 运行与产物
+ 
+ ```sh
+-# 全部 69 个 B=1 案例，M1–M4 共 276 次精确求解
++# Zhou 15 个 B=1 案例，预览 M1–M4 共 60 项任务，不实际求解
+ .venv/bin/python experiments/runs/run_single_batch_exact.py \
+-  --exact-time 300 --seed 42 --workers 2
++  --source-kinds zhou_derived_scenario --exact-time 300 --seed 42 --workers 2 --dry-run
+ 
+ # 一个案例，四模型，一个精确参考、三个 ALNS 种子；费用参数为虚构演示
+ .venv/bin/python main.py compare-single-batch \
+@@ -146,3 +146,7 @@
+ 当前提供的是可重现的单批对照与条件经济分析链路，尚未证明真实企业的盈利、最优箱池或最优费用。
+ 
+ 编号与目录已按用户设计恢复，见 [模型布局](model_layout.md)：M3/M4 专属单批次，M5 专属多批次；本页的四模型单批对照范围不变。
++
++2026-09-30 完成新一轮模型/算法检查与初步优化，见 [详细检查报告](single_batch_solver_audit_20260930.md)。
++新增独立枚举、历史方案重放和冻结输入的前后诊断对照；其中包含改进、限时无解和 ALNS 退步案例，
++仍不替代完整数据集上的正式性能评测。
+--- before/docs/single_batch_solver_audit_20260930.md
++++ after/docs/single_batch_solver_audit_20260930.md
+@@ -0,0 +1,305 @@
++# 单批次 M1–M4：模型、精确算法与 ALNS 检查及优化报告
++
++日期：2026-09-30。检查对象为当前 `multi_batch_cutoff_v1` 的 B=1 实现。报告针对本轮开始时的工作区和冻结输入，不把旧模型编号、旧业务规则或正在整理的数据目录混为同一版本。
++
++## Material Passport
++
++- Origin Skill：academic-research-suite / experiment-agent。
++- Origin Mode：validate，连续执行用户授权的检查、修复和优化。
++- Verification Status：VERIFIED（仅限本文实际执行的回归、枚举、重放及诊断对照）；不代表对任意规模输入的完备软件正确性证明。
++- 原始证据：[检查输出目录](../output/experiments/single_batch_audit_20260930/)。
++- 范围：当前四模型的需求追溯、共同数学约束、八个求解入口、解码与独立审计、证明状态、预算与性能；历史基线检查其适用范围、功能迁移及现有回归。
++
++## 1. 检查结论
++
++**当前四模型基本符合仓库已确认的单批次业务要求，但优化前的算法性能不能满足“大规模、高质量、可证明”的完整研究要求。** 没有在本轮独立小例枚举中发现精确模型改变最优值的反例；这不等于证明原实现对所有输入都没有问题。
++
++确认并修复了一处 ALNS 可行性误判；另有多项会损失求解效率或解质量的实现问题，已经作针对性优化。M2/M4 仍以分仓枚举为精确算法主干，指数复杂度没有消失。ALNS 已加入真实的请求移除与插入修复，但仍需完整实例集、更多种子和更长统一预算的正式评测。
++
++本轮特别区分：
++
++1. 方案可行、已证明距离最优、已证明不可行、限时未找到解，是四种不同结论。
++2. 单批次闭环满足容器循环要求，但不存在本周期内向下一批复用；池规模至少覆盖全部箱次。
++3. 距离最优不等于工时、车辆数、费用或投资回报最优。
++4. 历史基线包含较丰富的算法组件，但其模型规则不能直接代替当前闭环要求。
++
++## 2. 需求与模型对应
++
++依据：[研究范围与日程规则](static_single_multibatch_study_plan.md)、[单批四模型说明](single_batch_comparison.md)、[精确求解范围](exact_solver_architecture.md)。没有自行修改批次、时间窗、车辆资源或包装比较假设来使算法更容易求解。
++
++| 要求 | M1 | M2 | M3 | M4 | 检查结论 |
++|---|---|---|---|---|---|
++| B=1、全部信息已知、订单分批固定 | 是 | 是 | 是 | 是 | 入口验证限制范围 |
++| 两级配送、完整服务所有订单 | 是 | 是 | 是 | 是 | MILP、解码器及独立审计均检查覆盖 |
++| 顾客分仓 | 输入固定 | 顾客级自由 | 输入固定 | 顾客级自由 | 自由分仓按顾客共享到该顾客全部订单；送取同仓 |
++| 回收同数空箱及最短使用时间 | 无 | 无 | 有 | 有 | 一次性包装不施加回收可行性条件 |
++| 配送服务在唯一截止前完成 | 是 | 是 | 是 | 是 | 不只检查服务开始是否在窗内 |
++| 空箱在截止前完成二级卸回 | 无 | 无 | 是 | 是 | 恰好截止计入，晚于截止不计入 |
++| 一级截止全取、不得顺带取迟到箱 | 无 | 无 | 是 | 是 | 按二级卸回完成时间冻结资格 |
++| 末态全池清洁归总仓、车辆可用 | 车辆 | 车辆 | 全部 | 全部 | 清洗、整备时间及连续两周期重放均纳入 |
++| 重量/体积双容量、物理车辆占用 | 是 | 是 | 是 | 是 | 含装卸、准备及多趟复用 |
++| 当前优化目标 | 两级总距离 | 两级总距离 | 两级总距离 | 两级总距离 | 没有声称优化总费用或最小箱池 |
++
++### 2.1 数学约束核对
++
++记唯一批次开始、截止、一级归仓期限及周期结束为 `a,c,e,H`；订单箱数为 `n_o`、服务时间为 `s_o`、最短使用时间为 `h_o`；仓 s 的箱次为 `D_s=Σ n_o`，总箱次为 `Q=Σ D_s`。
++
++- **一级供货**：每个有需求的仓恰有一次完整配送；不拆分该仓本批一级配送数量。携带配送任务的一级车辆固定在 `a+装货时间` 出发，其车辆占用从 a 开始。每车每批最多一趟，先送后取。驶向首个回收站的路段不能在 c 前开始。
++- **二级供货同步**：装有配送货物的二级趟次须在该仓一级卸货完成后准备发车。准备过程也占用物理车辆，不能和上一趟重叠。
++- **顾客任务**：每单恰有一次配送；M3/M4 另有一次完整回收。服务开始在对应时间窗内，且 `t_d+s_o≤c`、`t_p≥t_d+s_o+h_o`。
++- **容量**：出发载全部本趟配送货物，配送扣减载荷、回收增加空箱载荷，逐段检查重量和体积。一级回收量不可拆给多辆车。
++- **车辆复用**：相同仓、相同车辆按趟次序运行；下一趟准备开始不得早于上一趟卸货完成加整备时间。没有通过增加匿名车辆绕开车队上限。
++- **回收闭环**：M3/M4 所有空箱都必须由二级在 c 前卸回，由一级在 e 前卸回总仓，并在 H 前完成清洗。
++- **库存**：B=1 在 a 一次领走全部 Q 个箱次，故 `N≥Q`。没有未来批次可再次领取本周期回收箱。
++- **连通与因果**：一级路径顺序变量、二级全局因果序位排除脱离仓的子环；全零时间情况下，也不能以送取相互依赖的循环冒充可行计划。
++- **独立复核**：审计从显式路线重算距离、服务、容量、时间、截止库存、清洗释放和两个周期状态，不直接相信求解器的可行性标志。
++
++这些约束在当前研究范围内相互一致。M1/M3 和 M2/M4 才是包装对照；M1/M2、M3/M4 是分仓对照。自由分仓的最优值包含固定分仓可行方案这一关系，以输入确实按顾客固定到单仓为前提；启发式有限预算结果不保证保持该大小关系。
++
++### 2.2 应继续明确的模型边界
++
++| 边界 | 对结论的影响 |
++|---|---|
++| 一级不拆仓配送、每车一趟；二级有输入趟次上限 | “不可行/最优”仅针对这些资源和服务限制；不能理解成无限趟次的原始 VRP 结论 |
++| 整数时间刻度，行驶/作业时间向上取整，窗口末端向下取整 | 当前模型是声明精度下的模型；改变 tick 可能改变可行域 |
++| 单一同质容器、无损耗、总仓无限并行清洗、前置仓无库容限制 | 不具备有限清洗线、损耗补购或多规格箱的经营描述能力 |
++| 两种包装正向重量/体积相同 | 包装经济对照的假设，需实际规格校准 |
++| 一级和二级距离直接相加 | 不等于具有不同车型费率的运输费用目标 |
++| 固定路线采用最早可行时间表 | 统一去除任意松弛，但不优化工时，更不优化所有等距离方案的经济性 |
++| 可输入非对称、非度量矩阵 | 不能不加条件使用三角不等式剪枝，也不能一概声称添加回收任务只会增大最优距离 |
++| 静态全信息 | 不支持动态订单揭晓、已执行动作冻结或在线重优化 |
++
++## 3. 发现的问题与处理
++
++| 编号 | 严重程度 | 优化前问题 | 本轮处理及剩余限制 |
++|---|---|---|---|
++| F1 | 高：可行性误判 | ALNS 用尚未加入回收段的临时一级路线，检查最终车辆归仓状态；非度量矩阵下可误拒有效混合路线 | 修复。临时路线只检查已确定的配送部分，最终完整路线仍检查所有期限和车辆可用性 |
++| F2 | 高：扩展性 | M2/M4 枚举 `仓数^顾客数` 个组合，无分仓成本下界剪枝 | 加入保守距离下界、剪枝、最近仓优先；指数最坏复杂度仍在 |
++| F3 | 中高：预算浪费 | 枚举一遍后即返回，限时未闭合的分仓子问题可能仍有总预算可用 | 加入未闭合子问题再求解及经过审计的 MIP 初始解；保持证明状态诚实 |
++| F4 | 中高：限时无解 | 首个固定分仓只得到约总预算 1/8，M4 可能错过 M3 可找到的初始可行解 | 首个分仓最多分配剩余预算 40%，提前证明完可把剩余时间用于其他分仓；并非对任意预算的可行性保证 |
++| F5 | 中高：建模开销 | B=1 仍构造多批次回收归属、可变回收数量和库存释放变量 | 对 B=1 用已知回收量与直接截止约束等价替代；多批次仍保留动态归属机制 |
++| F6 | 中：建模与搜索开销 | 每个节点反复扫描全部弧建流平衡，构造稠密不可能弧；二级路径同时有局部 rank 和全局因果序位 | 建邻接表，安全删除时间上不可能的弧；保留全局因果序位并去掉重复 rank；加入同质车辆对称性约束 |
++| F7 | 中：重复工作 | 每次分仓转换/审计重新验证全部网络并重新进行 Decimal 时间转换，约 O(V²) | 分仓仅重建不可变订单及聚合，复用已校验的静态网络和旅行时间；网络不得在一次求解中被外部并发修改 |
++| F8 | 中高：搜索质量 | 新 ALNS 主要随机小邻域迁移，没有多请求移除后系统插入修复 | 新增随机/相关请求移除和时间窗、容量感知的贪心插入；完整解码与独立审计仍为最终判据 |
++| F9 | 中：无效搜索 | 单批次仍随机延迟到截止后；一次性包装仍有回收相关空操作；无变化提案也获正奖励 | B=1 去掉截止等待算子，一次性去掉回收算子；空操作降权；加入反转邻域和有界评价缓存 |
++| F10 | 中：初解不一致 | 容量满时封存的组按送取成对相邻，最后一组却先送后取；可能过早等待回收而错过后续配送 | 所有打包组统一先送后取；保留按订单时间顺序的备选初解 |
++| F11 | 中：重复冷启动 | 自由分仓反复遇到相同分仓时，从头搜索 | 有界缓存最近分仓的已审计可行解，作为后续 ALNS 热启动；不会把启发式评价变成证明 |
++| F12 | 中：预算与降温 | 原温度只依赖墙钟；尝试仅按迭代降温后，较慢的修复算子又可能耗尽时间却未充分降温 | 最终用时间/迭代两种预算消耗进度的较大值降温。充足时间且迭代进度始终主导时可重现；限时运行仍受机器负载影响 |
++| F13 | 中：直接 API 类型不一致 | 直接传入整数值浮点箱数 `1.0` 可通过输入验证，却导致 ALNS 审计失败或精确提取读取 `.X` 报错 | 实例构造时规范为 int；8 个模型/算法组合回归通过。文件加载路径原本已有转换，不受此反例影响 |
++
++### 3.1 F1 的可复现反例
++
++构造 D、S、T、A、B，除 `S→D=100` 外，其余不同地点间行驶时间/距离均为 1，同地点为 0。一级配送顺序 `D→T→S`，随后截止时依次在 S、T 取箱后归 D。两个顾客各由所属仓完成送取。
++
++- 临时纯配送路线 `D→T→S→D` 的归仓时刻为 102，超过周期末 65。
++- 完整送取路线经 `S→T→D` 归仓，时刻为 32；清洗完成为 37，全部要求满足。
++- 独立审计判定有效，总距离为 8。
++- 旧解码器却返回 `E1_TERMINAL_VEHICLE`，评分为 1,000,008，排除该方案。
++
++这是**漏掉可行候选**，不是发现旧程序向用户输出了一个审计通过的非法解。证据：[旧反例输出](../output/experiments/single_batch_audit_20260930/nonmetric_decoder_before.json)；回归：[反例及独立枚举测试](../tests/routing/test_single_batch_solver_audit.py)。
++
++### 3.2 历史算法是否有问题
++
++需要区分两种“之前”：
++
++- **本轮优化前的当前算法**：上述 F1–F12 针对该版本，有源码、反例或实验依据。
++- **`models/routing/baselines/` 的旧规则算法**：含缓存、贪心/后悔修复、成对移除及路段交换等组件，这些能力没有全部迁入当前周期求解器。旧结果不满足新规则的全部对照前提，不能直接用于当前四模型排名。这属于适用范围与迁移缺口，不能仅因旧最优值不同就断言旧 MILP 解错。
++
++本轮没有逐一穷尽验证所有历史后端的任意输入；保留其实现和旧结果，纳入全库回归。也没有把旧规则中获得的解不经当前独立审计就导入当前模型。
++
++## 4. 加速为什么不会据此改变业务可行域
++
++### 4.1 B=1 回收量常量化
++
++对任一完整单批循环方案，每笔订单送取数相等，且所有二级空箱必须在唯一截止前卸回所属仓。因此 `q_s=D_s`。一级仍恰有一辆车在该仓一次取完，容量和截止后的首段行驶规则全部保留。
++
++这只是把已由其他约束唯一决定的变量替换为常量。二级含回收任务的趟次直接要求 `return_complete≤c`；并没有强制所有纯配送趟次也在 c 前返回。单批次箱池约束化为 `N≥Q`，清洗和末态约束没有删除。
++
++### 4.2 稀疏弧与对称性
++
++若节点 i 的最早服务开始加服务时间和直接行驶时间已晚于节点 j 的最晚服务开始，则 i→j 不可能出现在合法路线中，删除该弧是安全的。强化后的最早/最晚界使用放松网络最短路，允许更多中转，因此不依赖输入满足三角不等式。
++
++不同物理车辆具有相同容量、起点和可用日程，可交换整个车辆计划的编号，使先编号车辆优先启用。保留趟次顺序和资源复用约束。二级全局因果序位已沿每条选中弧严格增加，局部 rank 对排除子环重复；删除它不删除因果约束。
++
++### 4.3 分仓下界与证书
++
++对每层、每个有任务的基地，求所有必访任务的最小入弧之和再加至少一次归基地弧；同时求最小出弧之和再加至少一次离基地弧，取二者较大值。再对两级求和。此放松忽略若干容量和时间限制，因此不高估合法路线的最优距离。一级仍排除取后送弧。重复地点按不同任务保留，非对称、非度量距离均适用。
++
++使用前对浮点界保守下调。只有该下界不小于现有已审计可行解，才能将分仓记录为 `BOUND_PRUNED`。这说明“该分仓不可能改善当前最优方案”，**不说明该分仓不可行**。只有全部分仓被最优、不可行或安全成本界闭合，才报告全局最优；未访问组合仍使用零下界。
++
++Gurobi 设置相对和绝对 MIP gap 为零，但其数值可行性仍按浮点求解器容差解释，不能称为有理数形式化证明。[Gurobi 参数文档](https://docs.gurobi.com/projects/optimizer/en/current/reference/parameters.html)
++
++## 5. 验证设计与结果
++
++本节的最终数字由冻结运行结果汇总，详见 [comparison.json](../output/experiments/single_batch_audit_20260930/comparison.json)。本轮的诊断预算不能替代原计划的正式全量预算。
++
++### 5.1 正确性与历史结果复核
++
++- 修改前全库：**248 passed**。最终全库：**287 passed**（30.14 秒）；日志分别为 `tests_before.log`、`tests_verified.log`。14 条警告来自绘图库弃用接口，不影响通过状态。
++- 新增独立验证：**24 个模型×小例组合**逐一枚举分仓、一级送取顺序及二级任务排列，与精确算法的最优值/不可行状态一致。枚举器不调用 MILP、ALNS 解码器或时间规范化程序；最终方案由共同独立审计器验收。该覆盖的边界是每仓一辆二级车、一趟；多趟机制另由已有回归检查。
++- 新增非度量误判反例、分仓转换隔离、缓存键、破坏修复完整性、固定迭代可重复性，以及 8 个模型/算法的整数值浮点箱数回归。
++- 精确/ALNS/共同层的隔离测试全部通过：ALNS 不加载 Gurobi 或精确算法，精确算法不加载 ALNS。
++- 历史 **171** 条保存结果均找到对应的哈希一致输入；其中 **158** 条有 incumbent，重新独立审计和两周期重放 **158/158 通过**，其余 **13** 条是限时无可行解。未启动或恢复历史暂停任务。此项是方案重放，不是重跑全部历史最优性证明。
++
++| 历史模型 | 已保存作业 | 有效方案 | 原记录已证明最优 | 限时结束 |
++|---|---:|---:|---:|---:|
++| M1 | 43 | 43 | 38 | 5 |
++| M2 | 43 | 43 | 8 | 35 |
++| M3 | 43 | 39 | 34 | 9 |
++| M4 | 42 | 33 | 8 | 34 |
++
++历史证据：[逐条严格重放记录](../output/experiments/single_batch_audit_20260930/historical_reaudit_strict.json)。全部声明输入哈希已核对，车队/日程也从冻结文件重建并与 manifest 一致。已记录最优不等于本轮重新证明最优。
++
++### 5.2 固定的诊断实验协议
++
++每个版本 **112 次**：7 个案例 × 4 模型 ×（1 次精确＋3 个 ALNS 种子）。精确预算 5 秒、seed=42；ALNS 预算 1 秒、最多 2,000 次外层迭代，seeds=42/43/44。作业串行运行，每个子进程有“预算＋20 秒”的外层硬超时；不丢弃失败结果。
++
++环境：Python 3.9.6，Gurobi 12.0.3，macOS-27.0-arm64-arm-64bit；Gurobi 单线程。计时采用整个 `solve_routing` 调用墙钟，包含解的规范化与审计；不只使用内部 MILP runtime。求解器预算为协作式限制，构建、提取及审计可带来少量超时开销。
++
++输入先冻结，再运行；**before/verified 输入哈希完全一致**。小例包含两个机制例、两个 Zhou 7 顾客派生例及 LaDe 10 AOI；另含 Zhou 50 顾客派生例与 LaDe 30 AOI。此处不以“30 AOI”代称 100/200 顾客大例，未覆盖的更大规模不作性能保证。
++
++### 5.3 精确算法：速度与可行率
++
++下表提速只比较前后都已证明相同最优值的配对作业，避免把超时或不同质量的解当成提速。一次计时不能给出稳定性置信区间。
++
++| 模型 | 有效方案 前→后 | 证明最优 前→后 | 相同最优配对数 | 中位提速 |
++|---|---:|---:|---:|---:|
++| M1 | 5/7 → 5/7 | 5/7 → 5/7 | 5 | 2.00× |
++| M2 | 5/7 → 5/7 | 2/7 → 2/7 | 2 | 1.10× |
++| M3 | 5/7 → 5/7 | 5/7 → 5/7 | 5 | 1.80× |
++| M4 | 2/7 → 5/7 | 2/7 → 2/7 | 2 | 1.95× |
++
++**全体精确作业**：可行方案从 17/28 增至 20/28；最优证书仍为 14/28。新增可行方案来自 M4 的两个 Zhou 小例与 LaDe 10 AOI，它们仍是限时可行解，没有标成全局最优。Zhou 50 与 LaDe 30 的四模型精确算法在 5 秒内仍未找到可行解，共 8/28；这不能写为问题已证明不可行。
++
++代表性固定分仓实例的规模和耗时：
++
++| 案例/模型 | 变量数 前→后 | 约束数 前→后 | 墙钟秒 前→后 | 最优距离是否一致 |
++|---|---:|---:|---:|---|
++| zhou_Set1_7-2-1 / M1 | 2098 → 893 | 5955 → 2447 | 0.291 → 0.145 | 是 |
++| zhou_Set1_7-2-1 / M3 | 5138 → 3472 | 17289 → 10148 | 1.295 → 0.514 | 是 |
++| lade_0823_10aoi / M1 | 2333 → 1207 | 6583 → 3462 | 0.806 → 0.202 | 是 |
++| lade_0823_10aoi / M3 | 5683 → 4333 | 19034 → 13414 | 3.429 → 1.379 | 是 |
++
++约束数为 Gurobi 线性约束与 general constraints 数量之和，非其内部预处理后的行数。没有只靠调参得出上述建模规模下降。
++
++### 5.4 ALNS：相同预算下的解质量
++
++前后 **84/84 均找到可行方案并通过两周期重放**。下表均值是各配对运行的相对距离变化的算术平均，包含未变化的机制例；不是不同单位距离直接合并的总和，也不是显著性检验。
++
++| 模型 | 作业数 | 距离改善 / 相同 / 退步 | 平均距离下降 |
++|---|---:|---:|---:|
++| M1 | 21 | 9 / 12 / 0 | 4.43% |
++| M2 | 21 | 9 / 12 / 0 | 5.95% |
++| M3 | 21 | 9 / 10 / 2 | 5.68% |
++| M4 | 21 | 11 / 6 / 4 | 5.58% |
++
++合计 **38 改善、40 相同、6 退步**。改善主要集中在有实际搜索空间的案例，不能据总平均掩盖局部退步。
++
++按实例三种子平均距离列出，便于检查规模差异：
++
++| 案例 | 模型 | 优化前均值 | 优化后均值 | 均值变化 |
++|---|---|---:|---:|---:|
++| zhou_Set1_7-2-1 | M1 | 295.160 | 295.160 | +0.00% |
++| zhou_Set1_7-2-1 | M2 | 295.160 | 295.160 | +0.00% |
++| zhou_Set1_7-2-1 | M3 | 299.143 | 299.143 | +0.00% |
++| zhou_Set1_7-2-1 | M4 | 324.865 | 299.143 | -7.92% |
++| zhou_Set1_7-2-1b | M1 | 247.664 | 247.664 | +0.00% |
++| zhou_Set1_7-2-1b | M2 | 247.664 | 247.664 | +0.00% |
++| zhou_Set1_7-2-1b | M3 | 299.618 | 298.460 | -0.39% |
++| zhou_Set1_7-2-1b | M4 | 300.197 | 299.213 | -0.33% |
++| lade_0823_10aoi | M1 | 93.561 | 92.634 | -0.99% |
++| lade_0823_10aoi | M2 | 87.747 | 82.015 | -6.53% |
++| lade_0823_10aoi | M3 | 102.543 | 102.466 | -0.08% |
++| lade_0823_10aoi | M4 | 106.079 | 102.611 | -3.27% |
++| zhou_Set2_100-5-1b_subset50 | M1 | 1257.746 | 1014.246 | -19.36% |
++| zhou_Set2_100-5-1b_subset50 | M2 | 1433.854 | 1113.442 | -22.35% |
++| zhou_Set2_100-5-1b_subset50 | M3 | 2101.859 | 1393.235 | -33.71% |
++| zhou_Set2_100-5-1b_subset50 | M4 | 2536.321 | 1757.481 | -30.71% |
++| lade_0823_30aoi | M1 | 115.906 | 103.388 | -10.80% |
++| lade_0823_30aoi | M2 | 119.032 | 103.825 | -12.78% |
++| lade_0823_30aoi | M3 | 174.028 | 161.937 | -6.95% |
++| lade_0823_30aoi | M4 | 214.358 | 220.437 | +2.84% |
++
++**全部退步运行**：
++
++| 案例 | 模型 / seed | 距离前→后 | 退步幅度 |
++|---|---|---:|---:|
++| zhou_Set1_7-2-1b | M4 / 42 | 300.1969 → 300.7199 | +0.17% |
++| lade_0823_10aoi | M3 / 44 | 102.0136 → 102.4538 | +0.43% |
++| lade_0823_10aoi | M4 / 44 | 100.5197 → 102.9805 | +2.45% |
++| lade_0823_30aoi | M3 / 42 | 163.3653 → 168.4590 | +3.12% |
++| lade_0823_30aoi | M4 / 43 | 203.8699 → 230.1782 | +12.90% |
++| lade_0823_30aoi | M4 / 44 | 221.0292 → 222.7849 | +0.79% |
++
++其中 LaDe 30 的 M4 均值仍比旧版差，需要后续针对跨仓搜索与内层预算进一步改进。本轮没有保证 ALNS 单次运行支配旧版；可用旧版源码快照继续做显式消融/组合实验，不应隐藏这项风险。
++
++**ALNS 的距离改善不能全部解释成执行速度变快。** 例如 LaDe 30 / M1，旧版常在 2,000 次迭代后约 0.5 秒结束，新版较贵的修复可使用接近 1 秒。二者时间上限与迭代上限一致，实际使用时间不同；本轮证据支持预算内解质量改善，尚不能给 ALNS 统一“提速倍数”。
++
++### 5.5 末轮输入规范化补丁
++
++直接 Python API 构造 `Order(count=1.0)` 时，旧验证认为它是合法整数值，但 ALNS 审计要求实际 int，精确解提取又可能把 float 当作 Gurobi 变量读取 `.X`。已在实例构造时统一转成整数；JSON/CSV 加载器原本已做转换。反例记录为 `integral_float_before.json`，8 个模型/算法组合均加入回归。
++
++此补丁在性能运行完成后加入，只影响直接 API 的整数值浮点输入。已将性能运行对应源码保存为 `solver_benchmark_verified.tar.gz`；28 个冻结案例/模型在补丁前后的已加载订单、需求、重量、旅行时间、日程与车队完全一致，且箱数类型均为 int，见 `post_benchmark_input_equivalence.json`。最终全库测试覆盖此补丁，没有把它声称为实测提速来源。
++
++
++## 6. 是否已经具备加速能力
++
++**具备，而且本轮已有小例与代表例的实测证据；但仍不适合宣称四模型已具有统一的大规模精确求解能力。**
++
++| 方法 | 当前已经具备 | 仍缺少 |
++|---|---|---|
++| M1/M3 精确 | B=1 专门化、时间界和弧删除、同质车辆对称性消除、减少重复约束、构建阶段预算检查 | 更强 LP 松弛、有效不等式、分解或路线列模型、大例稳定可行初解 |
++| M2/M4 精确 | 上述固定分仓能力，加分仓成本界、剪枝、优先候选、重访未闭合分区及 MIP 初始解 | 可扩展的联合分仓模型或带可证明界的分解；逐一分仓仍有指数瓶颈 |
++| M1/M3 ALNS | 多请求破坏/贪心修复、原有迁移/拆并/换车、反转、评价缓存、空操作降权 | 后悔插入、自适应可行性惩罚、局部时间/载荷增量传播、系统多启动 |
++| M2/M4 ALNS | 上述能力、顾客迁移/交换、重复分仓可行解热启动 | 跨仓联合破坏修复、迁移时保留未受影响路线、根据收益分配内外层预算 |
++
++这里的局部插入评价只用于挑选候选，不能替代全局同步检查。经典 ALNS 以多种竞争子启发式和基于历史表现的选择为核心；当前实现比优化前更接近这一结构，但不能据此声称达到文献中成熟算法的实验水平。[Røpke 与 Pisinger，2006](https://orbit.dtu.dk/en/publications/an-adaptive-large-neighborhood-search-heuristic-for-the-pickup-an/)
++
++## 7. 后续工作的优先级
++
++1. **先做正式、可复现的算法评测**：按当前有效数据清单重新登记实例集合；同预算、多种子，分别报告可行率、最好/均值/离散程度、距最佳已知解的差距及证明 gap。全部失败和超时保留。大例不能用 ALNS 间差距代替到全局最优的 gap。
++2. **优先重构 M2/M4 精确分仓层**：比较联合分仓变量的 MILP 和带有效子问题界的分解。不要仅提高枚举时间上限就把指数问题视作解决。中大例以“可行上界＋可信下界”作为阶段目标。
++3. **继续改善 ALNS 的有效邻域**：先做本轮各改动的消融，确定缓存、破坏修复、初解和温度策略各自贡献；再增加后悔插入、跨仓联合修复以及局部增量评价。增量代码必须与完整解码器逐例对照。
++4. **保持求解器隔离**：ALNS 不依赖 Gurobi，精确算法不自动调用 ALNS。若以后要研究“ALNS 给 MILP 提供初始解”的混合实验，应作为显式实验模式，单独记录启发式预算及总预算。
++5. **经营问题另行校准**：如果真正需求是最小总成本，应明确车型距离费、工时费、车辆启用费与包装费的无重复计费关系，再改目标；真实清洗能力、包装规格和损耗不能用当前演示参数代替。
++
++## 8. 证据、复现与统计解释边界
++
++主要文件：
++
++- [本轮原始运行、输入快照和日志](../output/experiments/single_batch_audit_20260930/)。
++- [运行前登记的 112 个作业](../output/experiments/single_batch_audit_20260930/benchmark_manifest.json)。
++- [诊断运行程序](../tools/audit/benchmark_single_batch_solvers.py)、[成对汇总程序](../tools/audit/summarize_single_batch_audit.py)。
++- [独立枚举与反例测试](../tests/routing/test_single_batch_solver_audit.py)。
++- `source_before.tar.gz` 保存最初检查时源码/配置/文档；`solver_before.tar.gz` 保存优化前求解代码；每轮 `hashes.json` 保存源码和冻结输入哈希。旧历史运行目录未覆盖。
++
++重新运行当前版本的诊断套件（输出目录必须全新；会运行 112 个有外层超时保护的作业）：
++
++```sh
++.venv/bin/python tools/audit/benchmark_single_batch_solvers.py \
++  --output output/experiments/single_batch_audit_recheck --phase current
++.venv/bin/python -m pytest tests/routing/test_single_batch_solver_audit.py -q
++.venv/bin/python -m pytest -q
++```
++
++第一次基准启动因正在变化的数据清单中一个候选实例已被移出而失败，发生在任何求解之前，日志保留为 `benchmark_before.log`。随后按当时仍有效的实例完成输入冻结再运行，没有把该启动失败计作算法失败，也没有覆盖任何原始数据。本次中间候选版本 `after/`、`final/` 均保留；最终报告用 `before/` 与 `verified/` 对照，中间版本不混入最终数字。
++
++第二个候选版本在 LaDe 30 点的 M3 三种子均值从 174.028 退步到 195.054（约 +12.08%）。分析发现，仅按迭代数降温在修复算子变慢时不能保证限时结束前充分降温。增加双预算降温后，先做三种子诊断，再重跑完整 112 个作业；旧候选结果没有删除。这是探索性调优，仍需要独立留出集检验，不能把同一组实例上的选择当作无偏泛化评测。
++
++统计解释检查覆盖 11/11 类：
++
++| 检查项 | 本轮处理 |
++|---|---|
++| 辛普森悖论 | 按模型、算法和实例列出结果，不只给跨规模总均值 |
++| 生态谬误 | 代表例整体改善不推断每个实例或每个种子都改善 |
++| 选择偏差（Berkson） | 实例和预算在运行前登记；明确是诊断选例，不代表完整目标分布 |
++| 碰撞变量偏差 | 没有做条件回归；共同可行子集的距离比较同时报告全体可行率 |
++| 基率忽略 | 所有计数提供分母，不只展示成功样例 |
++| 均值回归 | 不因一次较差种子就做总体改进的统计因果结论 |
++| 幸存者偏差 | 失败、限时无解和退步均保留；不能计算距离的行明确列状态 |
++| 多重搜索效应 | 无显著性检验，不选择性报告最有利 p 值 |
++| 分析选择自由度 | 保留中间候选版本、预算调整原因和全部前后记录；本轮属于探索性优化 |
++| 相关不等于因果 | 顺序同机对照支持诊断判断；没有随机交错和多次耗时复测，不给统计显著性结论 |
++| 反向因果 | 属工程版本对照，无人群因果方向分析；不据此外推真实经营收益 |
++
++可复现性：固定迭代、相同种子、时间预算充足且迭代进度主导降温的 ALNS 已加入路线一致性测试；限时 ALNS 的迭代数和结果仍可能随机器负载变化。性能表是单次同机诊断观察，尚非重复测量的置信区间。本报告没有把 3 个种子包装成统计充分性，也没有将历史未完成作业当成已完成作业。

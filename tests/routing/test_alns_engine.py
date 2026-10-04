@@ -197,6 +197,7 @@ def test_service_uses_model_specific_alns_signatures(monkeypatch):
     )
 
     service.solve_routing(
+        allow_baseline=True,
         model=2, method="alns", problem=problem,
         e1_tasks=["e1"], e2_tasks_by_sat={"S": ["e2"]},
         alns_time=2.0,
@@ -206,6 +207,7 @@ def test_service_uses_model_specific_alns_signatures(monkeypatch):
     assert "alns_config_overrides" in captured
 
     service.solve_routing(
+        allow_baseline=True,
         model=1, method="alns", problem=problem,
         e1_tasks=["e1"], e2_tasks_by_sat={"S": ["e2"]},
         alns_time=2.0,

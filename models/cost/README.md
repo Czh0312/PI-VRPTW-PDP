@@ -1,11 +1,8 @@
-# 成本模型
+# 费用层
 
-成本模型与 Model 1–7 解耦，只接收 `RouteMetrics`，其中包含订单量、E1/E2 里程和
-车辆数量。公共接口由本目录 `__init__.py` 导出。
+`multibatch.py` 对新版已审计路线核算周期运营费用，区分一次性购买与循环清洗/追踪，并单列箱池投入。
+`single_batch.py` 对 M1/M3、M2/M4 核算重复周期、整池寿命补购、累计回本和价格/寿命敏感性。
+`lifecycle.py`、`parameters.py`、`metrics.py` 保留通用旧算术，不作为新版四模型执行入口。
 
-- `metrics.py`：路径结果到成本模型的稳定数据契约。
-- `parameters.py`：经济参数结构。
-- `lifecycle.py`：一次性包装、循环容器、运输成本及盈亏平衡计算。
-- `analysis.py`：敏感性分析的公开函数。
-
-运行与报告编排位于 `cli/cost.py`；成本参数位于 `config/cost/cases/`。
+详见 [单批经济说明](../../docs/single_batch_comparison.md)。费用是距离方案的后处理，不是费用最优解。
+旧六模型成本入口和旧回本报告已归档。当前 synthetic_units 参数仅用于演示，真实盈利尚未验证。

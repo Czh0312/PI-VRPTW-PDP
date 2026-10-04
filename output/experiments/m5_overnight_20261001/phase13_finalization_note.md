@@ -1,0 +1,1 @@
+收尾v2在运行中采集了自己的stdout日志空文件哈希；退出后日志填入结果，最终检查发现唯一差异。该尝试清单完整保存在phase13_manifest_attempt2.json作为诊断数据。只在所有进程退出后重新冻结实际日志与完成文件，最终逐项复核在phase13_all_manifests_rechecked_final.json。算法、矩阵、证书、完整方案和正式界均未改变。旧收尾前扫描记录保留。
