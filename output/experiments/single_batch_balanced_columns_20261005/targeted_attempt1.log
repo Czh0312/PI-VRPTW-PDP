@@ -1,0 +1,18 @@
+.................F...................................................... [ 70%]
+..............................                                           [100%]
+=================================== FAILURES ===================================
+__________ test_cross_trip_original_physical_vehicle_is_not_collapsed __________
+
+    def test_cross_trip_original_physical_vehicle_is_not_collapsed():
+        from tests.routing.test_single_batch_primal import split_problem
+        from models.routing.solvers.exact.primal import construct_incumbent
+        base = split_problem()
+        p = MultiBatchInstance(base.network, base.orders, base.operating_policy, model=4)
+        start = construct_incumbent(p, time.perf_counter()+2)
+>       assert start and audit_solution(p, start)['valid']
+E       assert (None)
+
+tests/routing/test_single_batch_balanced_columns.py:141: AssertionError
+=========================== short test summary info ============================
+FAILED tests/routing/test_single_batch_balanced_columns.py::test_cross_trip_original_physical_vehicle_is_not_collapsed
+1 failed, 101 passed in 7.65s

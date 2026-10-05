@@ -35,7 +35,8 @@ def travel_lower_bounds(problem):
 
 def check_necessary_conditions(problem, travel_bounds=None):
     p, f = problem.operating_policy, problem.fleet
-    errors, order_bounds = [], []
+    from .availability import fixed_order_availability_errors
+    errors, order_bounds = fixed_order_availability_errors(problem), []
 
     def fail(code, **details):
         errors.append(dict(code=code, **details))

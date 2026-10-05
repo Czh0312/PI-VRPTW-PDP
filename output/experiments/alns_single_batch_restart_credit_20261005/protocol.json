@@ -1,0 +1,15 @@
+{
+  "registered": "2026-10-05T10:55:04.089379+08:00",
+  "mode": "Continuous run and descriptive validation; user explicitly authorizes implementation and experiments.",
+  "hypothesis": "Classify scheduled randomized reconstruction as restart, never credit or penalize an unrelated sampled operator, and never apply pickup-only late acceptance to a restart. Keep operator RNG selection draw, reconstruction schedule, actual pickup policy, decoding and audits unchanged.",
+  "scope": "M1-M4 as one candidate, no subset adoption. Only single_batch.py and new targeted tests. Freeze all imported source and inputs. M5/M6/exact and existing archives untouched.",
+  "correctness_gate": "Targeted forced-restart tests: accepted/rejected/noop accounting, sampled weights unchanged across restart, actual pickup policy intact, preserved RNG draw and descent/assignment precedence. Disabled source vs baseline on two100 inputs x M1-M4 fixed500 exact routes, assignment, objective, iterations and full audit/replay. Fresh decode every quality result.",
+  "pilot": "32 pairs64 serialruns5/15 seconds. This is a rejection screen, never enough to adopt. Run all registered jobs once, retain failures.",
+  "confirmation": "Only if all pilot gates pass, 32pairs64 serialruns30/60 seconds using fixed new seeds. Same per-model rules. Even a pass is limited evidence, not stable/general/near-optimal proof; longer60/120 and unseen geometries remain future work.",
+  "quality_gate": "EACH model: short/long/short50/short100 means <=0%; every pair <=5% worsening; short>=3/6 wins, long>=1/2; all results feasible by fresh decoder and fixed/free independent audit+periodic replay; actual corrected restart attempts required in both budget strata for each model. Any failure rejects entire candidate.",
+  "withdrawal": "Keep production baseline unless all gates pass; restore only our owned module if needed and archive new candidate tests. Never change thresholds, reseed, discard bad runs, or adopt a successful model subset.",
+  "timing": "Alternating source order; strictly serial solver runs, no own tests/profiles/other heavy work during quality. Load averages and process wall recorded, external load not controlled. Worker hard timeout budget+30 seconds.",
+  "interpretation": "Paired percent changes of audited original distance, not penalized score or true GAP. These previously used geometries and nested sizes do not constitute independent held-out instances; order-window differences preclude pure-size conclusions.",
+  "cpu_gate": "Not applicable: intentional algorithmic change, no equivalence or speedup claim.",
+  "production_edits_started": false
+}

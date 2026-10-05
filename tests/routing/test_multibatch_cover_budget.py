@@ -40,7 +40,9 @@ def test_subset_reservation_uses_same_total_cover_budget_and_zero_skips_selectio
     monkeypatch.setattr(cg, 'route_cover_certificate', plain)
     monkeypatch.setattr(cuts, 'select_capacity_subsets', select)
     monkeypatch.setattr(cg, 'site_route_cover', subset)
-    out = hybrid.solve_hybrid(p, time_limit=360, primal_time_limit=0, cover_time_limit=360,
+    # The public cap now includes finalization. Leave one second beyond the
+    # configured360second cover stage; the subset split itself is unchanged.
+    out = hybrid.solve_hybrid(p, time_limit=361, primal_time_limit=0, cover_time_limit=360,
                               conditional_time_limit=0, adaptive_finish=False,
                               subset_time_fraction=fraction)
     assert calls[0] == ('plain', 360*(1-fraction))

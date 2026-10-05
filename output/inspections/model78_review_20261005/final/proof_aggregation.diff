@@ -1,0 +1,29 @@
+--- candidate/models/routing/variants/calendar_search.py
++++ final/models/routing/variants/calendar_search.py
+@@ -78,10 +78,16 @@
+         if valid and (best is None or info['objective'] < best['info']['objective']-1e-8):
+             best = candidate
+     resolved = all(r['proven_optimal'] or r['proven_infeasible'] for r in rows)
+-    optimal = method == 'exact' and best is not None and resolved
+     infeasible = best is None and all(r['proven_infeasible'] for r in rows)
+     bounds = [r['best_bound'] for r in rows if not r['proven_infeasible']]
+     bound = min(bounds) if bounds and all(v is not None and math.isfinite(v) for v in bounds) else None
++    # A count need not finish its own search if its certified lower bound
++    # already rules out improving the audited incumbent from another count.
++    # Unknown bounds (including unrun counts) and failed audits block this
++    # certificate. Use a strict comparison without rounding away a gap.
++    dominated = (best is not None and bound is not None and bound >= best['info']['objective']
++                 and all(r['status'] != 'AUDIT_FAILED' for r in rows))
++    optimal = method == 'exact' and best is not None and (resolved or dominated)
+     result = best if best is not None else joint_empty_result(problem, method)
+     if best is None:
+         result.update(cycle_batch_count=None, batch_boundaries=None, batch_durations_ticks=None,
+@@ -115,6 +121,8 @@
+                           batch_count_candidates=list(problem.batch_count_candidates),
+                           selected_count_proven_optimal=next((r['proven_optimal'] for r in rows
+                                     if r['batch_count'] == result.get('cycle_batch_count')), False),
++                          proof_aggregation=('all_counts_resolved' if resolved else 'all_count_bounds_dominate_incumbent')
++                                            if optimal else None,
+                           initial_incumbent_cost=initial_result['info']['objective'] if initial_result else None,
+                           proof_scope=f'model_{problem.model_number}_all_configured_counts_integer_time_cost_MILP'
+                                       if method == 'exact' else None)

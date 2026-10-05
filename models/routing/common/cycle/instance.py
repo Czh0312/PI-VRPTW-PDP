@@ -40,7 +40,7 @@ class MultiBatchInstance:
             model = 3 if len(self.operating_policy.batches) == 1 else 5
         self.operating_policy.require_model(model)
         self.model_number = int(model)
-        self.reusable = self.model_number in (3, 4, 5, 6)
+        self.reusable = self.model_number in (3, 4, 5, 6, 7, 8)
         self.free_assignment = self.model_number in (2, 4)
         self.task_kinds = ('d', 'p') if self.reusable else ('d',)
         # Direct Python callers can supply an integral float, just as JSON/CSV
@@ -78,6 +78,13 @@ class MultiBatchInstance:
             nonnegative(o.goods_weight, 'goods_weight')
             integer(o.service_time, 'service_time')
             integer(o.min_use_time, 'min_use_time')
+            if o.release_time is not None:
+                integer(o.release_time, 'release_time')
+            if o.allowed_batch_ids is not None:
+                if (not isinstance(o.allowed_batch_ids, (tuple, list))
+                        or any(not isinstance(b, str) or b not in self.batch_map for b in o.allowed_batch_ids)
+                        or len(set(o.allowed_batch_ids)) != len(o.allowed_batch_ids)):
+                    raise ValueError(f'{o.id}: invalid or duplicate allowed_batch_ids')
             for tw in (o.delivery_window, o.pickup_window):
                 if len(tw) != 2 or tw[0] > tw[1]:
                     raise ValueError(f'{o.id}: invalid time window after rounding')
@@ -85,6 +92,10 @@ class MultiBatchInstance:
                     integer(t, 'time window')
                 if tw[0] < p.cycle_start or tw[1] > p.cycle_end:
                     raise ValueError(f'{o.id}: time window outside cycle')
+        from .availability import fixed_order_availability_errors
+        # Orders and their batch bindings are immutable within an instance;
+        # projections construct a new instance. Avoid an extra scan per move.
+        self._availability_codes = tuple(e['code'] for e in fixed_order_availability_errors(self))
         if _physical_source is None:
             for a in network.nodes:
                 for b in network.nodes:
@@ -211,13 +222,16 @@ def load_instance(config, fleet_config):
         raise ValueError('duration_matrix requires distance_matrix')
     network = ProblemInstance(nodes, {k: v for k, v in fleet_config.items() if k != 'operating_policy'},
                               speed=speed, distance_matrix=distance, travel_time_matrix=duration)
-    orders = load_orders(resolve_project_path(config['orders']), policy, joint=config['model']==6)
-    if config['model']==6:
+    orders = load_orders(resolve_project_path(config['orders']), policy, joint=config['model'] in (6, 7, 8))
+    if config['model'] in (6, 7, 8):
         from .joint import JointBatchInstance
         from .uniform import UniformCycleInstance
         if not config.get('economic_config'):
-            raise ValueError('M6 requires economic_config')
+            raise ValueError('M6–M8 require economic_config')
         options = config.get('joint_batch_options', {})
+        if config['model'] in (7, 8):
+            from .calendar import CalendarCycleInstance
+            return CalendarCycleInstance(network, orders, policy, options, config['economic_config'], model=config['model'])
         factory = UniformCycleInstance if options.get('schedule_mode') == 'uniform_cycle' else JointBatchInstance
         return factory(network, orders, policy, options,
                                   config['economic_config'])

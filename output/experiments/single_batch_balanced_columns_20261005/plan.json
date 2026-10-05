@@ -1,0 +1,52 @@
+{
+  "created_local": "2026-10-05T10:56:00.647434+08:00",
+  "status": "REGISTERED_BEFORE_IMPLEMENTATION",
+  "scope": "B1 M4 balanced-price guided columns in original root loop; no default changes, no schedule changes",
+  "hypothesis": "Pairwise D/P balanced pricing can supply original-dual negative routes early enough to improve certified full-universe E2 bounds after RMP reoptimization, unlike frozen-price diagnostics.",
+  "correctness": "Balance only discovery prices. Recompute raw directed route cost and reduced cost with CURRENT ORIGINAL master prices, deduplicate then add; never use balanced pricing bound/status for original certificate or LP closure. Original full-domain pricing and K*rho correction remain unchanged. All original D/P task IDs and shared-customer assignments retained; full physical integer model is unchanged.",
+  "policy": {
+    "discovery_fraction": 0.2,
+    "call_cap_seconds": 1.0,
+    "maximum_consecutive_discovery_passes": 1,
+    "phase_two_only": true,
+    "exact_stop_at_negative": false,
+    "default": false,
+    "combine_with_old_insertion": false
+  },
+  "validation": "Independent tiny all-route LP and original integer enumeration including duplicate-customer and nonmetric/zero-time seeds; original integer schedule projection; poison balanced bounds to test nonpromotion; verify all returned discovery raw distances and original reduced costs; actual original+balanced repricing against tiny enumerations.",
+  "root_matrix": {
+    "sources": [
+      "zhou_Set2_100-5-1b_subset20",
+      "zhou_Set2_100-5-2_subset20"
+    ],
+    "seeds": [
+      42,
+      43,
+      44
+    ],
+    "budgets": [
+      15,
+      30
+    ],
+    "methods": [
+      "baseline",
+      "balanced"
+    ],
+    "jobs": 24,
+    "total_registered_seconds": 540,
+    "threads": 1,
+    "order": "alternate by source/seed/budget parity",
+    "total_scope": "Input loading, audit, projection, root setup/build/discovery/certification charged; process imports separately recorded"
+  },
+  "gate": "All audits pass; candidate improves effective E2 bound by >1e-5 in >=8/12 pairs including both sources, all three seeds and both budgets, with no >1e-5 regressions; OR same positive root LP optimum, complete on all pairs and lower total wall/work on each source/budget aggregate. Zero E2 and better negative raw corrections alone fail. No favorable reruns or selected subsets.",
+  "complete_integer_gate": "Only if root gate passes: register a separate frozen full solver control before executing; root alone never permits production-default adoption. Complete original integer same-input/start/total-budget multi-source/seed comparison and independent audit/regression required.",
+  "rejection": "Keep closed prototype if root gate fails; do not spend a full MILP matrix on a zero-bound mechanism. Preserve every failure and negative result; no adaptive budget candidate bundled here.",
+  "budgets": "Serial subprocess hard protection budget+30 seconds; retain stdout/stderr, inputs, starts, source/parameters SHA256 and results. No automatic retry after solver failure.",
+  "ownership": [
+    "models/routing/solvers/exact/single_batch_pickup_bound.py",
+    "tests/routing/test_single_batch_balanced_columns.py",
+    "experiments/runs/run_single_batch_balanced_columns.py"
+  ],
+  "stopped_automation": "m1-m4 remains paused; this new human-authorized experiment is synchronous and has its own checkpoint",
+  "load": "Read ALNS/M5 checkpoint status and machine load before/after every job, inspect current model6 activity where available; do not claim CPU-exclusive execution."
+}

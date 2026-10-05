@@ -151,18 +151,33 @@ def solve_conditional_inventory(problem, site_bounds, conditions, *, deadline,
         model.Params.IntFeasTol = model.Params.FeasibilityTol = 1e-9
         if initial_result is not None:
             set_conditional_projection(problem, context, initial_result)
-        model.Params.TimeLimit = max(0, deadline-time.perf_counter())
+        # Reserve part of the same deadline for a separate cut-free search.
+        # A reported primary ObjBound alone cannot improve the certified floor.
+        remaining = max(0, deadline-time.perf_counter())
+        reserve = min(10.0, remaining*.3)
+        model.Params.TimeLimit = max(0, remaining-reserve)
         model.optimize()
         try:
             raw = float(model.ObjBound)
         except (gp.GurobiError, AttributeError):
             raw = math.nan
-        if math.isfinite(raw) and model.Status != gp.GRB.INFEASIBLE:
-            margin = 1e-7*max(1.0, abs(raw))
-            result.update(bound=max(fallback_bound, max(0, raw-margin)), raw_bound=raw, margin=margin)
+        from .multibatch_inventory_guard import check_inventory_bound
+        verification_path = (Path(diagnostics_path).with_name(
+            Path(diagnostics_path).name.replace('.mps', '_verification.mps'))
+            if diagnostics_path is not None else None)
+        checked = check_inventory_bound(model, raw, fallback_bound=fallback_bound,
+            deadline=deadline, time_limit=10.0, diagnostics_path=verification_path)
+        accepted = checked['accepted_raw_bound']
+        result.update(bound_verification=checked, reported_raw_bound=checked['reported_raw_bound'])
+        if accepted is not None and model.Status != gp.GRB.INFEASIBLE:
+            margin = 1e-7*max(1.0, abs(accepted))
+            result.update(bound=max(fallback_bound, max(0, accepted-margin)), raw_bound=accepted, margin=margin)
         result.update(status=int(model.Status), relaxation_optimal=model.Status == gp.GRB.OPTIMAL,
             conditional_rows=context['conditional_rows'], patterns=len(context['patterns']),
             variables=model.NumVars, constraints=model.NumConstrs)
+        result['relaxation_optimal'] &= (checked.get('replay_status') == gp.GRB.OPTIMAL
+                                          and checked['status'] == 'REPLAY_BOUND_CHECKED'
+                                          and checked['reported_bound_consistent'] is True)
         if model.SolCount:
             result['supplies'] = [dict(site=s, batch=b, supply=int(round(v.X)))
                                   for (s, b), v in context['supplies'].items()]

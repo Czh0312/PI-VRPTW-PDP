@@ -145,6 +145,10 @@ def run_case(config, fleet, *, case_path=None, output=None):
             manifest.update(uniform_cycle_config=instance.uniform_contract,
                             cutoff_bounds_ticks=None,legal_order_batches=None,
                             source_calendar_note='Reference only; solver rebuilds the entire cycle for each K')
+        if getattr(instance, 'calendar_cycle', False):
+            manifest.update(calendar_config=instance.calendar_contract,
+                            cutoff_bounds_ticks=None, legal_order_batches=None,
+                            source_calendar_note='Reference only; M7/M8 optimize a new calendar over the entire cycle')
     _json(out/'manifest.json', manifest)
     print(f'M{instance.model_number} {"single_batch" if len(instance.operating_policy.batches) == 1 else "multi_batch"} {config["solver"]}: {out}')
     log, begun = io.StringIO(), time.perf_counter()
@@ -207,6 +211,13 @@ def run_case(config, fleet, *, case_path=None, output=None):
                           '所有配置批次数均解决，才能声明整个均匀分批模型的成本最优；单个K最优不足以证明全局最优。',
                           '', '| K | 状态 | 有效成本 | 箱数 | 该K成本最优已证明 |', '| --- | --- | ---: | ---: | --- |']
                 lines.extend(f"| {r['batch_count']} | {r['status']} | {r['objective']} | {r.get('container_pool_size')} | {r['proven_optimal']} |" for r in result['count_search'])
+            if getattr(instance, 'calendar_cycle', False):
+                lines += ['', f"日历模式：{instance.schedule_mode}；K 搜索范围：{list(instance.batch_count_candidates)}。",
+                          f"逐批长度/ticks：{result.get('batch_durations_ticks')}；逐批分界比例：{result.get('cutoff_ratios')}。",
+                          f"实际空箱回运轮数：{result.get('actual_recovery_round_count')}。",
+                          '所有配置K均证明最优或不可行，才能声明整个模型成本最优。',
+                          '', '| K | 状态 | 有效成本 | 箱数 | 该K成本最优已证明 |', '| --- | --- | ---: | ---: | --- |']
+                lines.extend(f"| {r['batch_count']} | {r['status']} | {r['objective']} | {r.get('container_pool_size')} | {r['proven_optimal']} |" for r in result['count_search'])
         if audit.get('errors'):
             lines += ['', '审计错误：', '```json', json.dumps(audit['errors'], ensure_ascii=False, indent=2), '```']
         if result.get('precheck', {}).get('errors'):
@@ -215,6 +226,8 @@ def run_case(config, fleet, *, case_path=None, output=None):
         (out/'report.md').write_text('\n'.join(lines)+'\n', encoding='utf-8')
         if audit.get('valid') and config.get('save_plots', True):
             selected = instance.for_count(result['cycle_batch_count']) if getattr(instance,'uniform_cycle',False) else instance
+            if getattr(instance, 'calendar_cycle', False):
+                selected = instance.selected_problem(result)
             plotted = selected.project(result['order_batch_assignment'], pool,result.get('batch_cutoffs')) if joint else instance
             plot_result(plotted, result, out/'timeline.png')
         print(f"{result['info']['status']} | valid={audit.get('valid', False)} | {objective_label}={result['info']['objective']}")

@@ -92,6 +92,8 @@ def evaluate(problem, state, *, _memo=None, _prepared=None):
     summary_of = getattr(_prepared, 'load_summary', None)
     result = empty_result(problem, 'alns')
     violations, goods_ready = [], {}
+    if problem._availability_codes:
+        return 1e12, result, list(problem._availability_codes)
     # E1 deliveries do not depend on reverse flow; delivery times are explicit.
     for b in p.batches:
         seen = []

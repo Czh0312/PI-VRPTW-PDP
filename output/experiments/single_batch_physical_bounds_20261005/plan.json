@@ -1,0 +1,62 @@
+{
+  "created": "2026-10-05T11:19:08.889961+08:00",
+  "mode": "continuous human-authorized implementation and experiment",
+  "hypothesis": "M3 fixed-assignment physical E2 site MIPs retain cross-trip clocks and original serial vehicles; their ObjBound floors can improve the complete original MILP enough to repay preprocessing cost. Unlike route-cover LP, no physical serial relaxation inside each site.",
+  "scope": "First fixed M3 only. No full Benders or M4 assignment decomposition claim. Site decomposition relaxes E1 routing/supply coupling but retains original necessary supply lower bounds.",
+  "policy": {
+    "component_fraction": 0.2,
+    "site_allocation": "equal remaining component budget across remaining sites; serial; no retry",
+    "threads": 1,
+    "cuts": "individual original E2 site objective floors",
+    "production_default": false
+  },
+  "correctness": [
+    "Independent tiny full integer enumeration bounds, duplicate customers, nonmetric and zero times",
+    "Original full schedules projected by fixing E2 paths, times and supply; all tasks and same physical vehicle routes",
+    "Local objective uses unique raw E2 arc variables; no double count compressed arcs",
+    "Only finite valid ObjBound with conservative margin; timeout UNKNOWN cannot prove infeasibility; no partial site sums masquerade as full proof",
+    "Every original large output audited and periodic-replayed; positive site bounds independently re-solve saved MPS or a changed representation before adoption"
+  ],
+  "matrix": {
+    "sources": [
+      "zhou_Set2_100-5-1b_subset20",
+      "zhou_Set2_100-5-2_subset20"
+    ],
+    "model": 3,
+    "seeds": [
+      42,
+      43,
+      44
+    ],
+    "budgets": [
+      15,
+      30
+    ],
+    "methods": [
+      "baseline",
+      "physical"
+    ],
+    "jobs": 24,
+    "registered_total_seconds": 540,
+    "method_order": "alternate by source/seed/budget parity",
+    "budget_scope": "load/audit + component build/solve + original MILP + application under total budget; imports separate"
+  },
+  "gate": "Only after all correctness/audits/regressions pass: >=8/12 pairs improve final gap by >1e-5 including both sources, all seeds and budgets, no gap regression >1e-5; OR all pairs reach original integer optimality with >=10% total time and Work reduction in each source/budget aggregate. Otherwise closed experiment only. No favorable reruns.",
+  "ownership": [
+    "models/routing/solvers/exact/single_batch_physical_bounds.py",
+    "models/routing/solvers/exact/solver.py",
+    "tests/routing/test_single_batch_physical_bounds.py",
+    "experiments/runs/run_single_batch_physical_bounds.py"
+  ],
+  "stopped_automation": "Do not resume m1-m4",
+  "load": {
+    "loadavg": [
+      6.70068359375,
+      18.46240234375,
+      18.74658203125
+    ],
+    "cpu_count": 8,
+    "exclusive": false
+  },
+  "failures": "Preserve all failed logs/code; no timed-job automatic retry; correctness fixture repairs retained separately."
+}

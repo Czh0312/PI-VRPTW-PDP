@@ -75,6 +75,11 @@ def build_model(problem, *, verbose=False, deadline=None, share_e2=True, travel_
     m.Params.MIPGap = 0
     m.Params.MIPGapAbs = 0
     m.Params.Threads = 1
+    # Also enforce availability for direct build_model callers that bypass the
+    # public solve entry's necessary-condition rejection.
+    from models.routing.common.cycle.availability import fixed_order_availability_errors
+    for index, issue in enumerate(fixed_order_availability_errors(problem)):
+        m.addConstr(gp.LinExpr() >= 1, name=f'fixed_availability_{index}_{issue["code"]}')
     routes1, routes2, objective = [], [], gp.LinExpr()
     component_costs = {}
     assignments, active_sites, counts, weights = {}, {}, {}, {}

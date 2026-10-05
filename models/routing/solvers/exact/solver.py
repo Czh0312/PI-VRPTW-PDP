@@ -93,7 +93,8 @@ def _set_start(problem, model, ctx, result):
 def solve_exact(problem, time_limit=60, seed=42, verbose=False, initial_result=None, _travel_bounds=None,
                 _domain_check=None, use_distance_certificate=True, distance_cuts=None,
                 _single_batch_route_certificate=None, _single_batch_cycle_cuts=False,
-                _single_batch_causal_bounds=False, _single_batch_e1_certificate=None):
+                _single_batch_causal_bounds=False, _single_batch_e1_certificate=None,
+                _single_batch_physical_certificate=None):
     if not math.isfinite(time_limit) or time_limit <= 0:
         raise ValueError('time_limit must be finite and positive')
     if _single_batch_e1_certificate is not None and (problem.model_number!=3 or len(problem.operating_policy.batches)!=1):
@@ -205,6 +206,10 @@ def solve_exact(problem, time_limit=60, seed=42, verbose=False, initial_result=N
                                   gurobi_best_bound=None)
         return preserve_incumbent()
     try:
+        if _single_batch_physical_certificate is not None:
+            from .single_batch_physical_bounds import apply_physical_bounds
+            result['info']['single_batch_physical_floors'] = apply_physical_bounds(
+                model, problem, ctx, _single_batch_physical_certificate)
         if _single_batch_e1_certificate is not None:
             from .single_batch_e1_bound import apply_e1_cover_bound
             result['info']['single_batch_e1_cover_floor']=apply_e1_cover_bound(

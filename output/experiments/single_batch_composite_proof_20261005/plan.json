@@ -1,0 +1,57 @@
+{
+  "created": "2026-10-05T03:45:25.293662+00:00",
+  "mode": "continuous human-authorized experiment",
+  "hypothesis": "Use exact component equality to an audited original M3 incumbent to close optimality without near-optimal distance-floor rows. Complete E1 integer cover and full physical E2 site MIPs form a valid separable lower relaxation. If incomplete, preserve conservative component bounds externally and run original full MILP with no new floor constraints.",
+  "proof_boundary": "No epsilon closure: E1 full enumeration and integer-cover exact Fraction DP complete; every active E2 site status OPTIMAL with zero requested gaps and ObjBound==ObjVal; exact binary-rational sum of selected raw arc coefficients equals that same original incumbent component cost. Noncomplete, missing or unequal component cannot prove original optimum. Backend OPTIMAL still uses numerical feasibility tolerances, as the original solver.",
+  "policy": {
+    "prefix_fraction": 0.2,
+    "e1_enumeration_cap_seconds": 0.2,
+    "site_order": "increasing task count then site id; each gets remaining prefix; exit on mismatch or time exhaustion",
+    "site_parameters": "Threads1, same seed, DualReductions0, FeasibilityTol/IntFeasTol1e-9, MIPGap/MIPGapAbs0; default focus/heuristics",
+    "no_cross_run_cache": true,
+    "public_default_adopted": false,
+    "scope": "M3 B1 fixed assignment only"
+  },
+  "matrix": {
+    "sources": [
+      "zhou_Set2_100-5-1b_subset20",
+      "zhou_Set2_100-5-2_subset20"
+    ],
+    "seeds": [
+      42,
+      43,
+      44
+    ],
+    "budgets": [
+      15,
+      30
+    ],
+    "methods": [
+      "baseline",
+      "composite"
+    ],
+    "jobs": 24,
+    "registered_seconds": 540,
+    "python_hash_seed": 0,
+    "method_order": "alternate source/seed/budget parity",
+    "total_scope": "input/audit+prefix builds/enumeration/solves/proof and diagnostics+remaining original kernel; imports separate"
+  },
+  "acceptance": "All independent enumeration, physical projections, component proofs and regressions pass. >=8/12 pair improvements counting either gap gain>1e-5 or >=10% faster completion when both prove optimum, covering both sources/all seeds/budgets; no gap regression>1e-5, lost proof or >=10% proof-time regression. Otherwise closed research entry. No favorable timing reruns.",
+  "verification": "Independent alternate E1 raw enumeration and exact cover for tiny and two large cases; original integer tiny enumeration and original fixed schedules; every claimed global component closure independently re-solve all saved site MPS with seed+101 and original frozen warm solution (5s/site), exact objective cost match; unknown blocks adoption, no selective extensions. All other positive site floors re-solve MPS same cap and record inconclusive. All original outputs audited/periodic-replayed.",
+  "ownership": [
+    "models/routing/solvers/exact/single_batch_composite_proof.py",
+    "tests/routing/test_single_batch_composite_proof.py",
+    "experiments/runs/run_single_batch_composite_proof.py"
+  ],
+  "default_policy": "Existing exact entry unchanged; old failed schemes remain off. Do not restart automation or modify old sealed artifacts.",
+  "load": {
+    "cpu_count": 8,
+    "loadavg": [
+      11.1826171875,
+      10.96533203125,
+      15.3466796875
+    ],
+    "exclusive": false
+  },
+  "failure_policy": "Retain failures and code versions; no automatic timing retry."
+}

@@ -27,7 +27,9 @@ def _solve_hybrid(problem, *, time_limit=660, alns_time_limit=15, primal_time_li
         adaptive_finish=True, verbose=False, diagnostics_dir=None, extra_slots_per_vehicle=0,
         route_pool_max_columns=256, max_supply_conjunctions=0, subset_time_fraction=.25,
         adaptive_pricing_mode='column_generation', count_dual_repair=False,
-        capacity_dual_repair=False, route_cover_batch_pricing=True, _route_sessions=None):
+        capacity_dual_repair=False, route_cover_batch_pricing=True,
+        primal_revisit_time_limit=0, primal_revisit_gap_limit=.10,
+        retain_all_pricing_columns=False, primal_mip_focus=0, _route_sessions=None):
     from models.routing.service import solve_routing
     from .multibatch_route_pool import reoptimize_route_pool
     from .multibatch_route_cg import route_cover_certificate, site_route_cover
@@ -41,7 +43,8 @@ def _solve_hybrid(problem, *, time_limit=660, alns_time_limit=15, primal_time_li
         if not math.isfinite(value) or value <= 0:
             raise ValueError(name+' must be finite and positive')
     for name, value in [('primal_time_limit', primal_time_limit), ('cover_time_limit', cover_time_limit),
-                        ('conditional_time_limit', conditional_time_limit)]:
+                        ('conditional_time_limit', conditional_time_limit),
+                        ('primal_revisit_time_limit', primal_revisit_time_limit)]:
         if not math.isfinite(value) or value < 0:
             raise ValueError(name+' must be finite and nonnegative')
     if not math.isfinite(target_gap) or not 0 <= target_gap < 1:
@@ -64,8 +67,15 @@ def _solve_hybrid(problem, *, time_limit=660, alns_time_limit=15, primal_time_li
         raise ValueError('capacity_dual_repair must be boolean')
     if not isinstance(route_cover_batch_pricing, bool):
         raise ValueError('route_cover_batch_pricing must be boolean')
+    if not isinstance(retain_all_pricing_columns, bool):
+        raise ValueError('retain_all_pricing_columns must be boolean')
+    if not math.isfinite(primal_revisit_gap_limit) or not 0 <= primal_revisit_gap_limit < 1:
+        raise ValueError('primal_revisit_gap_limit must lie in [0, 1)')
+    if not isinstance(primal_mip_focus, int) or isinstance(primal_mip_focus, bool) or not 0 <= primal_mip_focus <= 3:
+        raise ValueError('primal_mip_focus must be an integer from 0 to 3')
     begun = time.perf_counter()
-    deadline = begun+time_limit
+    # Charge cleanup, exports and the final physical audit to the public cap.
+    deadline = begun+time_limit-min(1.0, time_limit*.01)
     path = Path(diagnostics_dir) if diagnostics_dir is not None else None
     stages, lower, reference, conditional, adaptive = [], 0.0, None, None, None
     result = solve_routing(model=5, method='alns', problem=problem, seed=seed,
@@ -90,6 +100,7 @@ def _solve_hybrid(problem, *, time_limit=660, alns_time_limit=15, primal_time_li
             transfers=True, exchanges=True, recombinations=True, max_passes=1,
             e1_backend=backend, max_columns=route_pool_max_columns, verbose=verbose,
             extra_slots_per_vehicle=extra_slots_per_vehicle,
+            mip_focus=primal_mip_focus,
             diagnostics_dir=path/f'primal_{number}' if path else None)
         audited = audit_solution(problem, result)
         if not audited['valid']:
@@ -150,8 +161,31 @@ def _solve_hybrid(problem, *, time_limit=660, alns_time_limit=15, primal_time_li
         reference.update(bound=lower, raw_bound=raw)
         stages.append(dict(stage='route_cover', bound=lower, upper_bound=audited['objective'],
                            subset_runs=len(subset_runs), runtime=cover_time_limit-max(0, cover_deadline-time.perf_counter())))
+    if reference is not None and primal_revisit_time_limit > 0:
+        from .multibatch_hybrid_primal import collect_pricing_columns, near_target_primal_budget
+        budget = near_target_primal_budget(audited['objective'], lower, target_gap=target_gap,
+            gap_limit=primal_revisit_gap_limit, time_limit=primal_revisit_time_limit,
+            remaining=deadline-time.perf_counter())
+        if budget > .05:
+            revisit_begun = time.perf_counter()
+            before = audited['objective']
+            result = reoptimize_route_pool(problem, result, time_limit=budget, seed=seed,
+                transfers=True, exchanges=True, recombinations=True, max_passes=1,
+                additional_columns=collect_pricing_columns(problem, reference),
+                e1_backend=backend, max_columns=route_pool_max_columns, verbose=verbose,
+                extra_slots_per_vehicle=extra_slots_per_vehicle,
+                mip_focus=primal_mip_focus,
+                diagnostics_dir=path/'primal_revisit' if path else None)
+            audited = audit_solution(problem, result)
+            if not audited['valid'] or audited['objective'] > before+1e-6:
+                raise RuntimeError('Near-target primal failed independent improvement audit')
+            stages.append(dict(stage='route_pool_revisit', upper_bound=audited['objective'],
+                previous_upper_bound=before, bound=lower, budget=budget,
+                runtime=time.perf_counter()-revisit_begun, pool_complete=False))
     if reference is not None and {c['satellite'] for c in reference['components']} == set(problem.satellites) and (
-            conditional_time_limit > 0 and time.perf_counter() < deadline):
+            conditional_time_limit > 0 and time.perf_counter() < deadline and (
+                primal_revisit_time_limit == 0 or
+                max(0, audited['objective']-lower)/max(1e-9, abs(audited['objective'])) > target_gap)):
         conditional = refine_conditional_bound(problem, reference, result,
             deadline=min(deadline, time.perf_counter()+conditional_time_limit), seed=seed,
             max_conditions=max_conditions, target_gap=target_gap, verbose=verbose,
@@ -170,6 +204,8 @@ def _solve_hybrid(problem, *, time_limit=660, alns_time_limit=15, primal_time_li
             count_dual_repair=count_dual_repair,
             capacity_dual_repair=capacity_dual_repair,
             route_cover_batch_pricing=route_cover_batch_pricing,
+            retain_all_pricing_columns=retain_all_pricing_columns,
+            primal_mip_focus=primal_mip_focus,
             route_sessions=_route_sessions,
             diagnostics_dir=path/'adaptive' if path else None)
         result, lower = adaptive['result'], adaptive['bound']
@@ -193,7 +229,8 @@ def finish_hybrid(problem, reference, conditional, initial_result, *, deadline,
                   fallback_bound, seed=42, target_gap=.05, verbose=False, diagnostics_dir=None,
                   extra_slots_per_vehicle=0, route_pool_max_columns=256,
                   adaptive_pricing_mode='column_generation', route_sessions=None, count_dual_repair=False,
-                  capacity_dual_repair=False, route_cover_batch_pricing=True):
+                  capacity_dual_repair=False, route_cover_batch_pricing=True,
+                  retain_all_pricing_columns=False, primal_mip_focus=0):
     """Spend unused original budget on unfinished pricing, then audited primal.
 
     This internal helper consumes certificates produced in the same run. Copies
@@ -288,14 +325,19 @@ def finish_hybrid(problem, reference, conditional, initial_result, *, deadline,
     if not reached() and deadline-time.perf_counter() > .05:
         backend = 'patterns' if len({o.satellite for o in problem.orders}) <= 5 and (
             problem.operating_policy.e1_turnaround_time == 0) else 'auto'
-        proposal_rows = ref['sites']+[r['certificate'] for r in leaves]
-        extra = {site: [c for row in proposal_rows if row['satellite'] == site for c in row['columns']]
-                 for site in problem.satellites}
+        if retain_all_pricing_columns:
+            from .multibatch_hybrid_primal import collect_pricing_columns
+            extra = collect_pricing_columns(problem, ref, conditional, leaves)
+        else:
+            proposal_rows = ref['sites']+[r['certificate'] for r in leaves]
+            extra = {site: [c for row in proposal_rows if row['satellite'] == site for c in row['columns']]
+                     for site in problem.satellites}
         result = reoptimize_route_pool(problem, result, time_limit=max(1e-12, deadline-time.perf_counter()),
             seed=seed, exchanges=True, recombinations=True, max_columns=route_pool_max_columns, max_passes=2,
             additional_columns=extra,
             extra_slots_per_vehicle=extra_slots_per_vehicle,
-            e1_backend=backend, verbose=verbose, diagnostics_dir=path/'primal' if path else None)
+            e1_backend=backend, mip_focus=primal_mip_focus, verbose=verbose,
+            diagnostics_dir=path/'primal' if path else None)
         audited = audit_solution(problem, result)
         if not audited['valid']:
             raise RuntimeError('Adaptive primal failed independent whole-cycle audit')

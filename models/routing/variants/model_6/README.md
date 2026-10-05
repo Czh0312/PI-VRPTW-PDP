@@ -16,6 +16,10 @@
 
 精确求解枚举K，每个K的MILP只有一个共同分界变量。ALNS枚举K，分界移动同步改变所有批次；两套算法共享各自一次调用的总时间/迭代预算，不按K重复增加预算。ALNS不调用精确模型或Gurobi。只有所有配置K均证明最优或不可行，才报告整体成本最优；限时无解不等于不可行。
 
+求解检查后，ALNS的分界搜索还覆盖实际卸箱、回运加清洗赶上下一批领箱的临界点及其前后刻度，增加有界局部细化与较晚回收初始化；精确模型增加路线时长的有效下界以加强松弛。两者保持相同的业务和成本定义，修改前后采用冻结代码、相同输入/预算/种子的逐例对比，入口为 `experiments.runs.review_model6_search`。短预算改进不能视为所有实例上的性能保证。
+
+[分界搜索检查报告](../../../../output/model6_comparison/20261005_uniform_review_v2/inspection_report.md)保留首轮和预算修正后的全部配对结果，包括改善、退步与限时未找到解的情况。最终分界细化每个K最多预留10%时间，避免反复多候选评价挤占路线搜索。
+
 结果分别记录 `cycle_batch_count`（均匀划分K）、`delivery_batch_count`（有配送的批次）、`actual_recovery_round_count`（实际回运轮数），并保存 `batch_duration_ticks`、`shared_cutoff_offset_ticks`、`shared_cutoff_ratio`、`count_search` 和允许域。独立审计从K重建日历，检查共同分界、两周期车辆与箱子重放、清洗和成本。周期尾部仍须完成清洗，不新增隐含回运轮次。第二阶段可继续回收，截点后的箱子等后续回运。
 
     .venv/bin/python main.py route --case data/model6/uniform_v1_20261005/lade_0823_10aoi/m6_case.json --solver alns --time 15 --iterations 5000

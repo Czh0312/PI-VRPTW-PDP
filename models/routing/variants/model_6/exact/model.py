@@ -17,7 +17,7 @@ def build_model(problem, *, verbose=False, deadline=None):
     from gurobipy import GRB
     p, f = problem.operating_policy, problem.fleet
     H, Q = p.cycle_end, problem.total
-    m = gp.Model('model6_joint_batch_cost_v1')
+    m = gp.Model(f'model{getattr(problem, "calendar_model_number", 6)}_joint_batch_cost_v1')
     m.Params.OutputFlag = int(verbose)
     m.Params.Threads = 1
     m.Params.MIPGap = 0
@@ -28,6 +28,16 @@ def build_model(problem, *, verbose=False, deadline=None):
             raise TimeoutError('M6 model construction reached its total budget')
 
     try:
+        variable_calendar = getattr(problem, 'variable_calendar', False)
+        if variable_calendar:
+            starts = {b.id: m.addVar(vtype=GRB.INTEGER, lb=problem.start_bounds[b.id][0],
+                                    ub=problem.start_bounds[b.id][1], name=f'batch_start_{b.id}')
+                      for b in p.batches}
+            ends = {b.id: (starts[p.batches[i+1].id] if i+1 < len(p.batches) else p.cycle_end)
+                    for i, b in enumerate(p.batches)}
+        else:
+            starts = {b.id: b.start for b in p.batches}
+            ends = {b.id: b.end for b in p.batches}
         if problem.shared_cutoff:
             lo,hi = problem.shared_cutoff_bounds
             offset = m.addVar(vtype=GRB.INTEGER, lb=lo, ub=hi, name='shared_cutoff_offset')
@@ -36,11 +46,18 @@ def build_model(problem, *, verbose=False, deadline=None):
             cutoffs = {b.id:(m.addVar(vtype=GRB.INTEGER, lb=problem.cutoff_bounds[b.id][0],
                                 ub=problem.cutoff_bounds[b.id][1], name=f'cutoff_{b.id}')
                          if problem.optimize_cutoffs else b.cutoff) for b in p.batches}
+        if variable_calendar:
+            for b in p.batches:
+                m.addConstr(cutoffs[b.id] >= starts[b.id]+problem.minimum_phase_ticks)
+                m.addConstr(cutoffs[b.id] <= ends[b.id]-problem.minimum_phase_ticks)
         y = {(o.id, b):m.addVar(vtype=GRB.BINARY, name=f'assign_{o.id}_{b}')
              for o in problem.orders for b in problem.legal_batches[o.id]}
         z = {b.id:m.addVar(vtype=GRB.BINARY, name=f'delivery_active_{b.id}') for b in p.batches}
         for o in problem.orders:
             m.addConstr(gp.quicksum(y[o.id,b] for b in problem.legal_batches[o.id]) == 1)
+            if variable_calendar:
+                for bid in problem.legal_batches[o.id]:
+                    m.addConstr((y[o.id,bid] == 1) >> (starts[bid] >= o.release_time))
         for b in p.batches:
             members = [v for (oid,bid),v in y.items() if bid==b.id]
             for v in members:
@@ -121,10 +138,12 @@ def build_model(problem, *, verbose=False, deadline=None):
                         m.addConstr((visit[i]==1) >> (times[i]>=cutoffs[batch.id]))
                         m.addConstr((visit[i]==1) >> (end+p.cleaning_duration<=H))
             distance = gp.LinExpr()
+            travel_ticks = gp.LinExpr()
             for a,b in arcs:
                 left = base if a==-1 else nodes[a]['site']
                 right = base if b==-2 else nodes[b]['site']
                 distance += problem.distance(left,right)*x[a,b]
+                travel_ticks += problem.travel(left,right)*x[a,b]
                 if a==-1:
                     m.addConstr((x[a,b]==1) >> (times[b]>=start+problem.travel(left,right)))
                     if rank is not None:
@@ -143,6 +162,12 @@ def build_model(problem, *, verbose=False, deadline=None):
                     m.addConstr((x[a,b]==1) >> (lv[b]==lv[a]+sign*nodes[b]['v']))
                 if layer=='e1' and b!=-2 and nodes[b]['kind']=='p' and (a==-1 or nodes[a]['kind']=='d'):
                     m.addConstr((x[a,b]==1) >> (times[b]>=cutoffs[batch.id]+problem.travel(left,right)))
+            # Every physical trip includes its traversed arcs, service and
+            # unloading. Expose this implication in the LP relaxation too:
+            # indicator-only timing otherwise permits negative paid duration.
+            m.addConstr(end-start >= travel_ticks
+                        +gp.quicksum(n['service']*visit[i] for i,n in enumerate(nodes))
+                        +unload*used, name=label+'_duration_lower_bound')
             return dict(nodes=nodes,base=base,used=used,start=start,end=end,visit=visit,
                         times=times,x=x,label=label,distance=distance)
 
@@ -155,8 +180,10 @@ def build_model(problem, *, verbose=False, deadline=None):
                         w = m.addVar(ub=f.e1_weight_cap,name=f'goods_weight_{b.id}_{k}_{s}') if kind=='d' else q*f.container_weight
                         nodes.append(dict(site=s,kind=kind,quantity=q,w=w,v=q*f.container_volume,
                                           service=problem.service(s),
-                                          window=(b.start,problem.cutoff_bounds[b.id][1]-problem.service(s))
-                                          if kind=='d' else (problem.cutoff_bounds[b.id][0],b.end)))
+                                          window=((problem.start_bounds[b.id][0] if variable_calendar else b.start),
+                                                  problem.cutoff_bounds[b.id][1]-problem.service(s))
+                                          if kind=='d' else (problem.cutoff_bounds[b.id][0],
+                                              problem.end_bounds[b.id][1] if variable_calendar else b.end)))
                 r = make_route(nodes,problem.depot,'e1',f'e1_{b.id}_{k}',b)
                 r.update(batch=b,vehicle=k)
                 hd = m.addVar(vtype=GRB.BINARY,name=r['label']+'_loaded')
@@ -166,9 +193,9 @@ def build_model(problem, *, verbose=False, deadline=None):
                 m.addConstr(hd<=gp.quicksum(ds))
                 only_pick = m.addVar(vtype=GRB.BINARY)
                 m.addConstr(only_pick==r['used']-hd)
-                m.addConstr((hd==1) >> (r['start']==b.start+p.e1_load_time))
+                m.addConstr((hd==1) >> (r['start']==starts[b.id]+p.e1_load_time))
                 m.addConstr((only_pick==1) >> (r['start']>=cutoffs[b.id]))
-                m.addConstr((r['used']==1) >> (r['end']<=b.end))
+                m.addConstr((r['used']==1) >> (r['end']<=ends[b.id]))
                 m.addConstr((r['used']==1) >> (r['end']+p.e1_turnaround_time<=H))
                 r['loaded'] = hd
                 r['return_quantity'] = gp.quicksum(n['quantity'] for n in nodes if n['kind']=='p')
@@ -276,8 +303,8 @@ def build_model(problem, *, verbose=False, deadline=None):
             for r in routes['e1']:
                 ready,late = (m.addVar(vtype=GRB.BINARY) for _ in range(2))
                 m.addConstr(ready+late==r['used'])
-                m.addConstr((ready==1) >> (r['end']+p.cleaning_duration<=b.start))
-                m.addConstr((late==1) >> (r['end']+p.cleaning_duration>=b.start+1))
+                m.addConstr((ready==1) >> (r['end']+p.cleaning_duration<=starts[b.id]))
+                m.addConstr((late==1) >> (r['end']+p.cleaning_duration>=starts[b.id]+1))
                 released=m.addVar(vtype=GRB.INTEGER,ub=Q)
                 m.addConstr(released<=r['return_quantity']); m.addConstr(released<=Q*ready)
                 m.addConstr(released>=r['return_quantity']-Q*(1-ready))
@@ -308,6 +335,7 @@ def build_model(problem, *, verbose=False, deadline=None):
         budget()
         m.update()
         return m,dict(**routes,assignments=y,activation=z,pool=N,cutoffs=cutoffs,cost_parts=parts,
+                      batch_starts=starts, batch_ends=ends,
                       physical_vehicles=physical_vehicles)
     except BaseException:
         m.dispose()

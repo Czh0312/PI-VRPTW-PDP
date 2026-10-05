@@ -1,0 +1,85 @@
+"""Summarize every registered run without changing any comparison evidence."""
+from pathlib import Path
+from fractions import Fraction
+from datetime import datetime,timezone
+from collections import Counter
+import hashlib,json,platform
+import gurobipy
+ROOT=Path(__file__).resolve().parents[3]
+OUT=Path(__file__).resolve().parent
+REPORT=ROOT/'docs/single_batch_composite_proof_20261005.md'
+def read(p):return json.loads(Path(p).read_text())
+def write(p,v):Path(p).write_text(json.dumps(v,ensure_ascii=False,indent=2,allow_nan=False)+'\n')
+def sha(p):return hashlib.sha256(Path(p).read_bytes()).hexdigest()
+s=read(OUT/'verification/summary.json');pairs=read(OUT/'verification/pairs.json');rows=read(OUT/'comparison.json')
+assert s['pairs']==12 and s['positive_site_checks']==s['supported_site_checks'] and not s['acceptance_gate']
+assert len(read(OUT/'verification/kernel_equivalence.json'))==12
+assert '196 passed' in (OUT/'regression_attempt1.log').read_text()
+assert '44 passed' in (OUT/'final_targeted_attempt1.log').read_text()
+write(OUT/'environment.json',dict(python=platform.python_version(),gurobi=gurobipy.gurobi.version(),platform=platform.platform(),threads=1,python_hash_seed=0))
+ledger=[]
+for case in sorted({r['case'] for r in rows}):
+ subset=[r for r in rows if r['case']==case];best=max(subset,key=lambda r:r['lower']);upper=min(r['upper'] for r in subset)
+ item=dict(case=case,model=3,problem_sha256=best['original_fp'],upper=upper,lower=best['lower'],gap=(upper-best['lower'])/upper,
+  this_round_best=dict(method=best['method'],seed=best['seed'],budget=best['budget']),scope='Complete original MILP; this round has no composite proof')
+ if case.endswith('1b_subset20'):
+  previous_path=ROOT/'output/experiments/single_batch_physical_bounds_20261005/best_verified_interval.json';previous=read(previous_path)
+  assert previous['problem_sha256']==best['original_fp'] and previous['original_start_sha256']==best['start_sha256']
+  assert sha(previous['result'])==previous['result_sha256']
+  item['prior_verified_interval']=dict(path=str(previous_path),sha256=sha(previous_path),lower=previous['lower'],upper=previous['upper'],gap=previous['gap_fraction'],note='Historical bound, not a speed result in current comparison')
+ ledger.append(item)
+write(OUT/'bounds_ledger.json',ledger)
+lines=[
+ '# M3 单批次组合最优性证明试验（2026-10-05）','',
+ 'Material Passport：原创实现与计算实验；真实冻结输入；24 次串行运行；两份独立来源、每份 20 客户 / 40 个配送回收任务；所有成功、失败和负结果保留。范围仅为固定分仓 B1 M3。无模拟性能数据、无统计显著性声明。','',
+ '**结论：不采用默认。** 组合证明入口实现并验证，但本轮 12 组同预算配对只有 2 组改善、9 组退步、1 组接近；12 次候选运行均未完成组合证明。现有 `solve_exact` 默认调用链未改，M1/M2/M4 与业务输入未改。旧二环、次序界、逐边 Big-M 和上一轮物理距离界开关继续保持原状态。','',
+ '## 新假设与正确性边界','',
+ '上一轮仓级距离界可能拖慢完整模型证明。本轮改为先尝试组合最优性证明，且不向原整数模型加入距离界：完整枚举 E1 必要时间窗下的所有配送优先路径，用原始二进制浮点系数的有理数求和及整数集合划分求最小值；逐仓保留原 E2 真实物理车辆、趟次、全部配送与回收任务、跨趟先后、准备和周转、整数时钟，仅松弛 E1 耦合。','',
+ '任何原可行排程都能投影进这些松弛，所以 `L_E1 + Σ L_site ≤ 完整模型最优值 ≤ 原排程距离`。只有同一份已通过完整审计的原排程逐项达到所有分量最小值，才可组合结束。要求 E1 完整枚举与整数划分完成；全部仓级 MIP 为原生 OPTIMAL，MIPGap/MIPGapAbs=0，原始弧成本有理数精确相等，整数目标变量偏差≤1e-9，最大违约≤1e-7，并额外要求原生 ObjBound 与 ObjVal 的 double 值完全相等。','',
+ '最后一项非常保守，本轮暴露了其数值脆弱性。这里只采用 Gurobi 数值可行性标准下的整数最优语义，并不是符号有理数分支定界证明。部分子问题、小 Gap、受限路线池或列生成 LP 均不能触发完整整数最优。','',
+ '未闭合则保留保守分量下界（未求解仓记 0），剩余总预算交给原模型；外部取 `max(分量总界, 原模型总界)`，不重复相加。12/12 配对的原模型 fingerprint、行数、列数及非零元数完全一致，证据见 `verification/kernel_equivalence.json`。','',
+ '## 预登记、输入和预算','',
+ '实现前保存 `plan.json`、`baseline_source/` 与哈希。使用 `zhou_Set2_100-5-1b_subset20` 和 `zhou_Set2_100-5-2_subset20` 原始输入及同一冻结初解；完整输入、源码、参数、日志、MPS、原始初解的仓级投影 Start 均保留。种子 42/43/44，总预算 15/30 秒，两方法按来源/种子/预算交替顺序串行运行。Threads=1，解释器导入前设置 PYTHONHASHSEED=0。','',
+ '候选前置预算占 20%；E1 枚举上限 0.2 秒、最多 5 个活跃仓；仓按任务数与 ID 升序，每个仓使用剩余前置预算，遇未完成或不满足证明检查即回退。加载与审计、建模、枚举、子问题、证明检查、诊断写盘和原模型共用总预算，工作进程导入不计入。没有重跑或选择有利结果。','',
+ f"登记求解预算合计 540 秒；24 次实测总耗时 {s['actual_runtime']:.3f} 秒，进程总墙钟 {s['process_wall']:.3f} 秒，前置计算合计 {s['component_runtime']:.3f} 秒；最大预算超出 {s['maximum_total_overrun']:.3f} 秒（求解/清理开销，未掩去）。",'',
+ f"共享 8 核机器的 1 分钟负载在 {s['minimum_load1']:.2f}–{s['maximum_load1']:.2f} 间，期间有 M5 及其他任务；不能声称独占机器或将单次墙钟差异完全归因于算法。每次 load_before/after.json 保存已知 checkpoint 与负载，不停止或改动其他工作。",'',
+ '采用门槛为至少 8/12 改善且覆盖来源、种子、预算，无显著 Gap 退步、已完成证明丢失或≥10%证明耗时退步，同时全部正确性检查通过。改善定义为 Gap 降低>1e-5，或双方均证明最优且候选快≥10%。本轮未通过该门槛。','',
+ '## 全部配对结果','',
+ 'Gap 使用 `(上界−下界)/上界`。下表 A 为第一来源（UB=784.285170225458），B 为第二来源（UB=404.016983386723，浮点末位见原 JSON）。证明列为原生完整模型返回的最优标记；本轮没有组合证明。','',
+ '|来源|种子|总预算/s|基线 LB / Gap|候选 LB / Gap|基线/候选耗时/s|基线/候选已证明最优|判断|',
+ '|---|---:|---:|---|---|---|---|---|']
+for pair in sorted(pairs,key=lambda p:(p['case'],p['seed'],p['budget'])):
+ a,b=pair['baseline'],pair['composite'];label='A' if pair['case'].endswith('1b_subset20') else 'B'
+ verdict='退步' if pair['loss'] else '改善' if pair['win'] else '接近'
+ lines.append(f"|{label}|{pair['seed']}|{pair['budget']}|{a['lower']:.6f} / {a['gap']:.5%}|{b['lower']:.6f} / {b['gap']:.5%}|{a['runtime']:.3f} / {b['runtime']:.3f}|{'是' if a['proven_optimal'] else '否'} / {'是' if b['proven_optimal'] else '否'}|{verdict}|")
+lines += ['',
+ '来源 A 有 1 组改善、4 组退步、1 组接近；来源 B 有 1 组微小 Gap 改善和 5 组退步。B 的基线 5/6 完成最优证明，候选仅 3/6，候选丢失了 seed43/15s 与 seed44/30s 两组证明。来源 A 的两方法均 0/6 完成全局最优。','',
+ '对于来源 B、seed42，两预算下原模型求解 Work 均为约 3.74，候选原模型 Work 也约 3.74，却额外付出约 1.86–2.08 的仓级 Work。其回退阶段没有减少原模型工作量。来源 A 的时间限制结果受机器负载明显干扰，不能把单个 30 秒改善当作稳定算法收益。','',
+ '## 为什么没有触发组合证明','',
+ '保存的 `diagnosis.json` 区分了失败原因：5 次原生浮点上下界末位不一致，7 次仓级子问题未完成。没有把这些事件当作可行性错误或证明原排程距离更差。','',
+ '来源 A 的 5 次 S3 求解中，原排程成本与子问题整数解的原始弧系数有理数和完全相同，MaxVio=0，但 ObjVal=178.65486951203957，ObjBound=178.65486951203954，相差约 2.84e-14，严格 double 相等检查拒绝退出。早期进度中“初解距离较差”的判断已更正，此处以精确复核结果为准。另一短预算 S3 与来源 B 的 6 次 S4 前置求解未完成。','',
+ '没有在看到这些结果后修改阈值重跑。最终源码只增加 `proof_guard_failures` 诊断字段，将目标不一致、原生浮点界差异和可行性违约分开；判定条件、模型和预算完全不变。计时源码与最终源码分别保存于 candidate_source/、final_source/。','',
+ '## 审计与回归','',
+ '- 新测试 44 项通过；冻结源码相关回归 196 项通过（包含该 44 项），覆盖独立 E1 固定路径整数时钟模型、独立逐车辆集合划分、小例完整整数枚举、物理跨趟、极小预算、缺失/非法初解及极小目标差异拒绝证明。诊断字段新增后 44 项再次通过。',
+ '- 两个原始大例的 E1 完整整数最小距离独立复核为 315.36295866759826 与 181.82099006060486，均精确匹配同一原始初解 E1 的有理数成本；准备阶段两个原始排程的全部 40 个任务逐仓固定投影通过。',
+ '- 24/24 输出通过原模型完整审计、全部任务核对与周期回放。',
+ '- 29/29 正仓级下界用保存的 MPS、原始冻结 Start、独立种子 seed+101、5秒/仓得到支持；29/29 同一保存模型的固定原始排程投影通过。独立复核总耗时约 43 秒，单独计量，不混入性能对照。',
+ '- 大例组合全局证明声明 0 个；不能把仓级复核或小例通过写成大例组合全局证明成功。MPS 使用同一数值后端，独立性在不同优化运行和原始排程投影；另有独立枚举测试。',
+ '- 核验 716 份源码/输入哈希，另核对 driver、plan、逐次 result 哈希；最后完整封存清单见 seal_manifest.json。','',
+ '## 可核查区间与下一步','',
+ '本轮来源 A 最好下界 728.923884，未刷新上一轮已独立核查的 `[755.696226955545, 784.285170225458]`，Gap=3.645223%。已确认两轮 problem fingerprint 和原始初解哈希一致；旧界只是历史有效界，不混入本轮同预算比较，旧封存文件未改。来源 B 本轮基线仍证明距离 404.016983386723 最优。详情及历史证据哈希见 bounds_ledger.json。','',
+ '后续不应继续盲目增加前置预算。若继续该分解方向，先研究保留 E1 时序耦合的局部整数排程优化以改善可行上界，或有严格实例/源码身份核验的已验证证明复用；严格区分条件局部最优与完整问题下界。若研究原生 OPTIMAL 与浮点显示末位的接口，应另登记新假设与完整对照，不能直接放宽本轮条件后宣称已验证加速。','',
+ '## 文件与复现','',
+ '- 实现：`models/routing/solvers/exact/single_batch_composite_proof.py`；测试：`tests/routing/test_single_batch_composite_proof.py`；驱动：`experiments/runs/run_single_batch_composite_proof.py`。仅直接调用研究函数时生效。',
+ '- 实验目录：`output/experiments/single_batch_composite_proof_20261005/`。plan、checkpoint、progress、原始输入/初解、两份完整相关源码快照及哈希、所有逐次 job/load/kernel/site log/MPS/start/result/row、失败诊断和独立审计都在目录内。',
+ '- `verify.py`、`diagnose.py`、`verify_e1.py`、`finalize.py` 保存复核和汇总逻辑。首次独立 E1 预检通过内联同等脚本执行，随后保存 verify_e1.py 供复现，新增防覆盖检查；原始日志与结果未重跑。',
+ '- 从冻结 candidate_source 运行相关 pytest 可复核测试。性能重现应建立新的输出目录，恢复冻结 driver 到原项目相对位置并更新输出路径及配置引用；驱动会校验源码、输入、初解哈希，拒绝自动重试已开始且未完成的任务。不得在封存目录直接覆盖重跑。',
+ '- 未提交、推送、发布、跨聊天发送消息或创建子代理；旧夜间自动任务未重启。所有本轮进程已结束，手动继续授权不被解释成跨日自动续跑。','']
+REPORT.write_text('\n'.join(lines))
+with (OUT/'progress.md').open('a') as f:
+ f.write('\nComplete: 24 serial jobs, 2/12 wins, 9/12 losses, 1 neutral. Zero composite closures. All 24 full audits and 29 independent positive site floors/fixed projections passed. 196 frozen related tests and final 44 targeted tests passed. Default rejected; no active worker or automation restarted.\n')
+write(OUT/'checkpoint.json',dict(status='COMPLETE_REJECTED_DEFAULT',active_process=None,completed=24,total=24,
+ completed_at=datetime.now(timezone.utc).isoformat(),default_adopted=False,report=str(REPORT),
+ comparison=dict(wins=2,losses=9,neutral=1,composite_closures=0),verification='VERIFIED',
+ next='No automatic continuation. New hypothesis and preregistration required; retain every sealed negative result.'))
+print(REPORT)

@@ -380,11 +380,13 @@ def extract_pool(problem, context, initial, pools, backend):
 def _reoptimize_once(problem, initial_result, *, time_limit=10, seed=42, verbose=False,
                      max_columns=128, transfers=True, exchanges=False, recombinations=False, e1_backend='auto',
                      additional_columns=None, additional_columns_per_slot=128, diagnostics_dir=None,
-                     extra_slots_per_vehicle=0):
+                     extra_slots_per_vehicle=0, mip_focus=0):
     if not math.isfinite(time_limit) or time_limit <= 0:
         raise ValueError('time_limit must be finite and positive')
     if not isinstance(max_columns, int) or isinstance(max_columns, bool) or max_columns < 1:
         raise ValueError('max_columns must be a positive integer')
+    if not isinstance(mip_focus, int) or isinstance(mip_focus, bool) or not 0 <= mip_focus <= 3:
+        raise ValueError('mip_focus must be an integer from 0 to 3')
     if (problem.model_number != 5 or problem.free_assignment or not problem.reusable
             or len(problem.operating_policy.batches) <= 1):
         raise ValueError('Route-pool reoptimization requires fixed reusable multibatch M5')
@@ -420,7 +422,7 @@ def _reoptimize_once(problem, initial_result, *, time_limit=10, seed=42, verbose
         route_pool_subproblem_bound=None, route_pool_complete=False, route_pool_transfers=bool(transfers),
         route_pool_exchanges=bool(exchanges), route_pool_recombinations=bool(recombinations))
     result['info'].update(route_pool_extra_slots_per_vehicle=extra_slots_per_vehicle,
-                          route_pool_physical_slots=len(layout['e2_trips']))
+                          route_pool_physical_slots=len(layout['e2_trips']), route_pool_mip_focus=mip_focus)
     status = 'TIME_LIMIT_BUILD'
     try:
         import gurobipy as gp
@@ -440,6 +442,7 @@ def _reoptimize_once(problem, initial_result, *, time_limit=10, seed=42, verbose
             set_e1_projection(problem, context, initial_result)
         add_route_pool(problem, model, context, layout, pools, deadline=deadline)
         model.Params.Seed = int(seed)
+        model.Params.MIPFocus = mip_focus
         model.Params.TimeLimit = max(0, deadline-time.perf_counter())
         model.optimize()
         status = int(model.Status)
@@ -490,7 +493,7 @@ def _reoptimize_once(problem, initial_result, *, time_limit=10, seed=42, verbose
 def reoptimize_route_pool(problem, initial_result, *, time_limit=10, seed=42, verbose=False,
                           max_columns=128, transfers=True, exchanges=False, recombinations=False, e1_backend='auto', max_passes=4,
                           additional_columns=None, additional_columns_per_slot=128, diagnostics_dir=None,
-                          extra_slots_per_vehicle=0):
+                          extra_slots_per_vehicle=0, mip_focus=0):
     """Rebuild the candidate neighborhood after each audited improvement.
 
     All passes share the original total budget. Stop at an unchanged upper
@@ -506,7 +509,7 @@ def reoptimize_route_pool(problem, initial_result, *, time_limit=10, seed=42, ve
         result = _reoptimize_once(problem, result, time_limit=remaining, seed=seed,
             verbose=verbose, max_columns=max_columns, transfers=transfers, exchanges=exchanges, recombinations=recombinations, e1_backend=e1_backend,
             additional_columns=additional_columns, additional_columns_per_slot=additional_columns_per_slot,
-            extra_slots_per_vehicle=extra_slots_per_vehicle,
+            extra_slots_per_vehicle=extra_slots_per_vehicle, mip_focus=mip_focus,
             diagnostics_dir=Path(diagnostics_dir)/f'pass_{index}' if diagnostics_dir is not None else None)
         info = result['info']
         trace.append(dict(pass_index=index, upper_before=info['upper_before'], upper_after=info['objective'],

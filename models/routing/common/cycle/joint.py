@@ -22,7 +22,8 @@ class JointBatchInstance(MultiBatchInstance):
             raise ValueError('M6 requires at least one order')
         self.options = deepcopy(options)
         if set(options)-{'pool_min', 'pool_max', 'fixed_assignment',
-                         'optimize_cutoffs', 'cutoff_bounds_minutes', 'shared_cutoff', 'shared_min_phase_ticks'}:
+                         'optimize_cutoffs', 'cutoff_bounds_minutes', 'shared_cutoff', 'shared_min_phase_ticks',
+                         'min_phase_ticks'}:
             raise ValueError('Unknown joint_batch_options')
         self.optimize_cutoffs = options.get('optimize_cutoffs', False)
         if not isinstance(self.optimize_cutoffs, bool):
@@ -38,11 +39,12 @@ class JointBatchInstance(MultiBatchInstance):
         # Input bounds are absolute minutes; decisions and saved results use
         # integer ticks. Fixed starts/ends preserve candidate departure slots.
         self.cutoff_bounds = {}
+        minimum = integer(options.get('min_phase_ticks', 1), 'min_phase_ticks', 1)
         for b in self.operating_policy.batches:
             if not self.optimize_cutoffs:
                 lo = hi = b.cutoff
             elif bounds is None:
-                lo, hi = b.start+1, b.end-1
+                lo, hi = b.start+minimum, b.end-minimum
             else:
                 interval = bounds[b.id]
                 if not isinstance(interval, (list, tuple)) or len(interval) != 2:

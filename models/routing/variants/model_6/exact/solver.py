@@ -62,7 +62,13 @@ def solve_exact(problem, time_limit=60, seed=42, verbose=False):
         assignment={oid:bid for (oid,bid),v in ctx['assignments'].items() if v.X>.5}
         pool=integral(ctx['pool'])
         cutoffs={bid:integral(value) for bid,value in ctx['cutoffs'].items()}
-        fixed=problem.project(assignment,pool,cutoffs)
+        selected_problem = problem
+        if getattr(problem, 'variable_calendar', False):
+            boundaries = [integral(ctx['batch_starts'][b.id]) for b in problem.operating_policy.batches]
+            boundaries.append(problem.operating_policy.cycle_end)
+            selected_problem = problem.with_boundaries(boundaries)
+            info['proof_scope'] = 'variable_boundaries_independent_cutoffs_joint_cost_integer_time_MILP'
+        fixed=selected_problem.project(assignment,pool,cutoffs)
         raw=empty_result(fixed,'exact')
         raw['info']={**info,'objective':None}
         for layer in ('e1','e2'):
@@ -90,7 +96,7 @@ def solve_exact(problem, time_limit=60, seed=42, verbose=False):
                     event['site_id' if layer=='e1' else 'order_id']=n['site'] if layer=='e1' else n['order'].id
                     trip['events'].append(event)
                 raw[layer+'_trips'].append(trip)
-        result=lift_result(problem,raw,assignment,pool,'exact',cutoffs)
+        result=lift_result(selected_problem,raw,assignment,pool,'exact',cutoffs)
         result['solver_module']=__name__
         info=result['info']
         if result.get('audit',{}).get('valid'):

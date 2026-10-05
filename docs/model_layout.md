@@ -10,6 +10,10 @@
 | M4 | 自由选仓、容器配送与回收 | 单批次 B=1 | `models/routing/variants/model_4/` |
 | M5 | 固定分仓、有限容器跨批周转 | 多批次 B>1 | `models/routing/variants/model_5/` |
 | M6 | 静态分批、容器池与两级路径成本联合优化 | 均匀周期分批、统一分界；保留历史候选时段模式 | `models/routing/variants/model_6/` |
+| M7 | 分批、箱池与路线成本联合优化 | 等长批次、独立分界 | `models/routing/variants/model_7/` |
+| M8 | 分批、箱池与路线成本联合优化 | 不等长批次、独立分界 | `models/routing/variants/model_8/` |
+
+M7/M8 的定义、精确MILP、ALNS和独立审计见[日历扩展设计](model7_model8_calendar_design.md)。各自提供 `model.py`、`exact/` 和 `alns/`；共用路线成本内核和物理规则，新增编号不恢复历史模型。
 
 2026-10-04 已实现并注册 M6：固定候选时段，联合优化配送启用、订单分批、容器和路线，分为独立联合 MILP 与 ALNS。见 [模型6设计](model6_joint_batch_cost_design.md)、[程序机制对比](../output/model6_comparison/20261004_mechanism_v1_final/report.md) 与 [较大LaDe派生场景箱数/批次对比](../output/model6_comparison/20261004_lade_static_v2/resources.md)。下文关于五个模型和旧验证的历史记录仍指 M1–M5。
 

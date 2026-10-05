@@ -16,21 +16,21 @@ def main(argv=None):
         return baseline_main([arg for arg in arguments if arg != "--baseline"])
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--case", default=str(DEFAULT_CASE))
-    parser.add_argument("--model", type=int, choices=range(1, 7), help="M1/M2 纯配送；M3/M4 单批循环；M5 多批循环；M6 联合分批成本优化")
-    parser.add_argument("--economic-config", help="M6 成本参数与证据配置")
+    parser.add_argument("--model", type=int, choices=range(1, 9), help="M1–M5 原模型；M6 统一分界；M7 独立分界；M8 不等长批次")
+    parser.add_argument("--economic-config", help="M6–M8 成本参数与证据配置")
     schedules=parser.add_mutually_exclusive_group()
     schedules.add_argument('--uniform-cycle',dest='uniform_cycle',action='store_true',default=None,
                            help='M6 基础版：优化周期批次数，均分周期，各批共用相对分界点')
     schedules.add_argument('--candidate-slots',dest='uniform_cycle',action='store_false',default=None,
                            help='M6 历史候选时段模式，保留输入批次起止')
-    parser.add_argument('--batch-count-candidates',type=int,nargs='+',help='均匀分批的 K 搜索范围，例如 1 2 3')
-    parser.add_argument('--min-phase-minutes',type=float,help='均匀分批各阶段最短时长，默认1分钟（场景假设）')
+    parser.add_argument('--batch-count-candidates',type=int,nargs='+',help='M6–M8 周期分批的 K 搜索范围，例如 1 2 3')
+    parser.add_argument('--min-phase-minutes',type=float,help='M6–M8 各阶段最短时长，默认1分钟（场景假设）')
     cutoffs=parser.add_mutually_exclusive_group()
     cutoffs.add_argument('--optimize-cutoffs',dest='optimize_cutoffs',action='store_true',default=None,
                          help='M6 优化两窗截点，保持候选批次起止与顾客窗口不变')
     cutoffs.add_argument('--fixed-cutoffs',dest='optimize_cutoffs',action='store_false',default=None,
                          help='M6 使用原固定截点，作为对照')
-    parser.add_argument('--initial-joint-result',help='M6 ALNS 已有可行解 JSON；重新审计后作为保留的起点')
+    parser.add_argument('--initial-joint-result',help='M6–M8 ALNS 同模型已有可行解 JSON；审计后保留')
     parser.add_argument("--solver", choices=("alns", "exact"))
     parser.add_argument("--exact-time", type=float)
     parser.add_argument("--time", type=float)
@@ -62,6 +62,10 @@ def main(argv=None):
         fleet = {**load_json(args.fleet_config), "operating_policy": fleet["operating_policy"]}
         config["routing_config"] = args.fleet_config
     options=dict(config.get('joint_batch_options',{}))
+    if args.model in (7, 8):
+        from models.routing.common.cycle.calendar import SCHEDULE_MODES
+        options['schedule_mode'] = SCHEDULE_MODES[args.model]
+        config['joint_batch_options'] = options
     if args.uniform_cycle is not None:
         if config['model']!=6:
             raise ValueError('Schedule optimization flags require M6')
@@ -70,8 +74,8 @@ def main(argv=None):
             options['schedule_mode']='uniform_cycle'
         config['joint_batch_options']=options
     if args.batch_count_candidates is not None or args.min_phase_minutes is not None:
-        if config['model']!=6 or options.get('schedule_mode')!='uniform_cycle':
-            raise ValueError('Batch-count and phase-minimum options require M6 --uniform-cycle')
+        if config['model'] not in (7, 8) and (config['model']!=6 or options.get('schedule_mode')!='uniform_cycle'):
+            raise ValueError('Batch-count and phase-minimum options require M6 --uniform-cycle or M7/M8')
         if args.batch_count_candidates is not None:
             options['batch_count_candidates']=args.batch_count_candidates
         if args.min_phase_minutes is not None:
@@ -90,10 +94,10 @@ def main(argv=None):
         config['initial_joint_result']=args.initial_joint_result
     if args.container_pool_size is not None:
         config, fleet = apply_container_pool_size(config, fleet, args.container_pool_size)
-        if config['model'] == 6:
+        if config['model'] in (6, 7, 8):
             config['joint_batch_options'] = {**config.get('joint_batch_options', {}),
                                            'pool_min': args.container_pool_size, 'pool_max': args.container_pool_size}
-    elif config['model'] != 6:
+    elif config['model'] not in (6, 7, 8):
         config, fleet = apply_pool_config(config, fleet, args.pool_config)
     from .multibatch import run_case
     return run_case(config, fleet, case_path=args.case, output=args.output)

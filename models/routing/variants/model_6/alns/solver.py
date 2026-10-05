@@ -230,6 +230,114 @@ def _local_cost_scorer(problem, route, goods, ready):
             +rates['e2_trip_cost']+max(0,score-distance)),end
 
 
+def _cutoff_events(problem, cuts, result, bid):
+    """Candidate breakpoints, not feasibility claims; the decoder replays each.
+
+    Shared cutoffs collect events from *all* batches. Cleaning thresholds use
+    the current route's end and can change when quantities/routes change.
+    """
+    p=problem.operating_policy
+    lo,hi=problem.cutoff_bounds[bid]
+    targets=set()
+    def add(batch, value):
+        if problem.shared_cutoff:
+            value=problem.batch_map[bid].start+value-batch.start
+        elif batch.id!=bid:
+            return
+        for t in (value-1,value,value+1):
+            if lo<=t<=hi:
+                targets.add(t)
+    for batch in p.batches if problem.shared_cutoff else (problem.batch_map[bid],):
+        for trip in result['e2_trips']:
+            if any(e['kind']=='p' for e in trip['events']):
+                add(batch,trip['return_complete'])
+    for trip in result['e1_trips']:
+        batch=problem.batch_map[trip['batch_id']]
+        for event in trip['events']:
+            if event['kind']=='d':
+                add(batch,event['start']+problem.service(event['site_id']))
+        end=trip['return_complete']
+        add(batch,cuts[batch.id]+batch.end-end)
+        if any(e['kind']=='p' for e in trip['events']):
+            deadlines=[b.start for b in p.batches if b.start>batch.start]+[p.cycle_end]
+            for deadline in deadlines:
+                add(batch,cuts[batch.id]+deadline-p.cleaning_duration-end)
+    return targets
+
+
+def _with_cutoff(problem, state, bid, selected):
+    proposed=clone_state(state)
+    cuts=problem.validated_cutoffs(state.get('cutoffs'))
+    if problem.shared_cutoff:
+        offset=selected-problem.batch_map[bid].start
+        cuts={b.id:b.start+offset for b in problem.operating_policy.batches}
+    else:
+        cuts[bid]=selected
+    proposed['cutoffs']=cuts
+    return proposed
+
+
+def _polish_cutoff(problem, evaluator, assignment, state, deadline, limit=16):
+    """Bounded descent over physical breakpoints; always retain the input state."""
+    score,result,_=evaluator(assignment,state)
+    best=clone_state(state)
+    if result is None:
+        return best
+    cuts=problem.validated_cutoffs(state.get('cutoffs'))
+    bids=list(cuts)[:1] if problem.shared_cutoff else list(cuts)
+    candidates=[]
+    for bid in bids:
+        targets=_cutoff_events(problem,cuts,result,bid)|set(problem.cutoff_bounds[bid])
+        for target in targets-{cuts[bid]}:
+            candidates.append((abs(target-cuts[bid]),bid,target))
+    for _,bid,target in sorted(candidates)[:limit]:
+        if time.perf_counter()>=deadline:
+            break
+        proposed=_with_cutoff(problem,state,bid,target)
+        value,candidate,_=evaluator(assignment,proposed)
+        if candidate is not None and value<score-1e-8:
+            best,score=proposed,value
+    return best
+
+
+def _initial_cutoff_profiles(problem):
+    profiles=[dict(problem.default_cutoffs)]
+    if not problem.optimize_cutoffs:
+        return profiles
+    if all(problem.legal_batches[o.id] for o in problem.orders):
+        # A late pickup can make every 25/50/75% initialization infeasible.
+        # Seed from the necessary last-return boundary without restricting
+        # the optimization domain or claiming the seed is feasible.
+        p=problem.operating_policy
+        earliest_returns=[]
+        for order in problem.orders:
+            supply=min(problem.batch_map[b].start+p.e1_load_time
+                       +problem.travel_bounds['outward'][problem.depot][order.satellite]
+                       +problem.service(order.satellite) for b in problem.legal_batches[order.id])
+            delivered=max(order.delivery_window[0],supply+p.e2_dispatch_prep_time
+                          +problem.travel_bounds['outward'][order.satellite][order.customer])
+            picked=max(order.pickup_window[0],delivered+order.service_time+order.min_use_time)
+            earliest_returns.append(picked+order.service_time
+                                    +problem.travel_bounds['inward'][order.satellite][order.customer]
+                                    +p.e2_return_unload_time)
+        if problem.shared_cutoff:
+            lo,hi=problem.shared_cutoff_bounds
+            offset=min(hi,max(lo,max(earliest_returns)-p.batches[-1].start))
+            profiles.append({b.id:b.start+offset for b in p.batches})
+        else:
+            last=p.batches[-1].id
+            lo,hi=problem.cutoff_bounds[last]
+            late={**problem.default_cutoffs,last:min(hi,max(lo,max(earliest_returns)))}
+            if late not in profiles:
+                profiles.append(late)
+    fractions=(.25,.5,.75,.9,.95) if problem.shared_cutoff else (.25,.5,.75)
+    for fraction in fractions:
+        profile={bid:lo+round((hi-lo)*fraction) for bid,(lo,hi) in problem.cutoff_bounds.items()}
+        if profile not in profiles:
+            profiles.append(profile)
+    return profiles
+
+
 def _cutoff_move(problem, evaluator, assignment, state, rng, align=False):
     """Move a cutoff without restricting second-phase E2 recovery."""
     proposed=clone_state(state)
@@ -244,22 +352,10 @@ def _cutoff_move(problem, evaluator, assignment, state, rng, align=False):
     if align:
         _,result,_=evaluator(assignment,state)
         if result is not None:
-            for trip in result['e2_trips']:
-                if any(e['kind']=='p' for e in trip['events']):
-                    targets.update(t for t in (trip['return_complete']-1,trip['return_complete']) if lo<=t<=hi)
-            for trip in result['e1_trips']:
-                if trip['batch_id']==bid:
-                    targets.update(e['start']+problem.service(e['site_id']) for e in trip['events']
-                                   if e['kind']=='d' and lo<=e['start']+problem.service(e['site_id'])<=hi)
+            targets.update(_cutoff_events(problem,cuts,result,bid))
     targets.discard(old)
     selected=rng.choice(sorted(targets)) if targets else old
-    if problem.shared_cutoff:
-        offset=selected-problem.batch_map[bid].start
-        cuts={b.id:b.start+offset for b in problem.operating_policy.batches}
-    else:
-        cuts[bid]=selected
-    proposed['cutoffs']=cuts
-    return proposed
+    return _with_cutoff(problem,state,bid,selected)
 
 
 def _seed_from_result(problem, initial_result):
@@ -325,6 +421,10 @@ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_resul
         return solve_uniform(problem, method='alns', budget=max_time, max_iterations=max_iterations,
                              seed=seed, initial_result=initial_result)
     begun=time.perf_counter(); deadline=begun+max_time
+    # Reserve a bounded share for refining the best cutoff. Putting a
+    # multi-evaluation descent in the adaptive operator roulette can starve
+    # route/batch exploration while rewarding repeated no-op descents.
+    search_deadline=deadline-.1*max_time if problem.optimize_cutoffs else deadline
     missing=[oid for oid,choices in problem.legal_batches.items() if not choices]
     if missing:
         result=joint_empty_result(problem,'alns')
@@ -348,23 +448,18 @@ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_resul
         if candidate is not None and score<best_cost:
             best,best_cost=deepcopy(candidate),score
         history.append(dict(iteration=0,objective=best_cost,time=time.perf_counter()-begun,source='supplied_incumbent'))
-    profiles=[dict(problem.default_cutoffs)]
-    if problem.optimize_cutoffs:
-        for fraction in (.25,.5,.75):
-            profile={bid:lo+round((hi-lo)*fraction) for bid,(lo,hi) in problem.cutoff_bounds.items()}
-            if profile not in profiles:
-                profiles.append(profile)
+    profiles=_initial_cutoff_profiles(problem)
     starts=[(assignment,profiles[0]) for assignment in seeds]
     starts += [(original,profile) for profile in profiles[1:]]
     visited_starts=set()
     for assignment,cutoffs in starts:
-        if current is not None and time.perf_counter()>=deadline:
+        if current is not None and time.perf_counter()>=search_deadline:
             break
         start_key=(tuple(sorted(assignment.items())),tuple(sorted(cutoffs.items())))
         if start_key in visited_starts:
             continue
         visited_starts.add(start_key)
-        score,state,result,issues=_best_construction(problem,evaluator,assignment,rng,deadline,cutoffs=cutoffs)
+        score,state,result,issues=_best_construction(problem,evaluator,assignment,rng,search_deadline,cutoffs=cutoffs)
         seen.update(issues)
         if current is None or score<current[0]:
             current=(score,assignment,state)
@@ -382,7 +477,7 @@ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_resul
     accepted=iterations=restarts=0
     score,assignment,state=current
     for iteration in range(max_iterations):
-        if time.perf_counter()>=deadline:
+        if time.perf_counter()>=search_deadline:
             break
         iterations=iteration+1
         index=rng.choices(range(len(operators)),weights=weights)[0]
@@ -392,19 +487,19 @@ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_resul
             score=evaluator(assignment,state)[0]; restarts+=1
         proposed_assignment=dict(assignment)
         if 'batch' in op:
-            proposed_assignment,proposed=_batch_move(problem,evaluator,assignment,rng,op,deadline,state.get('cutoffs'))
+            proposed_assignment,proposed=_batch_move(problem,evaluator,assignment,rng,op,search_deadline,state.get('cutoffs'))
         elif op in ('shift_cutoff','align_cutoff'):
             proposed=_cutoff_move(problem,evaluator,assignment,state,rng,op=='align_cutoff')
         else:
             fixed=evaluator.fixed(assignment,state.get('cutoffs'))
             if op=='destroy_routes':
                 fixed._joint_cost_rates=problem.cost_profile.rates
-                proposed=destroy_repair(fixed,state,rng,rng.choice(['random','related']),deadline,
+                proposed=destroy_repair(fixed,state,rng,rng.choice(['random','related']),search_deadline,
                                         scorer=_local_cost_scorer)
                 proposed['cutoffs']=dict(state['cutoffs'])
             else:
                 proposed=_route_move(fixed,state,rng,op)
-        if time.perf_counter()>=deadline:
+        if time.perf_counter()>=search_deadline:
             break
         new_score,candidate,issues=evaluator(proposed_assignment,proposed)
         seen.update(issues); reward=0.
@@ -426,6 +521,22 @@ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_resul
         if iterations%25==0:
             weights=[max(.1,.8*w+.2*(r/u if u else w)) for w,r,u in zip(weights,rewards,uses)]
             rewards=[0.]*len(operators); uses=[0]*len(operators)
+    polish_calls=polish_improvements=0
+    polish_started=time.perf_counter(); polish_evaluations=evaluator.misses
+    if problem.optimize_cutoffs and best is not None:
+        polish_deadline=min(deadline,polish_started+.1*max_time)
+        while time.perf_counter()<polish_deadline:
+            polished=_polish_cutoff(problem,evaluator,best_assignment,best_state,polish_deadline)
+            polished_cost,candidate,issues=evaluator(best_assignment,polished)
+            seen.update(issues); polish_calls+=1
+            if candidate is None or polished_cost>=best_cost-1e-8:
+                break
+            best,best_cost=deepcopy(candidate),polished_cost
+            best_state=clone_state(polished); polish_improvements+=1
+            history.append(dict(iteration=iterations,objective=best_cost,
+                                time=time.perf_counter()-begun,source='cutoff_polish'))
+    polish_runtime=time.perf_counter()-polish_started
+    polish_evaluations=evaluator.misses-polish_evaluations
     result=best if best is not None else joint_empty_result(problem,'alns')
     result['solver_module']=__name__
     result['info'].update(status='FEASIBLE' if best is not None else 'HEURISTIC_NO_SOLUTION',
@@ -434,6 +545,9 @@ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_resul
                           accepted_moves=accepted,restarts=restarts,operator_attempts=attempts,
                           operator_improvements=improvements,operator_weights=dict(zip(operators,weights)),
                           cache_hits=evaluator.hits,evaluations=evaluator.misses,
+                          cutoff_polish_calls=polish_calls,cutoff_polish_improvements=polish_improvements,
+                          cutoff_polish_evaluations=polish_evaluations,cutoff_polish_runtime=polish_runtime,
+                          cutoff_polish_budget=.1*max_time if problem.optimize_cutoffs else 0.,
                           encountered_violations=sorted(seen),history=history,
                           optimized_cutoffs=problem.optimize_cutoffs,
                           initial_incumbent_cost=initial_cost,

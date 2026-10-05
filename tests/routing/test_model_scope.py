@@ -7,9 +7,9 @@ from models.routing.service import solve_routing
 from cli.route import DEFAULT_CASE, load_config, main
 
 
-@pytest.mark.parametrize("model", [7, 8])
-def test_retired_models_are_rejected_before_loading_solver(model):
-    with pytest.raises(ValueError, match="1–6"):
+@pytest.mark.parametrize("model", [0, 9])
+def test_unknown_models_are_rejected_before_loading_solver(model):
+    with pytest.raises(ValueError, match="1–8"):
         solve_routing(model=model, method="alns", problem=SimpleNamespace())
 
 

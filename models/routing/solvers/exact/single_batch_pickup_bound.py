@@ -160,8 +160,70 @@ class PickupCoverMaster:
     def dispose(self):self.model.dispose()
 
 
+def balanced_order_prices(context, prices):
+    """Discovery prices only; changing them invalidates old pricing bounds.
+
+    Pair task IDs, not customer addresses: distinct orders may share a customer.
+    The mean preserves each order's D/P price sum up to floating roundoff.
+    """
+    expected = set(context['lookup'])
+    if set(prices) != expected:
+        raise ValueError('Balanced discovery requires all original task prices')
+    balanced = {}
+    for order_id in dict.fromkeys(key[0] for key in context['lookup']):
+        delivery, pickup = (order_id, 'd'), (order_id, 'p')
+        if delivery not in expected or pickup not in expected:
+            raise ValueError('Balanced discovery requires both D/P tasks')
+        left, right = float(prices[delivery]), float(prices[pickup])
+        if not math.isfinite(left) or not math.isfinite(right):
+            raise ValueError('Balanced discovery prices must be finite')
+        mean = left * 0.5 + right * 0.5
+        balanced[delivery] = balanced[pickup] = mean
+    return balanced
+
+
+def supply_balanced_columns(problem, contexts, master, pricers, prices, *, deadline, call_cap):
+    """Discover under balanced prices; admit columns under ORIGINAL prices.
+
+    Balanced pricing bounds/status below are diagnostics, never an original
+    certificate. Later certificates require fresh pricing under current original
+    master prices. The route domain and shared customer assignment stay intact.
+    """
+    begun = time.perf_counter()
+    history = dict(added=0, original_negative=0, returned=0, sites={},
+                   corrected_e2_bound=None, proof_scope='discovery_only')
+    for site, (pi, nu) in prices.items():
+        remaining = deadline - time.perf_counter()
+        if remaining <= 0:
+            break
+        balanced = balanced_order_prices(contexts[site], pi)
+        record = pricers[site].price(balanced, nu, time_limit=min(call_cap, remaining),
+                                     phase_one=False, stop_at_negative=False)
+        item = dict(original_prices=[[list(k), v] for k, v in pi.items()],
+                    balanced_prices=[[list(k), v] for k, v in balanced.items()],
+                    fleet_price=nu, pricing={k: v for k, v in record.items()
+                                            if k not in ('column', 'columns')}, columns=[])
+        for column in record.get('columns', []):
+            replay = evaluate_column(problem, contexts[site], column['tasks'])
+            if replay is None or not math.isclose(replay['cost'], column['cost'], rel_tol=0, abs_tol=1e-7):
+                raise ValueError('Balanced discovery returned an invalid route')
+            reduced = replay['cost'] - math.fsum(pi[tuple(k)] for k in replay['tasks']) - nu
+            eligible = reduced < -1e-7
+            added = master.add(site, replay) if eligible else False
+            item['columns'].append(dict(tasks=replay['tasks'], cost=replay['cost'],
+                original_reduced_cost=reduced,
+                balanced_reduced_cost=replay['cost']-math.fsum(balanced[tuple(k)] for k in replay['tasks'])-nu,
+                original_negative=eligible, added=added))
+            history['returned'] += 1
+            history['original_negative'] += int(eligible)
+            history['added'] += int(added)
+        history['sites'][site] = item
+    history['runtime'] = time.perf_counter() - begun
+    return history
+
+
 def root_pickup_route_bound(problem,time_limit=20,*,seed=42,initial_result=None,pricing_time_limit=1.0,
-                            heuristic_columns=False,e1_route_cover=False):
+                            heuristic_columns=False,e1_route_cover=False,balanced_columns=False):
     """Valid interrupted LP bound, optional research entry, no solver defaults."""
     if not math.isfinite(time_limit) or time_limit<=0 or not math.isfinite(pricing_time_limit) or pricing_time_limit<=0:
         raise ValueError('Mixed-task budgets must be finite and positive')
@@ -169,6 +231,12 @@ def root_pickup_route_bound(problem,time_limit=20,*,seed=42,initial_result=None,
         raise ValueError('heuristic_columns must be boolean')
     if not isinstance(e1_route_cover,bool):
         raise ValueError('e1_route_cover must be boolean')
+    if not isinstance(balanced_columns,bool):
+        raise ValueError('Balanced columns must be boolean')
+    if balanced_columns and problem.model_number != 4:
+        raise ValueError('Balanced columns currently require M4')
+    if balanced_columns and heuristic_columns:
+        raise ValueError('Choose one discovery strategy per experiment')
     if e1_route_cover and problem.model_number!=3:
         raise ValueError('E1 route cover requires M3')
     begun = time.perf_counter();deadline = begun+time_limit
@@ -177,6 +245,7 @@ def root_pickup_route_bound(problem,time_limit=20,*,seed=42,initial_result=None,
         model=problem.model_number,status='TIME_LIMIT',proven_optimal=False,proven_infeasible=False,
         relaxation_complete=False,bound=0.0,e2_bound=0.0,e1_floor=0.0,history=[],iterations=0,
         heuristic_columns=heuristic_columns,heuristic_runtime=0.0,heuristic_history=[],
+        balanced_columns=balanced_columns,balanced_runtime=0.0,balanced_history=[],
         all_task_count=2*len(problem.orders),physical_model_unchanged=True,
         relaxation='All tasks/shared assignment retained; E1 sync, stocks, serial vehicles and cross-trip use-time relaxed only for this lower bound')
     if check is not None and not check['passed']:
@@ -204,6 +273,7 @@ def root_pickup_route_bound(problem,time_limit=20,*,seed=42,initial_result=None,
             if time.perf_counter()>=deadline:raise TimeoutError('Mixed-task pricing build deadline')
             pricers[site] = RoutePricer(problem,ctx,deadline=deadline,seed=seed)
         consecutive_heuristics = 0
+        consecutive_balanced = 0
         while time.perf_counter()<deadline:
             master.model.Params.TimeLimit = max(0.0,deadline-time.perf_counter());master.model.optimize()
             if master.model.Status!=2:
@@ -212,6 +282,20 @@ def root_pickup_route_bound(problem,time_limit=20,*,seed=42,initial_result=None,
                 master.phase_two();continue
             output['iterations'] += 1
             prices,assignment = master.duals()
+            # A discovery pass may trigger reoptimization; the next pass must
+            # price with original duals. All work consumes the same root clock.
+            quota = 0.2*time_limit-output['balanced_runtime']
+            if balanced_columns and not master.phase_one and consecutive_balanced == 0 and quota > 0:
+                restricted = master.model.ObjVal
+                discovery = supply_balanced_columns(problem,contexts,master,pricers,prices,
+                    deadline=min(deadline,time.perf_counter()+quota),call_cap=min(1.0,pricing_time_limit))
+                discovery.update(iteration=output['iterations'],restricted_objective=restricted)
+                output['balanced_runtime'] += discovery['runtime']
+                output['balanced_history'].append(discovery)
+                if discovery['added']:
+                    consecutive_balanced = 1
+                    continue
+            consecutive_balanced = 0
             # Cheap discovery supplies columns only: it never certifies absence
             # of a negative route or promotes the restricted objective. Charge
             # it to the same root budget; force exact pricing after two passes.

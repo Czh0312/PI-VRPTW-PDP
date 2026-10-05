@@ -1,0 +1,35 @@
+--- baseline/models/routing/variants/model_8/alns/search.py
++++ candidate/models/routing/variants/model_8/alns/search.py
+@@ -20,7 +20,7 @@
+ 
+ 
+ def boundary_events(variable, result=None):
+-    parent, p = variable.parent, variable.operating_policy
++    p = variable.operating_policy
+     events = {o.release_time for o in variable.orders}
+     for o in variable.orders:
+         outbound = (p.e1_load_time+variable.travel_bounds['outward'][variable.depot][o.satellite]
+@@ -32,8 +32,8 @@
+         for trip in result.get('e1_trips', []):
+             events.add(trip['return_complete']+p.cleaning_duration)
+             events.add(trip['return_complete']+p.e1_turnaround_time)
+-    return sorted(t+delta for t in events for delta in (-1, 0, 1)
+-                  if p.cycle_start < t+delta < p.cycle_end)
++    return sorted({t+delta for t in events for delta in (-1, 0, 1)
++                   if p.cycle_start < t+delta < p.cycle_end})
+ 
+ 
+ def move_boundaries(variable, boundaries, rng, operator, result=None):
+@@ -83,6 +83,12 @@
+ 
+ def solve_variable_count(variable, *, max_time, max_iterations, seed, initial_result=None):
+     parent, k = variable.parent, variable.count
++    if k == 1:
++        # There are no movable boundaries. Use exactly the same independent-
++        # cutoff route search as M7, including its cutoff refinement phase.
++        from models.routing.variants.model_6.alns.solver import solve_alns
++        return solve_alns(parent.fixed_calendar(1), max_time=max_time, max_iterations=max_iterations,
++                          seed=seed, initial_result=initial_result)
+     begun = time.perf_counter()
+     deadline = begun+max_time
+     rng = random.Random(seed)

@@ -19,14 +19,14 @@ def solve_routing(*, model, method, problem, e1_tasks=None, e2_tasks_by_sat=None
     method = str(method).lower()
     if method not in {"exact", "alns"}:
         raise ValueError(f"Expected exact or alns, got {method}")
-    if initial_result is not None and (model!=6 or method!='alns'):
-        raise ValueError('Initial joint solution requires M6 ALNS')
+    if initial_result is not None and (model not in (6, 7, 8) or method!='alns'):
+        raise ValueError('Initial joint solution requires M6–M8 ALNS')
     if getattr(policy, "multi_batch", False):
         if problem.model_number != model:
             raise ValueError("Requested model does not match the loaded instance")
         if e1_tasks or e2_tasks_by_sat:
             raise ValueError("Multibatch quantities must be derived from return events, not static tasks")
-        expected_backend = 'joint_batch_indexed' if model == 6 else 'multibatch_indexed'
+        expected_backend = 'joint_batch_indexed' if model in (6, 7, 8) else 'multibatch_indexed'
         if exact_backend not in (None, expected_backend):
             raise ValueError(f'Model {model} requires {expected_backend}; incompatible or legacy backend: {exact_backend}')
         from .common.cycle.scope import batch_mode_for
@@ -39,8 +39,8 @@ def solve_routing(*, model, method, problem, e1_tasks=None, e2_tasks_by_sat=None
         return module.solve_alns(problem, **kwargs)
     if model == 5:
         raise ValueError('Current M5 requires multi_batch_cutoff_v1 with B>1; historical M5 was retired')
-    if model == 6:
-        raise ValueError('Current M6 requires multi_batch_cutoff_v1 and explicit joint batch/cost inputs')
+    if model in (6, 7, 8):
+        raise ValueError(f'Current M{model} requires multi_batch_cutoff_v1 and explicit joint batch/cost inputs')
     if not allow_baseline:
         raise ValueError("Historical policy: use route --baseline / allow_baseline=True explicitly. "
                          "Current M1/M2/M4 require the unified single-batch policy.")

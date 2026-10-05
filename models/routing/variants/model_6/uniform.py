@@ -66,6 +66,14 @@ def solve_uniform(problem, *, method, budget, seed, max_iterations=0, initial_re
                    proven_infeasible=info.get('proven_infeasible',False),best_bound=info.get('best_bound'),
                    proof_scope=info.get('proof_scope'),budget=allocation,runtime=info.get('runtime'),
                    iteration_budget=iteration_allocation,iterations=info.get('iterations',0),
+                   evaluations=info.get('evaluations',0),cache_hits=info.get('cache_hits',0),
+                   operator_attempts=info.get('operator_attempts',{}),
+                   operator_improvements=info.get('operator_improvements',{}),
+                   cutoff_polish_calls=info.get('cutoff_polish_calls',0),
+                   cutoff_polish_improvements=info.get('cutoff_polish_improvements',0),
+                   cutoff_polish_evaluations=info.get('cutoff_polish_evaluations',0),
+                   cutoff_polish_runtime=info.get('cutoff_polish_runtime',0.),
+                   cutoff_polish_budget=info.get('cutoff_polish_budget',0.),
                    container_pool_size=candidate.get('container_pool_size') if valid else None)
         rows.append(row)
         if valid:
@@ -84,6 +92,12 @@ def solve_uniform(problem, *, method, budget, seed, max_iterations=0, initial_re
         result.update(cycle_batch_count=None,batch_duration_ticks=None,shared_cutoff_offset_ticks=None,
                       shared_cutoff_ratio=None,actual_recovery_round_count=None)
     initial_cost = initial_result['info']['objective'] if initial_result is not None else None
+    def sum_operators(key):
+        totals={}
+        for row in rows:
+            for name,value in row.get(key,{}).items():
+                totals[name]=totals.get(name,0)+value
+        return totals
     result['info'].update(status='OPTIMAL' if globally_optimal else 'INFEASIBLE' if infeasible else
                           'FEASIBLE' if best is not None else 'TIME_LIMIT' if method=='exact' else 'HEURISTIC_NO_SOLUTION',
                           proven_optimal=globally_optimal,proven_infeasible=infeasible,
@@ -91,6 +105,14 @@ def solve_uniform(problem, *, method, budget, seed, max_iterations=0, initial_re
                           mip_gap=(max(0.,result['info']['objective']-bound)/max(1e-9,abs(result['info']['objective']))
                                    if best is not None and method=='exact' and bound is not None else None),
                           runtime=time.perf_counter()-begun,iterations=sum(row['iterations'] for row in rows),
+                          evaluations=sum(row.get('evaluations',0) for row in rows),
+                          cache_hits=sum(row.get('cache_hits',0) for row in rows),
+                          operator_attempts=sum_operators('operator_attempts'),
+                          operator_improvements=sum_operators('operator_improvements'),
+                          **{key:sum(row.get(key,0) for row in rows) for key in (
+                              'cutoff_polish_calls','cutoff_polish_improvements','cutoff_polish_evaluations',
+                              'cutoff_polish_runtime','cutoff_polish_budget')},
+                          history_scope='selected_batch_count_only',
                           initial_incumbent_cost=initial_cost,selected_count_proven_optimal=(
                               next((row['proven_optimal'] for row in rows if row['batch_count']==result.get('cycle_batch_count')),False)),
                           batch_count_candidates=list(counts),seed=seed,

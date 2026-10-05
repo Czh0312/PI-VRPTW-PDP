@@ -1,0 +1,23 @@
+{
+  "scope": "B1 fixed M3 only; opt-in, unchanged original solver default",
+  "derivation": "Every original feasible schedule projects into complete E1 integer cover and each physical-site relaxation. Therefore L_E1 + sum(L_site) <= original optimum <= audited incumbent. Equality for every component with the SAME incumbent closes original optimum. Only zero-gap complete native MIP states plus exact original binary-float coefficient sums are accepted. Native numerical optimality is not symbolic rational branch-and-bound.",
+  "guards": [
+    "No restricted column pool used",
+    "No partial E1 enumeration bound",
+    "No epsilon component equality",
+    "No total bound added to total bound",
+    "No site floor rows passed into fallback",
+    "All physical E2 slots and cross-trip precedence inherited from original formulation",
+    "No full proof from interrupted components or missing initial",
+    "Original start copied and audited, never mutated"
+  ],
+  "tests": "44 targeted + 196 frozen related tests (44 included), independent E1 fixed-path integer MIPs and bottom-up cover also matched both original 20-order cases",
+  "timing": "24 serial frozen jobs, alternate method order, input/audit and prefix proof/diagnostics included in one total allocation; worker imports excluded; no warm-up timing retries",
+  "limitations": [
+    "Same native Gurobi numerical backend for independent MPS replay",
+    "Shared machine load uncontrolled",
+    "Only two source cases and M3 B1 scope"
+  ],
+  "verification_script_sha256": "0faba4d9e781cc4c8b5d5fc85ad0255daa20937f751899a2338bab1df1ce1f21",
+  "verification_started": false
+}

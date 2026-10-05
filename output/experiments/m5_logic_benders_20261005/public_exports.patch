@@ -1,0 +1,46 @@
+diff --git a/models/routing/variants/model_5/exact/README.md b/models/routing/variants/model_5/exact/README.md
+index 1bf53ecf8..398054535 100644
+--- a/models/routing/variants/model_5/exact/README.md
++++ b/models/routing/variants/model_5/exact/README.md
+@@ -86,3 +86,13 @@ Gurobi 原始界和最优性标志分别保留；见 [距离下界与根节点
+ 聚合必要服务/回仓时刻，并添加实际车队数的必占用区间约束。50 顾客两种子下界小幅提升，
+ 第三种子限时退步，因此仍默认关闭；完整 M5 最优性标志不变。
+ 见 [全路径服务包络与车辆并发对照](../../../../../docs/m5_route_service_20261001.md)。
++
++第十八步提供 `logic_benders_certificate(problem, initial_result=audited_result, time_limit=60,
++diagnostics_dir='output/m5_logic_benders', recovery_time_limit=10)`，自动连接完整整数主问题、
++保留全部允许访问顺序的条件物理车辆子问题、经独立复算的冲突缩减和条件成本割。
++缓存绑定业务输入、路由源码和 Gurobi 版本；同一版本重跑会恢复已验证切割，保留每次运行快照。
++`max_rounds=0` 是相同完整整数主问题的无分解对照，`target_gap` 使用比例值。
++完整排程恢复仅接纳原业务周期审计合格且更好的上界；限时未知不生成不可行割。
++20/30 顾客的冷缓存多种子同预算结果、矩阵复核和限制见
++[自动逻辑 Benders 与排程恢复](../../../../../docs/m5_logic_benders_20261005.md)。
++这是显式实验入口，默认完整求解器路径不变，完整 M5 最优性标志仍为 False。
+diff --git a/models/routing/variants/model_5/exact/__init__.py b/models/routing/variants/model_5/exact/__init__.py
+index 6320dd5c6..7f539a14b 100644
+--- a/models/routing/variants/model_5/exact/__init__.py
++++ b/models/routing/variants/model_5/exact/__init__.py
+@@ -1,6 +1,6 @@
+ """M5 exact entry."""
+ from .solver import solve_exact
+-from .bounds import e1_inventory_certificate, route_cover_certificate, joint_route_inventory_certificate
++from .bounds import e1_inventory_certificate, route_cover_certificate, joint_route_inventory_certificate, logic_benders_certificate
+ from .primal import reoptimize_e1, reoptimize_route_pool, solve_hybrid
+ 
+-__all__ = ["solve_exact", "route_cover_certificate", "e1_inventory_certificate", "joint_route_inventory_certificate", "reoptimize_e1", "reoptimize_route_pool", "solve_hybrid"]
++__all__ = ["solve_exact", "route_cover_certificate", "e1_inventory_certificate", "joint_route_inventory_certificate", "logic_benders_certificate", "reoptimize_e1", "reoptimize_route_pool", "solve_hybrid"]
+diff --git a/models/routing/variants/model_5/exact/bounds.py b/models/routing/variants/model_5/exact/bounds.py
+index ae487c394..81be7b4db 100644
+--- a/models/routing/variants/model_5/exact/bounds.py
++++ b/models/routing/variants/model_5/exact/bounds.py
+@@ -18,3 +18,10 @@ def joint_route_inventory_certificate(problem, **options):
+     validate_problem(problem)
+     from models.routing.solvers.exact.multibatch_joint_inventory import joint_route_inventory_certificate as compute
+     return compute(problem, **options)
++
++
++def logic_benders_certificate(problem, **options):
++    """Opt-in complete-domain certificate with verified physical separation."""
++    validate_problem(problem)
++    from models.routing.solvers.exact.multibatch_logic_benders import logic_benders_certificate as compute
++    return compute(problem, **options)

@@ -336,7 +336,11 @@ def test_actual_alns_search_changes_batches_and_matches_small_exact_reference(ex
     p=joint_fixture()
     exact=solve_exact(p,time_limit=10)
     for seed in (42,43,44):
-        r=solve_alns(p,max_time=.3,max_iterations=300,seed=seed)
+        # Check the fixed search trajectory, not whether a loaded host can
+        # finish it inside 0.3 seconds. Performance budgets are benchmarked
+        # separately; the optimum and operator assertions remain unchanged.
+        r=solve_alns(p,max_time=3,max_iterations=300,seed=seed)
+        assert r['info']['iterations']==300
         assert r['audit']['valid'] and not r['info']['proven_optimal']
         assert r['info']['objective']==pytest.approx(exact['info']['objective'])
         assert r['info']['operator_attempts']['destroy_random_batch']>0

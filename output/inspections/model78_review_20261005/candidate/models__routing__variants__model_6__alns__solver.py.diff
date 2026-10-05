@@ -1,0 +1,31 @@
+--- baseline/models/routing/variants/model_6/alns/solver.py
++++ candidate/models/routing/variants/model_6/alns/solver.py
+@@ -304,7 +304,7 @@
+     profiles=[dict(problem.default_cutoffs)]
+     if not problem.optimize_cutoffs:
+         return profiles
+-    if problem.shared_cutoff:
++    if all(problem.legal_batches[o.id] for o in problem.orders):
+         # A late pickup can make every 25/50/75% initialization infeasible.
+         # Seed from the necessary last-return boundary without restricting
+         # the optimization domain or claiming the seed is feasible.
+@@ -320,9 +320,16 @@
+             earliest_returns.append(picked+order.service_time
+                                     +problem.travel_bounds['inward'][order.satellite][order.customer]
+                                     +p.e2_return_unload_time)
+-        lo,hi=problem.shared_cutoff_bounds
+-        offset=min(hi,max(lo,max(earliest_returns)-p.batches[-1].start))
+-        profiles.append({b.id:b.start+offset for b in p.batches})
++        if problem.shared_cutoff:
++            lo,hi=problem.shared_cutoff_bounds
++            offset=min(hi,max(lo,max(earliest_returns)-p.batches[-1].start))
++            profiles.append({b.id:b.start+offset for b in p.batches})
++        else:
++            last=p.batches[-1].id
++            lo,hi=problem.cutoff_bounds[last]
++            late={**problem.default_cutoffs,last:min(hi,max(lo,max(earliest_returns)))}
++            if late not in profiles:
++                profiles.append(late)
+     fractions=(.25,.5,.75,.9,.95) if problem.shared_cutoff else (.25,.5,.75)
+     for fraction in fractions:
+         profile={bid:lo+round((hi-lo)*fraction) for bid,(lo,hi) in problem.cutoff_bounds.items()}

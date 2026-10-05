@@ -39,6 +39,9 @@ def replay_ledger(events, pool, satellites, repetitions=1, period=0):
 def audit_solution(problem, result, repeat=True):
     try:
         if getattr(problem, 'joint_batch', False):
+            if getattr(problem, 'calendar_cycle', False):
+                from .calendar import audit_calendar_solution
+                return audit_calendar_solution(problem, result, repeat)
             if getattr(problem, 'uniform_cycle', False):
                 from .uniform import audit_uniform_solution
                 return audit_uniform_solution(problem, result, repeat)
@@ -62,6 +65,16 @@ def audit_solution(problem, result, repeat=True):
 def _audit(problem, result, repeat):
     p, f = problem.operating_policy, problem.fleet
     errors, ledger_events = [], []
+
+    # Recheck the input assignment independently of solver prechecks. Goods
+    # must exist when their batch starts loading, not merely at customer service.
+    for order in problem.orders:
+        batch = problem.batch_map[order.batch]
+        if order.release_time is not None and batch.start < order.release_time:
+            errors.append(dict(code='ORDER_RELEASE_AFTER_BATCH_START', order_id=order.id,
+                               batch_id=batch.id, batch_start=batch.start, release_time=order.release_time))
+        if order.allowed_batch_ids is not None and order.batch not in order.allowed_batch_ids:
+            errors.append(dict(code='ORDER_BATCH_NOT_ALLOWED', order_id=order.id, batch_id=batch.id))
 
     def error(code, **details):
         errors.append(dict(code=code, **details))

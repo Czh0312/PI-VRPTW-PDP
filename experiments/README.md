@@ -6,6 +6,10 @@
 
     .venv/bin/python -m experiments.runs.run_model6_uniform_comparison --manifest data/model6/uniform_v1_20261005/manifest.json --exact-time 24 --time 10 --iterations 5000 --seeds 42 43 --workers 2 --output /path/to/new/uniform_study
 
+求解实现修改前后可用 `runs/review_model6_search.py` 配对检查。`--before-source` 指向历史运行保存的源码快照，当前源码作为after；输入、费用、预算和种子相同，串行执行且交替两版先后顺序。输出全部原始结果、独立审计、源码/输入哈希和逐种子配对表，保留未找到解的尝试。该检查属于短预算描述性验证，不代表收敛、显著性或真实货币收益。
+
+    .venv/bin/python -m experiments.runs.review_model6_search --manifest data/model6/uniform_v1_20261005/manifest.json --before-source output/model6_comparison/20261005_uniform_v1_final/source_snapshot --output /path/to/new/search_review --exact-time 24 --time 10 --iterations 5000 --seeds 42 43
+
 该入口作短预算工程验证。两模型的原日历/优化日历和目标函数同时变化，报告箱数对比而不把差异全归因于均匀分批。不做统计显著、性能收敛或真实人民币节约结论。
 
 正式入口为 `runs/run_multibatch_cycle.py`，汇总在 `analysis/summarize_multibatch_cycle.py` 与 `analysis/summarize_static_multibatch.py`。
