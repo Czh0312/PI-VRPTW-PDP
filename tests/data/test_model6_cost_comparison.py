@@ -43,6 +43,37 @@ def test_m5_cli_prices_pool_trips_and_wear_after_distance_solving(tmp_path):
         evaluate_comparison_cost(problem,invalid,load_routing_case(case,use_pool_config=False)[0]['economic_config'])
 
 
+def test_m3_cli_uses_joint_prices_without_changing_single_batch_route(tmp_path):
+    from cli.cost import main as price
+    from configuration.loader import load_json
+    case = 'config/cases/single_batch_demo.json'
+    source = 'output/experiments/static_batch_suite_v1/data_audit_20260929/mechanism_forced_late_b1.json'
+    config, fleet = load_routing_case(case, use_pool_config=False)
+    problem = load_instance(config, fleet)
+    result = load_json(source)
+    original = deepcopy(result)
+    economic = 'data/model6/uniform_v2_20261005/lade_0823_10aoi/spread_medium/economic.json'
+    parameters = load_json(economic)
+    audit = audit_solution(problem, result)
+    assert audit['valid']
+    cost = price(['--case', case, '--route-result', source,
+                  '--economic-config', economic, '--output', str(tmp_path/'m3_cost')])
+    from models.cost.joint_batch import JointCostProfile
+    reference = JointCostProfile(parameters).evaluate(audit, problem.operating_policy.container_pool_size)
+    assert cost['model'] == 3
+    assert cost['components'] == pytest.approx(reference['components'])
+    assert cost['total'] == pytest.approx(reference['total'])
+    assert cost['economic_profile_hash'] == reference['economic_profile_hash']
+    assert cost['components']['e1_trips'] == audit['e1_trip_count']*parameters['e1_trip_cost']
+    assert cost['components']['container_wear'] == problem.total*parameters['container_price']/parameters['container_lifetime_uses']
+    assert cost['route_objective_mode'] == 'distance' and not cost['cost_is_optimized']
+    assert result == original
+    corrupt = deepcopy(result)
+    corrupt['e2_trips'] = []
+    with pytest.raises(ValueError, match='invalid route'):
+        evaluate_comparison_cost(problem, corrupt, parameters)
+
+
 def _priced_row(root, run, model, seed, distance, cost, pool=2, profile='same'):
     folder=root/run
     folder.mkdir()

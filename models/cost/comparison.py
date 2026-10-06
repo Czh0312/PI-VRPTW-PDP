@@ -1,4 +1,4 @@
-"""Price M5 distance schedules and M6-M8 cost schedules under one cost contract."""
+"""Price M3/M5 distance schedules and M6-M8 cost schedules under one contract."""
 from __future__ import annotations
 
 from configuration.loader import load_json
@@ -7,8 +7,8 @@ from models.routing.common.cycle.audit import audit_solution
 
 
 def evaluate_comparison_cost(problem, result, parameters, *, audit=None):
-    if problem.model_number not in (5, 6, 7, 8):
-        raise ValueError('Matched joint-cost comparison requires M5–M8')
+    if problem.model_number not in (3, 5, 6, 7, 8):
+        raise ValueError('Matched joint-cost comparison requires M3 or M5–M8')
     joint = getattr(problem, 'joint_batch', False)
     profile = JointCostProfile(load_json(parameters) if isinstance(parameters, str) else parameters)
     if joint and profile.hash != problem.cost_profile.hash:
@@ -24,7 +24,7 @@ def evaluate_comparison_cost(problem, result, parameters, *, audit=None):
                 route_objective_mode='cost' if joint else 'distance',
                 cost_is_optimized=joint,
                 pool_basis='optimized_pool' if joint else 'configured_pool')
-    if problem.model_number == 5:
+    if problem.model_number in (3, 5):
         # This changes only the price of the pool, never the distance solution.
         reference = profile.evaluate(audited, audited['minimum_pool_for_schedule'])
         reference.update(container_pool_size=audited['minimum_pool_for_schedule'],

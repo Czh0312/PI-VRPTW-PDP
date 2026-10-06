@@ -18,7 +18,7 @@ def run_cost(config, fleet, args):
     result = json.loads(source.read_text(encoding='utf-8'))
     parameters = load_json(economic) if isinstance(economic, str) else economic
     if getattr(problem, 'joint_batch', False) or (
-            problem.model_number == 5 and 'container_pool_cost_per_period' in parameters):
+            problem.model_number in (3, 5) and 'container_pool_cost_per_period' in parameters):
         from models.cost.comparison import evaluate_comparison_cost
         cost = evaluate_comparison_cost(problem, result, parameters)
     else:
