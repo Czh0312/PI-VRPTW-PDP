@@ -1,0 +1,141 @@
+{
+  "schema_version": 1,
+  "artifact_type": "economic_estimation_worksheet_not_solver_configuration",
+  "created_on": "2026-10-06",
+  "scope": "User requested diesel large truck E1 and electric cargo tricycle E2 estimate; preserve fuel/electricity-only transport boundary.",
+  "ready_for_matched_empirical_claims": false,
+  "ready_for_existing_Zhou_CNY_pricing": false,
+  "distance_mapping_km_per_Zhou_coordinate_unit": null,
+  "inputs": {
+    "truck_fuel_L_per_100km": 30,
+    "diesel_CNY_per_L": 8.45,
+    "tricycle_battery_kWh_per_100km": 6,
+    "charging_efficiency": 0.85,
+    "electricity_CNY_per_kWh": 0.8,
+    "container_price_CNY": 36.5,
+    "container_lifetime_uses": 50,
+    "cleaning_CNY_per_return": 0.8,
+    "tracking_CNY_per_issue": 0.1,
+    "annual_container_capital_charge_rate": 0.05,
+    "calendar_days_per_year": 365
+  },
+  "derived_rates": {
+    "e1_fuel_CNY_per_km": 2.5349999999999997,
+    "e2_electricity_CNY_per_km": 0.05647058823529412,
+    "container_wear_CNY_per_issue": 0.73,
+    "optional_container_capital_charge_CNY_per_box_day": 0.005
+  },
+  "sources": {
+    "diesel": {
+      "url": "https://cif.mofcom.gov.cn/newsite/html/zhejiangsheng/html/1086127/2026/6/15/1781515022016.html",
+      "verified_on": "2026-10-06",
+      "price_effective_date": "2026-05-21",
+      "status": "verified_dated_reference_not_current_price",
+      "value_CNY_per_L": 8.45
+    },
+    "tricycle": {
+      "url": "https://www.jinpeng-global.com/Electric-Cargo-Tricycle-JG180-pd793787298.html",
+      "verified_on": "2026-10-06",
+      "status": "manufacturer_nominal_specs_not_measured_energy",
+      "battery_V": 60,
+      "battery_Ah_range": [
+        80,
+        100
+      ],
+      "range_km": [
+        80,
+        100
+      ],
+      "note": "6 kWh/100km uses 60V*100Ah/1000 divided by assumed 100km; published ranges do not establish a paired consumption test. Usable energy, load, weather and cycle vary."
+    },
+    "electricity_reference": {
+      "url": "https://zjjcmspublic.oss-cn-hangzhou-zwynet-d01-a.internet.cloud.zj.gov.cn/jcms_files/jcms1/web3235/site/attach/0/c23af1d370b54214bc0a45302125037a.pdf",
+      "verified_on": "2026-10-06",
+      "reference_period": "2025-08",
+      "reference_CNY_per_kWh": 0.7361,
+      "locator": "PDF page 4, single-part general industrial/commercial, below 1kV, non-time-of-use rate",
+      "note": "Scenario uses rounded 0.8, not an asserted current tariff. No separate paid charging-service fee is assumed."
+    },
+    "container": {
+      "url": "https://www.news.cn/politics/2022-06/28/c_1128783518.htm",
+      "verified_on": "2026-10-06",
+      "publication_date": "2022-06-28",
+      "status": "historical_company_interview_proxy_not_matched_SKU",
+      "price_CNY": 36.5,
+      "illustrative_uses": 50
+    }
+  },
+  "explicit_assumptions": [
+    "Truck fuel 30 L/100km is an estimation scenario, not verified matched-fleet telemetry.",
+    "Battery/range ratio is only a nominal reference; charging efficiency 85% is assumed.",
+    "Electricity 0.8 CNY/kWh is assumed, informed by a dated tariff rather than current billing.",
+    "Cleaning 0.8 and tracking 0.1 CNY/use remain unmeasured process allowances.",
+    "Container 36.5 CNY and 50 uses are a historical price proxy and illustrative lifetime, not current procurement or measured survival.",
+    "Optional 5% annual capital charge is an opportunity-cost scenario; no purchase depreciation is included in this charge. One operational cycle is treated as one calendar day of capital tying.",
+    "Wages, vehicle fixed/trip charges, maintenance, battery degradation, tolls and container loss are excluded from this simplified scenario; these exclusions are not claims that costs are actually zero.",
+    "Vehicle carrying capacities, charging range, time windows and usable battery constraints have not been recalibrated or re-solved."
+  ],
+  "period_formula_with_optional_capital": "C = 2.535*D1_km + (0.06/0.85*0.8)*D2_km + 0.005*N + (0.8+0.1+36.5/50)*Q",
+  "initial_investment_formula": "36.5*N; reported separately; do not add to allocated wear in a cash-flow total",
+  "example": {
+    "inputs": {
+      "e1_distance_km": 100,
+      "e2_distance_km": 200,
+      "N": 100,
+      "Q": 200
+    },
+    "components_CNY": {
+      "truck_fuel": 253.49999999999997,
+      "tricycle_electricity": 11.294117647058824,
+      "optional_capital_charge": 0.5,
+      "cleaning": 160.0,
+      "tracking": 20.0,
+      "wear": 146.0
+    },
+    "allocated_period_cost_CNY": 591.2941176470588,
+    "initial_investment_CNY": 3650,
+    "first_period_cash_outlay_excluding_opportunity_cost_and_wear_CNY": 4094.794117647059
+  },
+  "suggested_sensitivity_not_executed": {
+    "truck_fuel_L_per_100km": [
+      25,
+      30,
+      40
+    ],
+    "tricycle_battery_kWh_per_100km": [
+      4,
+      6,
+      8
+    ],
+    "charging_efficiency": [
+      0.8,
+      0.85,
+      0.9
+    ],
+    "electricity_CNY_per_kWh": [
+      0.6,
+      0.8,
+      1.2
+    ],
+    "container_price_CNY": [
+      25,
+      36.5,
+      50
+    ],
+    "container_lifetime_uses": [
+      30,
+      50,
+      100
+    ],
+    "cleaning_CNY_per_return": [
+      0.3,
+      0.8,
+      1.5
+    ],
+    "annual_container_capital_charge_rate": [
+      0,
+      0.05,
+      0.1
+    ]
+  }
+}
