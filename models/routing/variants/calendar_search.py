@@ -59,7 +59,7 @@ def solve_counts(problem, *, method, budget, seed, max_iterations=0, initial_res
         info = candidate['info']
         valid = candidate.get('audit', {}).get('valid', False)
         if valid:
-            boundaries = [b['start'] for b in candidate['batches']]+[problem.operating_policy.cycle_end]
+            boundaries = [b['start'] for b in candidate['batches']]+[child.operating_policy.cycle_end]
             attach_calendar_decisions(problem, candidate, count, boundaries)
             candidate['audit'] = audit_calendar_solution(problem, candidate)
             valid = candidate['audit']['valid']

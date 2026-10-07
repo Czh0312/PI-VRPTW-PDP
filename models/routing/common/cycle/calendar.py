@@ -12,6 +12,7 @@ import math
 
 from .joint import JointBatchInstance, audit_joint_solution, STRATEGY
 from .policy import Batch, integer, nonnegative
+from .batch_counts import batch_count_domain, equal_batch_clock
 
 SCHEDULE_MODES = {7: 'uniform_independent_cutoffs', 8: 'flexible_cycle'}
 STRATEGIES = {7: 'independent_cutoff_cost_v1', 8: 'flexible_batch_cost_v1'}
@@ -33,28 +34,17 @@ class CalendarCycleInstance(JointBatchInstance):
                          {k: options[k] for k in ('pool_min', 'pool_max') if k in options}, economic_config)
         if any(set(o.allowed_batch_ids) != set(self.batch_map) for o in self.orders):
             raise ValueError('Repartitioning requires every order to allow all source batches')
-        raw = options.get('batch_count_candidates', list(range(1, len(self.batch_map)+1)))
-        if not isinstance(raw, (list, tuple)) or not raw:
-            raise ValueError('batch_count_candidates must be a nonempty list')
-        counts = [integer(k, 'batch_count_candidate', 1) for k in raw]
-        if len(set(counts)) != len(counts):
-            raise ValueError('Duplicate batch count candidate')
         minimum = nonnegative(options.get('min_phase_minutes', 1), 'min_phase_minutes')
         if minimum <= 0:
             raise ValueError('min_phase_minutes must be positive')
         self.minimum_phase_ticks = self.operating_policy.ticks(minimum)
         self.cycle_duration = self.operating_policy.cycle_end-self.operating_policy.cycle_start
-        for k in counts:
-            if self.cycle_duration < 2*k*self.minimum_phase_ticks:
-                raise ValueError(f'K={k}: both phases must meet min_phase_minutes')
-            if model == 7 and self.cycle_duration % k:
-                raise ValueError(f'K={k}: cycle ticks must be divisible by K for equal batches')
         self.model_number = model
         self.schedule_mode = mode
-        self.batch_count_candidates = tuple(sorted(counts))
+        self.batch_count_candidates = batch_count_domain(options, self.cycle_duration, self.minimum_phase_ticks)
         self.options = deepcopy({**options, 'schedule_mode': mode})
         self._calendars = OrderedDict()
-        self._counts = {}
+        self._counts = OrderedDict()
 
     @property
     def calendar_contract(self):
@@ -66,8 +56,13 @@ class CalendarCycleInstance(JointBatchInstance):
 
     def balanced_boundaries(self, count):
         count = self.validate_count(count)
-        p = self.operating_policy
-        return tuple(p.cycle_start+i*self.cycle_duration//count for i in range(count+1))
+        p, _, factor = self.count_clock(count)
+        return tuple(p.cycle_start+i*self.cycle_duration*factor//count for i in range(count+1))
+
+    def count_clock(self, count):
+        if self.model_number == 7:
+            return equal_batch_clock(self, count)
+        return self.operating_policy, self.orders, 1
 
     def validate_count(self, count):
         count = integer(count, 'cycle_batch_count', 1)
@@ -80,10 +75,10 @@ class CalendarCycleInstance(JointBatchInstance):
         if not isinstance(boundaries, (list, tuple)) or len(boundaries) != count+1:
             raise ValueError('batch_boundaries must contain K+1 integer ticks')
         checked = tuple(integer(v, 'batch_boundary') for v in boundaries)
-        p = self.operating_policy
+        p, _, factor = self.count_clock(count)
         if checked[0] != p.cycle_start or checked[-1] != p.cycle_end:
             raise ValueError('Batch calendar must cover the entire original cycle')
-        if any(b-a < 2*self.minimum_phase_ticks for a, b in zip(checked, checked[1:])):
+        if any(b-a < 2*self.minimum_phase_ticks*factor for a, b in zip(checked, checked[1:])):
             raise ValueError('Batch lengths must leave both minimum phases')
         if self.model_number == 7 and checked != self.balanced_boundaries(count):
             raise ValueError('M7 requires equal batch lengths')
@@ -94,11 +89,12 @@ class CalendarCycleInstance(JointBatchInstance):
             boundaries = self.balanced_boundaries(count)
         key = self.validated_boundaries(count, boundaries)
         if key not in self._calendars:
-            p, minimum = self.operating_policy, self.minimum_phase_ticks
+            p, source_orders, factor = self.count_clock(count)
+            minimum = self.minimum_phase_ticks*factor
             batches = tuple(Batch(f'b{i+1}', a, (a+b)//2, b)
                             for i, (a, b) in enumerate(zip(key, key[1:])))
             ids = tuple(b.id for b in batches)
-            orders = [replace(o, batch=ids[0], allowed_batch_ids=ids) for o in self.orders]
+            orders = [replace(o, batch=ids[0], allowed_batch_ids=ids) for o in source_orders]
             child = JointBatchInstance(self.network, orders, replace(p, batches=batches),
                         dict(pool_min=self.pool_min, pool_max=self.pool_max, optimize_cutoffs=True,
                              min_phase_ticks=minimum),
@@ -116,6 +112,9 @@ class CalendarCycleInstance(JointBatchInstance):
             return self.fixed_calendar(count)
         if count not in self._counts:
             self._counts[count] = VariableCalendarInstance(self, count)
+            if len(self._counts) > 8:
+                self._counts.popitem(last=False)
+        self._counts.move_to_end(count)
         return self._counts[count]
 
     def selected_problem(self, result):

@@ -72,7 +72,7 @@ class SingleBatchRouteScorer:
         if any(t[3] == 'p' for t in tasks):
             late += max(0, completed-self.batch.cutoff)
         distance += distance_to(previous, site)
-        return distance+1e6*(load_penalty+0)+late*p.time_tick_seconds/60*1e4, completed
+        return distance+1e6*(load_penalty+0)+p.minutes(late)*1e4, completed
 
 
 class _PickupInsertions:
@@ -150,4 +150,4 @@ class _PickupInsertions:
         late += max(0, completed+p.e2_turnaround_time-p.cycle_end)
         late += max(0, completed-scorer.batch.cutoff)
         distance += distance_to(previous, self.site)
-        return distance+1e6*(load_penalty+0)+late*p.time_tick_seconds/60*1e4, completed
+        return distance+1e6*(load_penalty+0)+p.minutes(late)*1e4, completed

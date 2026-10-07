@@ -2,17 +2,17 @@
 
 ## 当前基础版：均匀分批、统一分界（2026-10-05）
 
-用 `joint_batch_options.schedule_mode="uniform_cycle"` 启用。周期 `[t0,t1]` 给定，优化配置范围中的批次数K，重新把**整个周期**均分成K批；每批长度L=(t1-t0)/K。所有批次共用一个相对分界时长d，即 c_b=start_b+d，两个阶段分别长d与L-d。共同分界比例为d/L。订单分批、箱池、路线、车辆及实际服务时刻同时优化。下面的固定候选日程实现作为历史对照保留。
+用 `joint_batch_options.schedule_mode="uniform_cycle"` 启用。周期 `[t0,t1]` 给定，批次数K为正整数决策，重新把**整个周期**均分成K批；每批长度L=(t1-t0)/K。所有批次共用一个相对分界时长d，即 c_b=start_b+d，两个阶段分别长d与L-d。共同分界比例为d/L。订单分批、箱池、路线、车辆及实际服务时刻同时优化。下面的固定候选日程实现作为历史对照保留。
 
     "joint_batch_options": {
       "schedule_mode": "uniform_cycle",
-      "batch_count_candidates": [1, 2, 3],
+      "batch_count_candidates": "all_positive_integers",
       "min_phase_minutes": 1,
       "pool_min": 1,
       "pool_max": 131
     }
 
-默认K范围为1至原日历的批次数，可显式扩展；各阶段最少1分钟是场景假设。整数时间模型要求周期刻度数能被每个候选K整除，不能整除时明确拒绝输入，可调整时间精度或K范围。`allowed_batch_ids`必须覆盖原日历所有批次，避免在重新划分后悄悄丢弃已有批次限制。顾客绝对窗口、货物release_time、物理网络和清洗时长保持输入值。
+2026-10-07：省略K范围或设为 `all_positive_integers` 时，允许全部正整数K，由两阶段最短时长推出上界 `floor(H/(2m))`，不受原日历批数限制。各阶段最少1分钟仍为当前场景假设。H的原始刻度不能被K整除时，为该K自动细分整数时间刻度，保持真正等长批次和原始物理时长；结果记录 `time_tick_subdivision`，分钟等于 `ticks*time_tick_seconds/(60*time_tick_subdivision)`。显式K列表用于历史复现或固定K诊断。`allowed_batch_ids`必须覆盖原日历所有批次，避免在重新划分后悄悄丢弃已有批次限制。顾客绝对窗口、货物release_time、物理网络和清洗时长保持输入值。
 
 精确求解枚举K，每个K的MILP只有一个共同分界变量。ALNS枚举K，分界移动同步改变所有批次；两套算法共享各自一次调用的总时间/迭代预算，不按K重复增加预算。ALNS不调用精确模型或Gurobi。只有所有配置K均证明最优或不可行，才报告整体成本最优；限时无解不等于不可行。
 
@@ -23,7 +23,7 @@
 结果分别记录 `cycle_batch_count`（均匀划分K）、`delivery_batch_count`（有配送的批次）、`actual_recovery_round_count`（实际回运轮数），并保存 `batch_duration_ticks`、`shared_cutoff_offset_ticks`、`shared_cutoff_ratio`、`count_search` 和允许域。独立审计从K重建日历，检查共同分界、两周期车辆与箱子重放、清洗和成本。周期尾部仍须完成清洗，不新增隐含回运轮次。第二阶段可继续回收，截点后的箱子等后续回运。
 
     .venv/bin/python main.py route --case data/model6/uniform_v1_20261005/lade_0823_10aoi/m6_case.json --solver alns --time 15 --iterations 5000
-    .venv/bin/python main.py route --case /path/to/old_m6_case.json --uniform-cycle --batch-count-candidates 1 2 3 --solver exact --exact-time 30
+    python main.py route --case config/cases/20261007_pool25_truck0p5_allK_v1/0_M6.json --all-batch-counts --solver alns --time 300 --iterations 1000000
 
 CLI的 `--candidate-slots` 可切回历史候选日程；均匀模式不兼容逐批 `--optimize-cutoffs` / `--fixed-cutoffs`。已有起点需来自相同的均匀分批允许域，不能直接套用旧候选日程的解。成本系数仍为未校准的合成单位，最低成本不保证箱数最低。
 

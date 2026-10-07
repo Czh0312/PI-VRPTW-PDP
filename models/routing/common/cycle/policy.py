@@ -48,6 +48,7 @@ class MultiBatchPolicy:
     e2_turnaround_time: int = 0
     policy_version: str = VERSION
     terminal_policy: str = 'all_clean_at_depot'
+    time_tick_subdivision: int = 1
 
     @property
     def single_day(self):
@@ -69,7 +70,7 @@ class MultiBatchPolicy:
 
     def ticks(self, minutes, rounding='ceil'):
         nonnegative(minutes, 'time')
-        scaled = Decimal(str(minutes)) * 60 / self.time_tick_seconds
+        scaled = Decimal(str(minutes)) * 60 * self.time_tick_subdivision / self.time_tick_seconds
         if rounding == 'exact':
             if scaled != scaled.to_integral_value():
                 raise ValueError('Calendar boundaries must be multiples of time_tick_seconds')
@@ -77,7 +78,7 @@ class MultiBatchPolicy:
         return int(scaled.to_integral_value(rounding=(ROUND_CEILING if rounding == 'ceil' else ROUND_FLOOR)))
 
     def minutes(self, ticks):
-        return ticks * self.time_tick_seconds / 60.0
+        return ticks * self.time_tick_seconds / (60.0 * self.time_tick_subdivision)
 
     @classmethod
     def from_config(cls, config):
@@ -98,7 +99,8 @@ class MultiBatchPolicy:
         if config.get('terminal_policy', 'all_clean_at_depot') != 'all_clean_at_depot':
             raise ValueError('Only all_clean_at_depot is supported')
         tick = integer(config['time_tick_seconds'], 'time_tick_seconds', 1)
-        converter = cls(0, 1, (), 0, 0, 1, tick)
+        subdivision = integer(config.get('time_tick_subdivision', 1), 'time_tick_subdivision', 1)
+        converter = cls(0, 1, (), 0, 0, 1, tick, time_tick_subdivision=subdivision)
         start = converter.ticks(config['cycle_start'], 'exact')
         end = converter.ticks(config['cycle_end'], 'exact')
         if end <= start:
@@ -129,10 +131,12 @@ class MultiBatchPolicy:
                    integer(config['container_pool_size'], 'container_pool_size'),
                    times.pop('cleaning_duration'),
                    integer(config['e2_max_trips_per_vehicle'], 'e2_max_trips_per_vehicle', 1),
-                   time_tick_seconds=tick, **times)
+                   time_tick_seconds=tick, time_tick_subdivision=subdivision, **times)
 
     def as_dict(self, problem=None):
         result = asdict(self)
+        if self.time_tick_subdivision == 1:
+            result.pop('time_tick_subdivision')
         result.update(time_unit='ticks', pickup_policy='cutoff_all_available',
                       batch_overlap=False, allow_transfers=False,
                       input_time_unit='minutes', objective_mode='distance')

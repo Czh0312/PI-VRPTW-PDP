@@ -184,7 +184,7 @@ def run_case(config, fleet, *, case_path=None, output=None):
         for row in audit.get('clean_stock', []):
             lines.append(f"| {row['batch_id']} | {row['available']} | {row['demand']} | {row['after']} |")
         lines += ['', f"连续两个大周期重放：{audit.get('periodic_replay', {}).get('valid', False)}。",
-                  '', '时间表 JSON 使用整数 ticks；分钟 = ticks × time_tick_seconds / 60。']
+                  '', '时间表 JSON 使用整数 ticks；分钟 = ticks × time_tick_seconds / (60 × time_tick_subdivision)，细分倍率缺省为1。']
         if not instance.reusable:
             lines += ['一次性包装的重放检查车辆与配送服务；每个周期重新购入包装，不声明容器闭环。']
         if instance.free_assignment:

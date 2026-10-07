@@ -23,7 +23,9 @@ def main(argv=None):
                            help='M6 基础版：优化周期批次数，均分周期，各批共用相对分界点')
     schedules.add_argument('--candidate-slots',dest='uniform_cycle',action='store_false',default=None,
                            help='M6 历史候选时段模式，保留输入批次起止')
-    parser.add_argument('--batch-count-candidates',type=int,nargs='+',help='M6–M8 周期分批的 K 搜索范围，例如 1 2 3')
+    counts = parser.add_mutually_exclusive_group()
+    counts.add_argument('--batch-count-candidates',type=int,nargs='+',help='显式指定用于诊断的 K 子集')
+    counts.add_argument('--all-batch-counts',action='store_true',help='M6–M8 允许全部满足周期及最短阶段约束的正整数 K')
     parser.add_argument('--min-phase-minutes',type=float,help='M6–M8 各阶段最短时长，默认1分钟（场景假设）')
     cutoffs=parser.add_mutually_exclusive_group()
     cutoffs.add_argument('--optimize-cutoffs',dest='optimize_cutoffs',action='store_true',default=None,
@@ -73,11 +75,13 @@ def main(argv=None):
         if args.uniform_cycle:
             options['schedule_mode']='uniform_cycle'
         config['joint_batch_options']=options
-    if args.batch_count_candidates is not None or args.min_phase_minutes is not None:
+    if args.all_batch_counts or args.batch_count_candidates is not None or args.min_phase_minutes is not None:
         if config['model'] not in (7, 8) and (config['model']!=6 or options.get('schedule_mode')!='uniform_cycle'):
             raise ValueError('Batch-count and phase-minimum options require M6 --uniform-cycle or M7/M8')
         if args.batch_count_candidates is not None:
             options['batch_count_candidates']=args.batch_count_candidates
+        elif args.all_batch_counts:
+            options['batch_count_candidates']='all_positive_integers'
         if args.min_phase_minutes is not None:
             options['min_phase_minutes']=args.min_phase_minutes
         config['joint_batch_options']=options

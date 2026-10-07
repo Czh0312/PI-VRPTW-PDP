@@ -4,15 +4,15 @@
 
 | 模型 | 周期批次数 K | 各批长度 | 批内分界 |
 | --- | --- | --- | --- |
-| M6 `uniform_cycle` | 有限候选集合中优化 | H/K | 共同相对时长 d |
-| M7 `uniform_independent_cutoffs` | 有限候选集合中优化 | H/K | 各批独立 d_b |
-| M8 `flexible_cycle` | 有限候选集合中优化 | 各批独立 L_b，总和 H | 各批独立 d_b |
+| M6 `uniform_cycle` | 正整数，由周期和最短阶段约束定界 | H/K | 共同相对时长 d |
+| M7 `uniform_independent_cutoffs` | 正整数，由周期和最短阶段约束定界 | H/K | 各批独立 d_b |
+| M8 `flexible_cycle` | 正整数，由周期和最短阶段约束定界 | 各批独立 L_b，总和 H | 各批独立 d_b |
 
 ## 数学范围
 
 给定原周期 [t0,t1]，H=t1−t0，最短阶段时长 m。在每个固定 K 的子问题内，M7 使用 s_b=t0+(b−1)H/K、e_b=t0+bH/K；每个 c_b 独立满足 s_b+m≤c_b≤e_b−m。
 
-M8 的批次边界为整数刻度变量 x_0,…,x_K，约束 x_0=t0、x_K=t1、x_{b−1}+m≤c_b≤x_b−m。令 s_b=x_{b−1}、e_b=x_b、L_b=x_b−x_{b−1}，因此批次覆盖完整周期，连续且不重叠，每批至少 2m。无额外比例相等、长度候选网格或需求排序限制。M8 不要求 H 能被 K 整除；M7 与均匀 M6 相同，不能整除时明确拒绝输入。
+M8 的批次边界为整数刻度变量 x_0,…,x_K，约束 x_0=t0、x_K=t1、x_{b−1}+m≤c_b≤x_b−m。令 s_b=x_{b−1}、e_b=x_b、L_b=x_b−x_{b−1}，因此批次覆盖完整周期，连续且不重叠，每批至少 2m。无额外比例相等、长度候选网格或需求排序限制。2026-10-07起，K默认为全部 `1≤K≤floor(H/(2m))` 的正整数；M6/M7在不能整除原刻度时自动细分该K的时钟，保持原物理时长和严格等长；M8保留原时钟。
 
 订单分配 y_ib、配送启用 z_b、箱池 N、两级路线、车辆和实际作业时刻继续联合优化。各模型使用同一成本评价，包括箱池、距离、车辆、趟次、占用工时和固定周转费用。成本参数的来源状态保持不变。
 
@@ -55,14 +55,14 @@ ALNS 不导入 Gurobi 或精确后端；精确法也不导入 ALNS。两模型�
 
 ## 输入和运行
 
-保留 schema_version=2、multi_batch_cutoff_v1 及 `joint_batch_options`；必须提供显式 release_time、allowed_batch_ids 和 economic_config。重新划分周期要求每笔订单允许全部原日历批次；不能静默丢掉已有的批次限制。默认 K 范围为 1 至原日历批次数，m 默认 1 分钟，都是可配置的场景假设。
+保留 schema_version=2、multi_batch_cutoff_v1 及 `joint_batch_options`；必须提供显式 release_time、allowed_batch_ids 和 economic_config。重新划分周期要求每笔订单允许全部原日历批次；不能静默丢掉已有的批次限制。省略批数配置或设为 `all_positive_integers` 时，K上界仅由周期和阶段最短时长确定。m 默认 1 分钟，仍为可配置的场景假设。显式K列表保留用于历史复现或诊断；旧输入可用CLI的 `--all-batch-counts` 覆盖。
 
 ```json
 {
   "model": 8,
   "joint_batch_options": {
     "schedule_mode": "flexible_cycle",
-    "batch_count_candidates": [1, 2, 3],
+    "batch_count_candidates": "all_positive_integers",
     "min_phase_minutes": 1,
     "pool_min": 1,
     "pool_max": 131

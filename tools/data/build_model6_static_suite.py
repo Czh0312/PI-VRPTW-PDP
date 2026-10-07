@@ -87,7 +87,8 @@ def build_suite(destination,source_manifest='data/manifest.json',families=None,b
                         cost_source_type='synthetic_mechanism',currency='synthetic_units')
         if uniform_cycle:
             provenance.update(schedule_mode='uniform_cycle',calendar_assumption='Repartition entire original cycle uniformly; all batches share a relative cutoff',
-                              batch_count_candidates=list(batch_count_candidates or range(1,record['batch_count']+1)),
+                              batch_count_candidates=(list(batch_count_candidates) if batch_count_candidates is not None
+                                                      else 'all_positive_integers'),
                               min_phase_minutes=min_phase_minutes)
         _json(folder/'adaptation.json',provenance)
         shared['dataset_metadata']=str(folder/'adaptation.json')
@@ -95,7 +96,8 @@ def build_suite(destination,source_manifest='data/manifest.json',families=None,b
         options=dict(pool_min=1,pool_max=source_problem.total)
         if uniform_cycle:
             options.update(schedule_mode='uniform_cycle',min_phase_minutes=min_phase_minutes,
-                           batch_count_candidates=list(batch_count_candidates or range(1,record['batch_count']+1)))
+                           batch_count_candidates=(list(batch_count_candidates) if batch_count_candidates is not None
+                                                   else 'all_positive_integers'))
         elif optimize_cutoffs:
             calendar=source_problem.operating_policy
             bounds={b.id:[calendar.minutes(b.start)+min_phase_minutes,

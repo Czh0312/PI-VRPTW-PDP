@@ -125,7 +125,8 @@ def check_necessary_conditions(problem, travel_bounds=None):
         fail('POOL_BELOW_NECESSARY_BOUND', pool=p.container_pool_size, lower_bound=lower_bound)
     return dict(passed=not errors, proven_infeasible=bool(errors),
                 proof_scope='static_necessary_conditions_v1', time_unit='ticks',
-                time_tick_seconds=p.time_tick_seconds, pool_lower_bound=lower_bound,
+                time_tick_seconds=p.time_tick_seconds, time_tick_subdivision=p.time_tick_subdivision,
+                pool_lower_bound=lower_bound,
                 stock_bounds=stock_bounds, order_bounds=order_bounds, errors=errors,
                 limitation='Passing necessary conditions does not prove feasibility or a minimum pool.')
 

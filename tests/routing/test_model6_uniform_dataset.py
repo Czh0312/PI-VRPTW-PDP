@@ -44,8 +44,8 @@ def test_reproducible_semantics_across_output_directories(generated,tmp_path):
     assert a['semantic_dataset_sha256']==b['semantic_dataset_sha256']
     # All bytes match after replacing only the output-root references.
     for file in a['artifact_sha256']:
-        left=(generated.parent/file).read_text().replace(str(generated.parent),'<SUITE>')
-        right=(second.parent/file).read_text().replace(str(second.parent),'<SUITE>')
+        left=(generated.parent/file).read_text().replace(str(generated.parent).replace('\\', '\\\\'),'<SUITE>').replace(str(generated.parent),'<SUITE>')
+        right=(second.parent/file).read_text().replace(str(second.parent).replace('\\', '\\\\'),'<SUITE>').replace(str(second.parent),'<SUITE>')
         assert left==right,file
 
 

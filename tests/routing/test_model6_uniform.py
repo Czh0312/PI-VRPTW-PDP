@@ -177,7 +177,7 @@ assert 'gurobipy' not in sys.modules
 
 @pytest.mark.parametrize('options',[
     dict(batch_count_candidates=[]),dict(batch_count_candidates=[0]),dict(batch_count_candidates=[True]),
-    dict(batch_count_candidates=[1,1]),dict(batch_count_candidates=[3]),dict(min_phase_minutes=0),
+    dict(batch_count_candidates=[1,1]),dict(batch_count_candidates=[66]),dict(min_phase_minutes=0),
     dict(min_phase_minutes=40,batch_count_candidates=[2]),dict(optimize_cutoffs=True),
 ])
 def test_invalid_uniform_domains_rejected(options):
@@ -249,7 +249,7 @@ def test_cli_uniform_cycle_freezes_inputs_and_reports_actual_k(tmp_path):
     assert saved['cycle_batch_count']==len(saved['batches'])
 
 
-def test_uniform_comparison_runner_preserves_all_runs_and_uniform_windows(tmp_path):
+def test_uniform_comparison_runner_preserves_all_runs_and_uniform_windows(tmp_path, exact_available):
     from tools.data.build_model6_demo_suite import build_suite
     from experiments.runs.run_model6_uniform_comparison import main
     path=build_suite(tmp_path/'data')

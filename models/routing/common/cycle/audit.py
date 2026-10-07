@@ -92,7 +92,8 @@ def _audit(problem, result, repeat):
                                       quantity=quantity, source=label))
 
     if (result.get('schema_version') != 2 or result.get('policy_version') != VERSION
-            or result.get('time_unit') != 'ticks' or result.get('time_tick_seconds') != p.time_tick_seconds):
+            or result.get('time_unit') != 'ticks' or result.get('time_tick_seconds') != p.time_tick_seconds
+            or result.get('time_tick_subdivision', 1) != p.time_tick_subdivision):
         error('INVALID_SOLUTION_SCHEMA')
     if result.get('operating_policy') is not None and result['operating_policy'] != p.as_dict():
         # JSON converts the dataclass batch tuple into a list.

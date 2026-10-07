@@ -108,11 +108,17 @@ class MultiBatchInstance:
                                       for o in self.orders if o.satellite == s and o.batch == b.id)
                         for s in self.satellites for b in p.batches}
         self.batch_demands = {b.id: sum(o.count for o in self.orders if o.batch == b.id) for b in p.batches}
-        if _physical_source is not None and p.time_tick_seconds==_physical_source.operating_policy.time_tick_seconds:
-            # M6 changes batches, quantities and cutoffs, not the road matrix
-            # or time precision. Reuse validated immutable physical metrics.
-            self._travel = _physical_source._travel
-            self._service_ticks = _physical_source._service_ticks
+        if (_physical_source is not None
+                and p.time_tick_seconds == _physical_source.operating_policy.time_tick_seconds
+                and p.time_tick_subdivision % _physical_source.operating_policy.time_tick_subdivision == 0):
+            # Preserve already-rounded physical durations when refining an
+            # equal partition's clock; the road matrix and minutes are fixed.
+            factor = p.time_tick_subdivision // _physical_source.operating_policy.time_tick_subdivision
+            self._travel = (_physical_source._travel if factor == 1 else
+                            {key: value * factor for key, value in _physical_source._travel.items()})
+            self._service_ticks = (_physical_source._service_ticks if factor == 1 else
+                {(type(s.service_time), s.service_time, p.time_tick_seconds, p.time_tick_subdivision):
+                 _physical_source.service(s.id) * factor for s in network.satellites})
         else:
             self._travel = {(a, b): p.ticks(network.travel_time(a, b))
                             for a in network.nodes for b in network.nodes}
@@ -126,7 +132,8 @@ class MultiBatchInstance:
 
     def service(self, satellite):
         raw = self.network.nodes[satellite].service_time
-        key = (type(raw), raw, self.operating_policy.time_tick_seconds)
+        key = (type(raw), raw, self.operating_policy.time_tick_seconds,
+               self.operating_policy.time_tick_subdivision)
         if key not in self._service_ticks:
             self._service_ticks[key] = self.operating_policy.ticks(raw)
         return self._service_ticks[key]

@@ -176,9 +176,11 @@ def test_m8_accepts_nondivisible_horizon_and_exact_phase_ticks():
     p = CalendarCycleInstance(source.network, source.orders, policy, dict(batch_count_candidates=[3]),
                               source.cost_profile.config, model=8)
     assert p.balanced_boundaries(3) == (0, 43, 87, 131)
-    with pytest.raises(ValueError, match='divisible'):
-        CalendarCycleInstance(source.network, source.orders, policy, dict(batch_count_candidates=[3]),
-                              source.cost_profile.config, model=7)
+    equal = CalendarCycleInstance(source.network, source.orders, policy, dict(batch_count_candidates=[3]),
+                                  source.cost_profile.config, model=7)
+    child = equal.for_count(3)
+    assert child.operating_policy.time_tick_subdivision == 3
+    assert {child.operating_policy.minutes(b.end-b.start) for b in child.operating_policy.batches} == {131/3}
     # Seven-second ticks deliberately have nonterminating minute fractions.
     policy = replace(source.operating_policy, time_tick_seconds=7)
     p = CalendarCycleInstance(source.network, source.orders, policy,
@@ -244,7 +246,14 @@ def test_cli_native_cases_override_and_snapshot(tmp_path, number):
     manifest = json.loads((tmp_path/'run/manifest.json').read_text())
     assert manifest['calendar_config']['model'] == number
     assert (tmp_path/f'run/source_snapshot/models/routing/variants/model_{number}/exact/model.py').is_file()
-    override = main(['--case', 'data/model6/mechanism_v1/reuse_high_pool/m6_case.json', '--model', str(number),
+    # Keep the override fixture portable; archived generated cases contain
+    # absolute paths from the machine that originally produced the dataset.
+    portable = json.loads(Path(case).read_text(encoding='utf-8'))
+    portable.update(model=6)
+    portable['joint_batch_options']['schedule_mode'] = 'uniform_cycle'
+    source_case = tmp_path/'source_m6.json'
+    source_case.write_text(json.dumps(portable), encoding='utf-8')
+    override = main(['--case', str(source_case), '--model', str(number),
                      '--batch-count-candidates', '1', '2', '--time', '.2', '--iterations', '30',
                      '--output', str(tmp_path/'override')])
     assert override['audit']['valid'] and override['model'] == number

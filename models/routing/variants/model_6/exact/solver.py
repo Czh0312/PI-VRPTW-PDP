@@ -47,6 +47,7 @@ def solve_exact(problem, time_limit=60, seed=42, verbose=False):
                       if problem.optimize_cutoffs else 'full_joint_batch_pool_cost_integer_time_MILP'),
                   candidate_slots=len(problem.operating_policy.batches),
                   time_tick_seconds=problem.operating_policy.time_tick_seconds,
+                  time_tick_subdivision=problem.operating_policy.time_tick_subdivision,
                   e2_max_trips_per_vehicle=problem.operating_policy.e2_max_trips_per_vehicle)
         result['info']=info
         if not m.SolCount:

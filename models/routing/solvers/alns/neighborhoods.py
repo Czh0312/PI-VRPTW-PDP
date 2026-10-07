@@ -93,7 +93,7 @@ def _route_score(problem, route, goods, vehicle_ready):
     if any(k == 'p' for _, k in tasks):
         late += max(0, completed-p.batches[-1].cutoff)
     distance += problem.distance(previous, site)
-    return distance+1e6*(load_penalty+max(0, len(dbatches)-1))+late*p.time_tick_seconds/60*1e4, completed
+    return distance+1e6*(load_penalty+max(0, len(dbatches)-1))+p.minutes(late)*1e4, completed
 
 
 def destroy_repair(problem, original, rng, mode, deadline, *, scorer=None, cache_distances=False,

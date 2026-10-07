@@ -315,7 +315,7 @@ def build_model(problem, *, verbose=False, deadline=None):
         physical_vehicles={}
         for layer in ('e1','e2'):
             parts[layer+'_distance']=gp.quicksum(r['distance'] for r in routes[layer])*rates['distance_scale_to_km']*rates[layer+'_distance_cost_per_km']
-            parts[layer+'_work']=gp.quicksum(r['work_ticks'] for r in routes[layer])*p.time_tick_seconds/60*rates[layer+'_work_cost_per_minute']
+            parts[layer+'_work']=gp.quicksum(r['work_ticks'] for r in routes[layer])*p.minutes(1)*rates[layer+'_work_cost_per_minute']
             parts[layer+'_trips']=gp.quicksum(r['used'] for r in routes[layer])*rates[layer+'_trip_cost']
             groups={}
             for r in routes[layer]:

@@ -1,0 +1,643 @@
+diff --git a/cli/multibatch.py b/cli/multibatch.py
+index afc5cadde..a7850d73c 100644
+--- a/cli/multibatch.py
++++ b/cli/multibatch.py
+@@ -184,7 +184,7 @@ def run_case(config, fleet, *, case_path=None, output=None):
+         for row in audit.get('clean_stock', []):
+             lines.append(f"| {row['batch_id']} | {row['available']} | {row['demand']} | {row['after']} |")
+         lines += ['', f"连续两个大周期重放：{audit.get('periodic_replay', {}).get('valid', False)}。",
+-                  '', '时间表 JSON 使用整数 ticks；分钟 = ticks × time_tick_seconds / 60。']
++                  '', '时间表 JSON 使用整数 ticks；分钟 = ticks × time_tick_seconds / (60 × time_tick_subdivision)，细分倍率缺省为1。']
+         if not instance.reusable:
+             lines += ['一次性包装的重放检查车辆与配送服务；每个周期重新购入包装，不声明容器闭环。']
+         if instance.free_assignment:
+diff --git a/cli/route.py b/cli/route.py
+index 0e153cdd7..f02d05cd3 100644
+--- a/cli/route.py
++++ b/cli/route.py
+@@ -23,7 +23,9 @@ def main(argv=None):
+                            help='M6 基础版：优化周期批次数，均分周期，各批共用相对分界点')
+     schedules.add_argument('--candidate-slots',dest='uniform_cycle',action='store_false',default=None,
+                            help='M6 历史候选时段模式，保留输入批次起止')
+-    parser.add_argument('--batch-count-candidates',type=int,nargs='+',help='M6–M8 周期分批的 K 搜索范围，例如 1 2 3')
++    counts = parser.add_mutually_exclusive_group()
++    counts.add_argument('--batch-count-candidates',type=int,nargs='+',help='显式指定用于诊断的 K 子集')
++    counts.add_argument('--all-batch-counts',action='store_true',help='M6–M8 允许全部满足周期及最短阶段约束的正整数 K')
+     parser.add_argument('--min-phase-minutes',type=float,help='M6–M8 各阶段最短时长，默认1分钟（场景假设）')
+     cutoffs=parser.add_mutually_exclusive_group()
+     cutoffs.add_argument('--optimize-cutoffs',dest='optimize_cutoffs',action='store_true',default=None,
+@@ -73,11 +75,13 @@ def main(argv=None):
+         if args.uniform_cycle:
+             options['schedule_mode']='uniform_cycle'
+         config['joint_batch_options']=options
+-    if args.batch_count_candidates is not None or args.min_phase_minutes is not None:
++    if args.all_batch_counts or args.batch_count_candidates is not None or args.min_phase_minutes is not None:
+         if config['model'] not in (7, 8) and (config['model']!=6 or options.get('schedule_mode')!='uniform_cycle'):
+             raise ValueError('Batch-count and phase-minimum options require M6 --uniform-cycle or M7/M8')
+         if args.batch_count_candidates is not None:
+             options['batch_count_candidates']=args.batch_count_candidates
++        elif args.all_batch_counts:
++            options['batch_count_candidates']='all_positive_integers'
+         if args.min_phase_minutes is not None:
+             options['min_phase_minutes']=args.min_phase_minutes
+         config['joint_batch_options']=options
+diff --git a/docs/model6_joint_batch_cost_design.md b/docs/model6_joint_batch_cost_design.md
+index a91fe2093..66268cabd 100644
+--- a/docs/model6_joint_batch_cost_design.md
++++ b/docs/model6_joint_batch_cost_design.md
+@@ -4,7 +4,7 @@
+ 
+ ## 2026-10-05 基础版调整：等长批次、共同分界
+ 
+-先研究均匀分批，再把各批分界不同时长与批次长度不同作为后续扩展。基础版通过 `schedule_mode=uniform_cycle` 实现：周期总长H固定；K属于显式有限集合，L=H/K；第b批开始s_b=t0+(b-1)L、结束e_b=t0+bL，分界c_b=s_b+d。所有批次共用整数分界时长d，满足m≤d≤L-m，m为显式最短阶段时长。因此同一个方案内，各批的第一阶段、第二阶段分别等长，绝对钟点不同。
++先研究均匀分批，再把各批分界不同时长与批次长度不同作为后续扩展。基础版通过 `schedule_mode=uniform_cycle` 实现：周期总长H固定；K为正整数决策，L=H/K；第b批开始s_b=t0+(b-1)L、结束e_b=t0+bL，分界c_b=s_b+d。所有批次共用整数分界时长d，满足m≤d≤L-m，m为显式最短阶段时长。因此同一个方案内，各批的第一阶段、第二阶段分别等长，绝对钟点不同。
+ 
+ 订单分批、N及两级路线仍联合优化原成本目标。K变化会重建全部批次起止，不能只减少旧候选日历中的配送启用数。K为全周期的划分数，有配送的批次和实际空箱回运轮数另行报告；关闭配送的周期区间不会被误称为已删除的时间段。固定候选日历下逐批截点自由的旧实现保留用于历史复现。
+ 
+@@ -12,7 +12,7 @@
+ 
+ 输入仍保留顾客绝对送取窗、release_time、需求、固定分仓、道路、车辆、清洗及费用。新日历覆盖整个cycle_start到cycle_end，包括原日历尾部的空白；末轮总仓卸箱加清洗必须在cycle_end前完成。第二阶段仍允许二级回收；本轮全取量依据二级卸回前置仓完成时刻≤c_b确定，迟到空箱留待后续回运。没有按箱数乘清洗时间，也没有新增清洗排队假设。
+ 
+-整数刻度要求H能被所有候选K整除，若不能明确拒绝而不悄悄生成不等长批次。默认K=1至原候选批次数、m=1分钟；二者都是可配置研究范围，不是运营实测事实。重新划分仅接受原allowed_batch_ids覆盖所有原批次的订单，已有时间/批次限制不得静默放宽。允许更大K时应显式声明并测试。
++2026-10-07：默认允许全部满足 `1≤K≤floor(H/(2m))` 的正整数，m=1分钟仍为显式场景约束。上界由有限周期和两阶段最短时长推出，不再由原批数或1/2/3列表决定。均分需要分数刻度时，为每个K单独细分时钟并记录倍率，保持原物理分钟与严格等长批次；不要求K整除原周期刻度。显式K列表仅用于历史复现和诊断。重新划分仅接受原allowed_batch_ids覆盖所有原批次的订单，已有时间/批次限制不得静默放宽。
+ 
+ 当前代码和配置见 [模型6入口说明](../models/routing/variants/model_6/README.md)。原有成本证据状态不因本次时间表调整改变，未校准费用不代表真实人民币节约。
+ 
+diff --git a/docs/model7_model8_calendar_design.md b/docs/model7_model8_calendar_design.md
+index a2550f556..2fbb96b4b 100644
+--- a/docs/model7_model8_calendar_design.md
++++ b/docs/model7_model8_calendar_design.md
+@@ -4,15 +4,15 @@
+ 
+ | 模型 | 周期批次数 K | 各批长度 | 批内分界 |
+ | --- | --- | --- | --- |
+-| M6 `uniform_cycle` | 有限候选集合中优化 | H/K | 共同相对时长 d |
+-| M7 `uniform_independent_cutoffs` | 有限候选集合中优化 | H/K | 各批独立 d_b |
+-| M8 `flexible_cycle` | 有限候选集合中优化 | 各批独立 L_b，总和 H | 各批独立 d_b |
++| M6 `uniform_cycle` | 正整数，由周期和最短阶段约束定界 | H/K | 共同相对时长 d |
++| M7 `uniform_independent_cutoffs` | 正整数，由周期和最短阶段约束定界 | H/K | 各批独立 d_b |
++| M8 `flexible_cycle` | 正整数，由周期和最短阶段约束定界 | 各批独立 L_b，总和 H | 各批独立 d_b |
+ 
+ ## 数学范围
+ 
+ 给定原周期 [t0,t1]，H=t1−t0，最短阶段时长 m。在每个固定 K 的子问题内，M7 使用 s_b=t0+(b−1)H/K、e_b=t0+bH/K；每个 c_b 独立满足 s_b+m≤c_b≤e_b−m。
+ 
+-M8 的批次边界为整数刻度变量 x_0,…,x_K，约束 x_0=t0、x_K=t1、x_{b−1}+m≤c_b≤x_b−m。令 s_b=x_{b−1}、e_b=x_b、L_b=x_b−x_{b−1}，因此批次覆盖完整周期，连续且不重叠，每批至少 2m。无额外比例相等、长度候选网格或需求排序限制。M8 不要求 H 能被 K 整除；M7 与均匀 M6 相同，不能整除时明确拒绝输入。
++M8 的批次边界为整数刻度变量 x_0,…,x_K，约束 x_0=t0、x_K=t1、x_{b−1}+m≤c_b≤x_b−m。令 s_b=x_{b−1}、e_b=x_b、L_b=x_b−x_{b−1}，因此批次覆盖完整周期，连续且不重叠，每批至少 2m。无额外比例相等、长度候选网格或需求排序限制。2026-10-07起，K默认为全部 `1≤K≤floor(H/(2m))` 的正整数；M6/M7在不能整除原刻度时自动细分该K的时钟，保持原物理时长和严格等长；M8保留原时钟。
+ 
+ 订单分配 y_ib、配送启用 z_b、箱池 N、两级路线、车辆和实际作业时刻继续联合优化。各模型使用同一成本评价，包括箱池、距离、车辆、趟次、占用工时和固定周转费用。成本参数的来源状态保持不变。
+ 
+@@ -55,14 +55,14 @@ ALNS 不导入 Gurobi 或精确后端；精确法也不导入 ALNS。两模型
+ 
+ ## 输入和运行
+ 
+-保留 schema_version=2、multi_batch_cutoff_v1 及 `joint_batch_options`；必须提供显式 release_time、allowed_batch_ids 和 economic_config。重新划分周期要求每笔订单允许全部原日历批次；不能静默丢掉已有的批次限制。默认 K 范围为 1 至原日历批次数，m 默认 1 分钟，都是可配置的场景假设。
++保留 schema_version=2、multi_batch_cutoff_v1 及 `joint_batch_options`；必须提供显式 release_time、allowed_batch_ids 和 economic_config。重新划分周期要求每笔订单允许全部原日历批次；不能静默丢掉已有的批次限制。省略批数配置或设为 `all_positive_integers` 时，K上界仅由周期和阶段最短时长确定。m 默认 1 分钟，仍为可配置的场景假设。显式K列表保留用于历史复现或诊断；旧输入可用CLI的 `--all-batch-counts` 覆盖。
+ 
+ ```json
+ {
+   "model": 8,
+   "joint_batch_options": {
+     "schedule_mode": "flexible_cycle",
+-    "batch_count_candidates": [1, 2, 3],
++    "batch_count_candidates": "all_positive_integers",
+     "min_phase_minutes": 1,
+     "pool_min": 1,
+     "pool_max": 131
+diff --git a/docs/novelty_overlap_audit_20261004.md b/docs/novelty_overlap_audit_20261004.md
+index 22de15a60..399c791ac 100644
+--- a/docs/novelty_overlap_audit_20261004.md
++++ b/docs/novelty_overlap_audit_20261004.md
+@@ -1,5 +1,7 @@
+ # 当前项目与已发表研究的重叠及创新证据审查
+ 
++**当前状态提示（2026-10-06）：** 本文保留10月4日审查快照。当前新增 M6–M8 已内生优化批次日历、订单归批、箱池与成本，最新实验也出现 N<Q 的方案；本文“批次/池是输入”和旧560份实验结论不能概括当前全部模型。请优先阅读[10月6日重新评估](novelty_reassessment_20261006.md)。
++
+ 审查日期：2026-10-04；食品RTI全文补核与本报告更新完成于2026-10-05。用途：硕士学位论文选题、贡献表述和补充实验决策。审查对象为现行 static_batch_suite_v2、multi_batch_cutoff_v1 和 M1–M5；不把旧 M5 中转模型、旧 M6–M8 或 V1 实验算作当前成果。
+ 
+ ## 1. 结论与证据边界
+diff --git a/docs/transport_container_ratio_tests_v1.md b/docs/transport_container_ratio_tests_v1.md
+index 3b193161a..e305ee750 100644
+--- a/docs/transport_container_ratio_tests_v1.md
++++ b/docs/transport_container_ratio_tests_v1.md
+@@ -1,5 +1,7 @@
+ # 运输与容器成本比例测试 v1
+ 
++2026-10-07 当前配置：一级距离系数改为0.5，箱池25、二级0.056470588、追踪0.1、磨损0.5、实际回库清洗0.2保持。完整目标为 `0.5D1+0.056470588D2+25N+0.6U+0.2R`。M6–M8批次数允许所有满足周期及最短阶段约束的正整数；当前780分钟周期、每阶段至少1分钟推出 `1≤K≤390`，不再限定1/2/3，等长模型自动细分非整除K的时钟。新版30份配置见 `config/cases/20261007_pool25_truck0p5_allK_v1/manifest.json`，状态为已准备、尚未正式重跑。生成入口为 `python -m tools.data.build_cost_ratio_suite`；旧参数的结果仍只属于旧实验。
++
+ 日期：2026-10-06。用途：测试数据集和模型在不同运输/箱池权衡下的表现。采用无量纲评价，不作为运营利润估计。30 份配置已生成并通过现有费用模块检查，尚未重新求解。
+ 
+ 用户纠正后恢复正式实验：六例×M3/M5/M6/M7/M8，每例每模型总预算300秒；M6–M8的一次求解自行搜索K1/2/3并返回最低有效费用。箱25、一级1、二级0.056470588、磨损0.5、追踪0.1、按回库清洗0.2，其他物理输入和算法保持。结果见 `output/model35678_comparison/20261006_pool25_truck1_autoK_5min_v1/`；30/30独立路线和双周期审计通过，18/18联合调用自动择优检查通过，16个实际两批并减箱、2个单批。下方分别固定K、每个K300秒的结果只作为机制诊断，不等价于自动选择批次的正式实验。
+diff --git a/models/routing/common/cycle/audit.py b/models/routing/common/cycle/audit.py
+index 84e26b7fb..9f0e35395 100644
+--- a/models/routing/common/cycle/audit.py
++++ b/models/routing/common/cycle/audit.py
+@@ -92,7 +92,8 @@ def _audit(problem, result, repeat):
+                                       quantity=quantity, source=label))
+ 
+     if (result.get('schema_version') != 2 or result.get('policy_version') != VERSION
+-            or result.get('time_unit') != 'ticks' or result.get('time_tick_seconds') != p.time_tick_seconds):
++            or result.get('time_unit') != 'ticks' or result.get('time_tick_seconds') != p.time_tick_seconds
++            or result.get('time_tick_subdivision', 1) != p.time_tick_subdivision):
+         error('INVALID_SOLUTION_SCHEMA')
+     if result.get('operating_policy') is not None and result['operating_policy'] != p.as_dict():
+         # JSON converts the dataclass batch tuple into a list.
+diff --git a/models/routing/common/cycle/calendar.py b/models/routing/common/cycle/calendar.py
+index b3e5d1a2d..a5ed7cc83 100644
+--- a/models/routing/common/cycle/calendar.py
++++ b/models/routing/common/cycle/calendar.py
+@@ -12,6 +12,7 @@ import math
+ 
+ from .joint import JointBatchInstance, audit_joint_solution, STRATEGY
+ from .policy import Batch, integer, nonnegative
++from .batch_counts import batch_count_domain, equal_batch_clock
+ 
+ SCHEDULE_MODES = {7: 'uniform_independent_cutoffs', 8: 'flexible_cycle'}
+ STRATEGIES = {7: 'independent_cutoff_cost_v1', 8: 'flexible_batch_cost_v1'}
+@@ -33,28 +34,17 @@ class CalendarCycleInstance(JointBatchInstance):
+                          {k: options[k] for k in ('pool_min', 'pool_max') if k in options}, economic_config)
+         if any(set(o.allowed_batch_ids) != set(self.batch_map) for o in self.orders):
+             raise ValueError('Repartitioning requires every order to allow all source batches')
+-        raw = options.get('batch_count_candidates', list(range(1, len(self.batch_map)+1)))
+-        if not isinstance(raw, (list, tuple)) or not raw:
+-            raise ValueError('batch_count_candidates must be a nonempty list')
+-        counts = [integer(k, 'batch_count_candidate', 1) for k in raw]
+-        if len(set(counts)) != len(counts):
+-            raise ValueError('Duplicate batch count candidate')
+         minimum = nonnegative(options.get('min_phase_minutes', 1), 'min_phase_minutes')
+         if minimum <= 0:
+             raise ValueError('min_phase_minutes must be positive')
+         self.minimum_phase_ticks = self.operating_policy.ticks(minimum)
+         self.cycle_duration = self.operating_policy.cycle_end-self.operating_policy.cycle_start
+-        for k in counts:
+-            if self.cycle_duration < 2*k*self.minimum_phase_ticks:
+-                raise ValueError(f'K={k}: both phases must meet min_phase_minutes')
+-            if model == 7 and self.cycle_duration % k:
+-                raise ValueError(f'K={k}: cycle ticks must be divisible by K for equal batches')
+         self.model_number = model
+         self.schedule_mode = mode
+-        self.batch_count_candidates = tuple(sorted(counts))
++        self.batch_count_candidates = batch_count_domain(options, self.cycle_duration, self.minimum_phase_ticks)
+         self.options = deepcopy({**options, 'schedule_mode': mode})
+         self._calendars = OrderedDict()
+-        self._counts = {}
++        self._counts = OrderedDict()
+ 
+     @property
+     def calendar_contract(self):
+@@ -66,8 +56,13 @@ class CalendarCycleInstance(JointBatchInstance):
+ 
+     def balanced_boundaries(self, count):
+         count = self.validate_count(count)
+-        p = self.operating_policy
+-        return tuple(p.cycle_start+i*self.cycle_duration//count for i in range(count+1))
++        p, _, factor = self.count_clock(count)
++        return tuple(p.cycle_start+i*self.cycle_duration*factor//count for i in range(count+1))
++
++    def count_clock(self, count):
++        if self.model_number == 7:
++            return equal_batch_clock(self, count)
++        return self.operating_policy, self.orders, 1
+ 
+     def validate_count(self, count):
+         count = integer(count, 'cycle_batch_count', 1)
+@@ -80,10 +75,10 @@ class CalendarCycleInstance(JointBatchInstance):
+         if not isinstance(boundaries, (list, tuple)) or len(boundaries) != count+1:
+             raise ValueError('batch_boundaries must contain K+1 integer ticks')
+         checked = tuple(integer(v, 'batch_boundary') for v in boundaries)
+-        p = self.operating_policy
++        p, _, factor = self.count_clock(count)
+         if checked[0] != p.cycle_start or checked[-1] != p.cycle_end:
+             raise ValueError('Batch calendar must cover the entire original cycle')
+-        if any(b-a < 2*self.minimum_phase_ticks for a, b in zip(checked, checked[1:])):
++        if any(b-a < 2*self.minimum_phase_ticks*factor for a, b in zip(checked, checked[1:])):
+             raise ValueError('Batch lengths must leave both minimum phases')
+         if self.model_number == 7 and checked != self.balanced_boundaries(count):
+             raise ValueError('M7 requires equal batch lengths')
+@@ -94,11 +89,12 @@ class CalendarCycleInstance(JointBatchInstance):
+             boundaries = self.balanced_boundaries(count)
+         key = self.validated_boundaries(count, boundaries)
+         if key not in self._calendars:
+-            p, minimum = self.operating_policy, self.minimum_phase_ticks
++            p, source_orders, factor = self.count_clock(count)
++            minimum = self.minimum_phase_ticks*factor
+             batches = tuple(Batch(f'b{i+1}', a, (a+b)//2, b)
+                             for i, (a, b) in enumerate(zip(key, key[1:])))
+             ids = tuple(b.id for b in batches)
+-            orders = [replace(o, batch=ids[0], allowed_batch_ids=ids) for o in self.orders]
++            orders = [replace(o, batch=ids[0], allowed_batch_ids=ids) for o in source_orders]
+             child = JointBatchInstance(self.network, orders, replace(p, batches=batches),
+                         dict(pool_min=self.pool_min, pool_max=self.pool_max, optimize_cutoffs=True,
+                              min_phase_ticks=minimum),
+@@ -116,6 +112,9 @@ class CalendarCycleInstance(JointBatchInstance):
+             return self.fixed_calendar(count)
+         if count not in self._counts:
+             self._counts[count] = VariableCalendarInstance(self, count)
++            if len(self._counts) > 8:
++                self._counts.popitem(last=False)
++        self._counts.move_to_end(count)
+         return self._counts[count]
+ 
+     def selected_problem(self, result):
+diff --git a/models/routing/common/cycle/instance.py b/models/routing/common/cycle/instance.py
+index 4681c8fe6..c45c8a7cb 100644
+--- a/models/routing/common/cycle/instance.py
++++ b/models/routing/common/cycle/instance.py
+@@ -108,11 +108,17 @@ class MultiBatchInstance:
+                                       for o in self.orders if o.satellite == s and o.batch == b.id)
+                         for s in self.satellites for b in p.batches}
+         self.batch_demands = {b.id: sum(o.count for o in self.orders if o.batch == b.id) for b in p.batches}
+-        if _physical_source is not None and p.time_tick_seconds==_physical_source.operating_policy.time_tick_seconds:
+-            # M6 changes batches, quantities and cutoffs, not the road matrix
+-            # or time precision. Reuse validated immutable physical metrics.
+-            self._travel = _physical_source._travel
+-            self._service_ticks = _physical_source._service_ticks
++        if (_physical_source is not None
++                and p.time_tick_seconds == _physical_source.operating_policy.time_tick_seconds
++                and p.time_tick_subdivision % _physical_source.operating_policy.time_tick_subdivision == 0):
++            # Preserve already-rounded physical durations when refining an
++            # equal partition's clock; the road matrix and minutes are fixed.
++            factor = p.time_tick_subdivision // _physical_source.operating_policy.time_tick_subdivision
++            self._travel = (_physical_source._travel if factor == 1 else
++                            {key: value * factor for key, value in _physical_source._travel.items()})
++            self._service_ticks = (_physical_source._service_ticks if factor == 1 else
++                {(type(s.service_time), s.service_time, p.time_tick_seconds, p.time_tick_subdivision):
++                 _physical_source.service(s.id) * factor for s in network.satellites})
+         else:
+             self._travel = {(a, b): p.ticks(network.travel_time(a, b))
+                             for a in network.nodes for b in network.nodes}
+@@ -126,7 +132,8 @@ class MultiBatchInstance:
+ 
+     def service(self, satellite):
+         raw = self.network.nodes[satellite].service_time
+-        key = (type(raw), raw, self.operating_policy.time_tick_seconds)
++        key = (type(raw), raw, self.operating_policy.time_tick_seconds,
++               self.operating_policy.time_tick_subdivision)
+         if key not in self._service_ticks:
+             self._service_ticks[key] = self.operating_policy.ticks(raw)
+         return self._service_ticks[key]
+diff --git a/models/routing/common/cycle/policy.py b/models/routing/common/cycle/policy.py
+index eaf78c495..915f3017a 100644
+--- a/models/routing/common/cycle/policy.py
++++ b/models/routing/common/cycle/policy.py
+@@ -48,6 +48,7 @@ class MultiBatchPolicy:
+     e2_turnaround_time: int = 0
+     policy_version: str = VERSION
+     terminal_policy: str = 'all_clean_at_depot'
++    time_tick_subdivision: int = 1
+ 
+     @property
+     def single_day(self):
+@@ -69,7 +70,7 @@ class MultiBatchPolicy:
+ 
+     def ticks(self, minutes, rounding='ceil'):
+         nonnegative(minutes, 'time')
+-        scaled = Decimal(str(minutes)) * 60 / self.time_tick_seconds
++        scaled = Decimal(str(minutes)) * 60 * self.time_tick_subdivision / self.time_tick_seconds
+         if rounding == 'exact':
+             if scaled != scaled.to_integral_value():
+                 raise ValueError('Calendar boundaries must be multiples of time_tick_seconds')
+@@ -77,7 +78,7 @@ class MultiBatchPolicy:
+         return int(scaled.to_integral_value(rounding=(ROUND_CEILING if rounding == 'ceil' else ROUND_FLOOR)))
+ 
+     def minutes(self, ticks):
+-        return ticks * self.time_tick_seconds / 60.0
++        return ticks * self.time_tick_seconds / (60.0 * self.time_tick_subdivision)
+ 
+     @classmethod
+     def from_config(cls, config):
+@@ -98,7 +99,8 @@ class MultiBatchPolicy:
+         if config.get('terminal_policy', 'all_clean_at_depot') != 'all_clean_at_depot':
+             raise ValueError('Only all_clean_at_depot is supported')
+         tick = integer(config['time_tick_seconds'], 'time_tick_seconds', 1)
+-        converter = cls(0, 1, (), 0, 0, 1, tick)
++        subdivision = integer(config.get('time_tick_subdivision', 1), 'time_tick_subdivision', 1)
++        converter = cls(0, 1, (), 0, 0, 1, tick, time_tick_subdivision=subdivision)
+         start = converter.ticks(config['cycle_start'], 'exact')
+         end = converter.ticks(config['cycle_end'], 'exact')
+         if end <= start:
+@@ -129,10 +131,12 @@ class MultiBatchPolicy:
+                    integer(config['container_pool_size'], 'container_pool_size'),
+                    times.pop('cleaning_duration'),
+                    integer(config['e2_max_trips_per_vehicle'], 'e2_max_trips_per_vehicle', 1),
+-                   time_tick_seconds=tick, **times)
++                   time_tick_seconds=tick, time_tick_subdivision=subdivision, **times)
+ 
+     def as_dict(self, problem=None):
+         result = asdict(self)
++        if self.time_tick_subdivision == 1:
++            result.pop('time_tick_subdivision')
+         result.update(time_unit='ticks', pickup_policy='cutoff_all_available',
+                       batch_overlap=False, allow_transfers=False,
+                       input_time_unit='minutes', objective_mode='distance')
+diff --git a/models/routing/common/cycle/precheck.py b/models/routing/common/cycle/precheck.py
+index 7b67e8806..08e4711e7 100644
+--- a/models/routing/common/cycle/precheck.py
++++ b/models/routing/common/cycle/precheck.py
+@@ -125,7 +125,8 @@ def check_necessary_conditions(problem, travel_bounds=None):
+         fail('POOL_BELOW_NECESSARY_BOUND', pool=p.container_pool_size, lower_bound=lower_bound)
+     return dict(passed=not errors, proven_infeasible=bool(errors),
+                 proof_scope='static_necessary_conditions_v1', time_unit='ticks',
+-                time_tick_seconds=p.time_tick_seconds, pool_lower_bound=lower_bound,
++                time_tick_seconds=p.time_tick_seconds, time_tick_subdivision=p.time_tick_subdivision,
++                pool_lower_bound=lower_bound,
+                 stock_bounds=stock_bounds, order_bounds=order_bounds, errors=errors,
+                 limitation='Passing necessary conditions does not prove feasibility or a minimum pool.')
+ 
+diff --git a/models/routing/common/cycle/state.py b/models/routing/common/cycle/state.py
+index b001a9eb8..45a51abc9 100644
+--- a/models/routing/common/cycle/state.py
++++ b/models/routing/common/cycle/state.py
+@@ -4,7 +4,8 @@ from .policy import VERSION
+ 
+ def empty_result(problem, method):
+     p = problem.operating_policy
+-    return dict(schema_version=2, policy_version=VERSION, time_unit='ticks',
++    return dict(**({'time_tick_subdivision': p.time_tick_subdivision} if p.time_tick_subdivision != 1 else {}),
++                schema_version=2, policy_version=VERSION, time_unit='ticks',
+                 model=problem.model_number, packaging='reusable' if problem.reusable else 'single_use',
+                 time_tick_seconds=p.time_tick_seconds, objective_mode='distance',
+                 operating_policy=p.as_dict(), solver=method,
+diff --git a/models/routing/common/cycle/uniform.py b/models/routing/common/cycle/uniform.py
+index 288015712..1a3537743 100644
+--- a/models/routing/common/cycle/uniform.py
++++ b/models/routing/common/cycle/uniform.py
+@@ -2,11 +2,13 @@
+ from __future__ import annotations
+ 
+ from copy import deepcopy
++from collections import OrderedDict
+ from dataclasses import replace
+ import math
+ 
+ from .joint import JointBatchInstance, audit_joint_solution
+ from .policy import Batch, integer, nonnegative
++from .batch_counts import batch_count_domain, equal_batch_clock
+ 
+ 
+ class UniformCycleInstance(JointBatchInstance):
+@@ -24,25 +26,14 @@ class UniformCycleInstance(JointBatchInstance):
+         # Accept only explicit freedom across the entire source calendar.
+         if any(set(o.allowed_batch_ids) != set(self.batch_map) for o in self.orders):
+             raise ValueError('Uniform cycle requires every order to allow all source batches; preserve restrictions explicitly')
+-        raw = options.get('batch_count_candidates', list(range(1,len(self.batch_map)+1)))
+-        if not isinstance(raw,(list,tuple)) or not raw:
+-            raise ValueError('batch_count_candidates must be a nonempty list')
+-        counts = [integer(k,'batch_count_candidate',1) for k in raw]
+-        if len(set(counts)) != len(counts):
+-            raise ValueError('Duplicate batch count candidate')
+-        self.batch_count_candidates = tuple(sorted(counts))
+         minimum = nonnegative(options.get('min_phase_minutes',1), 'min_phase_minutes')
+         if minimum <= 0:
+             raise ValueError('min_phase_minutes must be positive')
+         self.minimum_phase_ticks = self.operating_policy.ticks(minimum)
+         self.cycle_duration = self.operating_policy.cycle_end-self.operating_policy.cycle_start
+-        for k in counts:
+-            if self.cycle_duration % k:
+-                raise ValueError(f'K={k}: cycle ticks must be divisible by K for exactly equal batches; choose finer time_tick_seconds')
+-            if self.cycle_duration//k < 2*self.minimum_phase_ticks:
+-                raise ValueError(f'K={k}: both phases must meet min_phase_minutes')
++        self.batch_count_candidates = batch_count_domain(options, self.cycle_duration, self.minimum_phase_ticks)
+         self.options = deepcopy(options)
+-        self._count_problems = {}
++        self._count_problems = OrderedDict()
+ 
+     @property
+     def uniform_contract(self):
+@@ -56,20 +47,23 @@ class UniformCycleInstance(JointBatchInstance):
+         if count not in self.batch_count_candidates:
+             raise ValueError('Batch count is outside the configured search domain')
+         if count not in self._count_problems:
+-            p = self.operating_policy
+-            length = self.cycle_duration//count
+-            minimum = self.minimum_phase_ticks
++            p, source_orders, factor = equal_batch_clock(self, count)
++            length = self.cycle_duration*factor//count
++            minimum = self.minimum_phase_ticks*factor
+             offset = min(max(length//2,minimum),length-minimum)
+             batches = tuple(Batch(f'b{i+1}',p.cycle_start+i*length,
+                                   p.cycle_start+i*length+offset,p.cycle_start+(i+1)*length)
+                             for i in range(count))
+             ids = tuple(b.id for b in batches)
+-            orders = [replace(o,batch=ids[0],allowed_batch_ids=ids) for o in self.orders]
++            orders = [replace(o,batch=ids[0],allowed_batch_ids=ids) for o in source_orders]
+             child = JointBatchInstance(self.network,orders,replace(p,batches=batches),
+                         dict(pool_min=self.pool_min,pool_max=self.pool_max,optimize_cutoffs=True,
+                              shared_cutoff=True,shared_min_phase_ticks=minimum),
+                         self.cost_profile.config,_physical_source=self)
+             self._count_problems[count] = child
++            if len(self._count_problems) > 8:
++                self._count_problems.popitem(last=False)
++        self._count_problems.move_to_end(count)
+         return self._count_problems[count]
+ 
+ 
+@@ -90,7 +84,7 @@ def audit_uniform_solution(problem, result, repeat=True):
+     try:
+         count = integer(result['cycle_batch_count'],'cycle_batch_count',1)
+         child = problem.for_count(count)
+-        length = problem.cycle_duration//count
++        length = child.operating_policy.batches[0].end-child.operating_policy.batches[0].start
+         offset = integer(result['shared_cutoff_offset_ticks'],'shared_cutoff_offset_ticks',1)
+         if (result.get('schedule_mode') != 'uniform_cycle' or result.get('batch_mode') != 'uniform_cycle'
+                 or result.get('uniform_cycle_config') != problem.uniform_contract
+diff --git a/models/routing/solvers/alns/neighborhoods.py b/models/routing/solvers/alns/neighborhoods.py
+index 228bbb5bb..984a10a7f 100644
+--- a/models/routing/solvers/alns/neighborhoods.py
++++ b/models/routing/solvers/alns/neighborhoods.py
+@@ -93,7 +93,7 @@ def _route_score(problem, route, goods, vehicle_ready):
+     if any(k == 'p' for _, k in tasks):
+         late += max(0, completed-p.batches[-1].cutoff)
+     distance += problem.distance(previous, site)
+-    return distance+1e6*(load_penalty+max(0, len(dbatches)-1))+late*p.time_tick_seconds/60*1e4, completed
++    return distance+1e6*(load_penalty+max(0, len(dbatches)-1))+p.minutes(late)*1e4, completed
+ 
+ 
+ def destroy_repair(problem, original, rng, mode, deadline, *, scorer=None, cache_distances=False,
+diff --git a/models/routing/solvers/alns/single_batch_scoring.py b/models/routing/solvers/alns/single_batch_scoring.py
+index 1fa43a089..40a161bd6 100644
+--- a/models/routing/solvers/alns/single_batch_scoring.py
++++ b/models/routing/solvers/alns/single_batch_scoring.py
+@@ -72,7 +72,7 @@ class SingleBatchRouteScorer:
+         if any(t[3] == 'p' for t in tasks):
+             late += max(0, completed-self.batch.cutoff)
+         distance += distance_to(previous, site)
+-        return distance+1e6*(load_penalty+0)+late*p.time_tick_seconds/60*1e4, completed
++        return distance+1e6*(load_penalty+0)+p.minutes(late)*1e4, completed
+ 
+ 
+ class _PickupInsertions:
+@@ -150,4 +150,4 @@ class _PickupInsertions:
+         late += max(0, completed+p.e2_turnaround_time-p.cycle_end)
+         late += max(0, completed-scorer.batch.cutoff)
+         distance += distance_to(previous, self.site)
+-        return distance+1e6*(load_penalty+0)+late*p.time_tick_seconds/60*1e4, completed
++        return distance+1e6*(load_penalty+0)+p.minutes(late)*1e4, completed
+diff --git a/models/routing/variants/calendar_search.py b/models/routing/variants/calendar_search.py
+index 970eceda9..b568e02f4 100644
+--- a/models/routing/variants/calendar_search.py
++++ b/models/routing/variants/calendar_search.py
+@@ -59,7 +59,7 @@ def solve_counts(problem, *, method, budget, seed, max_iterations=0, initial_res
+         info = candidate['info']
+         valid = candidate.get('audit', {}).get('valid', False)
+         if valid:
+-            boundaries = [b['start'] for b in candidate['batches']]+[problem.operating_policy.cycle_end]
++            boundaries = [b['start'] for b in candidate['batches']]+[child.operating_policy.cycle_end]
+             attach_calendar_decisions(problem, candidate, count, boundaries)
+             candidate['audit'] = audit_calendar_solution(problem, candidate)
+             valid = candidate['audit']['valid']
+diff --git a/models/routing/variants/model_6/README.md b/models/routing/variants/model_6/README.md
+index 0eef0d50e..7f9338717 100644
+--- a/models/routing/variants/model_6/README.md
++++ b/models/routing/variants/model_6/README.md
+@@ -2,17 +2,17 @@
+ 
+ ## 当前基础版：均匀分批、统一分界（2026-10-05）
+ 
+-用 `joint_batch_options.schedule_mode="uniform_cycle"` 启用。周期 `[t0,t1]` 给定，优化配置范围中的批次数K，重新把**整个周期**均分成K批；每批长度L=(t1-t0)/K。所有批次共用一个相对分界时长d，即 c_b=start_b+d，两个阶段分别长d与L-d。共同分界比例为d/L。订单分批、箱池、路线、车辆及实际服务时刻同时优化。下面的固定候选日程实现作为历史对照保留。
++用 `joint_batch_options.schedule_mode="uniform_cycle"` 启用。周期 `[t0,t1]` 给定，批次数K为正整数决策，重新把**整个周期**均分成K批；每批长度L=(t1-t0)/K。所有批次共用一个相对分界时长d，即 c_b=start_b+d，两个阶段分别长d与L-d。共同分界比例为d/L。订单分批、箱池、路线、车辆及实际服务时刻同时优化。下面的固定候选日程实现作为历史对照保留。
+ 
+     "joint_batch_options": {
+       "schedule_mode": "uniform_cycle",
+-      "batch_count_candidates": [1, 2, 3],
++      "batch_count_candidates": "all_positive_integers",
+       "min_phase_minutes": 1,
+       "pool_min": 1,
+       "pool_max": 131
+     }
+ 
+-默认K范围为1至原日历的批次数，可显式扩展；各阶段最少1分钟是场景假设。整数时间模型要求周期刻度数能被每个候选K整除，不能整除时明确拒绝输入，可调整时间精度或K范围。`allowed_batch_ids`必须覆盖原日历所有批次，避免在重新划分后悄悄丢弃已有批次限制。顾客绝对窗口、货物release_time、物理网络和清洗时长保持输入值。
++2026-10-07：省略K范围或设为 `all_positive_integers` 时，允许全部正整数K，由两阶段最短时长推出上界 `floor(H/(2m))`，不受原日历批数限制。各阶段最少1分钟仍为当前场景假设。H的原始刻度不能被K整除时，为该K自动细分整数时间刻度，保持真正等长批次和原始物理时长；结果记录 `time_tick_subdivision`，分钟等于 `ticks*time_tick_seconds/(60*time_tick_subdivision)`。显式K列表用于历史复现或固定K诊断。`allowed_batch_ids`必须覆盖原日历所有批次，避免在重新划分后悄悄丢弃已有批次限制。顾客绝对窗口、货物release_time、物理网络和清洗时长保持输入值。
+ 
+ 精确求解枚举K，每个K的MILP只有一个共同分界变量。ALNS枚举K，分界移动同步改变所有批次；两套算法共享各自一次调用的总时间/迭代预算，不按K重复增加预算。ALNS不调用精确模型或Gurobi。只有所有配置K均证明最优或不可行，才报告整体成本最优；限时无解不等于不可行。
+ 
+@@ -23,7 +23,7 @@
+ 结果分别记录 `cycle_batch_count`（均匀划分K）、`delivery_batch_count`（有配送的批次）、`actual_recovery_round_count`（实际回运轮数），并保存 `batch_duration_ticks`、`shared_cutoff_offset_ticks`、`shared_cutoff_ratio`、`count_search` 和允许域。独立审计从K重建日历，检查共同分界、两周期车辆与箱子重放、清洗和成本。周期尾部仍须完成清洗，不新增隐含回运轮次。第二阶段可继续回收，截点后的箱子等后续回运。
+ 
+     .venv/bin/python main.py route --case data/model6/uniform_v1_20261005/lade_0823_10aoi/m6_case.json --solver alns --time 15 --iterations 5000
+-    .venv/bin/python main.py route --case /path/to/old_m6_case.json --uniform-cycle --batch-count-candidates 1 2 3 --solver exact --exact-time 30
++    python main.py route --case config/cases/20261007_pool25_truck0p5_allK_v1/0_M6.json --all-batch-counts --solver alns --time 300 --iterations 1000000
+ 
+ CLI的 `--candidate-slots` 可切回历史候选日程；均匀模式不兼容逐批 `--optimize-cutoffs` / `--fixed-cutoffs`。已有起点需来自相同的均匀分批允许域，不能直接套用旧候选日程的解。成本系数仍为未校准的合成单位，最低成本不保证箱数最低。
+ 
+diff --git a/models/routing/variants/model_6/exact/model.py b/models/routing/variants/model_6/exact/model.py
+index 85de4b538..08529df1a 100644
+--- a/models/routing/variants/model_6/exact/model.py
++++ b/models/routing/variants/model_6/exact/model.py
+@@ -315,7 +315,7 @@ def build_model(problem, *, verbose=False, deadline=None):
+         physical_vehicles={}
+         for layer in ('e1','e2'):
+             parts[layer+'_distance']=gp.quicksum(r['distance'] for r in routes[layer])*rates['distance_scale_to_km']*rates[layer+'_distance_cost_per_km']
+-            parts[layer+'_work']=gp.quicksum(r['work_ticks'] for r in routes[layer])*p.time_tick_seconds/60*rates[layer+'_work_cost_per_minute']
++            parts[layer+'_work']=gp.quicksum(r['work_ticks'] for r in routes[layer])*p.minutes(1)*rates[layer+'_work_cost_per_minute']
+             parts[layer+'_trips']=gp.quicksum(r['used'] for r in routes[layer])*rates[layer+'_trip_cost']
+             groups={}
+             for r in routes[layer]:
+diff --git a/models/routing/variants/model_6/exact/solver.py b/models/routing/variants/model_6/exact/solver.py
+index 76f5983eb..83876fcf4 100644
+--- a/models/routing/variants/model_6/exact/solver.py
++++ b/models/routing/variants/model_6/exact/solver.py
+@@ -47,6 +47,7 @@ def solve_exact(problem, time_limit=60, seed=42, verbose=False):
+                       if problem.optimize_cutoffs else 'full_joint_batch_pool_cost_integer_time_MILP'),
+                   candidate_slots=len(problem.operating_policy.batches),
+                   time_tick_seconds=problem.operating_policy.time_tick_seconds,
++                  time_tick_subdivision=problem.operating_policy.time_tick_subdivision,
+                   e2_max_trips_per_vehicle=problem.operating_policy.e2_max_trips_per_vehicle)
+         result['info']=info
+         if not m.SolCount:
+diff --git a/tests/routing/test_model6_uniform.py b/tests/routing/test_model6_uniform.py
+index b6c71f396..b94568521 100644
+--- a/tests/routing/test_model6_uniform.py
++++ b/tests/routing/test_model6_uniform.py
+@@ -177,7 +177,7 @@ assert 'gurobipy' not in sys.modules
+ 
+ @pytest.mark.parametrize('options',[
+     dict(batch_count_candidates=[]),dict(batch_count_candidates=[0]),dict(batch_count_candidates=[True]),
+-    dict(batch_count_candidates=[1,1]),dict(batch_count_candidates=[3]),dict(min_phase_minutes=0),
++    dict(batch_count_candidates=[1,1]),dict(batch_count_candidates=[66]),dict(min_phase_minutes=0),
+     dict(min_phase_minutes=40,batch_count_candidates=[2]),dict(optimize_cutoffs=True),
+ ])
+ def test_invalid_uniform_domains_rejected(options):
+@@ -249,7 +249,7 @@ def test_cli_uniform_cycle_freezes_inputs_and_reports_actual_k(tmp_path):
+     assert saved['cycle_batch_count']==len(saved['batches'])
+ 
+ 
+-def test_uniform_comparison_runner_preserves_all_runs_and_uniform_windows(tmp_path):
++def test_uniform_comparison_runner_preserves_all_runs_and_uniform_windows(tmp_path, exact_available):
+     from tools.data.build_model6_demo_suite import build_suite
+     from experiments.runs.run_model6_uniform_comparison import main
+     path=build_suite(tmp_path/'data')
+diff --git a/tests/routing/test_model6_uniform_dataset.py b/tests/routing/test_model6_uniform_dataset.py
+index ff1d9dd44..0eea29d9e 100644
+--- a/tests/routing/test_model6_uniform_dataset.py
++++ b/tests/routing/test_model6_uniform_dataset.py
+@@ -44,8 +44,8 @@ def test_reproducible_semantics_across_output_directories(generated,tmp_path):
+     assert a['semantic_dataset_sha256']==b['semantic_dataset_sha256']
+     # All bytes match after replacing only the output-root references.
+     for file in a['artifact_sha256']:
+-        left=(generated.parent/file).read_text().replace(str(generated.parent),'<SUITE>')
+-        right=(second.parent/file).read_text().replace(str(second.parent),'<SUITE>')
++        left=(generated.parent/file).read_text().replace(str(generated.parent).replace('\\', '\\\\'),'<SUITE>').replace(str(generated.parent),'<SUITE>')
++        right=(second.parent/file).read_text().replace(str(second.parent).replace('\\', '\\\\'),'<SUITE>').replace(str(second.parent),'<SUITE>')
+         assert left==right,file
+ 
+ 
+diff --git a/tests/routing/test_model78_calendar.py b/tests/routing/test_model78_calendar.py
+index 8f4af48ce..a7d17dd60 100644
+--- a/tests/routing/test_model78_calendar.py
++++ b/tests/routing/test_model78_calendar.py
+@@ -176,9 +176,11 @@ def test_m8_accepts_nondivisible_horizon_and_exact_phase_ticks():
+     p = CalendarCycleInstance(source.network, source.orders, policy, dict(batch_count_candidates=[3]),
+                               source.cost_profile.config, model=8)
+     assert p.balanced_boundaries(3) == (0, 43, 87, 131)
+-    with pytest.raises(ValueError, match='divisible'):
+-        CalendarCycleInstance(source.network, source.orders, policy, dict(batch_count_candidates=[3]),
+-                              source.cost_profile.config, model=7)
++    equal = CalendarCycleInstance(source.network, source.orders, policy, dict(batch_count_candidates=[3]),
++                                  source.cost_profile.config, model=7)
++    child = equal.for_count(3)
++    assert child.operating_policy.time_tick_subdivision == 3
++    assert {child.operating_policy.minutes(b.end-b.start) for b in child.operating_policy.batches} == {131/3}
+     # Seven-second ticks deliberately have nonterminating minute fractions.
+     policy = replace(source.operating_policy, time_tick_seconds=7)
+     p = CalendarCycleInstance(source.network, source.orders, policy,
+@@ -244,7 +246,14 @@ def test_cli_native_cases_override_and_snapshot(tmp_path, number):
+     manifest = json.loads((tmp_path/'run/manifest.json').read_text())
+     assert manifest['calendar_config']['model'] == number
+     assert (tmp_path/f'run/source_snapshot/models/routing/variants/model_{number}/exact/model.py').is_file()
+-    override = main(['--case', 'data/model6/mechanism_v1/reuse_high_pool/m6_case.json', '--model', str(number),
++    # Keep the override fixture portable; archived generated cases contain
++    # absolute paths from the machine that originally produced the dataset.
++    portable = json.loads(Path(case).read_text(encoding='utf-8'))
++    portable.update(model=6)
++    portable['joint_batch_options']['schedule_mode'] = 'uniform_cycle'
++    source_case = tmp_path/'source_m6.json'
++    source_case.write_text(json.dumps(portable), encoding='utf-8')
++    override = main(['--case', str(source_case), '--model', str(number),
+                      '--batch-count-candidates', '1', '2', '--time', '.2', '--iterations', '30',
+                      '--output', str(tmp_path/'override')])
+     assert override['audit']['valid'] and override['model'] == number
+diff --git a/tools/data/build_model6_static_suite.py b/tools/data/build_model6_static_suite.py
+index ab3890ee6..5c1a5032d 100644
+--- a/tools/data/build_model6_static_suite.py
++++ b/tools/data/build_model6_static_suite.py
+@@ -87,7 +87,8 @@ def build_suite(destination,source_manifest='data/manifest.json',families=None,b
+                         cost_source_type='synthetic_mechanism',currency='synthetic_units')
+         if uniform_cycle:
+             provenance.update(schedule_mode='uniform_cycle',calendar_assumption='Repartition entire original cycle uniformly; all batches share a relative cutoff',
+-                              batch_count_candidates=list(batch_count_candidates or range(1,record['batch_count']+1)),
++                              batch_count_candidates=(list(batch_count_candidates) if batch_count_candidates is not None
++                                                      else 'all_positive_integers'),
+                               min_phase_minutes=min_phase_minutes)
+         _json(folder/'adaptation.json',provenance)
+         shared['dataset_metadata']=str(folder/'adaptation.json')
+@@ -95,7 +96,8 @@ def build_suite(destination,source_manifest='data/manifest.json',families=None,b
+         options=dict(pool_min=1,pool_max=source_problem.total)
+         if uniform_cycle:
+             options.update(schedule_mode='uniform_cycle',min_phase_minutes=min_phase_minutes,
+-                           batch_count_candidates=list(batch_count_candidates or range(1,record['batch_count']+1)))
++                           batch_count_candidates=(list(batch_count_candidates) if batch_count_candidates is not None
++                                                   else 'all_positive_integers'))
+         elif optimize_cutoffs:
+             calendar=source_problem.operating_policy
+             bounds={b.id:[calendar.minutes(b.start)+min_phase_minutes,

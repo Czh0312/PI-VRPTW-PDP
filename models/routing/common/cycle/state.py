@@ -4,7 +4,8 @@ from .policy import VERSION
 
 def empty_result(problem, method):
     p = problem.operating_policy
-    return dict(schema_version=2, policy_version=VERSION, time_unit='ticks',
+    return dict(**({'time_tick_subdivision': p.time_tick_subdivision} if p.time_tick_subdivision != 1 else {}),
+                schema_version=2, policy_version=VERSION, time_unit='ticks',
                 model=problem.model_number, packaging='reusable' if problem.reusable else 'single_use',
                 time_tick_seconds=p.time_tick_seconds, objective_mode='distance',
                 operating_policy=p.as_dict(), solver=method,
