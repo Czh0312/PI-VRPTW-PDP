@@ -5,7 +5,7 @@ import random
 
 import pytest
 
-from configuration.loader import load_routing_case, resolve_project_path
+from tools.configuration.loader import load_routing_case, resolve_project_path
 from models.routing.common.cycle import MultiBatchInstance, load_instance
 from models.routing.common.cycle.audit import audit_solution
 from models.routing.common.cycle.precheck import check_necessary_conditions

@@ -1,36 +1,79 @@
-# 配置
+# 参数配置
 
-`cases/single_batch_demo.json` 是当前默认 B=1 示例；`cases/multibatch_demo.json` 是多批示例。
-`baselines/` 是需显式 `--baseline` 的历史 M1–M4 案例。
-`routing/` 的基础车队配置同时是派生数据来源，保留哈希与来源。
-`cost/cases/multibatch_synthetic.json` 仅用于新版费用算术演示。其余历史费用参数保留为参数参考，不代表当前经济性验证。
+按参数用途查找和修改；本目录不放订单、节点或距离矩阵。Python 读取与合并逻辑目前在
+[`tools/configuration/`](../tools/configuration/loader.py)。
 
-LaDe V2 另有可显式选择的人民币参考配置：`cost/cases/lade_hangzhou_v2_single_batch.json`（M1–M4）和 `cost/cases/lade_hangzhou_v2_multibatch.json`（M5）。它们结合公开价格/工资代理与明确的情景假设，来源、公式和使用命令见 [参数核实说明](../reference/cost/05_lade_v2_economic_parameters_20260930.md)。它们不改变求解默认值，也不适用于没有公里尺度的 Zhou 坐标。M5 的 `container_lifetime_uses` 按实际发出箱次分摊，不等于 `pool_amortization_cycles` 的运营周期数；两种口径不能同时启用。
+| 类别 | 目录 | 内容与入口 |
+| --- | --- | --- |
+| 车辆 | [vehicles/](vehicles/) | 一级/二级车辆数量、载重、容积、速度；按 Zhou 小例、大例、LaDe、机制例区分 |
+| 容器 | [containers/](containers/) | 容器重量、体积、初始池量；[pool_ratio.json](containers/pool_ratio.json) 是 M1–M5 的统一需求比例入口 |
+| 运行规则 | [operations/](operations/) | 周期、批次、装卸、清洗、周转、闭合规则；单批对比共用一份运行规则 |
+| 成本 | [cost/](cost/) | `synthetic/` 算术示例、`lade/` 人民币参考参数、`scenarios/` 成本情景、`transport_ratio_v1/` 运输/容器比例参数 |
+| 求解参数 | [solvers/](solvers/) | `exact/` 的预算和求解后端；`alns/` 的预算、迭代数、种子和算法选项 |
+| 数据生成 | [datasets/](datasets/) | 指定版本数据集的生成规则、规模、时间窗和资源假设；不是运行时对已有数据的覆盖 |
+| 实验组合 | [experiments/](experiments/) | 选择数据、模型、求解参数、成本与业务场景；`examples/` 是当前示例，`baselines/` 是显式历史基线 |
 
-## 容器数量的统一入口
+每组数据自身保存的 `fleet.json`、`policy.json` 是该数据版本的输入快照，不能通过修改它们
+为已完成实验重新定义参数。要做新的参数实验，应在这里声明新组合。
 
-只修改 `routing/container_pools.json`，单次求解、批量实验和单批次模型比较默认共用这一份设置：
+## 常用入口
+
+```sh
+# 单批 M3 默认示例
+.venv/bin/python main.py route --case config/experiments/examples/single_batch_demo.json
+
+# 多批 M5 示例
+.venv/bin/python main.py route --case config/experiments/examples/multibatch_demo.json
+
+# M8 日历示例
+.venv/bin/python main.py route --case config/experiments/examples/model8_demo.json
+```
+
+[六组案例的 M3/M5/M6/M7/M8 成本对比](experiments/pool25_truck0p5_allK_20261007/manifest.json)
+按“数据集名称 + model_编号”命名，使用
+[300 秒 ALNS 参数](solvers/alns/comparison_300s.json) 与
+[运输/容器成本情景](cost/scenarios/truck_tricycle_pool25_truck0p5_clean02_v1.json)。
+对应六份单批订单已移至 [data/experiment_inputs/](../data/experiment_inputs/pool25_truck0p5_allK_20261007/)。
+[运输成本比例清单](experiments/transport_ratio_v1.json) 引用其专属费用参数，不混入车辆或算法参数。
+
+## 参数引用与优先级
+
+JSON 的 `$include` 列表引用其他参数文件，路径相对仓库根目录，也支持绝对路径。
+例如 [多批实验配置](experiments/examples/multibatch_demo.json) 引用精确与 ALNS 参数，
+再选择车辆和运行规则；车辆文件引用容器物理属性。
 
 ```json
 {
-  "demand_ratio": 1.0
+  "$include": [
+    "config/solvers/alns/multibatch_demo.json",
+    "config/solvers/exact/multibatch_demo.json"
+  ],
+  "model": 5,
+  "solver": "alns"
 }
 ```
 
-总池量 `N = ceil(当前案例的总容器需求 Q × demand_ratio)`。总需求来自订单的 `container_count` 之和，与数据规模标签、顾客数无关。例如比例为 1.0 时，需求为 7、12、50 的案例分别使用 7、12、50 个容器，不会给所有小规模案例统一分配 131 个。
-比例调成 0.6 时，以上案例分别使用 5、8、30 个。这里的 N 是周期开始时的清洁容器总数；各批次共用，回收、卸载、清洗完成后才能复用。B=1 要求 N ≥ Q，因此降低比例可能使单批次不可行；多批次是否可行取决于回收和清洗时刻。求解器不会自动调大 N。
+以上是引用方式片段，完整案例还需要数据、订单、车辆和运行规则。
+列表按顺序合并，后面的同名值优先；当前文件自身的值最后覆盖。嵌套对象逐项合并，数组整体替换。
+随后沿用原来的优先级：案例覆盖 `algorithm_config`，命令行显式参数覆盖案例。
+循环引用会报错。`default.json` 只有被明确引用才生效，不会自动覆盖已有案例。
 
-无需额外指定配置路径，正常运行即可：
+M1–M5 默认按 `N = ceil(Q × demand_ratio)` 计算池量，Q 是订单箱次总需求。
+循环池约束适用于 M3–M5；显式 `container_pool_size`、`--container-pool-size`、实验池量扫描
+以及 `--pool-config` 的原有优先级保持不变。设置不足时报告不可行，不自动扩大池量。
+M6–M8 继续使用 `joint_batch_options` 的池上下限和日历允许域，不继承需求比例。
 
-```bash
-.venv/bin/python main.py route --case config/cases/single_batch_demo.json
+新实验会冻结被引用的参数文件，并保存供运行使用的合并值；修改当前参数不会改变已冻结的实验。
+成本公式位于 `models/cost/`，价格来源与适用范围位于 [reference/cost/](../reference/cost/)。
 
-.venv/bin/python experiments/runs/run_multibatch_cycle.py \
-  --dataset-manifest data/manifest.json \
-  --families zhou_Set1_7-2-1 --solver alns --seeds 42 --dry-run
-```
+## 旧路径与复现
 
-`--dry-run` 显示每个任务实际采用的 `pool`。输出保存有效 N 和统一配置快照；实验输入冻结后，再修改统一配置不会改变该实验。数据集 policy 中原有的数量保留用于原始数据验收，日常调参无需修改。示例案例不再重复写数量，旧的逐数据集表和 3 × 3 表均已取消。
+2026-10-07 分类前的 102 份配置及订单原文保存在
+[迁移归档](../archive/config/20261007_before_classification/README.md)，附原文件哈希和新位置对照。
+当前加载器遇到已经移走的旧 `config/` 路径时，会读取归档原文，兼容旧案例与数据来源校验。
+**当前调参使用上面的新目录**；旧路径指向历史值，不是新参数入口。
+成本参数文件保留原文和哈希，其中 `previous_version` 等来源字段继续指向历史版本。
 
-临时实验仍可用 `--container-pool-size 3` 指定单次运行的 N，或在批跑中用 `--pool-sizes 2 3 4` 扫描指定数量、`--suggested-pools` 扫描数据集预设数量；这些显式实验值优先于默认比例。`--pool-config 路径` 可替换统一配置文件，两种运行入口都支持。已冻结生成的案例中的显式 `container_pool_size` 用于复现，不会重新套用当前比例。
-M1/M2 使用一次性包装，循环池约束只适用于 M3/M4/M5。比较批次对距离的影响时保持同一案例的 N 一致；最小池量研究另行扫描 N。
+历史报告、实验结果和数据集保持原内容。直接使用文件系统读取旧路径的历史脚本，需要按对照表
+指定归档位置；当前维护的运行入口已经更新。静态 V2 数据生成器仍读取原始资源输入，保持已有
+数据与来源哈希；重新生成时如实记录当前生成器的源码哈希，不覆盖旧数据清单。

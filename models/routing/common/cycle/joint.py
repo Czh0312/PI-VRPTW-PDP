@@ -5,7 +5,7 @@ from copy import deepcopy
 from dataclasses import replace
 import math
 
-from configuration.loader import load_json
+from tools.configuration.loader import load_json
 from .instance import MultiBatchInstance
 from .policy import integer
 from .state import empty_result

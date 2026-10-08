@@ -42,7 +42,7 @@ def observed_load():
 
 
 def load_case(path):
-    from configuration.loader import load_routing_case
+    from tools.configuration.loader import load_routing_case
     from models.routing.common.cycle import load_instance
     config, fleet = load_routing_case(path)
     return load_instance(config, fleet)

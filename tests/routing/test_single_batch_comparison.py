@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from configuration.loader import load_json, load_routing_case
+from tools.configuration.loader import load_json, load_routing_case
 from models.routing.common.domain.node import Depot, Satellite, Customer
 from models.routing.common.domain.instance import ProblemInstance
 from models.routing.service import solve_routing
@@ -92,14 +92,23 @@ def test_request_cannot_silently_switch_model():
 
 
 def test_unclosed_assignment_never_becomes_global_certificate(monkeypatch):
+    from types import SimpleNamespace
+    from models.routing.solvers.exact import assignment
     from models.routing.solvers.exact import solver as exact_solver
-    from models.routing.solvers.exact.assignment import _solve_enumeration as solve_exact
+    now, examples = [0.0], {}
     def unclosed(fixed, **_):
-        result = solve(fixed)
+        key = tuple(o.satellite for o in fixed.orders)
+        if key not in examples:
+            examples[key] = solve(fixed)
+        result = deepcopy(examples[key])
         result['info'].update(status='TIME_LIMIT', proven_optimal=False, best_bound=0)
+        now[0] += .5
         return result
+    # Exercise revisiting open partitions without spending two wall-clock
+    # seconds repeatedly solving the same fixtures. Keep other clocks real.
+    monkeypatch.setattr(assignment, 'time', SimpleNamespace(perf_counter=lambda: now[0]))
     monkeypatch.setattr(exact_solver, 'solve_exact', unclosed)
-    result = solve_exact(problem(2), time_limit=2)
+    result = assignment._solve_enumeration(problem(2), time_limit=2)
     assert result['audit']['valid']
     assert result['info']['assignments_visited'] == 2
     assert not result['info']['proven_optimal'] and not result['info']['proven_infeasible']
@@ -125,7 +134,7 @@ def test_normalization_removes_arbitrary_slack_and_preserves_distance():
 
 @pytest.mark.parametrize('lifetime_uses', [None, 50])
 def test_cost_prices_only_the_packaging_actually_used(lifetime_uses):
-    rates = load_json('config/cost/cases/single_batch_synthetic.json')
+    rates = load_json('config/cost/synthetic/single_batch_synthetic.json')
     if lifetime_uses is not None:
         rates['container_lifetime_uses'] = lifetime_uses
     p = problem(1)
@@ -155,7 +164,7 @@ def test_replacement_can_undo_an_earlier_break_even():
 def test_comparison_checks_shared_inputs_and_keeps_failed_pairs():
     problems = {i: problem(i) for i in range(1, 5)}
     results = {i: solve(p) for i, p in problems.items()}
-    rates = load_json('config/cost/cases/single_batch_synthetic.json')
+    rates = load_json('config/cost/synthetic/single_batch_synthetic.json')
     compared = compare_single_batch(problems, results, rates)
     assert all(p['available'] for p in compared['comparisons'].values())
     assert not compared['cost_is_optimized']

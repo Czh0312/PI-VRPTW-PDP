@@ -14,7 +14,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-from configuration.loader import load_routing_case, load_json, resolve_project_path
+from tools.configuration.loader import load_routing_case, load_json, resolve_project_path
 from experiments.runs.run_multibatch_cycle import (
     INPUT_KEYS, freeze_inputs, source_snapshot, run_worker, write_json)
 from models.routing.common.cycle import load_instance, MultiBatchPolicy
@@ -62,14 +62,14 @@ def report(comparisons, rows, out, parameters):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--case', default='config/cases/single_batch_demo.json')
+    parser.add_argument('--case', default='config/experiments/examples/single_batch_demo.json')
     parser.add_argument('--solver', choices=('both', 'exact', 'alns'), default='both')
     parser.add_argument('--seeds', nargs='+', type=int, default=[42, 43, 44])
     parser.add_argument('--time', type=float, default=2)
     parser.add_argument('--exact-time', type=float, default=30)
     parser.add_argument('--iterations', type=int, default=5000)
     parser.add_argument('--timeout-overhead', type=float, default=30)
-    parser.add_argument('--economic-config', default='config/cost/cases/single_batch_synthetic.json')
+    parser.add_argument('--economic-config', default='config/cost/synthetic/single_batch_synthetic.json')
     parser.add_argument('--output')
     args = parser.parse_args(argv)
     if any(not math.isfinite(x) or x <= 0 for x in (args.time, args.exact_time, args.timeout_overhead)):

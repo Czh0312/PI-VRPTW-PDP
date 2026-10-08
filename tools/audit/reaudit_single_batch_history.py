@@ -10,7 +10,7 @@ sys.path.insert(0, str(ROOT))
 
 from models.routing.common.cycle import load_instance
 from models.routing.common.cycle.audit import audit_solution
-from configuration.loader import apply_container_pool_size
+from tools.configuration.loader import apply_container_pool_size
 
 
 def main(argv=None):

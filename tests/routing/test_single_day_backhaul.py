@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from configuration.loader import load_routing_case
+from tools.configuration.loader import load_routing_case
 from models.routing.common.domain.instance import ProblemInstance
 from models.routing.common.domain.node import Customer, Depot, Satellite
 from models.routing.common.operating_policy import OperatingPolicy
@@ -160,7 +160,7 @@ def test_invalid_container_dimensions_rejected(bad):
 
 
 def test_case_load_and_serialized_routes_reaudit():
-    cfg, fleet = load_routing_case('config/baselines/zhou_single_day.json')
+    cfg, fleet = load_routing_case('config/experiments/baselines/zhou_single_day.json')
     assert cfg['model'] == 3
     assert fleet['operating_policy']['day_end'] == 1440
     p = problem()

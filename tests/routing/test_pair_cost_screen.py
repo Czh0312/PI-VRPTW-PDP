@@ -1,5 +1,5 @@
 """The pair insertion cost screen must preserve exhaustive repair choices."""
-import json
+from tools.configuration.loader import load_json
 from pathlib import Path
 
 import pytest
@@ -31,7 +31,7 @@ def exhaustive(routes, task_ids, evaluator, satellite, start):
 
 @pytest.mark.parametrize("customer", ["C0", "C3", "C6"])
 def test_pair_screen_matches_exhaustive_across_satellites(customer, monkeypatch):
-    fleet = json.loads((ROOT / "config/routing/validation/zhou_small.json").read_text(encoding="utf-8"))
+    fleet = load_json(ROOT / "config/vehicles/zhou_small.json")
     nodes, _ = parse_dataset(str(ROOT / "data/zhou_later_pickup/small/standard_same_day/Set1_7-2-1b.csv"))
     problem = ProblemInstance(nodes, fleet, speed=1.0)
     problem.aggregate_demands_from_pre_assignment()

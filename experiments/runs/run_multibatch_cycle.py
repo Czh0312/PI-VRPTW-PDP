@@ -17,8 +17,9 @@ import time
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-from configuration.loader import load_routing_case, resolve_project_path
-from configuration.container_pools import apply_pool_config
+from tools.configuration.loader import config_sources, load_routing_case, resolve_project_path
+from tools.configuration.snapshots import freeze_input
+from tools.configuration.container_pools import apply_pool_config
 from experiments.analysis.summarize_multibatch_cycle import summarize
 from experiments.analysis.summarize_static_multibatch import summarize_study
 from models.routing.common.cycle import load_instance, MultiBatchPolicy
@@ -44,6 +45,7 @@ def prepare_variants(args, records):
         source_paths = {resolve_project_path(source).resolve()}
         source_paths.update(resolve_project_path(cfg[key]).resolve() for key in INPUT_KEYS
                             if isinstance(cfg.get(key), str))
+        source_paths = {dependency for path in source_paths for dependency in config_sources(path)}
         source_hashes = {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in source_paths}
         record = records[index] if records else {}
         pools = (suggested_pool_sizes(record) if args.suggested_pools else
@@ -88,6 +90,7 @@ def freeze_inputs(variants, out, dataset_manifest=None):
                          if key in INPUT_KEYS and isinstance(value, str))
     if dataset_manifest:
         originals.add(resolve_project_path(dataset_manifest).resolve())
+    originals = {dependency for path in originals for dependency in config_sources(path)}
     inputs = out/'inputs'
     inputs.mkdir()
     copies, hashes = {}, {}
@@ -97,10 +100,10 @@ def freeze_inputs(variants, out, dataset_manifest=None):
         if str(source) in expected and digest != expected[str(source)]:
             raise ValueError(f'INPUT_CHANGED_DURING_PLANNING: {source}')
         target = inputs/f'{index:04d}_{source.name}'
-        target.write_bytes(payload)
-        copies[str(source)] = str(target)
-        hashes[str(source)] = dict(sha256=digest,
-                                   snapshot=str(target.relative_to(out)))
+        records = freeze_input(source, target, out)
+        item = records[str(source)]
+        copies[str(source)] = str(out/item.get('resolved_snapshot', item['snapshot']))
+        hashes.update(records)
     for variant in variants:
         cfg = variant['config']
         for key in INPUT_KEYS:
@@ -111,7 +114,7 @@ def freeze_inputs(variants, out, dataset_manifest=None):
 
 def source_snapshot(out):
     hashes = {}
-    for directory in ('models', 'configuration', 'cli', 'experiments', 'reporting', 'tools'):
+    for directory in ('models', 'cli', 'experiments', 'tools'):
         for source in sorted((ROOT/directory).rglob('*.py')):
             relative = source.relative_to(ROOT)
             target = out/'source_snapshot'/relative
@@ -223,7 +226,7 @@ def main(argv=None):
     elif any((args.groups, args.sizes, args.batch_counts, args.families, args.suggested_pools, args.source_kinds)):
         parser.error('Dataset filters and suggested pools require --dataset-manifest')
     else:
-        args.case = args.case or ['config/cases/multibatch_demo.json']
+        args.case = args.case or ['config/experiments/examples/multibatch_demo.json']
     variants = prepare_variants(args, selected)
     if args.list_only:
         for item in selected or [dict(case_path=p) for p in args.case]:

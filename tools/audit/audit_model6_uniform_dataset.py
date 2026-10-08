@@ -7,7 +7,7 @@ import csv
 import json
 import math
 
-from configuration.loader import load_routing_case, resolve_project_path
+from tools.configuration.loader import load_routing_case, resolve_project_path
 from models.routing.common.cycle import load_instance
 from tools.data.build_model6_uniform_dataset import digest, load_suite, signature, source_totals, write_json
 

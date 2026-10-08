@@ -6,7 +6,7 @@ import csv
 import json
 from pathlib import Path
 
-from configuration.loader import resolve_project_path
+from tools.configuration.loader import resolve_project_path
 from models.routing.common.data_loader import parse_dataset
 from models.routing.common.domain.instance import ProblemInstance
 from models.routing.common.matrix_loader import load_square_matrix

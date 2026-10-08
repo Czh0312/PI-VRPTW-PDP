@@ -22,7 +22,7 @@ def write(path, value):
 
 
 def worker(job, destination):
-    from configuration.loader import load_routing_case
+    from tools.configuration.loader import load_routing_case
     from models.routing.common.cycle import load_instance
     from models.routing.common.cycle.audit import audit_solution
     from models.routing.variants.model_5.exact import reoptimize_route_pool, route_cover_certificate, solve_exact
@@ -78,7 +78,7 @@ def main():
         parser.error('budgets must be finite and positive')
     if len(set(args.variants)) != len(args.variants):
         parser.error('variants must be distinct')
-    from configuration.loader import load_routing_case, resolve_project_path
+    from tools.configuration.loader import load_routing_case, resolve_project_path
     from models.routing.common.cycle import load_instance
     from models.routing.common.cycle.audit import audit_solution
     output = args.output.resolve()
@@ -114,7 +114,7 @@ def main():
                     case=str(frozen/'case.json'), source_case=source, initial_result=str(frozen/'initial_result.json'),
                     initial_upper=a['objective'], budget=args.time, polish_time=args.polish_time,
                     seed=seed, customers=len({o.customer for o in p.orders})))
-    for source in [*ROOT.glob('models/**/*.py'), *ROOT.glob('configuration/*.py'), Path(__file__).resolve()]:
+    for source in [*ROOT.glob('models/**/*.py'), *ROOT.glob('tools/configuration/*.py'), ROOT/'tools/__init__.py', Path(__file__).resolve()]:
         target = output/'source_snapshot'/source.relative_to(ROOT)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)

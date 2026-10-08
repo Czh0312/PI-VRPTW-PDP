@@ -30,7 +30,10 @@ def sha(p):
 
 
 def load_case(path):
-    from configuration.loader import load_routing_case
+    if (OUT/'candidate_source/configuration/loader.py').is_file():
+        from configuration.loader import load_routing_case
+    else:
+        from tools.configuration.loader import load_routing_case
     from models.routing.common.cycle import load_instance
     config, fleet = load_routing_case(path)
     return load_instance(config, fleet)

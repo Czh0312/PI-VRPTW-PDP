@@ -6,7 +6,7 @@ import csv
 import json
 from pathlib import Path
 
-from configuration.loader import PROJECT_ROOT
+from tools.configuration.loader import PROJECT_ROOT
 
 
 def synthetic_profile(pool_rate=5):

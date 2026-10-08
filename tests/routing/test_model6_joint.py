@@ -262,7 +262,7 @@ def test_frozen_comparison_runs_matched_cost_ablation_and_all_seeds(tmp_path,exa
     assert resources['valid_runs']==9 and not resources['no_incumbent_runs']
     proof=resources['cases'][0]['resource_certificate']
     assert not proof['pool_minimum_proven']
-    from configuration.loader import load_routing_case
+    from tools.configuration.loader import load_routing_case
     from models.routing.common.cycle import load_instance
     from experiments.analysis.summarize_model6_resources import resource_certificate
     p=load_instance(*load_routing_case(out/'cases/0_M6_joint.json',use_pool_config=False))
@@ -289,7 +289,7 @@ def test_evidence_snapshot_is_shared_and_hashes_describe_rewritten_profile(tmp_p
 
 
 def test_case_loading_service_dispatch_and_cli(tmp_path):
-    from configuration.loader import load_routing_case
+    from tools.configuration.loader import load_routing_case
     from models.routing.common.cycle import load_instance
     from models.routing.service import solve_routing
     from cli.route import main

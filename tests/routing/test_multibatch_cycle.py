@@ -4,7 +4,7 @@ from dataclasses import replace
 import json
 import random
 import pytest
-from configuration.loader import load_routing_case
+from tools.configuration.loader import load_routing_case
 from models.routing.common.domain.node import Depot, Satellite, Customer
 from models.routing.common.domain.instance import ProblemInstance
 from models.routing.common.task_builder import build_tasks_for_model
@@ -253,7 +253,7 @@ def test_time_rounding_is_explicit():
 
 
 def test_order_identity_and_balanced_counts(tmp_path):
-    cfg, fleet = load_routing_case('config/cases/multibatch_demo.json')
+    cfg, fleet = load_routing_case('config/experiments/examples/multibatch_demo.json')
     p = load_instance(cfg, fleet)
     assert len(p.orders) == 4 and len({o.customer for o in p.orders}) == 2
     with open(cfg['orders']) as f:
@@ -320,20 +320,20 @@ def test_exact_proves_infeasible_cases(exact, case):
 def test_cli_roundtrip_and_no_overwrite(tmp_path):
     from cli.route import main
     out = tmp_path/'run'
-    r = main(['--case', 'config/cases/multibatch_demo.json', '--time', '.1', '--iterations', '0', '--output', str(out)])
+    r = main(['--case', 'config/experiments/examples/multibatch_demo.json', '--time', '.1', '--iterations', '0', '--output', str(out)])
     assert r['audit']['valid']
     saved = json.loads((out/'result.json').read_text())
-    cfg, fleet = load_routing_case('config/cases/multibatch_demo.json')
+    cfg, fleet = load_routing_case('config/experiments/examples/multibatch_demo.json')
     assert audit_solution(load_instance(cfg, fleet), saved)['valid']
     assert all((out/name).exists() for name in ('timeline.png', 'routes_1.png', 'manifest.json'))
     with pytest.raises(ValueError, match='overwrite'):
-        main(['--case', 'config/cases/multibatch_demo.json', '--output', str(out)])
+        main(['--case', 'config/experiments/examples/multibatch_demo.json', '--output', str(out)])
 
 
 def test_day_end_override_is_not_ambiguous():
     from cli.route import main
     with pytest.raises(ValueError, match='single-day only'):
-        main(['--case', 'config/cases/multibatch_demo.json', '--day-end', '999'])
+        main(['--case', 'config/experiments/examples/multibatch_demo.json', '--day-end', '999'])
 
 
 @pytest.mark.parametrize('pickup_time,pool,expected', [(29, 1, [1, 1]), (30, 2, [0, 2])])
@@ -347,10 +347,10 @@ def test_exact_cutoff_membership_is_two_way(exact, pickup_time, pool, expected):
 
 
 def test_cost_counts_uses_and_separates_investment():
-    from configuration.loader import load_json
+    from tools.configuration.loader import load_json
     from models.cost.multibatch import evaluate_cycle_cost
     p = fixture()
-    config = load_json('config/cost/cases/multibatch_synthetic.json')
+    config = load_json('config/cost/synthetic/multibatch_synthetic.json')
     cost = evaluate_cycle_cost(p, hand_solution(p), config)
     assert cost['period_operating_cost'] == pytest.approx(68.4)
     assert cost['initial_pool_investment'] == 10
@@ -364,9 +364,9 @@ def test_cost_counts_uses_and_separates_investment():
 
 
 def test_box_wear_tracks_two_uses_without_counting_idle_pool_as_wear():
-    from configuration.loader import load_json
+    from tools.configuration.loader import load_json
     from models.cost.multibatch import evaluate_cycle_cost
-    config = load_json('config/cost/cases/multibatch_synthetic.json')
+    config = load_json('config/cost/synthetic/multibatch_synthetic.json')
     config.pop('pool_amortization_cycles')
     config['container_lifetime_uses'] = 10
     for pool in (1, 2):
@@ -385,9 +385,9 @@ def test_box_wear_tracks_two_uses_without_counting_idle_pool_as_wear():
 
 @pytest.mark.parametrize('lifetime', [0, -1, 1.5, True, float('nan')])
 def test_box_lifetime_uses_requires_a_positive_integer(lifetime):
-    from configuration.loader import load_json
+    from tools.configuration.loader import load_json
     from models.cost.multibatch import evaluate_cycle_cost
-    config = load_json('config/cost/cases/multibatch_synthetic.json')
+    config = load_json('config/cost/synthetic/multibatch_synthetic.json')
     config.pop('pool_amortization_cycles')
     config['container_lifetime_uses'] = lifetime
     p = fixture()
@@ -461,7 +461,7 @@ def test_exact_does_not_prepare_a_busy_vehicle(exact):
 
 
 def test_invalid_order_row_and_duplicate_normalized_node(tmp_path):
-    cfg, fleet = load_routing_case('config/cases/multibatch_demo.json')
+    cfg, fleet = load_routing_case('config/experiments/examples/multibatch_demo.json')
     orders = tmp_path/'orders.json'
     orders.write_text('[null]')
     with pytest.raises(ValueError, match='object'):

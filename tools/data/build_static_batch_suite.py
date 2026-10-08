@@ -22,6 +22,7 @@ if str(ROOT) not in sys.path:
 
 VERSION = 'static_batch_suite_v2'
 from tools.data.design_static_scenarios import design_orders, select_territories
+from tools.configuration.loader import LEGACY_CONFIG_ROOT, resolve_project_path
 
 DEFAULT_OUTPUT = ROOT/'data'
 ZHOU_PROFILE = 'zhou_10_per_customer_count_v4'
@@ -45,6 +46,9 @@ def read_csv(path):
 
 def reference(path):
     path = Path(path).resolve()
+    # V2's provenance names are part of its byte-identical published dataset.
+    if path.is_relative_to(LEGACY_CONFIG_ROOT):
+        return (Path('config') / path.relative_to(LEGACY_CONFIG_ROOT)).as_posix()
     try:
         return path.relative_to(ROOT).as_posix()
     except ValueError:
@@ -190,7 +194,7 @@ def build_suite(output=DEFAULT_OUTPUT, source_root=ROOT):
 
     # Two small mechanism families: forced late vs cutoff-sensitive first return.
     demo = source_root/'data/source_inputs/mechanism'
-    demo_fleet_path = source_root/'config/routing/validation/multibatch_fleet.json'
+    demo_fleet_path = resolve_project_path(source_root/'config/routing/validation/multibatch_fleet.json')
     rows = read_csv(demo/'network.csv')
     for mode in ('forced_late', 'cutoff_choice'):
         orders, cohorts = [], {}
@@ -273,7 +277,7 @@ def build_suite(output=DEFAULT_OUTPUT, source_root=ROOT):
     geography = read_csv(real/'nodes_geographic.csv')
     ranking = sorted((r for r in geography if r['node_type'] == 'c'),
                      key=lambda r: (-float(r['weekly_orders']), r['node_id']))
-    real_fleet = source_root/'config/routing/real_cases/lade_hangzhou.json'
+    real_fleet = resolve_project_path(source_root/'config/routing/real_cases/lade_hangzhou.json')
     for source in sorted((real/'instances').glob('*.csv')):
         for size, n in [('small', 10), ('medium', 20), ('medium', 30)]:
             keep = {r['node_id'] for r in ranking[:n]}

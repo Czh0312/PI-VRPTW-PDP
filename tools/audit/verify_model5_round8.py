@@ -15,7 +15,10 @@ sys.path.insert(0, str(OUT/'probes/checkers'))
 import validation_core as check
 import validation_pool as pool
 import validation_conjunction as joint
-from configuration.loader import load_routing_case
+if (OUT/'source_snapshot/configuration/loader.py').is_file():
+    from configuration.loader import load_routing_case
+else:
+    from tools.configuration.loader import load_routing_case
 from models.routing.common.cycle import load_instance
 from models.routing.solvers.exact.multibatch_bounds import distance_certificate
 from models.routing.solvers.exact.multibatch_route_pricing import route_context

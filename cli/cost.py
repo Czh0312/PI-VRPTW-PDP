@@ -1,6 +1,6 @@
 """Price an audited current cycle; use compare-single-batch for lifecycle pairs."""
 import argparse
-from configuration.loader import load_routing_case
+from tools.configuration.loader import load_routing_case
 from .route import DEFAULT_CASE
 
 def main(argv=None):

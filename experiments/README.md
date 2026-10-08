@@ -1,5 +1,28 @@
 # 实验
 
+这里存放实验程序：`runs/` 负责批量运行，`analysis/` 负责分析汇总。
+实验参数位于 `config/experiments/`，生成的结果、图片、报告和 Excel 统一保存到 `output/`。
+例如 `experiments/runs/run_single_batch_benchmark.py` 是程序，
+`output/experiments/m1_m4_comparison_20261004/` 是一次实验的成果。
+
+## 按任务选择入口
+
+| 任务 | 运行模块 | 结果 / 说明 |
+| --- | --- | --- |
+| 单批四模型机制与经济对照 | `experiments.runs.run_single_batch_comparison` | [四模型说明](../docs/single_batch_comparison.md) |
+| M1–M4 全规模算法比较 | `experiments.runs.run_single_batch_benchmark` | [预算与结果](../output/experiments/m1_m4_comparison_20261004/m1_m4_solver_comparison_20261004.md) |
+| 固定批次与池规模扫描 | `experiments.runs.run_multibatch_cycle` | [使用说明](../docs/static_multibatch_implementation.md) |
+| M5 全规模算法比较 | `experiments.runs.run_model5_benchmark` | [预算与结果](../output/experiments/m5_comparison_20261004/m5_solver_comparison_20261004.md) |
+| M5/M6 共享数据比较 | `experiments.runs.run_model5_model6_shared` | [数据与比较口径](../docs/model5_model6_shared_dataset_20261005.md) |
+| M6 等长批次与共同分界 | `experiments.runs.run_model6_uniform_comparison` | [模型设计](../docs/model6_joint_batch_cost_design.md) |
+| M6–M8 日历审查 | `tools.audit.benchmark_model78` | [测评报告](../output/inspections/model78_review_20261005/model78_review_20261005.md) |
+| 运输 / 容器成本比例实验 | `experiments.runs.run_cost_ratio_suite` | [比例测试](../docs/transport_container_ratio_tests_v1.md) |
+| 已保存方案的经济重计价 | `experiments.analysis.recalculate_economics` | [重新核算](../output/economic_recalculation_20261005/economic_recalculation_20261005.md) |
+
+从仓库根目录使用 `.venv/bin/python -m 模块名 --help` 查看参数；新的运行写入新目录。
+M3/M5/M6/M7/M8 最新成本对比的逐轮专属脚本及复现步骤见[结果索引](../output/model35678_comparison/README.md)。
+这些冻结实验脚本维持原路径。通用验证、源码检索与恢复方法见[开发指南](../docs/development.md)。
+
 ## 模型6均匀周期基础版（2026-10-05）
 
 `runs/run_model6_uniform_comparison.py`比较M5原固定日历与M6均匀周期模型，逐次冻结源码与输入、独立审计并保存所有超时和失败。M6的一次总预算在配置K之间分配，各批共用分界；结果分别显示K、箱数、配送批次、实际回运轮数和统一两阶段时长。只有所有K解决才报告整体成本最优。数据生成器用`--uniform-cycle --batch-count-candidates 1 2 3`启用。
@@ -27,7 +50,7 @@
 `runs/run_model5_benchmark.py` 补测 M5 的 B2/B3 精确算法与独立 ALNS，默认覆盖 140 个多批次配置、560 次运行。
 支持 `--prepare-only` 冻结登记、`--resume` 校验快照后恢复，以及 `--after-progress` 等待前一轮实验完成。
 逐规模和批次数分别输出 `runs.csv`、`comparison.csv`、`summary.csv` 与动态 `report.md`。
-正式预算与复现说明见 [M5 全规模补测](../docs/m5_solver_comparison_20261004.md)。
+正式预算与复现说明见 [M5 全规模补测](../output/experiments/m5_comparison_20261004/m5_solver_comparison_20261004.md)。
 
 `runs/run_model6_comparison.py` 对比模型5原距离目标、模型6固定分批成本优化与联合分批成本优化；支持隔离子进程并发、逐次原子保存结果、输入及源码快照和独立物理审计。`tools/data/build_model6_static_suite.py --all-multibatch` 适配当前186个B2/B3配置，保留原物理数据并明确货物释放与合成费用假设。`analysis/summarize_model6_full_suite.py` 重新审计，输出完整箱数/批次数表、按来源与规模汇总、所有缺失对照及种子差异。见 [全量运行汇总](../output/model6_comparison/20261004_static_v2_full/full_summary.md)。
 ## 模型6两窗截点对照（2026-10-05）

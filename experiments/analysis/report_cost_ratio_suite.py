@@ -44,8 +44,11 @@ def localize(config, prior):
     return config
 
 
-def load_config(config):
-    from configuration.loader import load_json
+def load_config(config, snapshot=None):
+    if snapshot is not None and (snapshot/'configuration/loader.py').is_file():
+        from configuration.loader import load_json
+    else:
+        from tools.configuration.loader import load_json
     from models.routing.common.cycle import load_instance
     fleet = load_json(config['routing_config'])
     if 'operating_policy' in config:
@@ -55,7 +58,10 @@ def load_config(config):
 
 
 def verify(out):
-    from configuration.loader import load_routing_case
+    if (out/'source_snapshot/configuration/loader.py').is_file():
+        from configuration.loader import load_routing_case
+    else:
+        from tools.configuration.loader import load_routing_case
     from models.routing.common.cycle import load_instance
     from models.routing.common.cycle.audit import audit_solution
     from models.cost.comparison import evaluate_comparison_cost
@@ -114,7 +120,7 @@ def reprice_prior(out, prior):
         old_job = next(j for j in old_plan['jobs'] if j['id'] == old['id'])
         case_name = old_job['case_path'].replace('\\', '/').rsplit('/', 1)[-1]
         config = localize(read(prior/'cases'/case_name), prior)
-        problem = load_config(config)
+        problem = load_config(config, out/'source_snapshot')
         result_path = prior/'results'/old['id']/'result.json'
         result = read(result_path)
         audit = audit_solution(problem, result)

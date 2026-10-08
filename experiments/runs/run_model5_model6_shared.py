@@ -7,7 +7,7 @@ import json
 import math
 import shutil
 
-from configuration.loader import resolve_project_path
+from tools.configuration.loader import resolve_project_path
 from experiments.analysis.summarize_model6_costs import summarize as summarize_costs
 from tools.data.build_model5_model6_shared_dataset import load_shared_suite, verify_pair
 from .run_model6_comparison import execute_jobs, freeze_case, snapshot_source, write_json

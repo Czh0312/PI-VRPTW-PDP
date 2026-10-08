@@ -8,7 +8,7 @@ import math
 from pathlib import Path
 import statistics
 
-from configuration.loader import resolve_project_path
+from tools.configuration.loader import resolve_project_path
 
 
 GROUPS = {

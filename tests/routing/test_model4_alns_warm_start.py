@@ -1,6 +1,6 @@
 """Regression test for preserving a fixed-assignment M3 incumbent in M4."""
 
-import json
+from tools.configuration.loader import load_json
 from pathlib import Path
 
 from models.routing.alns.types import Route, Solution
@@ -30,9 +30,7 @@ def test_model4_keeps_external_model3_incumbent():
     nodes, _ = parse_dataset(str(
         ROOT / "data/zhou_later_pickup/small/standard_same_day/Set1_7-2-1b.csv"
     ))
-    fleet = json.loads((
-        ROOT / "config/routing/validation/zhou_small.json"
-    ).read_text(encoding="utf-8"))
+    fleet = load_json(ROOT / "config/vehicles/zhou_small.json")
     problem = ProblemInstance(nodes, fleet, speed=fleet.get("speed", 1.0))
     problem.aggregate_demands_from_pre_assignment()
     vps = problem.fleet.e2_per_sat_count

@@ -1,10 +1,10 @@
 """Run the current fixed-batch container model; B=1 is the single-batch case."""
 import argparse
 import sys
-from configuration.loader import PROJECT_ROOT, apply_container_pool_size, load_json, load_routing_case
-from configuration.container_pools import apply_pool_config
+from tools.configuration.loader import PROJECT_ROOT, apply_container_pool_size, load_json, load_routing_case
+from tools.configuration.container_pools import apply_pool_config
 
-DEFAULT_CASE = PROJECT_ROOT / "config/cases/single_batch_demo.json"
+DEFAULT_CASE = PROJECT_ROOT / "config/experiments/examples/single_batch_demo.json"
 
 def load_config(case_path=DEFAULT_CASE, **kwargs):
     return load_routing_case(case_path, **kwargs)

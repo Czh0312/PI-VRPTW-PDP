@@ -1,11 +1,12 @@
 """Acceptance tests for fixed-batch data, provenance and feasibility witnesses."""
 import copy
+import hashlib
 import json
 from pathlib import Path
 import tempfile
 import unittest
 
-from configuration.loader import load_routing_case, resolve_project_path
+from tools.configuration.loader import load_routing_case, resolve_project_path
 from tools.data.build_static_batch_suite import build_suite, digest, read_csv, stable_key
 from tools.data.static_batch_dataset import check_pairing, load_manifest
 
@@ -217,11 +218,21 @@ class StaticBatchDatasetTests(unittest.TestCase):
             self.assertEqual(audit['minimum_pool_for_schedule'], expected[record['case_id']])
 
     def test_generator_is_reproducible_and_preserves_changed_files(self):
-        # Running against the versioned dataset must accept only byte-identical outputs.
-        self.assertEqual(build_suite(MANIFEST.parent), self.manifest)
+        # A maintained generator has a new source hash. Preserve the old
+        # dataset, and compare regenerated artifacts after rebasing paths.
         with tempfile.TemporaryDirectory() as tmp:
-            target = Path(tmp)
-            build_suite(target)
+            target = Path(tmp).resolve()
+            regenerated = build_suite(target)
+            normalized_hashes = {}
+            for relative in self.manifest['artifact_sha256']:
+                payload = (target/relative).read_bytes().replace(str(target).encode(), b'data')
+                self.assertEqual(payload, (MANIFEST.parent/relative).read_bytes(), relative)
+                normalized_hashes[relative] = hashlib.sha256(payload).hexdigest()
+            normalized = json.loads(json.dumps(regenerated).replace(str(target), 'data'))
+            normalized['artifact_sha256'] = normalized_hashes
+            expected = dict(self.manifest, generator_sha256=digest(ROOT/'tools/data/build_static_batch_suite.py'))
+            self.assertEqual(normalized, expected)
+            self.assertEqual(build_suite(target), regenerated)
             case = target/'single_batch/small/mechanism_forced_late/orders.json'
             case.write_text('user change\n')
             with self.assertRaisesRegex(ValueError, 'Refusing to overwrite changed dataset'):

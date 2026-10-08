@@ -1,1 +1,1 @@
-"""Dataset, audit, and reporting tools."""
+"""Shared configuration, dataset, audit, and reporting tools."""

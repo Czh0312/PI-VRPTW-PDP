@@ -7,8 +7,8 @@
 - [完整定义、输入、运行和审计](../../../../docs/model7_model8_calendar_design.md)。
 
 ```sh
-.venv/bin/python main.py route --case config/cases/model7_demo.json --solver exact --exact-time 30
-.venv/bin/python main.py route --case config/cases/model7_demo.json --solver alns --time 3 --iterations 3000
+.venv/bin/python main.py route --case config/experiments/examples/model7_demo.json --solver exact --exact-time 30
+.venv/bin/python main.py route --case config/experiments/examples/model7_demo.json --solver alns --time 3 --iterations 3000
 ```
 
 新增编号不恢复已归档的历史模型。费用示例为合成单位；机制验证不能替代大规模算法实验。

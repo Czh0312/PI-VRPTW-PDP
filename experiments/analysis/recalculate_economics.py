@@ -22,7 +22,7 @@ import time
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from configuration.loader import load_routing_case, resolve_project_path
+from tools.configuration.loader import load_routing_case, resolve_project_path
 from experiments.runs.run_multibatch_cycle import (
     INPUT_KEYS, freeze_inputs, source_snapshot, run_worker)
 from models.routing.common.cycle import load_instance
@@ -112,7 +112,8 @@ def prepare(out, args):
                       ('lade_m5', 'lade_hangzhou_v2_multibatch'),
                       ('zhou_b1', 'single_batch_synthetic'),
                       ('zhou_m5', 'multibatch_synthetic')]:
-        source = ROOT/'config/cost/cases'/f'{name}.json'
+        category = 'lade' if name.startswith('lade_') else 'synthetic'
+        source = ROOT/'config/cost'/category/f'{name}.json'
         target = out/'parameters'/source.name
         target.parent.mkdir(exist_ok=True)
         target.write_bytes(source.read_bytes())

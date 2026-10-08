@@ -1,5 +1,5 @@
 """Atomic exchange moves preserve pickup/delivery coverage and feasibility."""
-import json
+from tools.configuration.loader import load_json
 import time
 
 from tests.routing.baseline_helpers import ROOT, load_problem, as_solution
@@ -9,7 +9,7 @@ from models.routing.common.solution_audit import audit_exact_solution
 
 
 def fixture():
-    fleet = json.loads((ROOT/'config/routing/validation/zhou_small.json').read_text())
+    fleet = load_json(ROOT / 'config/vehicles/zhou_small.json')
     problem = load_problem(ROOT/'data/zhou_later_pickup/small/standard_same_day/Set1_12-2-4.csv',fleet)
     e1 = [['D0','S1d','S1p','D0']]
     e2 = {'S0': [], 'S1': [

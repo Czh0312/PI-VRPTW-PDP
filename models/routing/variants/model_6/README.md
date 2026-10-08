@@ -23,7 +23,7 @@
 结果分别记录 `cycle_batch_count`（均匀划分K）、`delivery_batch_count`（有配送的批次）、`actual_recovery_round_count`（实际回运轮数），并保存 `batch_duration_ticks`、`shared_cutoff_offset_ticks`、`shared_cutoff_ratio`、`count_search` 和允许域。独立审计从K重建日历，检查共同分界、两周期车辆与箱子重放、清洗和成本。周期尾部仍须完成清洗，不新增隐含回运轮次。第二阶段可继续回收，截点后的箱子等后续回运。
 
     .venv/bin/python main.py route --case data/model6/uniform_v1_20261005/lade_0823_10aoi/m6_case.json --solver alns --time 15 --iterations 5000
-    python main.py route --case config/cases/20261007_pool25_truck0p5_allK_v1/0_M6.json --all-batch-counts --solver alns --time 300 --iterations 1000000
+    python main.py route --case config/experiments/pool25_truck0p5_allK_20261007/zhou_Set2_100-10-1_subset50_model_6.json --all-batch-counts --solver alns --time 300 --iterations 1000000
 
 CLI的 `--candidate-slots` 可切回历史候选日程；均匀模式不兼容逐批 `--optimize-cutoffs` / `--fixed-cutoffs`。已有起点需来自相同的均匀分批允许域，不能直接套用旧候选日程的解。成本系数仍为未校准的合成单位，最低成本不保证箱数最低。
 

@@ -26,7 +26,10 @@ def sha(path):
 def worker(job_path):
     job=json.loads(Path(job_path).read_text())
     sys.path.insert(0,job['source_snapshot'])
-    from configuration.loader import load_routing_case
+    if (Path(job['source_snapshot'])/'configuration/loader.py').is_file():
+        from configuration.loader import load_routing_case
+    else:
+        from tools.configuration.loader import load_routing_case
     from models.routing.common.cycle import load_instance
     from models.routing.variants.model_5.exact import logic_benders_certificate
     p=load_instance(*load_routing_case(job['case']))
@@ -66,7 +69,10 @@ def equal(a,b):
 
 def validate(job_path,output_dir=None):
     job=json.loads(Path(job_path).read_text());sys.path.insert(0,job['source_snapshot'])
-    from configuration.loader import load_routing_case
+    if (Path(job['source_snapshot'])/'configuration/loader.py').is_file():
+        from configuration.loader import load_routing_case
+    else:
+        from tools.configuration.loader import load_routing_case
     from models.routing.common.cycle import load_instance
     from models.routing.common.cycle.audit import audit_solution
     from models.routing.solvers.exact.multibatch_logic_benders import _read_model,_write_model,business_fingerprint,source_fingerprint
@@ -151,15 +157,16 @@ def main():
     if any(c not in (20,30) for c in args.cases):parser.error('Only the frozen 20/30 originals are selected here')
     out=Path(args.output).resolve();out.mkdir(parents=True,exist_ok=False)
     snapshot=out/'source_snapshot';snapshot.mkdir()
-    for folder in ('models','configuration'):
+    for folder in ('models','tools/configuration'):
         shutil.copytree(ROOT/folder,snapshot/folder,ignore=shutil.ignore_patterns('__pycache__','*.pyc'))
+    shutil.copy2(ROOT/'tools/__init__.py',snapshot/'tools/__init__.py')
     shutil.copy2(Path(__file__),out/'benchmark_driver.py')
     old=ROOT/'output/experiments/m5_overnight_20261001'
     protected=[old/'combined_certificate.json',old/'best_full_result.json',old/'newpoint9/master/no_good.mps.gz',
                old/'master49/combined_certificate.json',old/'medium25/1/combined_certificate.json',old/'checkpoint.json']
     protected_sha={str(p):sha(p) for p in protected};write(out/'protected_before.json',protected_sha)
     jobs=[]
-    from configuration.loader import load_routing_case
+    from tools.configuration.loader import load_routing_case
     from models.routing.common.cycle import load_instance
     from models.routing.solvers.exact.multibatch_logic_benders import business_fingerprint
     for customers in args.cases:

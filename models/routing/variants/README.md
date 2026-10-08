@@ -22,7 +22,8 @@ M1–M8 每个可运行模型有独立 `model.py`、`exact/`、`alns/` 与 `__in
 精确求解实现位于 `../solvers/exact/`，ALNS 实现位于 `../solvers/alns/`，二者不互相导入。
 M6的完整成本模型和搜索实现分别位于自身的 `exact/` 和 `alns/`；复用公共业务校验和物理传播工具，不调用模型5求解。
 `../common/cycle/` 保存共用输入、业务规则、结果格式与独立审计。
-M2/M4 的精确算法是分仓枚举；其 `exact/model.py` 暴露 `build_subproblem`，并非一个新增的联合选仓 MILP。
+M2/M4 的精确算法按规模选择联合分仓 MILP 或分仓域树，完整枚举保留为显式对照；
+其 `exact/model.py` 同时提供 `build_joint_model` 与固定分仓 `build_subproblem`。
 
 新版 M5 是多批次模型，与已归档的旧 M5 中转模型不同。
 历史 M1–M4 只在 `../baselines/`。当前目录不再嵌套 `model_3/multibatch/` 或 `single_batch/`。

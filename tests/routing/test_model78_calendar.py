@@ -78,30 +78,37 @@ def test_m8_moving_boundary_restores_release_feasibility(exact_available):
             assert r['info']['operator_attempts']['redistribute_lengths'] > 0
 
 
-@pytest.mark.parametrize('number', [7, 8])
-def test_integer_milp_matches_exhaustive_fixed_calendar_oracle(number, exact_available):
+def test_integer_milp_matches_exhaustive_fixed_calendar_oracle(exact_available):
     from models.routing.variants.model_6 import solve_exact
     source = joint_fixture(zero=True, cleaning=1, pool_rate=30)
     policy = replace(source.operating_policy, cycle_end=8,
                      batches=tuple(replace(b, start=i*4, cutoff=i*4+2, end=(i+1)*4)
                                    for i, b in enumerate(source.operating_policy.batches)))
     orders = [replace(o, delivery_window=(0, 6), pickup_window=(0, 7)) for o in source.orders]
-    p = CalendarCycleInstance(source.network, orders, policy, dict(batch_count_candidates=[1, 2]),
-                              source.cost_profile.config, model=number)
-    full = solve_routing(model=number, method='exact', problem=p, exact_time=15)
-    assert full['info']['proven_optimal'] and full['audit']['valid']
-    costs = []
-    for boundaries in [(0, 8)]+[(0, t, 8) for t in ([4] if number == 7 else range(2, 7))]:
-        child = p.fixed_calendar(len(boundaries)-1, boundaries)
-        for cuts in itertools.product(*(range(a+1, b) for a, b in zip(boundaries, boundaries[1:]))):
-            fixed_policy = replace(policy, batches=tuple(replace(b, cutoff=c) for b, c in
-                                                         zip(child.operating_policy.batches, cuts)))
-            fixed = JointBatchInstance(child.network, child.orders, fixed_policy, {}, p.cost_profile.config)
-            r = solve_exact(fixed, time_limit=3)
-            assert r['info']['proven_optimal'] or r['info']['proven_infeasible']
-            if r.get('audit', {}).get('valid'):
-                costs.append(r['info']['objective'])
-    assert full['info']['objective'] == pytest.approx(min(costs))
+    # M7's fixed calendars are a subset of M8's. The physical input and M6
+    # reference formulation are identical for each shared (boundaries, cuts).
+    # Reuse only reference scalar results; still solve M7 and M8 separately.
+    fixed_optima = {}
+    for number in (7, 8):
+        p = CalendarCycleInstance(source.network, orders, policy, dict(batch_count_candidates=[1, 2]),
+                                  source.cost_profile.config, model=number)
+        full = solve_routing(model=number, method='exact', problem=p, exact_time=15)
+        assert full['info']['proven_optimal'] and full['audit']['valid'], number
+        costs = []
+        for boundaries in [(0, 8)]+[(0, t, 8) for t in ([4] if number == 7 else range(2, 7))]:
+            child = p.fixed_calendar(len(boundaries)-1, boundaries)
+            for cuts in itertools.product(*(range(a+1, b) for a, b in zip(boundaries, boundaries[1:]))):
+                key = boundaries, cuts
+                if key not in fixed_optima:
+                    fixed_policy = replace(policy, batches=tuple(replace(b, cutoff=c) for b, c in
+                                                                 zip(child.operating_policy.batches, cuts)))
+                    fixed = JointBatchInstance(child.network, child.orders, fixed_policy, {}, p.cost_profile.config)
+                    r = solve_exact(fixed, time_limit=3)
+                    assert r['info']['proven_optimal'] or r['info']['proven_infeasible'], key
+                    fixed_optima[key] = r['info']['objective'] if r.get('audit', {}).get('valid') else None
+                if fixed_optima[key] is not None:
+                    costs.append(fixed_optima[key])
+        assert full['info']['objective'] == pytest.approx(min(costs)), number
 
 
 @pytest.mark.parametrize('number', [7, 8])
@@ -236,9 +243,9 @@ assert r['audit']['valid'], r
 @pytest.mark.parametrize('number', [7, 8])
 def test_cli_native_cases_override_and_snapshot(tmp_path, number):
     from cli.route import main
-    from configuration.loader import load_routing_case
+    from tools.configuration.loader import load_routing_case
     from models.routing.common.cycle.instance import load_instance
-    case = f'config/cases/model{number}_demo.json'
+    case = f'config/experiments/examples/model{number}_demo.json'
     config, fleet = load_routing_case(case)
     assert load_instance(config, fleet).model_number == number
     r = main(['--case', case, '--solver', 'alns', '--time', '.3', '--iterations', '50', '--output', str(tmp_path/'run')])

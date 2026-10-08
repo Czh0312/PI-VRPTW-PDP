@@ -28,7 +28,7 @@ class BlockOtherSolver(importlib.abc.MetaPathFinder):
         return None
 
 sys.meta_path.insert(0, BlockOtherSolver())
-from configuration.loader import load_routing_case
+from tools.configuration.loader import load_routing_case
 from models.routing.common.cycle import load_instance
 from models.routing.common.cycle.audit import audit_solution
 
@@ -37,7 +37,7 @@ if method == 'shared':
     from models.routing.common.cycle.precheck import check_necessary_conditions
     from models.routing.common.cycle.state import empty_result
     from models.routing.common.cycle.timing import normalize_schedule
-    config, fleet = load_routing_case('config/cases/single_batch_demo.json')
+    config, fleet = load_routing_case('config/experiments/examples/single_batch_demo.json')
     problem = load_instance({**config, 'model': 4}, fleet)
     assignment = input_assignment(problem)
     fixed = assigned_problem(problem, assignment)
@@ -48,7 +48,7 @@ if method == 'shared':
 else:
     from models.routing.service import solve_routing
     for number in range(1, 6):
-        case = 'config/cases/multibatch_demo.json' if number == 5 else 'config/cases/single_batch_demo.json'
+        case = 'config/experiments/examples/multibatch_demo.json' if number == 5 else 'config/experiments/examples/single_batch_demo.json'
         config, fleet = load_routing_case(case)
         problem = load_instance({**config, 'model': number}, fleet)
         result = solve_routing(model=number, method=method, problem=problem,

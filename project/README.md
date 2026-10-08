@@ -16,4 +16,4 @@
 
 默认检查当前项目的 `project/` 目录，没有则创建，保存新交接文件并保留历史索引。全局安装状态：**已安装并验证**，位于 `/Users/chenzeheng/.codex/skills/chat-window-handoff`；项目内技能备份已按用户要求移除。以后在新窗口说“总结聊天窗口”，或显式调用 `$chat-window-handoff`。
 
-本次交接核验：[handoff-verification-20261002.json](handoff-verification-20261002.json)。技能安装记录：[skill-installation-20261002.json](skill-installation-20261002.json)。
+本目录只保留交接文档和索引；技能安装、调试及一次性验证日志完成后清理，不随聊天总结累积。

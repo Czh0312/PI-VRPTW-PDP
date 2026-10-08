@@ -50,7 +50,7 @@ def register():
     write(inputs/'warm_certificates.json', dict(
         reference=payload['experiment']['adaptive_certificate']['reference_certificate'],
         conditional=payload['experiment']['conditional_certificate']))
-    for source in [*ROOT.glob('models/**/*.py'), *ROOT.glob('configuration/*.py'),
+    for source in [*ROOT.glob('models/**/*.py'), *ROOT.glob('tools/configuration/*.py'), ROOT/'tools/__init__.py',
                    Path(__file__).resolve()]:
         target = OUT/'source_snapshot'/source.relative_to(ROOT)
         target.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(source, target)
@@ -59,6 +59,7 @@ def register():
     for source in (NIGHT/'public1500_02').glob('validation_*.py'):
         target = checkers/source.name
         content = source.read_text()
+        content = content.replace('from configuration', 'from tools.configuration')
         if source.name == 'validation_core.py':
             content = content.replace("str(RUNS/'candidate_source')", "str(HERE.parents[1]/'source_snapshot')")
         target.write_text(content)
@@ -122,7 +123,10 @@ def worker(name):
             model.dispose()
         payload = dict(job=job, result=result, scope='Known historical master diagnostic; not a new full M5 solve.')
     else:
-        from configuration.loader import load_routing_case
+        if (OUT/'source_snapshot/configuration/loader.py').is_file():
+            from configuration.loader import load_routing_case
+        else:
+            from tools.configuration.loader import load_routing_case
         from models.routing.common.cycle import load_instance
         from models.routing.common.cycle.audit import audit_solution
         problem = load_instance(*load_routing_case(OUT/'inputs/case.json', use_pool_config=False))

@@ -154,7 +154,7 @@ def test_evaluator_cache_separates_identical_routes_with_different_cutoffs():
 
 def test_cli_variable_cutoffs_and_frozen_initial_solution(tmp_path,exact_available):
     from tools.data.build_model6_demo_suite import build_suite
-    from configuration.loader import load_routing_case
+    from tools.configuration.loader import load_routing_case
     from models.routing.common.cycle import load_instance
     from cli.route import main
     manifest=build_suite(tmp_path/'data')

@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from configuration.loader import load_routing_case, resolve_project_path
+from tools.configuration.loader import load_routing_case, resolve_project_path
 from experiments.runs.run_multibatch_cycle import INPUT_KEYS, freeze_inputs, source_snapshot, write_json
 from experiments.runs.run_single_batch_benchmark import comparisons, execute, fmt, mean, now, save_csv
 from models.routing.common.cycle import load_instance

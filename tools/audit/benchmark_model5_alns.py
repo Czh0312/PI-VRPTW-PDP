@@ -31,7 +31,7 @@ def hashes(folder):
 
 
 def register(out, plan=None):
-    from configuration.loader import load_routing_case, resolve_project_path
+    from tools.configuration.loader import load_routing_case, resolve_project_path
     dataset = json.loads((ROOT/'data/manifest.json').read_text())
     plan = plan or {}
     families = plan.get('families', {'zhou_Set2_100-5-1b_subset50': 'development',
@@ -87,7 +87,11 @@ def register(out, plan=None):
 
 
 def worker(job, destination):
-    from configuration.loader import load_routing_case, apply_container_pool_size
+    # --source may select a sealed snapshot from before the package move.
+    if (ROOT/'configuration/loader.py').is_file():
+        from configuration.loader import load_routing_case, apply_container_pool_size
+    else:
+        from tools.configuration.loader import load_routing_case, apply_container_pool_size
     from models.routing.common.cycle import load_instance
     from models.routing.common.cycle.audit import audit_solution
     from models.routing.service import solve_routing
@@ -159,6 +163,7 @@ def main(argv=None):
     source = phase/'source'
     source.mkdir()
     origin = args.source.resolve() if args.source else ROOT
+    # Retain the old package only when copying an existing historical snapshot.
     for directory in ('models', 'configuration', 'tools'):
         for p in (origin/directory).rglob('*.py'):
             target = source/p.relative_to(origin)

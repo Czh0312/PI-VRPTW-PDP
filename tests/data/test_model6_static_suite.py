@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from configuration.loader import load_routing_case,resolve_project_path
+from tools.configuration.loader import load_routing_case,resolve_project_path
 from models.routing.common.cycle import load_instance
 from tools.data.build_model6_static_suite import build_suite
 

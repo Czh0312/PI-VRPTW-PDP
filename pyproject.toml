@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "2e-vrptw-pdd"
+version = "0.0.0"
+description = "Two-echelon routing and reusable container experiments"
+requires-python = ">=3.9"
+dependencies = [
+    "gurobipy",
+    "matplotlib",
+    "numpy",
+    "pandas",
+    "pyarrow",
+    "openpyxl",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+# Run this research workspace as an editable checkout so data/config paths
+# continue to resolve relative to the repository, rather than site-packages.
+[tool.setuptools.packages.find]
+include = ["cli*", "models*", "experiments*", "tools*"]
+exclude = ["tests*", "archive*", "data*", "output*", "reference*"]
+namespaces = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = ["archive", "reference", "output"]

@@ -14,7 +14,7 @@ from tools.audit.summarize_model5_alns import compare, budget_extension
 
 
 def verify(folder, before='before', after='after'):
-    from configuration.loader import load_routing_case, apply_container_pool_size
+    from tools.configuration.loader import load_routing_case, apply_container_pool_size
     from models.routing.common.cycle import load_instance
     from models.routing.common.cycle.audit import audit_solution
     manifest = json.loads((folder/'benchmark_manifest.json').read_text())

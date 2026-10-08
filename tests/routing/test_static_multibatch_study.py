@@ -10,7 +10,7 @@ import subprocess
 
 import pytest
 
-from configuration.loader import load_routing_case, resolve_project_path
+from tools.configuration.loader import load_routing_case, resolve_project_path
 from experiments.analysis.summarize_static_multibatch import pool_evidence, paired_comparisons
 from experiments.runs.run_multibatch_cycle import main as run_study, run_worker
 from models.routing.common.cycle import MultiBatchInstance, load_instance
@@ -26,7 +26,7 @@ MANIFEST = 'data/manifest.json'
 
 
 def test_pool_bound_accounts_for_unavoidable_late_recovery():
-    cfg, fleet = load_routing_case('config/cases/multibatch_demo.json')
+    cfg, fleet = load_routing_case('config/experiments/examples/multibatch_demo.json')
     fleet['operating_policy']['container_pool_size'] = 2
     result = solve_alns(load_instance(cfg, fleet), max_time=.2)
     assert result['info']['status'] == 'INFEASIBLE'
@@ -87,7 +87,7 @@ def test_exact_precheck_needs_no_gurobi(monkeypatch):
 
 
 def test_satellite_service_time_is_used_by_both_decoder_and_audit(tmp_path):
-    cfg, fleet = load_routing_case('config/cases/multibatch_demo.json')
+    cfg, fleet = load_routing_case('config/experiments/examples/multibatch_demo.json')
     with resolve_project_path(cfg['data']).open() as handle:
         reader = csv.DictReader(handle)
         fields, rows = reader.fieldnames, list(reader)

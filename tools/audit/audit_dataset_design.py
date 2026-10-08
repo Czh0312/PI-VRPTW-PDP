@@ -22,7 +22,7 @@ if str(ROOT) not in sys.path:
 
 import numpy as np
 
-from configuration.loader import load_routing_case, resolve_project_path
+from tools.configuration.loader import load_routing_case, resolve_project_path
 from models.routing.common.cycle import load_instance
 from models.routing.common.cycle.instance import MultiBatchInstance
 from models.routing.common.cycle.audit import audit_solution
@@ -281,7 +281,7 @@ def audit_design(manifest_path, output):
         for p in [Path(__file__), ROOT/'tools/data/build_static_batch_suite.py',
                   ROOT/'models/routing/common/cycle/instance.py', ROOT/'models/routing/common/cycle/policy.py',
                   ROOT/'models/routing/common/cycle/precheck.py', ROOT/'models/routing/common/cycle/audit.py',
-                  ROOT/'models/routing/solvers/alns/evaluator.py', ROOT/'config/routing/container_pools.json']})
+                  ROOT/'models/routing/solvers/alns/evaluator.py', ROOT/'config/containers/pool_ratio.json']})
     make_figures(plots, family_rows, output)
     return result
 

@@ -6,7 +6,7 @@ from collections import Counter
 import csv
 import json
 
-from configuration.loader import resolve_project_path
+from tools.configuration.loader import resolve_project_path
 from tools.data.build_model5_model6_shared_dataset import load_shared_suite, verify_pair
 from tools.data.build_model6_uniform_dataset import signature, write_json
 

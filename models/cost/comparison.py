@@ -1,7 +1,7 @@
 """Price M3/M5 distance schedules and M6-M8 cost schedules under one contract."""
 from __future__ import annotations
 
-from configuration.loader import load_json
+from tools.configuration.loader import load_json
 from models.cost.joint_batch import JointCostProfile
 from models.routing.common.cycle.audit import audit_solution
 

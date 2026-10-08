@@ -27,12 +27,13 @@ def register():
     for file in (PARENT/'inputs').iterdir():
         shutil.copy2(file, inputs/file.name)
     # Case paths still name the same frozen original files; hash them as well.
-    for source in [*ROOT.glob('models/**/*.py'), *ROOT.glob('configuration/*.py'), Path(__file__).resolve()]:
+    for source in [*ROOT.glob('models/**/*.py'), *ROOT.glob('tools/configuration/*.py'), ROOT/'tools/__init__.py', Path(__file__).resolve()]:
         target = OUT/'source_snapshot'/source.relative_to(ROOT)
         target.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(source, target)
     checkers = OUT/'probes/checkers'; checkers.mkdir(parents=True)
     for file in (PARENT/'probes/checkers').glob('*.py'):
         code = file.read_text()
+        code = code.replace('from configuration', 'from tools.configuration')
         if file.name == 'validation_core.py':
             code = code.replace('ROOT = HERE.parents[4]', "ROOT = HERE.parents[1]/'source_snapshot'")
         (checkers/file.name).write_text(code)
@@ -83,7 +84,10 @@ def worker(name):
         log=str(OUT/(name+'.log')), started_at=datetime.now().astimezone().isoformat(), budget=job['budget']))
     write(OUT/'checkpoint.json', checkpoint)
     sys.path.insert(0, str(OUT/'source_snapshot'))
-    from configuration.loader import load_routing_case
+    if (OUT/'source_snapshot/configuration/loader.py').is_file():
+        from configuration.loader import load_routing_case
+    else:
+        from tools.configuration.loader import load_routing_case
     from models.routing.common.cycle import load_instance
     from models.routing.common.cycle.audit import audit_solution
     p = load_instance(*load_routing_case(OUT/'inputs/case.json', use_pool_config=False))

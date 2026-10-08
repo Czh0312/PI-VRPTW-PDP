@@ -7,8 +7,9 @@
 - `alns/`：ALNS 文件夹；`solver.py` 求解。
 - `__init__.py`：公共 API，供 `models/routing/service.py` 调用。
 
-精确算法枚举顾客到仓的分配，每个分配使用共同 MILP；只有全部组合都有证明才能报告全局最优。
-`exact/model.py` 的 `build_subproblem` 只构建一个分仓子问题，不能单独证明自由选仓最优。
+精确算法按规模自动选择联合顾客分仓 MILP 或分仓域树，完整枚举保留为显式对照。
+`exact/model.py` 提供 `build_joint_model` 与固定分仓 `build_subproblem`。全局证明来自联合模型，
+或由最优、不可行证明及有效界闭合的全部分仓域；单个固定分仓子问题不能单独证明自由选仓最优。
 
 精确实现位于 `../../solvers/exact/`，ALNS 实现位于 `../../solvers/alns/`。
 公共日程、容器账本、分仓转换与独立审计位于 `../../common/cycle/`。

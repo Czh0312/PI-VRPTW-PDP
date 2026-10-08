@@ -1,5 +1,5 @@
 """Behavioral checks for route/assignment isolation and no-relay equivalence."""
-import json
+from tools.configuration.loader import load_json
 import random
 from pathlib import Path
 
@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 def problem():
     nodes, _ = parse_dataset(str(
         ROOT / "data/zhou_later_pickup/small/standard_same_day/Set1_7-2-1b.csv"))
-    fleet = json.loads((ROOT / "config/routing/validation/zhou_small.json").read_text())
+    fleet = load_json(ROOT / "config/vehicles/zhou_small.json")
     result = ProblemInstance(nodes, fleet, speed=fleet.get("speed", 1.0))
     result.aggregate_demands_from_pre_assignment()
     return result

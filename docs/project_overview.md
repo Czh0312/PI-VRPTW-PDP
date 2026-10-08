@@ -1,19 +1,22 @@
 # 项目总览
 
-当前规则为 `multi_batch_cutoff_v1`。B=1 支持 M1–M4 的一次性/循环包装与固定/自由分仓对照；B>1 由 M5 支持跨批周转。
-新版 M1/M3 使用共同事件求解器，M2/M4 的精确法按规模采用联合顾客分仓 MILP 或完整枚举，ALNS 使用启发式分仓搜索。
+当前规则为 `multi_batch_cutoff_v1`。M1–M4 支持单批次的一次性/循环包装与固定/自由分仓对照；M5 支持固定分仓、多批次容器周转。M6–M8 联合优化批次数、箱池及路线成本，分别使用等长共同分界、等长独立分界和不等长独立分界。
 
-循环方案保持固定订单批次、一级先送后取、截止库存全取、有限箱池、清洗后释放和全池清洁末态。
-一次性方案只配送，每周期重新购买包装。四模型使用相同输入和配送标准，并审计物理车辆与两周期重放。
+循环方案包含一级先送后取、截止库存全取、有限箱池、清洗后释放和周期末全池清洁归仓。M1–M5 的日历与订单批次给定，M6–M8 在声明的允许域内优化日历及订单分批。可行结果须通过独立物理审计与周期重放。
 
-旧 M5 中转、旧 M6–M8、旧经济报告和旧实验已归档；当前 M5 专指多批次模型。历史 M1–M4 算法仅在显式 --baseline 入口保留，不参与新版对照。
-单批生命周期核算与敏感性已接入，当前参数为虚构演示；真实回收、清洗、损耗、寿命和费用数据仍缺。
+M2/M4 的精确法按规模采用联合分仓 MILP 或分仓域树，完整枚举作为显式对照；ALNS 使用启发式分仓搜索。精确与 ALNS 按需加载、互不导入；ALNS 不加载 Gurobi。
 
-- [单批四模型、经济条件与验证](single_batch_comparison.md)
-- [模型、命令和目录](../README.md)
-- [当前研究计划](static_single_multibatch_study_plan.md)
-- [多批使用说明](model5_multibatch_cycle.md)
-- [数据状态](data_status.md)
-- [清理记录](repository_cleanup_20260929.md)
+当前模型独立位于 `models/routing/variants/model_1/`～`model_8/`。M1–M5 的共享求解内核在 `models/routing/solvers/`，M6–M8 的成本与日历实现在编号目录及 `variants/calendar_search.py`。共同业务规则在 `models/routing/common/cycle/`，成本核算在 `models/cost/`。
 
-各模型独立位于 `models/routing/variants/model_1/`～`model_5/`，共享业务规则在 `models/routing/common/cycle/`，精确求解与 ALNS 分别位于 `models/routing/solvers/exact/` 和 `models/routing/solvers/alns/`。见 [模型布局](model_layout.md)。
+历史 M1–M4 仅在显式 `--baseline` 入口保留。旧 M5–M8 已归档，与当前同编号模型定义不同。研究费用包含合成情景和有来源说明的参考参数；真实容器回收、清洗、损耗及完整经营费用仍有缺口。
+
+- [快速运行和目录职责](../README.md)
+- [完整文档导航](README.md)
+- [开发、验证和复现](development.md)
+- [模型布局和公共入口](model_layout.md)
+- [M6–M8 日历设计](model7_model8_calendar_design.md)
+- [数据及来源状态](../data/README.md)
+- [现有实验与结果](../output/README.md)
+- [原固定分批研究计划](static_single_multibatch_study_plan.md)
+
+带日期的实验报告保留对应版本的采用决策、局限和失败结果；当前模型定义以模型目录及设计说明为入口。

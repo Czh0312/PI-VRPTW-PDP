@@ -5,7 +5,7 @@ from copy import deepcopy
 import hashlib
 import json
 
-from configuration.loader import load_json
+from tools.configuration.loader import load_json
 from models.routing.common.cycle.policy import nonnegative, integer
 
 RATE_FIELDS = (

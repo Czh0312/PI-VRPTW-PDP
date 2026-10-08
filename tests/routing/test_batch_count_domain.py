@@ -86,7 +86,7 @@ def test_unrestricted_search_keeps_all_counts_in_proof_scope(model):
 
 def test_cli_all_counts_overrides_an_existing_restricted_case(tmp_path):
     from cli.route import main
-    r = main(['--case', 'config/cases/model7_demo.json', '--all-batch-counts',
+    r = main(['--case', 'config/experiments/examples/model7_demo.json', '--all-batch-counts',
               '--solver', 'alns', '--time', '1', '--iterations', '200',
               '--output', str(tmp_path/'all_counts')])
     assert r['info']['batch_count_candidates'] == list(range(1, 66))

@@ -27,7 +27,7 @@ def write(path, value):
 
 
 def worker(job, destination):
-    from configuration.loader import load_routing_case
+    from tools.configuration.loader import load_routing_case
     from models.routing.common.cycle import load_instance
     from models.routing.common.cycle.audit import audit_solution
     problem = load_instance(*load_routing_case(job['case']))
@@ -80,7 +80,7 @@ def main():
         parser.error('enumeration-states must be positive')
     if len(set(args.variants)) != len(args.variants):
         parser.error('variants must be distinct')
-    from configuration.loader import load_routing_case, resolve_project_path
+    from tools.configuration.loader import load_routing_case, resolve_project_path
     from models.routing.common.cycle import load_instance
     from models.routing.common.cycle.audit import audit_solution
     output = args.output.resolve()
@@ -119,7 +119,7 @@ def main():
                     pricing_time_limit=args.pricing_time, e1_time_limit=args.e1_time,
                     integer_cover_time_limit=args.integer_time, enumeration_time_limit=args.enumeration_time, enumeration_max_states=args.enumeration_states, orders=len(problem.orders),
                     customers=len({o.customer for o in problem.orders})))
-    for source in [*ROOT.glob('models/**/*.py'), *ROOT.glob('configuration/*.py'), Path(__file__).resolve()]:
+    for source in [*ROOT.glob('models/**/*.py'), *ROOT.glob('tools/configuration/*.py'), ROOT/'tools/__init__.py', Path(__file__).resolve()]:
         target = output/'source_snapshot'/source.relative_to(ROOT)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)

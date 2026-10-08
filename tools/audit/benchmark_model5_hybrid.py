@@ -19,7 +19,7 @@ def write(path, value):
 
 
 def worker(job, destination):
-    from configuration.loader import load_routing_case
+    from tools.configuration.loader import load_routing_case
     from models.routing.common.cycle import load_instance
     from models.routing.common.cycle.audit import audit_solution
     from models.routing.variants.model_5.exact import solve_hybrid
@@ -48,7 +48,7 @@ def main():
     if not args.resume:
         if args.plan is None:
             parser.error('--plan is required for registration')
-        from configuration.loader import load_routing_case, resolve_project_path
+        from tools.configuration.loader import load_routing_case, resolve_project_path
         from models.routing.common.cycle import load_instance
         plan = json.loads(args.plan.read_text())
         output.mkdir(parents=True, exist_ok=False)
@@ -87,7 +87,7 @@ def main():
                     jobs.append(dict(id=f'{len(jobs):02d}_{family}_{label}_{seed}', case=str(frozen/'case.json'),
                         family=family, pool_label=label, pool=pool, options=options,
                         orders=len(problem.orders), customers=len({o.customer for o in problem.orders})))
-        for source in [*ROOT.glob('models/**/*.py'), *ROOT.glob('configuration/*.py'), Path(__file__).resolve()]:
+        for source in [*ROOT.glob('models/**/*.py'), *ROOT.glob('tools/configuration/*.py'), ROOT/'tools/__init__.py', Path(__file__).resolve()]:
             target = output/'source_snapshot'/source.relative_to(ROOT)
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, target)

@@ -10,18 +10,18 @@
 冻结输入/源码的池规模及清洗时长扫描，以及区分证明状态的汇总。
 新增命令和结果口径见 [静态多批次代码说明](static_multibatch_implementation.md)。
 2026-09-30 已加入多批次距离下降邻域与稳定初始搜索；50/100 顾客、有限池、多种子的
-同预算改善与退步均见 [M5 ALNS 优化记录](model5_alns_optimization_20260930.md)。
+同预算改善与退步均见 [M5 ALNS 优化记录](../archive/docs/model5_alns_optimization_20260930.md)。
 2026-10-01 进一步复用相同一级回收方案和未变化仓点的二级候选，见
-[第二轮优化与新母例对照](model5_alns_round2_20261001.md)。
+[第二轮优化与新母例对照](../archive/docs/model5_alns_round2_20261001.md)。
 同日测试了停滞重启、退火周期和探索分支下降；完整结果退步，已撤回，见
-[第三轮搜索与预算对照](model5_alns_round3_20261001.md)。
+[第三轮搜索与预算对照](../archive/docs/model5_alns_round3_20261001.md)。
 第四轮的有向弧缓存加快枚举，但同预算质量与稳定性未改善，现仅作为可选实验接口，见
-[第四轮完整记录](model5_alns_round4_20261001.md)。
+[第四轮完整记录](../archive/docs/model5_alns_round4_20261001.md)。
 第五轮修正旧车辆时刻误筛：原候选队列穷尽后，使用新车辆前缀补查任务迁移。
 完整平均距离和平均 CV 门槛通过，已作为默认下降策略采用；分组退步仍保留，见
-[第五轮采用及局限](model5_alns_round5_20261001.md)。
+[第五轮采用及局限](../archive/docs/model5_alns_round5_20261001.md)。
 第六轮的三种后悔值修复均未达到开发门槛，未替换默认算法；整趟/多订单重组方向见
-[第六轮试验记录](model5_alns_round6_20261001.md)。
+[第六轮试验记录](../archive/docs/model5_alns_round6_20261001.md)。
 
 **可以直接运行的入口**
 
@@ -71,12 +71,12 @@ q(s,b) = Σ 本仓在 cutoff_(b-1) < u ≤ cutoff_b 时卸入的箱数
 
 **输入和可调整参数**
 
-入口案例是 [multibatch_demo.json](../config/cases/multibatch_demo.json)，关联四类数据：
+入口案例是 [multibatch_demo.json](../archive/config/20261007_before_classification/cases/multibatch_demo.json)，关联四类数据：
 
 | 文件 | 修改用途 |
 | --- | --- |
-| [multibatch_policy.json](../config/routing/validation/multibatch_policy.json) | 批次数、各阶段长度、周期末、容器池、清洗和整备时间、时间精度、二级趟次上限 |
-| [multibatch_fleet.json](../config/routing/validation/multibatch_fleet.json) | 物理车辆数、重量和体积容量、单箱重量/体积、速度 |
+| [multibatch_policy.json](../archive/config/20261007_before_classification/routing/validation/multibatch_policy.json) | 批次数、各阶段长度、周期末、容器池、清洗和整备时间、时间精度、二级趟次上限 |
+| [multibatch_fleet.json](../archive/config/20261007_before_classification/routing/validation/multibatch_fleet.json) | 物理车辆数、重量和体积容量、单箱重量/体积、速度 |
 | [network.csv](../data/source_inputs/mechanism/network.csv) | 总仓、前置仓、顾客的物理地点；节点 ID 唯一 |
 | [orders.json](../data/source_inputs/mechanism/orders.json) | 独立订单 ID、地点、分仓、配送批次、箱数、货重和配送/回收时间窗 |
 
@@ -141,7 +141,7 @@ ALNS 在全周期状态上搜索订单任务移动、成对移动、拆合趟次
 .venv/bin/python main.py cost --case config/cases/multibatch_demo.json --route-result output/single_runs/multi_batch_cutoff_v1/你的运行目录/result.json --economic-config config/cost/cases/multibatch_synthetic.json
 ```
 
-费用包括距离、车辆工作时间、启用物理车辆、实际清洗箱次及使用箱次。初始容器投资 `N × 单箱价格` 与周期运营费用分列，可显式选择按周期摊销；不能每批重买整个池。此处只是距离方案的费用评价，没有声明费用最优。[示例费用参数](../config/cost/cases/multibatch_synthetic.json) 使用虚构单位 `synthetic_units`，不能作为真实经营费用或一次性包装比较结论。
+费用包括距离、车辆工作时间、启用物理车辆、实际清洗箱次及使用箱次。初始容器投资 `N × 单箱价格` 与周期运营费用分列，可显式选择按周期摊销；不能每批重买整个池。此处只是距离方案的费用评价，没有声明费用最优。[示例费用参数](../archive/config/20261007_before_classification/cost/cases/multibatch_synthetic.json) 使用虚构单位 `synthetic_units`，不能作为真实经营费用或一次性包装比较结论。
 
 **本次验证及后续工作**
 
@@ -157,6 +157,6 @@ M5 的定义和求解入口位于 `models/routing/variants/model_5/`；精确实
 
 **2026-09-29 主线清理更新**
 
-默认入口现为 `config/cases/single_batch_demo.json`，采用同一框架 B=1。历史单日版已隔离到 `models/routing/baselines/`，仅能显式启用。上文 253 项为清理前历史回归计数，清理后验收见 [清理记录](repository_cleanup_20260929.md)。旧 M5 中转、旧 M6–M8 与旧经济对比不再从正式命令调用。新版 M5 是本页的多批次模型。
+默认入口现为 `config/cases/single_batch_demo.json`，采用同一框架 B=1。历史单日版已隔离到 `models/routing/baselines/`，仅能显式启用。上文 253 项为清理前历史回归计数，清理后验收见 [清理记录](../archive/docs/repository_cleanup_20260929.md)。旧 M5 中转、旧 M6–M8 与旧经济对比不再从正式命令调用。新版 M5 是本页的多批次模型。
 
 编号修正说明：以前保存的多批次结果可能仍标为 M3；它们来自当时的源码快照。新运行标为 M5，旧结果可用显式迁移工具重标并重新审计，见 [布局与迁移](model_layout.md)。

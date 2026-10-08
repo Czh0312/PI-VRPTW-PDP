@@ -25,7 +25,7 @@ def write(path, value):
 
 
 def worker(job, destination):
-    from configuration.loader import load_routing_case
+    from tools.configuration.loader import load_routing_case
     from models.routing.common.cycle import load_instance
     from models.routing.common.cycle.audit import audit_solution
     from models.routing.service import solve_routing
@@ -64,7 +64,7 @@ def main(argv=None):
                     'zhou_Set2_100-5-1b_subset50', 'lade_0823_30aoi']
         dataset = json.loads((ROOT/'data/manifest.json').read_text())
         cases = {f['family_id']: f['cases']['b1'] for f in dataset['families']}
-        from configuration.loader import load_routing_case, resolve_project_path
+        from tools.configuration.loader import load_routing_case, resolve_project_path
         frozen = args.output.resolve()/'benchmark_inputs'
         frozen.mkdir()
         for family in families:
@@ -102,7 +102,7 @@ def main(argv=None):
         raise ValueError('The requested diagnostic subset has no registered jobs')
     write(out/'jobs.json', jobs)
     sources = {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
-               for base in ('models', 'configuration') for p in (ROOT/base).rglob('*.py')}
+               for base in ('models', 'tools/configuration') for p in (ROOT/base).rglob('*.py')}
     inputs = {str(p.relative_to(args.output)): hashlib.sha256(p.read_bytes()).hexdigest()
               for p in (args.output/'benchmark_inputs').rglob('*') if p.is_file()}
     write(out/'hashes.json', dict(sources=sources, inputs=inputs))

@@ -6,7 +6,7 @@
 
 Material Passport：Origin Skill = academic-research-suite / experiment-agent；Origin Mode = plan；Verification Status = PARTIALLY_VERIFIED（核心模型、精确求解、ALNS 与机制测试已实现；大规模正式实验与实际经济评价待完成）；Version Label = multibatch_container_cycle_plan_v1_implementation_update。
 
-本文以本次对话最终确认的业务规则为准，承接 [单日基础版](baselines/model3_single_day_backhaul.md) 和 [原实施计划](baselines/thesis_single_day_baseline_plan.md)。原计划第 14 项中的“自由决定每次取多少”不再作为本版主规则：本版必须取走截止前已经入仓、尚未取走的全部空箱。本文保留完整设计依据；实际命令、字段、默认值和限制见 [实现与使用说明](model5_multibatch_cycle.md)。
+本文以本次对话最终确认的业务规则为准，承接 [单日基础版](../archive/docs/baselines/model3_single_day_backhaul.md) 和 [原实施计划](../archive/docs/baselines/thesis_single_day_baseline_plan.md)。原计划第 14 项中的“自由决定每次取多少”不再作为本版主规则：本版必须取走截止前已经入仓、尚未取走的全部空箱。本文保留完整设计依据；实际命令、字段、默认值和限制见 [实现与使用说明](model5_multibatch_cycle.md)。
 
 后续讨论已明确采用“静态全信息、批次日程固定、每笔订单配送批次由数据给定”的研究范围。单批/多批定义、正式数据和对照实验安排以 [静态单批次与多批次研究计划](static_single_multibatch_study_plan.md) 为准；订单跨批分配和动态求解留作后续扩展。
 
@@ -306,7 +306,7 @@ q_(s,b)=Σ[n_o * w_(o,r,b)：趟次 r 的基地为 s]
 | 位置 | 当前限制 | 修改计划 |
 | --- | --- | --- |
 | 现有 `models/routing/common/operating_policy.py` | 只接受 legacy/single_day，单日 N>=全天需求 | 增加版本分派接口；新策略独立类型；保留旧校验，新策略以每批库存约束验证 N |
-| 现有 `configuration/loader.py` | 合并单份 data/fleet/policy | 支持 schema 2、orders、批次表与单位转换，严格校验不兼容配置 |
+| 现有 `tools/configuration/loader.py` | 合并单份 data/fleet/policy | 支持 schema 2、orders、批次表与单位转换，严格校验不兼容配置 |
 | 现有 `models/routing/common/data_loader.py` | 一行顾客就是一个订单 | 保留旧解析器；新增订单表解析，禁止重复物理 customer_id 覆盖订单 |
 | 现有 `common/domain/instance.py`、`node.py` | 静态 Customer 与全日 Satellite 聚合 | 网络继续复用，新建组合实例和订单类；避免污染旧属性语义 |
 | 现有 `common/task_builder.py` | E1 回收量在求解前静态汇总 | 新策略在入口分流，只预建配送任务和潜在取箱访问；实际回收量从事件得到 |
@@ -319,7 +319,7 @@ q_(s,b)=Σ[n_o * w_(o,r,b)：趟次 r 的基地为 s]
 | 现有 `cli/route.py` | 先建静态任务，再调用旧审计与绘图 | 在实例/任务构造前区分策略；接入新结果、审计、序列化和报告 |
 | 现有 `common/solution_audit.py` | 重算最早时间并等每仓全部 E2 返回 | 保留旧逻辑；新策略调用专用实际时间审计，不复用旧全仓 max 返回屏障 |
 | 现有 `alns/types.py`、`evaluation_cache.py` | 状态缺少批次/物理车/库存时间 | 新状态独立实现；共享接口只做兼容扩展，不让旧 cache 命中新版问题 |
-| 现有 `reporting/route_plot.py` | 扁平路线难区分多趟 | 新增按批次路线图、车辆甘特图、清洁箱库存图；基于新结果生成 |
+| 现有 `tools/reporting/route_plot.py` | 扁平路线难区分多趟 | 新增按批次路线图、车辆甘特图、清洁箱库存图；基于新结果生成 |
 | 新增建议 `config/cases/zhou_multibatch_demo.json` | 无 | 新 schema 2 机制案例，明确策略和支持后端 |
 | 新增建议 `config/routing/validation/multibatch_policy.json` | 无 | 示例参数与来源；不把 300/60 写入算法常量 |
 | 当前 `data/single_batch/`、`data/multi_batch/`、`data/shared/` | 无 | 单批/多批各分小中大；共用网络与资源，统一 `data/manifest.json` |

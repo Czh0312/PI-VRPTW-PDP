@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 2E-VRPTW-PDD 求解引擎入口
-配置驱动：选择 config/baselines/ 下的案例清单后运行。
+配置驱动：选择 config/experiments/baselines/ 下的案例清单后运行。
 """
 import argparse
 import io
@@ -14,7 +14,7 @@ from datetime import datetime
 from contextlib import redirect_stdout
 from pathlib import Path
 
-from configuration.loader import (
+from tools.configuration.loader import (
     PROJECT_ROOT,
     load_json,
     load_routing_case,
@@ -27,10 +27,10 @@ from models.routing.common.data_loader import parse_dataset
 from models.routing.common.task_builder import build_tasks_for_model
 from models.routing.common.solution_audit import audit_exact_solution
 from models.routing.common.matrix_loader import load_square_matrix
-from reporting.route_plot import plot_vrp_solution
+from tools.reporting.route_plot import plot_vrp_solution
 
 
-DEFAULT_CASE = PROJECT_ROOT / "config" / "baselines" / "zhou_small_demo.json"
+DEFAULT_CASE = PROJECT_ROOT / "config" / "experiments" / "baselines" / "zhou_small_demo.json"
 OUTPUT_DIR = PROJECT_ROOT / "output"
 
 
@@ -43,7 +43,7 @@ def main(argv=None):
     parser.add_argument(
         "--case",
         default=str(DEFAULT_CASE),
-        help="config/baselines/ 下的案例配置文件",
+        help="config/experiments/baselines/ 下的案例配置文件",
     )
     parser.add_argument("--model", type=int, choices=range(1, 5))
     parser.add_argument("--solver", choices=("alns", "exact"))

@@ -1,6 +1,6 @@
 # 模型编号与代码位置
 
-2026-09-29，按用户确认的设计整理。编号表示研究模型，各模型恢复独立文件夹。
+当前布局核对：2026-10-07。编号表示研究模型，M1–M8 各有独立入口。文末保留 2026-09-29 的迁移与验证记录，其测试数量和状态仅对应当时版本。
 
 | 编号 | 模型 | 批次 | 位置 |
 | --- | --- | --- | --- |
@@ -31,7 +31,10 @@ models/routing/
 │   ├── model_3/
 │   ├── model_4/
 │   ├── model_5/
-│   └── model_6/       完整联合 MILP 与成本 ALNS
+│   ├── model_6/       等长批次、共同分界
+│   ├── model_7/       等长批次、逐批独立分界
+│   ├── model_8/       不等长批次、逐批独立分界
+│   └── calendar_search.py  日历候选搜索与证明汇总
 ├── common/
 │   └── cycle/          输入、业务规则、结果格式与独立审计
 ├── solvers/
@@ -42,7 +45,7 @@ models/routing/
 └── service.py          按编号调用对应模型入口
 ```
 
-六个模型目录均包含：
+八个模型目录均包含以下公开入口（共享实现的位置见各模型 README）：
 
 ```text
 model.py               模型定义、范围校验；保留旧建模 API 的按需转发
@@ -58,7 +61,8 @@ README.md              本模型说明
 ```
 
 求解服务实际调用这些入口，各入口检查模型身份和批次数。M3 不能接收多批输入，M5 不能接收单批输入。
-M6 可以接收一个或多个候选时段，但要求显式订单释放时刻、允许批次和经济配置。它不继承固定分批模型的默认容器池比例。
+M6 保留历史候选时段输入；M6–M8 的当前日历模式优化 K 和分界，并要求订单释放与经济配置。
+它们不继承固定分批模型的默认容器池比例；K 域及时间精度见[日历设计](model7_model8_calendar_design.md)。
 结果记录 `model`、`batch_mode`、`model_module`、`solver` 和 `solver_module`，可追溯模型与实际求解实现。
 
 ## 精确求解与 ALNS 的分离
@@ -67,7 +71,7 @@ M6 可以接收一个或多个候选时段，但要求显式订单释放时刻�
 | --- | --- | --- |
 | 底层目录 | `solvers/exact/` | `solvers/alns/` |
 | 固定分仓实现 | `formulation.py`、`solver.py` | `construction.py`、`evaluator.py`、`solver.py` |
-| M2/M4 自由选仓 | `exact/assignment.py`，联合 MILP 或完整枚举并汇总证明 | `alns/assignment.py`，启发式搜索分仓 |
+| M2/M4 自由选仓 | `exact/assignment.py`，联合 MILP 或分仓域树，完整枚举作为显式对照 | `alns/assignment.py`，启发式搜索分仓 |
 | Gurobi 依赖 | 有，需有效许可证 | 无 |
 | 最优性 | 由求解状态、界和分仓覆盖情况判断 | 不声明已证明最优 |
 
@@ -76,8 +80,9 @@ M6 可以接收一个或多个候选时段，但要求显式订单释放时刻�
 M6的共同层 `joint.py` 负责分批域、输入投影和联合结果审计；成本定义位于 `models/cost/joint_batch.py`。其完整 MILP 与 ALNS 分别位于 `variants/model_6/exact/` 与 `variants/model_6/alns/`，ALNS 仅复用公共物理传播和路线工具。
 输入、日程、容器规则和结果格式共用；两种方法输出的方案都接受相同的独立审计与周期重放。
 
-M1/M3/M5 构建固定分仓 MILP；M2/M4 的精确算法枚举顾客分仓，其 `exact/model.py` 提供 `build_subproblem`，
-单个子问题的最优性不能冒充自由选仓全局最优。此次拆分没有改变数学约束或搜索函数的计算逻辑。
+M1/M3/M5 构建固定分仓 MILP。M2/M4 按规模选择联合分仓 MILP 或分仓域树，完整枚举保留为显式对照；
+`exact/model.py` 同时提供 `build_joint_model` 与 `build_subproblem`。固定分仓子问题的最优性不能代替自由选仓全局证明。
+详见[精确求解范围](exact_solver_architecture.md)。
 
 ## 数据与模型对应
 
@@ -101,10 +106,10 @@ Zhou 主对比集按小型 7/10/12、中型 20/30、大型 50/100 顾客划分�
 
 ```sh
 # M1–M4 使用相同单批案例，可替换编号
-.venv/bin/python main.py route --case config/cases/single_batch_demo.json --model 4 --time 2
+.venv/bin/python main.py route --case config/experiments/examples/single_batch_demo.json --model 4 --time 2
 
 # 当前多批次模型 M5
-.venv/bin/python main.py route --case config/cases/multibatch_demo.json --model 5 --time 2
+.venv/bin/python main.py route --case config/experiments/examples/multibatch_demo.json --model 5 --time 2
 
 # M6 已附合成机制案例，费用不代表真实人民币
 .venv/bin/python main.py route --case data/model6/mechanism_v1/consolidation_low_pool/m6_case.json --solver exact --exact-time 20
@@ -125,7 +130,7 @@ Zhou 主对比集按小型 7/10/12、中型 20/30、大型 50/100 顾客划分�
 
 ```sh
 .venv/bin/python tools/audit/migrate_cycle_result.py \
-  --case config/cases/multibatch_demo.json \
+  --case config/experiments/examples/multibatch_demo.json \
   --route-result /path/to/former_M3_multibatch_result.json \
   --output /path/to/new_M5_result.json
 ```

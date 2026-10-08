@@ -9,7 +9,7 @@ from models.routing.service import solve_routing
 from models.routing.common.cycle.audit import audit_solution
 from models.routing.common.cycle.migration import migrate_former_m3_result
 from models.routing.common.cycle import MultiBatchInstance, load_instance
-from configuration.loader import load_routing_case
+from tools.configuration.loader import load_routing_case
 from tests.routing.test_multibatch_cycle import fixture, hand_solution
 from tests.routing.test_single_batch_comparison import problem
 
@@ -66,7 +66,7 @@ def test_single_and_multi_entries_cannot_be_interchanged():
 
 
 def test_multibatch_default_case_selects_new_model5():
-    cfg, fleet = load_routing_case('config/cases/multibatch_demo.json')
+    cfg, fleet = load_routing_case('config/experiments/examples/multibatch_demo.json')
     assert cfg['model'] == 5
     instance = load_instance(cfg, fleet)
     assert instance.model_number == 5 and instance.reusable and not instance.free_assignment

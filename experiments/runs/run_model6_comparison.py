@@ -20,7 +20,8 @@ import subprocess
 import sys
 import time
 
-from configuration.loader import PROJECT_ROOT, load_routing_case, resolve_project_path
+from tools.configuration.loader import PROJECT_ROOT, load_routing_case, resolve_project_path
+from tools.configuration.snapshots import freeze_input
 from models.routing.common.cycle import load_instance
 from models.routing.common.cycle.audit import audit_solution
 
@@ -57,11 +58,11 @@ def freeze_case(source, out, prefix):
         if not isinstance(value, str):
             continue
         original = resolve_project_path(value).resolve()
-        payload = original.read_bytes()
         target = out/'inputs'/f'{prefix}_{key}_{original.name}'
-        target.write_bytes(payload)
-        hashes[str(original)] = dict(sha256=hashlib.sha256(payload).hexdigest(), snapshot=str(target.relative_to(out)))
-        config[key] = str(target)
+        records = freeze_input(original, target, out)
+        hashes.update(records)
+        item = records[str(original)]
+        config[key] = str(out/item.get('resolved_snapshot', item['snapshot']))
     economics = config.get('economic_config')
     if economics:
         profile = json.loads(Path(economics).read_text(encoding='utf-8')) if isinstance(economics, str) else deepcopy(economics)
@@ -77,19 +78,18 @@ def freeze_case(source, out, prefix):
             if isinstance(economics, str):
                 write_json(Path(economics), profile)
                 source_key = str(resolve_project_path(original_economics).resolve())
-                hashes[source_key]['snapshot_sha256'] = hashlib.sha256(Path(economics).read_bytes()).hexdigest()
+                field = 'resolved_sha256' if 'resolved_snapshot' in hashes[source_key] else 'snapshot_sha256'
+                hashes[source_key][field] = hashlib.sha256(Path(economics).read_bytes()).hexdigest()
             else:
                 config['economic_config'] = profile
     source_path = resolve_project_path(source)
-    hashes[str(source_path)] = dict(sha256=hashlib.sha256(source_path.read_bytes()).hexdigest(),
-                                    snapshot=f'inputs/{prefix}_source_case.json')
-    shutil.copy2(source_path, out/'inputs'/f'{prefix}_source_case.json')
+    hashes.update(freeze_input(source_path, out/'inputs'/f'{prefix}_source_case.json', out))
     return config, hashes
 
 
 def snapshot_source(out):
     hashes = {}
-    for directory in ('models', 'configuration', 'cli', 'reporting', 'experiments', 'tools'):
+    for directory in ('models', 'cli', 'experiments', 'tools'):
         for original in sorted((PROJECT_ROOT/directory).rglob('*.py')):
             relative = original.relative_to(PROJECT_ROOT)
             target = out/'source_snapshot'/relative

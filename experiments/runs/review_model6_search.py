@@ -8,7 +8,7 @@ import math
 from pathlib import Path
 import shutil
 
-from configuration.loader import resolve_project_path
+from tools.configuration.loader import resolve_project_path
 from .run_model6_comparison import freeze_case, run_job, snapshot_source, write_json
 
 

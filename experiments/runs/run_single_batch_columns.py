@@ -21,7 +21,7 @@ def write(path, value):
 
 
 def worker(job_path):
-    from configuration.loader import load_routing_case
+    from tools.configuration.loader import load_routing_case
     from models.routing.common.cycle import load_instance
     from models.routing.common.cycle.audit import audit_solution
     from models.routing.solvers.exact.solver import solve_exact
@@ -137,7 +137,7 @@ def main(argv=None):
     if out.exists() and any(out.iterdir()):
         parser.error('Refusing to overwrite a nonempty experiment directory')
     out.mkdir(parents=True, exist_ok=True)
-    from configuration.loader import load_routing_case, resolve_project_path
+    from tools.configuration.loader import load_routing_case, resolve_project_path
     from experiments.runs.run_multibatch_cycle import INPUT_KEYS, freeze_inputs, source_snapshot
     from models.routing.common.cycle import load_instance
     from models.routing.common.cycle.audit import audit_solution

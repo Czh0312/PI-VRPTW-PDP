@@ -10,4 +10,4 @@
 2026-10-05 重新核算入口为 `experiments/analysis/recalculate_economics.py`：
 LaDe 杭州 V2 的 21 组基础案例使用公里/分钟矩阵和人民币参考参数；
 2026-10-04 全量 Zhou 保存结果仅按 synthetic_units 计价。数据集与单位不可混用。
-结果与复现方法见 [本轮经济核算](../../docs/economic_recalculation_20261005.md)。
+结果与复现方法见 [本轮经济核算](../../output/economic_recalculation_20261005/economic_recalculation_20261005.md)。

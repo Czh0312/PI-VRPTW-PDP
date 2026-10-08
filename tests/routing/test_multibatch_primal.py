@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from configuration.loader import load_routing_case
+from tools.configuration.loader import load_routing_case
 from models.routing.common.cycle import MultiBatchInstance, load_instance
 from models.routing.common.cycle.audit import audit_solution
 from models.routing.solvers.exact.primal import construct_incumbent
@@ -96,7 +96,7 @@ def test_multibatch_seed_is_accepted_by_full_milp_and_survives_build_timeout(mon
     gp = pytest.importorskip('gurobipy')
     from models.routing.solvers.exact import solver
     from models.routing.solvers.exact.formulation import build_model
-    problem = load_instance(*load_routing_case('config/cases/multibatch_demo.json'))
+    problem = load_instance(*load_routing_case('config/experiments/examples/multibatch_demo.json'))
     result = seed(problem)
     saved = deepcopy(result)
     model, ctx = build_model(problem)

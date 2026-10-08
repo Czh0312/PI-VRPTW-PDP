@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from configuration.loader import load_routing_case, load_json, resolve_project_path
+from tools.configuration.loader import load_routing_case, load_json, resolve_project_path
 from models.routing.common.data_loader import parse_dataset
 from models.routing.common.domain.instance import ProblemInstance
 from models.routing.common.matrix_loader import load_square_matrix
@@ -31,7 +31,7 @@ from models.routing.service import solve_routing
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--case', default='config/baselines/zhou_single_day.json')
+    parser.add_argument('--case', default='config/experiments/baselines/zhou_single_day.json')
     parser.add_argument('--data', action='append', help='Data path/glob; repeat for multiple sets')
     parser.add_argument('--fleet-config', help='Override fleet, preserving the single-day policy')
     parser.add_argument('--solver', choices=('both', 'exact', 'alns'), default='both')
@@ -68,8 +68,8 @@ def main(argv=None):
         parser.error(f'output directory is not empty: {out}')
     out.mkdir(parents=True, exist_ok=True)
     revision = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=ROOT, capture_output=True, text=True).stdout.strip()
-    sources = [p for base in ('models/routing', 'configuration', 'cli') for p in (ROOT / base).rglob('*.py')]
-    sources.extend([ROOT / 'main.py', Path(__file__).resolve(),
+    sources = [p for base in ('models/routing', 'tools/configuration', 'cli') for p in (ROOT / base).rglob('*.py')]
+    sources.extend([ROOT / 'main.py', ROOT / 'tools/__init__.py', Path(__file__).resolve(),
                     ROOT / 'experiments/analysis/summarize_single_day_backhaul.py'])
     for source in sources:
         target = out / 'source_snapshot' / source.relative_to(ROOT)

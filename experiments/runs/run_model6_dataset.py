@@ -7,7 +7,7 @@ import json
 import math
 import shutil
 
-from configuration.loader import load_routing_case, resolve_project_path
+from tools.configuration.loader import load_routing_case, resolve_project_path
 from tools.data.build_model6_uniform_dataset import ARMS, load_suite, treatment_config
 from .run_model6_comparison import execute_jobs, freeze_case, snapshot_source, write_json
 

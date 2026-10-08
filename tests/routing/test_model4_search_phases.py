@@ -1,5 +1,5 @@
 """A second learning phase must preserve incumbents and shared budgets."""
-import json
+from tools.configuration.loader import load_json
 from pathlib import Path
 
 import pytest
@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 @pytest.fixture
 def problem():
-    fleet = json.loads((ROOT / 'config/routing/validation/zhou_small.json').read_text())
+    fleet = load_json(ROOT / 'config/vehicles/zhou_small.json')
     return load_problem(ROOT / 'data/zhou_later_pickup/small/standard_same_day/Set1_7-2-1b.csv', fleet)
 
 

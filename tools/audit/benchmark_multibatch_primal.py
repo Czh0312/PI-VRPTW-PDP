@@ -32,7 +32,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 DEFAULT_CASES = [
-    'config/cases/multibatch_demo.json',
+    'config/experiments/examples/multibatch_demo.json',
     'data/multi_batch/small/mechanism_forced_late/b2/case.json',
     'data/multi_batch/small/mechanism_cutoff_choice/b3/case.json',
     'data/multi_batch/small/zhou_Set1_7-2-1/b2/case.json',
@@ -48,7 +48,7 @@ def write(path, value):
 
 
 def worker(job, output):
-    from configuration.loader import load_routing_case
+    from tools.configuration.loader import load_routing_case
     from models.routing.common.cycle import load_instance
     from models.routing.common.cycle.audit import audit_solution
     from models.routing.solvers.exact import solver
@@ -96,7 +96,7 @@ def main(argv=None):
         parser.error('--initial-results must supply exactly one result per case')
     if args.initial_results and args.mode in ('primal', 'incumbent'):
         parser.error('--initial-results requires a formulation ablation mode')
-    from configuration.loader import load_routing_case, resolve_project_path
+    from tools.configuration.loader import load_routing_case, resolve_project_path
     from models.routing.common.cycle import load_instance
     from models.routing.common.cycle.audit import audit_solution
     output = args.output.resolve()
@@ -167,7 +167,7 @@ def main(argv=None):
                                  orders=len(problem.orders),
                                  customers=len({o.customer for o in problem.orders}),
                                  batch_count=len(problem.operating_policy.batches)))
-    sources = [*ROOT.glob('models/**/*.py'), *ROOT.glob('configuration/*.py'), Path(__file__).resolve()]
+    sources = [*ROOT.glob('models/**/*.py'), *ROOT.glob('tools/configuration/*.py'), ROOT/'tools/__init__.py', Path(__file__).resolve()]
     for source in sources:
         target = output/'source_snapshot'/source.relative_to(ROOT)
         target.parent.mkdir(parents=True, exist_ok=True)

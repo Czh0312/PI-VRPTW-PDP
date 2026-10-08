@@ -1,0 +1,313 @@
+{
+  "schema_version": 1,
+  "created_on": "2026-10-06",
+  "purpose": "Dimensionless transport-versus-container scenario tests; not empirical monetary costing.",
+  "status": "profiles_prepared_not_solved",
+  "transport_ratios": {
+    "e1": 1,
+    "e2": 0.022276366167768884,
+    "e1_over_e2": 44.890625,
+    "optional_sensitivity_e2": [
+      0.01,
+      0.022276366167768884,
+      0.05
+    ]
+  },
+  "container_weights": [
+    0.25,
+    0.5,
+    1,
+    2,
+    4
+  ],
+  "default_container_weight": 1,
+  "reference_rule": "Use each family’s archived 300-second seed-42 M3 solution from the fixed source summary, not a new outcome-selected solution. T_ref=D1_ref+beta*D2_ref. Freeze before new runs.",
+  "reference_source": "output/model35678_comparison/20261006_distance_pool_5min_v1/summary.json",
+  "reference_source_sha256": "68bc8b3c1ec113b234fa212e4715fa91fcd6ac8c83f4b41f950dfe061a389009",
+  "energy_estimate_source": "reference/cost/truck_tricycle_estimate_20261006.json",
+  "energy_estimate_sha256": "a4a4bb28550bda69e7ca11ce79fc65d1e1b0f94a8f1ddee1594fdeea4a2e2453",
+  "raw_objective": "D1 + beta*D2 + lambda*T_ref*N/Q_ref",
+  "normalized_objective": "(D1 + beta*D2)/T_ref + lambda*N/Q_ref",
+  "constant_cost_policy": "Handling and use-based wear are excluded from this variable-cost comparison because full delivery/recovery keeps their quantities Q identical within a case; excluded costs are not asserted physically free.",
+  "fairness": "All models for one family and weight must use the exact same profile. Coefficients differ across families by intentional relative-tradeoff normalization, not a universal economic price. Compare normalized scores only within the same lambda; do not pool minima across weights.",
+  "comparison_scope": "M3/M5 retain their distance objectives unless separately changed; repricing does not make them cost-optimized. M6/M7/M8 optimize the profile.",
+  "interpretation": "lambda equals full configured pool (N=Q_ref) cost divided by fixed reference transport cost. It is a test setting, not purchase-price depreciation or a rental quote.",
+  "cases": [
+    {
+      "family": "zhou_Set2_100-10-1_subset50",
+      "customers": 50,
+      "Q_ref": 78,
+      "baseline_run_id": "00_M3_alns_42",
+      "baseline_e1_distance": 278.5247954233347,
+      "baseline_e2_distance": 564.0425939874208,
+      "T_ref": 291.08961478121665,
+      "profiles": [
+        {
+          "lambda": 0.25,
+          "path": "config/cost/transport_ratio_v1/zhou_Set2_100-10-1_subset50_lambda_0p25.json",
+          "pool_coefficient": 0.9329795345551816,
+          "is_default": false,
+          "sha256": "112abebacd0fff25da526669ef994221f63db588bcd85935ebc3e2cd44115eb0"
+        },
+        {
+          "lambda": 0.5,
+          "path": "config/cost/transport_ratio_v1/zhou_Set2_100-10-1_subset50_lambda_0p5.json",
+          "pool_coefficient": 1.8659590691103631,
+          "is_default": false,
+          "sha256": "ac260080078ad1b5ba09b9bd6794ebc472ba7f8d08520c5020c41bc7c4e37144"
+        },
+        {
+          "lambda": 1,
+          "path": "config/cost/transport_ratio_v1/zhou_Set2_100-10-1_subset50_lambda_1.json",
+          "pool_coefficient": 3.7319181382207263,
+          "is_default": true,
+          "sha256": "d12c8bccfa5e78a8a04a8f7885d5794b0040ac4f7a1c6b7a00f43150185c4892"
+        },
+        {
+          "lambda": 2,
+          "path": "config/cost/transport_ratio_v1/zhou_Set2_100-10-1_subset50_lambda_2.json",
+          "pool_coefficient": 7.4638362764414525,
+          "is_default": false,
+          "sha256": "0c8c04bd3c77b42d0fdb8fb311eee2a7776a4296ef2a515ed6231f143fde85ad"
+        },
+        {
+          "lambda": 4,
+          "path": "config/cost/transport_ratio_v1/zhou_Set2_100-10-1_subset50_lambda_4.json",
+          "pool_coefficient": 14.927672552882905,
+          "is_default": false,
+          "sha256": "1c2aedc94b726dd5368a8a8c9acde4e3a21e8e8702c674f581f62d130e8a4cd0"
+        }
+      ]
+    },
+    {
+      "family": "zhou_Set2_100-10-1",
+      "customers": 100,
+      "Q_ref": 161,
+      "baseline_run_id": "01_M3_alns_42",
+      "baseline_e1_distance": 416.4088046484801,
+      "baseline_e2_distance": 963.5525915213267,
+      "T_ref": 437.8732549991118,
+      "profiles": [
+        {
+          "lambda": 0.25,
+          "path": "config/cost/transport_ratio_v1/zhou_Set2_100-10-1_lambda_0p25.json",
+          "pool_coefficient": 0.6799274145948941,
+          "is_default": false,
+          "sha256": "e7742a6ec83a298695baf57406b7b1ed3f97c22a2916d36042d413b24dc2fc97"
+        },
+        {
+          "lambda": 0.5,
+          "path": "config/cost/transport_ratio_v1/zhou_Set2_100-10-1_lambda_0p5.json",
+          "pool_coefficient": 1.3598548291897883,
+          "is_default": false,
+          "sha256": "345d166c147d2f23e72a66773779d90f7913189ed50e5810c46f9ab89565724f"
+        },
+        {
+          "lambda": 1,
+          "path": "config/cost/transport_ratio_v1/zhou_Set2_100-10-1_lambda_1.json",
+          "pool_coefficient": 2.7197096583795766,
+          "is_default": true,
+          "sha256": "8820d7ef896838c50bf4fd3effe6e29e0f2c0f91347142ae848d2cc86351e1ed"
+        },
+        {
+          "lambda": 2,
+          "path": "config/cost/transport_ratio_v1/zhou_Set2_100-10-1_lambda_2.json",
+          "pool_coefficient": 5.439419316759153,
+          "is_default": false,
+          "sha256": "7314433df6ea650efbf8e64527161aa5c1da39158ee09a2661465c0a1c2681fa"
+        },
+        {
+          "lambda": 4,
+          "path": "config/cost/transport_ratio_v1/zhou_Set2_100-10-1_lambda_4.json",
+          "pool_coefficient": 10.878838633518306,
+          "is_default": false,
+          "sha256": "65d0ebad0eb1bcfc6cdc9baa9b4415a4d2e3eccfd5c7d2032c0fe99ec18d6032"
+        }
+      ]
+    },
+    {
+      "family": "zhou_Set2_100-10-2_subset50",
+      "customers": 50,
+      "Q_ref": 74,
+      "baseline_run_id": "02_M3_alns_42",
+      "baseline_e1_distance": 263.6945391863629,
+      "baseline_e2_distance": 536.9202759891095,
+      "T_ref": 275.6551718571958,
+      "profiles": [
+        {
+          "lambda": 0.25,
+          "path": "config/cost/transport_ratio_v1/zhou_Set2_100-10-2_subset50_lambda_0p25.json",
+          "pool_coefficient": 0.9312674724905263,
+          "is_default": false,
+          "sha256": "7050b842444ae2282eb53386981df3684536b5bacfd244a7f305acc58b2c5b86"
+        },
+        {
+          "lambda": 0.5,
+          "path": "config/cost/transport_ratio_v1/zhou_Set2_100-10-2_subset50_lambda_0p5.json",
+          "pool_coefficient": 1.8625349449810527,
+          "is_default": false,
+          "sha256": "ad2e8bf30e70b1ea0a70861e93758d02ae8056e1d29613b49e921f3d011edc68"
+        },
+        {
+          "lambda": 1,
+          "path": "config/cost/transport_ratio_v1/zhou_Set2_100-10-2_subset50_lambda_1.json",
+          "pool_coefficient": 3.7250698899621053,
+          "is_default": true,
+          "sha256": "b814b4463859efd86c66017b78d3d45888a0c7b032263669a53ab4a7c9065b6e"
+        },
+        {
+          "lambda": 2,
+          "path": "config/cost/transport_ratio_v1/zhou_Set2_100-10-2_subset50_lambda_2.json",
+          "pool_coefficient": 7.450139779924211,
+          "is_default": false,
+          "sha256": "d45422432b0ab85279034a6dca936e9f9a8268e865d111b5ebccca3a341c84ed"
+        },
+        {
+          "lambda": 4,
+          "path": "config/cost/transport_ratio_v1/zhou_Set2_100-10-2_subset50_lambda_4.json",
+          "pool_coefficient": 14.900279559848421,
+          "is_default": false,
+          "sha256": "1be9bad52eb486d120d7defdc856b3f27bb09c53ad0ed46ec10e5a71afb07b45"
+        }
+      ]
+    },
+    {
+      "family": "zhou_Set2_100-10-2",
+      "customers": 100,
+      "Q_ref": 149,
+      "baseline_run_id": "03_M3_alns_42",
+      "baseline_e1_distance": 233.826210860941,
+      "baseline_e2_distance": 908.4405109361849,
+      "T_ref": 254.0629643241905,
+      "profiles": [
+        {
+          "lambda": 0.25,
+          "path": "config/cost/transport_ratio_v1/zhou_Set2_100-10-2_lambda_0p25.json",
+          "pool_coefficient": 0.4262801414835411,
+          "is_default": false,
+          "sha256": "b6d640e8d33c5df15bf135820d32f98f07ecb5ed62a020b5f46fd2d7f2270b2e"
+        },
+        {
+          "lambda": 0.5,
+          "path": "config/cost/transport_ratio_v1/zhou_Set2_100-10-2_lambda_0p5.json",
+          "pool_coefficient": 0.8525602829670822,
+          "is_default": false,
+          "sha256": "0e54fa1a5e1353196935f1e5cfd00a2dc09384ab9a13c0421f2f26fd9e387f9b"
+        },
+        {
+          "lambda": 1,
+          "path": "config/cost/transport_ratio_v1/zhou_Set2_100-10-2_lambda_1.json",
+          "pool_coefficient": 1.7051205659341644,
+          "is_default": true,
+          "sha256": "a07595737ba2df3da158b82efb9d9405e79414a08b340b397fe143927045630c"
+        },
+        {
+          "lambda": 2,
+          "path": "config/cost/transport_ratio_v1/zhou_Set2_100-10-2_lambda_2.json",
+          "pool_coefficient": 3.410241131868329,
+          "is_default": false,
+          "sha256": "b5696c0ccddb8e24af9ff65a94501c1c8a71dce85589105f9890355ec4248181"
+        },
+        {
+          "lambda": 4,
+          "path": "config/cost/transport_ratio_v1/zhou_Set2_100-10-2_lambda_4.json",
+          "pool_coefficient": 6.820482263736658,
+          "is_default": false,
+          "sha256": "63d38bc0d159cf9711185306c07c52300d47a8b8c0f2c3f33a60af3afb30b953"
+        }
+      ]
+    },
+    {
+      "family": "zhou_Set2_100-5-1b_subset50",
+      "customers": 50,
+      "Q_ref": 77,
+      "baseline_run_id": "04_M3_alns_42",
+      "baseline_e1_distance": 445.51238877915534,
+      "baseline_e2_distance": 797.6104240807883,
+      "T_ref": 463.2802506452084,
+      "profiles": [
+        {
+          "lambda": 0.25,
+          "path": "config/cost/transport_ratio_v1/zhou_Set2_100-5-1b_subset50_lambda_0p25.json",
+          "pool_coefficient": 1.5041566579389885,
+          "is_default": false,
+          "sha256": "27f6f75e52df7cde6fe0fea8a4d1c777be064479c44cdabfa9fc297548584d7e"
+        },
+        {
+          "lambda": 0.5,
+          "path": "config/cost/transport_ratio_v1/zhou_Set2_100-5-1b_subset50_lambda_0p5.json",
+          "pool_coefficient": 3.008313315877977,
+          "is_default": false,
+          "sha256": "d9512f5c82b967f947c12f434330f6cce76f3b30a2a262b7f65eead24fc8dfad"
+        },
+        {
+          "lambda": 1,
+          "path": "config/cost/transport_ratio_v1/zhou_Set2_100-5-1b_subset50_lambda_1.json",
+          "pool_coefficient": 6.016626631755954,
+          "is_default": true,
+          "sha256": "1ea071492cd9fdd8581a8712a764eafdaab042b532a213bdcf67f18722ac2c5e"
+        },
+        {
+          "lambda": 2,
+          "path": "config/cost/transport_ratio_v1/zhou_Set2_100-5-1b_subset50_lambda_2.json",
+          "pool_coefficient": 12.033253263511908,
+          "is_default": false,
+          "sha256": "0e3ffb9d0713b45c93d71e0891cef2050fd39c78f49b3650e43ba22bc384dd14"
+        },
+        {
+          "lambda": 4,
+          "path": "config/cost/transport_ratio_v1/zhou_Set2_100-5-1b_subset50_lambda_4.json",
+          "pool_coefficient": 24.066506527023815,
+          "is_default": false,
+          "sha256": "21b00f68c720be0379b2399fa67cc846d8bf334b9282b0a0a3bd1ebcc7cdc34e"
+        }
+      ]
+    },
+    {
+      "family": "zhou_Set2_100-5-1b",
+      "customers": 100,
+      "Q_ref": 155,
+      "baseline_run_id": "05_M3_alns_42",
+      "baseline_e1_distance": 627.9514196908547,
+      "baseline_e2_distance": 1709.8382503881578,
+      "T_ref": 666.0404026441586,
+      "profiles": [
+        {
+          "lambda": 0.25,
+          "path": "config/cost/transport_ratio_v1/zhou_Set2_100-5-1b_lambda_0p25.json",
+          "pool_coefficient": 1.0742587139421913,
+          "is_default": false,
+          "sha256": "847a79fd70f7493e06e453e1b5f3bec8a063fe6efc999a5055d0fed63679fb47"
+        },
+        {
+          "lambda": 0.5,
+          "path": "config/cost/transport_ratio_v1/zhou_Set2_100-5-1b_lambda_0p5.json",
+          "pool_coefficient": 2.1485174278843826,
+          "is_default": false,
+          "sha256": "d04522c7f58b8447046782d61119f562b193f5b09ad66d1f113ecc33fc835fd1"
+        },
+        {
+          "lambda": 1,
+          "path": "config/cost/transport_ratio_v1/zhou_Set2_100-5-1b_lambda_1.json",
+          "pool_coefficient": 4.297034855768765,
+          "is_default": true,
+          "sha256": "2e1b2f723fdef2d70b7c5d7a5428f474e548d96b9488fea0a3f56ab55a2cecdc"
+        },
+        {
+          "lambda": 2,
+          "path": "config/cost/transport_ratio_v1/zhou_Set2_100-5-1b_lambda_2.json",
+          "pool_coefficient": 8.59406971153753,
+          "is_default": false,
+          "sha256": "59bd01bb19f71a79110497c32e417e2026b8bea3d26ec8e80abc4118438c02e5"
+        },
+        {
+          "lambda": 4,
+          "path": "config/cost/transport_ratio_v1/zhou_Set2_100-5-1b_lambda_4.json",
+          "pool_coefficient": 17.18813942307506,
+          "is_default": false,
+          "sha256": "7690bd12768918dc709edfac7a5eaacd0958738416bebb1a78610df23e6caea2"
+        }
+      ]
+    }
+  ]
+}

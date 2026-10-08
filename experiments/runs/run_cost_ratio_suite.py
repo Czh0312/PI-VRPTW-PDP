@@ -43,7 +43,7 @@ def sha(path):
 
 def register(args, out):
     sys.path.insert(0, str(ROOT))
-    from configuration.loader import load_routing_case, resolve_project_path
+    from tools.configuration.loader import load_routing_case, resolve_project_path
     from models.routing.common.cycle import load_instance
     from models.cost.joint_batch import JointCostProfile
     from experiments.runs.run_model6_comparison import freeze_case, snapshot_source
@@ -120,7 +120,10 @@ def worker(out, job_id):
     target = out/'results'/job_id
     target.mkdir(exist_ok=False)
     sys.path.insert(0, str(out/'source_snapshot'))
-    from configuration.loader import load_routing_case
+    if (out/'source_snapshot/configuration/loader.py').is_file():
+        from configuration.loader import load_routing_case
+    else:
+        from tools.configuration.loader import load_routing_case
     from models.routing.common.cycle import load_instance
     from models.routing.common.cycle.audit import audit_solution
     from models.routing.service import solve_routing
@@ -309,7 +312,7 @@ def summarize(out):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--manifest', default='config/cases/20261007_pool25_truck0p5_allK_v1/manifest.json')
+    parser.add_argument('--manifest', default='config/experiments/pool25_truck0p5_allK_20261007/manifest.json')
     parser.add_argument('--output', required=True)
     parser.add_argument('--workers', type=int, default=4)
     parser.add_argument('--timeout-overhead', type=float, default=180)

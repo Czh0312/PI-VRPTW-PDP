@@ -35,7 +35,7 @@ def register(out):
     if out.exists() and any(out.iterdir()):
         raise ValueError('Refusing to overwrite an existing assessment')
     out.mkdir(parents=True, exist_ok=True)
-    from configuration.loader import load_routing_case
+    from tools.configuration.loader import load_routing_case
     manifest_path = ROOT/'data/model6/uniform_v2_20261005/manifest.json'
     rows = read(manifest_path)['cases']
     groups = {}
@@ -93,8 +93,8 @@ def freeze(out, phase):
     root = out/phase/'source'
     if root.exists():
         raise ValueError('Refusing to replace a frozen source version')
-    paths = [p for folder in ('models', 'configuration', 'cli') for p in (ROOT/folder).rglob('*.py')]
-    paths += [Path(__file__)]
+    paths = [p for folder in ('models', 'tools/configuration', 'cli') for p in (ROOT/folder).rglob('*.py')]
+    paths += [Path(__file__), ROOT/'tools/__init__.py']
     hashes = {}
     for source in paths:
         name = source.relative_to(ROOT)

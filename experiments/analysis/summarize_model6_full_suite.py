@@ -7,7 +7,7 @@ import csv
 import json
 import statistics
 
-from configuration.loader import resolve_project_path
+from tools.configuration.loader import resolve_project_path
 from experiments.analysis.summarize_model6_resources import summarize
 
 

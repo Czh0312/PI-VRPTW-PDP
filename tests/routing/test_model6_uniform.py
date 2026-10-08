@@ -126,7 +126,7 @@ def test_shared_cutoff_moves_never_break_equality():
 
 
 def test_multi_satellite_recovery_is_counted_once_per_batch(tmp_path,exact_available):
-    from configuration.loader import load_routing_case
+    from tools.configuration.loader import load_routing_case
     from models.routing.common.cycle import load_instance
     from tools.data.build_model6_static_suite import build_suite
     manifest=build_suite(tmp_path/'data',families=['mechanism_cutoff_choice'])

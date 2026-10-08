@@ -9,7 +9,7 @@ from experiments.analysis.summarize_model6_costs import cost_change, summarize
 from models.cost.comparison import evaluate_comparison_cost
 from models.routing.common.cycle import load_instance
 from models.routing.common.cycle.audit import audit_solution
-from configuration.loader import load_routing_case
+from tools.configuration.loader import load_routing_case
 from tools.data.build_model6_demo_suite import build_suite
 
 
@@ -45,8 +45,8 @@ def test_m5_cli_prices_pool_trips_and_wear_after_distance_solving(tmp_path):
 
 def test_m3_cli_uses_joint_prices_without_changing_single_batch_route(tmp_path):
     from cli.cost import main as price
-    from configuration.loader import load_json
-    case = 'config/cases/single_batch_demo.json'
+    from tools.configuration.loader import load_json
+    case = 'config/experiments/examples/single_batch_demo.json'
     source = 'output/experiments/static_batch_suite_v1/data_audit_20260929/mechanism_forced_late_b1.json'
     config, fleet = load_routing_case(case, use_pool_config=False)
     problem = load_instance(config, fleet)

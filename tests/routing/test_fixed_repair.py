@@ -1,6 +1,6 @@
 """Regret repair must retain exhaustive choices when options are reused."""
 from functools import partial
-import json
+from tools.configuration.loader import load_json
 from pathlib import Path
 import random
 
@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 @pytest.fixture(scope="module")
 def problem():
     nodes, _ = parse_dataset(str(ROOT / "data/zhou_later_pickup/large/standard_same_day/Set2_100-5-1.csv"))
-    fleet = json.loads((ROOT / "config/routing/validation/zhou_large.json").read_text(encoding="utf-8"))
+    fleet = load_json(ROOT / "config/vehicles/zhou_large.json")
     result = ProblemInstance(nodes, fleet, speed=fleet.get("speed", 1.0))
     result.aggregate_demands_from_pre_assignment()
     return result
