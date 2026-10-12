@@ -128,12 +128,21 @@ def e4(study, rows):
             points = [r for r in members if r['fixed_pool'] == pool]
             valid = [r for r in points if r['valid']]
             if valid:
-                ax.scatter([pool]*len(valid), [r['objective'] for r in valid], s=15, label='Total' if pool == min(r['fixed_pool'] for r in members) else None)
+                first = pool == min(r['fixed_pool'] for r in members)
+                ax.scatter([pool]*len(valid), [r['objective'] for r in valid], s=15, color='#4078a8', label='Total' if first else None)
+                for label, keys, color in [('Transport', ('e1_distance', 'e2_distance'), '#c98536'),
+                        ('Occupied work', ('e1_work', 'e2_work'), '#3c9977'),
+                        ('Pool holding', ('container_pool',), '#9354a8')]:
+                    values = [sum(r.get('cost_components', {}).get(k, 0) for k in keys) for r in valid]
+                    ax.scatter([pool]*len(valid), values, s=12, marker='x', color=color, label=label if first else None)
             status_ax.scatter(pool, len(valid)/len(points), color='#4078a8')
             status_ax.annotate(f'{len(valid)}/{len(points)}', (pool, len(valid)/len(points)), xytext=(0, 5), textcoords='offset points', fontsize=8)
         ax.set(title=case, ylabel='Audited total cost')
+        if ax.get_legend_handles_labels()[0]:
+            ax.legend(fontsize=7)
         status_ax.set(xlabel='Fixed physical pool N', ylabel='Feasible / planned', ylim=(-.05, 1.2))
         fig.savefig(study/'figures'/f'e4_pool_{index:02d}.png', dpi=160)
+        fig.savefig(study/'figures'/f'e4_pool_{index:02d}.pdf')
         plt.close(fig)
 
 
@@ -164,11 +173,15 @@ def e5(study, rows):
             x, optimized, replayed, pools = [], [], [], []
             for price in (.5, 1., 2.):
                 paired = [r for r in members if r['pool_price_factor'] == price and r['valid'] and r['fixed_schedule_repriced_cost'] is not None]
+                x.append(price)
                 if paired:
-                    x.append(price)
                     optimized.append(statistics.mean(r['reoptimized_cost'] for r in paired))
                     replayed.append(statistics.mean(r['fixed_schedule_repriced_cost'] for r in paired))
                     pools.append(statistics.mean(r['reoptimized_pool'] for r in paired))
+                else:
+                    optimized.append(math.nan)
+                    replayed.append(math.nan)
+                    pools.append(math.nan)
             line, = axes[0].plot(x, optimized, marker='o', label=f'M{model} reoptimized')
             axes[0].plot(x, replayed, ls='--', color=line.get_color(), label=f'M{model} fixed-schedule repricing')
             axes[1].plot(x, pools, marker='o', label=f'M{model}')
