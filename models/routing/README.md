@@ -31,10 +31,17 @@ ALNS 和精确求解各有自己的实现；M5 的显式混合实验入口会调
 | M8 | 不等长批次、逐批独立分界 | [alns](model_8/alns/README.md) | [exact](model_8/exact/README.md) |
 
 每个算法目录：`solver.py` 是带编号校验的公开入口；`engine.py` 是本模型内部求解过程（如果需要）；
-精确目录的 `model.py` 是建模入口，`formulation.py` 等文件定义实际变量与约束。
+精确目录的 `model.py` 是建模入口；`parameters.py` 管理已知参数与安全派生界，
+`variables.py` 定义决策变量，`constraints.py` 按业务类别添加约束，`objective.py` 定义目标函数。
+`formulation.py`、`single_batch_formulation.py` 或 `joint_model.py` 负责组装这些部分，
+完整阅读顺序见[精确模型结构](../../docs/exact_model_layout.md)。
 M7/M8 的 `joint_model.py`、`joint_solver.py` 是各自的固定 K 子问题实现，已与 M6 分开；
 内部投影仍使用统一的 JointBatchInstance 数据格式，不代表调用 M6 的求解代码。
 `__init__.py` 只导出当前目录的入口和编号信息。
+
+ALNS 的 `parameters.py`、`state.py`、`construction.py`、`neighborhoods.py`、`evaluator.py`
+及 `search_control.py` 分别负责搜索参数、状态、初解、邻域、评价和自适应／接受规则，
+搜索循环负责串联这些职责。各模型位置与兼容说明见[ALNS 模型结构](../../docs/alns_model_layout.md)。
 
 ```python
 from models.routing.model_3.alns import solve_alns

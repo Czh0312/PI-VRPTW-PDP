@@ -1,5 +1,8 @@
 # 精确求解范围
 
+模型代码按参数、变量、约束和目标函数组织，组装入口及约束组导航见
+[精确模型结构](exact_model_layout.md)。本页说明精确搜索范围和增强措施。
+
 正式入口将 `multi_batch_cutoff_v1` 分发到各编号目录的 `exact/solver.py`。
 M1/M3 为单批固定分仓；M2/M4 为单批自由分仓；M5 为多批固定分仓。
 各模型的 MILP 建模入口位于 `models/routing/model_n/exact/model.py`，实现分别位于 `models/routing/model_n/exact/`。

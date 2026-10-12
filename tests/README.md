@@ -21,6 +21,8 @@ make test-full
 | 范围 | 测试位置 |
 | --- | --- |
 | 模型分流与适用范围 | `routing/test_numbered_model_entries.py`、`routing/test_model_scope.py` |
+| 精确模型的参数／变量类及实际模型上下文 | `routing/test_exact_model_layout.py` |
+| ALNS 状态隔离、预算与接受规则 | `routing/test_alns_layout.py` |
 | 精确 / ALNS 依赖隔离 | `routing/test_solver_isolation.py` |
 | M6–M8 日历、K 域与独立参考枚举 | `routing/test_batch_count_domain.py`、`routing/test_model78_calendar.py`、`routing/test_model78_independent_oracle.py` |
 | 单批 / 多批求解与证明边界 | `routing/test_single_batch_*.py`、`routing/test_multibatch_*.py` |

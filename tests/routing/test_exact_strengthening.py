@@ -109,9 +109,9 @@ def test_inactive_satellite_does_not_apply_its_customer_deadline_to_another_assi
 
 def test_tree_timeout_keeps_every_unresolved_assignment_in_global_bound(monkeypatch):
     from models.routing.model_4.exact import assignment_tree
-    from models.routing.model_3.exact import engine as solver
-    from models.routing.model_3.exact.distance_bounds import free_assignment_lower_bound
-    from models.routing.model_3.exact.initial_solution import construct_incumbent
+    from models.routing.model_4.exact import engine as solver
+    from models.routing.model_4.exact.distance_bounds import free_assignment_lower_bound
+    from models.routing.model_4.exact.initial_solution import construct_incumbent
     from models.common.cycle.state import empty_result
     from tests.routing.test_single_batch_comparison import problem
     import time
@@ -171,7 +171,7 @@ def test_bounds_use_relaxed_paths_on_nonmetric_data():
 
 def test_assignment_seed_is_only_an_audited_upper_bound_and_survives_build_timeout(monkeypatch):
     from models.routing.model_4.exact import assignment
-    from models.routing.model_3.exact import engine as solver
+    from models.routing.model_4.exact import engine as solver
     p = tiny_problem(4, 1)
     p.fleet.e2_per_sat_count = 3
     p.operating_policy = replace(p.operating_policy, e2_max_trips_per_vehicle=12)

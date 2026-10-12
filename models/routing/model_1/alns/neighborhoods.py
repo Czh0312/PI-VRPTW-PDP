@@ -3,52 +3,21 @@
 Local scores rank proposals only. The complete decoder and independent audit
 remain the authorities; no local estimate proves infeasibility or optimality.
 """
+
+from models.routing.model_1.alns.evaluator import EvaluationCache
+
+from models.routing.model_1.alns.state import clone_state, state_key, state_from_result
 from collections import Counter, OrderedDict
 import time
-
-
-def clone_state(state):
-    return dict(deliveries={b: [list(r) for r in rows] for b, rows in state['deliveries'].items()},
-                pickup_order={b: list(row) for b, row in state['pickup_order'].items()},
-                pickup_vehicle={b: dict(row) for b, row in state['pickup_vehicle'].items()},
-                e2=[{**r, 'tasks': list(r['tasks'])} for r in state['e2']])
-
-
-def state_key(state):
-    return (tuple((b, tuple(map(tuple, rows))) for b, rows in state['deliveries'].items()),
-            tuple((b, tuple(row)) for b, row in state['pickup_order'].items()),
-            tuple((b, tuple(sorted(row.items()))) for b, row in state['pickup_vehicle'].items()),
-            tuple((r['satellite'], r['vehicle'], tuple(r['tasks']),
-                   r.get('depart_after'), r.get('return_after')) for r in state['e2']))
-
-
-class EvaluationCache:
-    def __init__(self, problem, evaluator, capacity=256):
-        self.problem, self.evaluator, self.capacity = problem, evaluator, capacity
-        self.entries = OrderedDict()
-        self.hits = self.misses = 0
-
-    def __call__(self, state):
-        key = state_key(state)
-        if key in self.entries:
-            self.hits += 1
-            self.entries.move_to_end(key)
-            return self.entries[key]
-        self.misses += 1
-        value = self.evaluator(self.problem, state)
-        self.entries[key] = value
-        if len(self.entries) > self.capacity:
-            self.entries.popitem(last=False)
-        return value
 
 
 def _goods_ready(problem, state):
     ready = {}
     for b in problem.operating_policy.batches:
-        for sites in state['deliveries'][b.id]:
-            current, previous = b.start+problem.operating_policy.e1_load_time, problem.depot
+        for sites in state["deliveries"][b.id]:
+            current, previous = b.start + problem.operating_policy.e1_load_time, problem.depot
             for site in sites:
-                current += problem.travel(previous, site)+problem.service(site)
+                current += problem.travel(previous, site) + problem.service(site)
                 ready[site, b.id] = current
                 previous = site
     return ready
@@ -56,67 +25,107 @@ def _goods_ready(problem, state):
 
 def _route_score(problem, route, goods, vehicle_ready):
     p, f = problem.operating_policy, problem.fleet
-    tasks, site = route['tasks'], route['satellite']
+    tasks, site = route["tasks"], route["satellite"]
     if not tasks:
         return 0.0, vehicle_ready
-    dbatches = {problem.order_map[oid].batch for oid, kind in tasks if kind == 'd'}
-    current = max(p.cycle_start, vehicle_ready, route.get('depart_after', p.cycle_start))
+    dbatches = {problem.order_map[oid].batch for oid, kind in tasks if kind == "d"}
+    current = max(p.cycle_start, vehicle_ready, route.get("depart_after", p.cycle_start))
     if dbatches:
-        current = max(current, *(goods[site, b] for b in dbatches))+p.e2_dispatch_prep_time
-    weight = sum(problem.task(oid, kind)[1] for oid, kind in tasks if kind == 'd')
-    volume = sum(problem.task(oid, kind)[2] for oid, kind in tasks if kind == 'd')
-    load_penalty = max(0, weight-f.e2_weight_cap)/max(1, f.e2_weight_cap)
-    load_penalty += max(0, volume-f.e2_volume_cap)/max(1, f.e2_volume_cap)
+        current = max(current, *(goods[site, b] for b in dbatches)) + p.e2_dispatch_prep_time
+    weight = sum(problem.task(oid, kind)[1] for oid, kind in tasks if kind == "d")
+    volume = sum(problem.task(oid, kind)[2] for oid, kind in tasks if kind == "d")
+    load_penalty = max(0, weight - f.e2_weight_cap) / max(1, f.e2_weight_cap)
+    load_penalty += max(0, volume - f.e2_volume_cap) / max(1, f.e2_volume_cap)
     distance, late, delivered, previous = 0.0, 0, {}, site
     for oid, kind in tasks:
         order, w, vol = problem.task(oid, kind)
-        window = order.delivery_window if kind == 'd' else order.pickup_window
-        current = max(current+problem.travel(previous, order.customer), window[0])
-        if kind == 'p':
-            current = max(current, delivered.get(oid, order.delivery_window[0]+order.service_time)+order.min_use_time)
+        window = order.delivery_window if kind == "d" else order.pickup_window
+        current = max(current + problem.travel(previous, order.customer), window[0])
+        if kind == "p":
+            current = max(
+                current,
+                delivered.get(oid, order.delivery_window[0] + order.service_time)
+                + order.min_use_time,
+            )
         due = window[1]
-        if kind == 'd' and len(p.batches) == 1:
-            due = min(due, p.batches[0].cutoff-order.service_time)
-        late += max(0, current-due)
+        if kind == "d" and len(p.batches) == 1:
+            due = min(due, p.batches[0].cutoff - order.service_time)
+        late += max(0, current - due)
         current += order.service_time
-        if kind == 'd':
+        if kind == "d":
             delivered[oid] = current
         distance += problem.distance(previous, order.customer)
         previous = order.customer
-        weight += w if kind == 'p' else -w
-        volume += vol if kind == 'p' else -vol
-        load_penalty += max(0, weight-f.e2_weight_cap)/max(1, f.e2_weight_cap)
-        load_penalty += max(0, volume-f.e2_volume_cap)/max(1, f.e2_volume_cap)
-    completed = max(current+problem.travel(previous, site)+p.e2_return_unload_time,
-                    route.get('return_after', p.cycle_start))
-    late += max(0, completed+p.e2_turnaround_time-p.cycle_end)
-    if any(k == 'p' for _, k in tasks):
-        late += max(0, completed-p.batches[-1].cutoff)
+        weight += w if kind == "p" else -w
+        volume += vol if kind == "p" else -vol
+        load_penalty += max(0, weight - f.e2_weight_cap) / max(1, f.e2_weight_cap)
+        load_penalty += max(0, volume - f.e2_volume_cap) / max(1, f.e2_volume_cap)
+    completed = max(
+        current + problem.travel(previous, site) + p.e2_return_unload_time,
+        route.get("return_after", p.cycle_start),
+    )
+    late += max(0, completed + p.e2_turnaround_time - p.cycle_end)
+    if any(k == "p" for _, k in tasks):
+        late += max(0, completed - p.batches[-1].cutoff)
     distance += problem.distance(previous, site)
-    return distance+1e6*(load_penalty+max(0, len(dbatches)-1))+p.minutes(late)*1e4, completed
+    return (
+        distance + 1e6 * (load_penalty + max(0, len(dbatches) - 1)) + p.minutes(late) * 1e4,
+        completed,
+    )
 
 
-def destroy_repair(problem, original, rng, mode, deadline, *, scorer=None, cache_distances=False,
-                   cache_pickup_prefix=False):
+def destroy_repair(
+    problem,
+    original,
+    rng,
+    mode,
+    deadline,
+    *,
+    scorer=None,
+    cache_distances=False,
+    cache_pickup_prefix=False
+):
     if not problem.orders:
         return clone_state(original)
     orders = list(problem.orders)
-    count = min(len(orders), max(2, min(5, len(orders)//5)))
-    if mode == 'related':
+    count = min(len(orders), max(2, min(5, len(orders) // 5)))
+    if mode == "related":
         anchor = rng.choice(orders)
-        orders.sort(key=lambda o: (o.satellite != anchor.satellite,
-                                  problem.distance(anchor.customer, o.customer)+
-                                  abs(o.delivery_window[0]-anchor.delivery_window[0])*.01))
+        orders.sort(
+            key=lambda o: (
+                o.satellite != anchor.satellite,
+                problem.distance(anchor.customer, o.customer)
+                + abs(o.delivery_window[0] - anchor.delivery_window[0]) * 0.01,
+            )
+        )
         removed = orders[:count]
     else:
         removed = rng.sample(orders, count)
-    repaired = repair_orders(problem, original, removed, deadline, scorer=scorer,
-                             cache_distances=cache_distances, cache_pickup_prefix=cache_pickup_prefix)
+    repaired = repair_orders(
+        problem,
+        original,
+        removed,
+        deadline,
+        scorer=scorer,
+        cache_distances=cache_distances,
+        cache_pickup_prefix=cache_pickup_prefix,
+    )
     return repaired if repaired is not None else clone_state(original)
 
 
-def repair_orders(problem, original, removed, deadline, *, screen=True, cache_scores=True,
-                  fast_scores=True, scorer=None, cache_distances=False, cache_pickup_prefix=False):
+def repair_orders(
+    problem,
+    original,
+    removed,
+    deadline,
+    *,
+    screen=True,
+    cache_scores=True,
+    fast_scores=True,
+    scorer=None,
+    cache_distances=False,
+    cache_pickup_prefix=False
+):
     """Reinsert complete requests; interruption never exposes a partial state.
 
     The distance-only bound safely screens this *local ranking score* because
@@ -125,15 +134,20 @@ def repair_orders(problem, original, removed, deadline, *, screen=True, cache_sc
     """
     state = clone_state(original)
     ids = {o.id for o in removed}
-    for route in state['e2']:
-        route['tasks'] = [t for t in route['tasks'] if t[0] not in ids]
-    state['e2'] = [r for r in state['e2'] if r['tasks']]
+    for route in state["e2"]:
+        route["tasks"] = [t for t in route["tasks"] if t[0] not in ids]
+    state["e2"] = [r for r in state["e2"] if r["tasks"]]
     goods = _goods_ready(problem, state)
     p, f = problem.operating_policy, problem.fleet
     # Deliveries are inserted first; each pickup may then join the same route
     # at a later position or a different vehicle/trip.
-    tasks = [(o.id, kind) for kind in problem.task_kinds
-             for o in sorted(removed, key=lambda o: (o.delivery_window if kind == 'd' else o.pickup_window)[1])]
+    tasks = [
+        (o.id, kind)
+        for kind in problem.task_kinds
+        for o in sorted(
+            removed, key=lambda o: (o.delivery_window if kind == "d" else o.pickup_window)[1]
+        )
+    ]
     score_route = _route_score
     if scorer is not None and len(p.batches) > 1:
         score_route = scorer
@@ -143,6 +157,7 @@ def repair_orders(problem, original, removed, deadline, *, screen=True, cache_sc
     prefix_enabled = False
     if tasks and fast_scores and len(p.batches) == 1:
         from models.routing.model_1.alns.single_batch_scoring import SingleBatchRouteScorer
+
         score_route = scorer if scorer is not None else SingleBatchRouteScorer(problem)
         prefix_enabled = cache_pickup_prefix and type(score_route) is SingleBatchRouteScorer
         if cache_distances and isinstance(score_route, SingleBatchRouteScorer):
@@ -157,54 +172,88 @@ def repair_orders(problem, original, removed, deadline, *, screen=True, cache_sc
         if time.perf_counter() >= deadline:
             return None
         oid, kind = task
-        order, routes = problem.order_map[oid], state['e2']
+        order, routes = problem.order_map[oid], state["e2"]
         ready, before, scores, distances = {}, {}, {}, {}
-        counts = Counter((r['satellite'], r['vehicle']) for r in routes)
+        counts = Counter((r["satellite"], r["vehicle"]) for r in routes)
         for index, route in enumerate(routes):
             # Other satellites cannot share this physical vehicle or supply.
-            if route['satellite'] != order.satellite:
+            if route["satellite"] != order.satellite:
                 continue
-            key = route['satellite'], route['vehicle']
+            key = route["satellite"], route["vehicle"]
             before[index] = ready.get(key, p.cycle_start)
             saved = route_scores.get(id(route)) if cache_scores else None
             if saved is not None and saved[0] is route and saved[1] == before[index]:
                 _, _, scores[index], end, distances[index] = saved
             else:
                 scores[index], end = score_route(problem, route, goods, before[index])
-                locations = [route['satellite']]+[problem.order_map[o].customer for o, _ in route['tasks']]+[route['satellite']]
+                locations = (
+                    [route["satellite"]]
+                    + [problem.order_map[o].customer for o, _ in route["tasks"]]
+                    + [route["satellite"]]
+                )
                 distances[index] = sum(distance(a, b) for a, b in zip(locations, locations[1:]))
                 if cache_scores:
-                    route_scores[id(route)] = (route, before[index], scores[index], end, distances[index])
-            ready[key] = end+p.e2_turnaround_time
+                    route_scores[id(route)] = (
+                        route,
+                        before[index],
+                        scores[index],
+                        end,
+                        distances[index],
+                    )
+            ready[key] = end + p.e2_turnaround_time
         best = None
         for index, route in enumerate(routes):
-            if route['satellite'] != order.satellite:
+            if route["satellite"] != order.satellite:
                 continue
-            existing = route['tasks']
-            if kind == 'd' and any(k == 'd' and problem.order_map[i].batch != order.batch for i, k in existing):
+            existing = route["tasks"]
+            if kind == "d" and any(
+                k == "d" and problem.order_map[i].batch != order.batch for i, k in existing
+            ):
                 continue
-            saved_prefix = pickup_prefixes.get(id(route)) if prefix_enabled and kind == 'p' else None
-            pickup_prefix = (saved_prefix[2] if saved_prefix is not None and
-                             saved_prefix[0] is route and saved_prefix[1] == before[index] else None)
-            for pos in range(len(existing)+1):
+            saved_prefix = (
+                pickup_prefixes.get(id(route)) if prefix_enabled and kind == "p" else None
+            )
+            pickup_prefix = (
+                saved_prefix[2]
+                if saved_prefix is not None
+                and saved_prefix[0] is route
+                and saved_prefix[1] == before[index]
+                else None
+            )
+            for pos in range(len(existing) + 1):
                 if time.perf_counter() >= deadline:
                     return None
-                if kind == 'd' and (oid, 'p') in existing[:pos]:
+                if kind == "d" and (oid, "p") in existing[:pos]:
                     continue
-                if kind == 'p' and (oid, 'd') in existing[pos:]:
+                if kind == "p" and (oid, "d") in existing[pos:]:
                     continue
                 if screen and best is not None:
-                    left = route['satellite'] if pos == 0 else problem.order_map[existing[pos-1][0]].customer
-                    right = route['satellite'] if pos == len(existing) else problem.order_map[existing[pos][0]].customer
-                    bound = (distances[index]+distance(left, order.customer)
-                             +distance(order.customer, right)-distance(left, right)-scores[index])
-                    tolerance = 1e-9*max(1, abs(bound), abs(best[0]), abs(scores[index]))
-                    if bound > best[0]+tolerance:
+                    left = (
+                        route["satellite"]
+                        if pos == 0
+                        else problem.order_map[existing[pos - 1][0]].customer
+                    )
+                    right = (
+                        route["satellite"]
+                        if pos == len(existing)
+                        else problem.order_map[existing[pos][0]].customer
+                    )
+                    bound = (
+                        distances[index]
+                        + distance(left, order.customer)
+                        + distance(order.customer, right)
+                        - distance(left, right)
+                        - scores[index]
+                    )
+                    tolerance = 1e-9 * max(1, abs(bound), abs(best[0]), abs(scores[index]))
+                    if bound > best[0] + tolerance:
                         continue
-                candidate = {**route, 'tasks': existing[:pos]+[task]+existing[pos:]}
-                if prefix_enabled and kind == 'p':
+                candidate = {**route, "tasks": existing[:pos] + [task] + existing[pos:]}
+                if prefix_enabled and kind == "p":
                     if pickup_prefix is None:
-                        pickup_prefix = score_route.prepare_pickup_insertions(problem, route, goods, before[index])
+                        pickup_prefix = score_route.prepare_pickup_insertions(
+                            problem, route, goods, before[index]
+                        )
                         # Goods are fixed within this repair. A held route
                         # reference and its readiness protect reuse when another
                         # route changes, shifts indices, or delays this vehicle.
@@ -212,19 +261,37 @@ def repair_orders(problem, original, removed, deadline, *, screen=True, cache_sc
                     score, _ = pickup_prefix(oid, pos)
                 else:
                     score, _ = score_route(problem, candidate, goods, before[index])
-                option = (score-scores[index], index, candidate, False)
+                option = (score - scores[index], index, candidate, False)
                 if best is None or option[0] < best[0]:
                     best = option
         for vehicle in range(f.e2_per_sat_count):
             if counts[order.satellite, vehicle] >= p.e2_max_trips_per_vehicle:
                 continue
             candidate = dict(satellite=order.satellite, vehicle=vehicle, tasks=[task])
-            window = order.delivery_window if kind == 'd' else order.pickup_window
-            pos = next((i for i, route in enumerate(routes)
-                        if route['satellite'] == order.satellite and route['vehicle'] == vehicle
-                        and min((problem.order_map[o].delivery_window if k == 'd' else
-                                 problem.order_map[o].pickup_window)[0] for o, k in route['tasks']) > window[0]), len(routes))
-            begin = before[pos] if pos < len(routes) else ready.get((order.satellite, vehicle), p.cycle_start)
+            window = order.delivery_window if kind == "d" else order.pickup_window
+            pos = next(
+                (
+                    i
+                    for i, route in enumerate(routes)
+                    if route["satellite"] == order.satellite
+                    and route["vehicle"] == vehicle
+                    and min(
+                        (
+                            problem.order_map[o].delivery_window
+                            if k == "d"
+                            else problem.order_map[o].pickup_window
+                        )[0]
+                        for o, k in route["tasks"]
+                    )
+                    > window[0]
+                ),
+                len(routes),
+            )
+            begin = (
+                before[pos]
+                if pos < len(routes)
+                else ready.get((order.satellite, vehicle), p.cycle_start)
+            )
             score, _ = score_route(problem, candidate, goods, begin)
             if best is None or score < best[0]:
                 best = (score, pos, candidate, True)
@@ -238,24 +305,84 @@ def repair_orders(problem, original, removed, deadline, *, screen=True, cache_sc
     return state
 
 
-def state_from_result(problem, result):
-    state = dict(deliveries={b.id: [[] for _ in range(problem.fleet.e1_count)] for b in problem.operating_policy.batches},
-                 pickup_order={b.id: [] for b in problem.operating_policy.batches},
-                 pickup_vehicle={b.id: {} for b in problem.operating_policy.batches}, e2=[])
-    for trip in result['e1_trips']:
-        batch, vehicle = trip['batch_id'], trip['vehicle_id']
-        for event in trip['events']:
-            site = event['site_id']
-            if event['kind'] == 'd':
-                state['deliveries'][batch][vehicle].append(site)
-            else:
-                state['pickup_order'][batch].append(site)
-                state['pickup_vehicle'][batch][site] = vehicle
-    for sites in state['pickup_order'].values():
-        sites.extend(s for s in problem.satellites if s not in sites)
-    for trip in sorted(result['e2_trips'], key=lambda r: (r['trip_index'], r['satellite_id'], r['vehicle_id'])):
-        state['e2'].append(dict(satellite=trip['satellite_id'], vehicle=trip['vehicle_id'],
-                               tasks=[(e['order_id'], e['kind']) for e in trip['events']]))
-        if len(problem.operating_policy.batches) > 1:
-            state['e2'][-1].update(depart_after=trip['departure'], return_after=trip['return_complete'])
+def move_route(problem, original, rng, operator):
+    state = clone_state(original)
+    p, f = problem.operating_policy, problem.fleet
+    routes = state["e2"]
+    if operator in ("relocate", "pair") and routes:
+        chosen = rng.choice(routes)
+        oid, kind = rng.choice(chosen["tasks"])
+        items = [(oid, k) for k in problem.task_kinds] if operator == "pair" else [(oid, kind)]
+        for r in routes:
+            r["tasks"] = [t for t in r["tasks"] if t not in items]
+        routes[:] = [r for r in routes if r["tasks"]]
+        o = problem.order_map[oid]
+        destinations = [r for r in routes if r["satellite"] == o.satellite]
+        if any(k == "d" for _, k in items):
+            destinations = [
+                r
+                for r in destinations
+                if all(k != "d" or problem.order_map[i].batch == o.batch for i, k in r["tasks"])
+            ]
+        if not destinations or rng.random() < 0.15:
+            target = dict(
+                satellite=o.satellite, vehicle=rng.randrange(f.e2_per_sat_count), tasks=[]
+            )
+            routes.append(target)
+        else:
+            target = rng.choice(destinations)
+        where = rng.randrange(len(target["tasks"]) + 1)
+        target["tasks"][where:where] = items
+    elif operator == "split_merge" and routes:
+        source = rng.choice(routes)
+        if len(source["tasks"]) > 1 and rng.random() < 0.5:
+            index = rng.randrange(1, len(source["tasks"]))
+            target = dict(
+                satellite=source["satellite"],
+                vehicle=rng.randrange(f.e2_per_sat_count),
+                tasks=source["tasks"][index:],
+            )
+            source["tasks"] = source["tasks"][:index]
+            routes.insert(routes.index(source) + 1, target)
+        else:
+            others = [
+                r for r in routes if r is not source and r["satellite"] == source["satellite"]
+            ]
+            if others:
+                other = rng.choice(others)
+                source["tasks"] += other["tasks"]
+                routes.remove(other)
+    elif operator == "vehicle" and routes:
+        if rng.random() < 0.5:
+            rng.choice(routes)["vehicle"] = rng.randrange(f.e2_per_sat_count)
+        elif len(routes) > 1:
+            a, b = rng.sample(range(len(routes)), 2)
+            routes[a], routes[b] = routes[b], routes[a]
+    elif operator == "cutoff" and routes:
+        r = rng.choice(routes)
+        boundary = rng.choice(p.batches).cutoff
+        target = rng.choice(
+            [p.cycle_start, max(p.cycle_start, boundary - 1), boundary, boundary + 1]
+        )
+        r[rng.choice(["depart_after", "return_after"])] = min(target, p.cycle_end)
+    elif operator == "e1_delivery":
+        b = rng.choice(p.batches)
+        rows = state["deliveries"][b.id]
+        nonempty = [r for r in rows if r]
+        if nonempty:
+            source = rng.choice(nonempty)
+            site = source.pop(rng.randrange(len(source)))
+            destination = rng.choice(rows)
+            destination.insert(rng.randrange(len(destination) + 1), site)
+    elif operator == "e1_pickup":
+        b = rng.choice(p.batches)
+        rng.shuffle(state["pickup_order"][b.id])
+        if problem.satellites:
+            s = rng.choice(problem.satellites)
+            state["pickup_vehicle"][b.id][s] = rng.randrange(f.e1_count)
+    elif operator == "reverse" and routes:
+        r = rng.choice(routes)
+        if len(r["tasks"]) >= 2:
+            a, b = sorted(rng.sample(range(len(r["tasks"])), 2))
+            r["tasks"][a : b + 1] = reversed(r["tasks"][a : b + 1])
     return state

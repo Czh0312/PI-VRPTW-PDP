@@ -2,13 +2,21 @@
 
 本目录拥有独立实现，不导入其他模型的求解代码。相似文件不自动同步。
 
+先按 `parameters.py` → `variables.py` → `constraints.py` → `objective.py` 阅读数学定义，
+再看组装文件和 `solver.py`。参数类复用公共业务实例，变量类管理同一个 Gurobi 模型。
+完整导航见[精确模型结构](../../../../docs/exact_model_layout.md)。
+
 | 文件 | 用途 |
 | --- | --- |
+| [parameters.py](parameters.py) | 已知参数、安全派生界及参数数据类 |
+| [variables.py](variables.py) | 决策变量定义与 `ModelVariables` 分组管理 |
+| [constraints.py](constraints.py) | 按业务含义组织的约束组 |
+| [objective.py](objective.py) | 距离或完整成本目标函数 |
 | [bounds.py](bounds.py) | 有编号校验的下界证书入口 |
 | [distance_bounds.py](distance_bounds.py) | 必访节点的保守距离下界 |
 | [domains.py](domains.py) | 客户可选仓点与安全时间域 |
 | [engine.py](engine.py) | 本模型内部的求解主过程 |
-| [formulation.py](formulation.py) | 建模分流及多批次车辆索引 MILP |
+| [formulation.py](formulation.py) | 建模分流及多批次完整 MILP 组装 |
 | [initial_solution.py](initial_solution.py) | 确定性可行初解分流 |
 | [model.py](model.py) | 有编号校验的 MILP 建模入口 |
 | [multibatch_bounds.py](multibatch_bounds.py) | M5 距离下界证书 |
@@ -49,7 +57,7 @@
 | [single_batch_delivery_pricer.py](single_batch_delivery_pricer.py) | 纯配送路线的 MILP 定价 |
 | [single_batch_dual_cuts.py](single_batch_dual_cuts.py) | 配送定价证书转距离约束 |
 | [single_batch_e1_bound.py](single_batch_e1_bound.py) | M3 一级路线覆盖松弛下界 |
-| [single_batch_formulation.py](single_batch_formulation.py) | 单批次 MILP 的本模型内部建模 |
+| [single_batch_formulation.py](single_batch_formulation.py) | 单批次 MILP 的参数、变量、约束及目标组装 |
 | [single_batch_label_bound.py](single_batch_label_bound.py) | 标签定价的后续路径下界 |
 | [single_batch_physical_bounds.py](single_batch_physical_bounds.py) | M3 原物理站点的可选成本下界 |
 | [single_batch_pickup_bound.py](single_batch_pickup_bound.py) | 送取混合任务的路线覆盖下界 |
