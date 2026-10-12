@@ -1,0 +1,1234 @@
+{
+  "schema_version": 2,
+  "policy_version": "multi_batch_cutoff_v1",
+  "time_unit": "ticks",
+  "model": 8,
+  "packaging": "reusable",
+  "time_tick_seconds": 60,
+  "objective_mode": "cost",
+  "operating_policy": {
+    "cycle_start": 0,
+    "cycle_end": 132,
+    "batches": [
+      {
+        "id": "b1",
+        "start": 0,
+        "cutoff": 12,
+        "end": 69
+      },
+      {
+        "id": "b2",
+        "start": 69,
+        "cutoff": 81,
+        "end": 132
+      }
+    ],
+    "container_pool_size": 2,
+    "cleaning_duration": 5,
+    "e2_max_trips_per_vehicle": 4,
+    "time_tick_seconds": 60,
+    "e1_load_time": 0,
+    "e2_dispatch_prep_time": 0,
+    "e2_return_unload_time": 0,
+    "depot_return_unload_time": 0,
+    "e1_turnaround_time": 0,
+    "e2_turnaround_time": 0,
+    "policy_version": "multi_batch_cutoff_v1",
+    "terminal_policy": "all_clean_at_depot",
+    "time_unit": "ticks",
+    "pickup_policy": "cutoff_all_available",
+    "batch_overlap": false,
+    "allow_transfers": false,
+    "input_time_unit": "minutes",
+    "objective_mode": "distance"
+  },
+  "solver": "alns",
+  "batches": [
+    {
+      "id": "b1",
+      "start": 0,
+      "cutoff": 12,
+      "end": 69,
+      "container_demand": 2
+    },
+    {
+      "id": "b2",
+      "start": 69,
+      "cutoff": 81,
+      "end": 132,
+      "container_demand": 2
+    }
+  ],
+  "e1_trips": [
+    {
+      "trip_id": "e1_b1_0",
+      "batch_id": "b1",
+      "vehicle_id": 0,
+      "departure": 0,
+      "events": [
+        {
+          "kind": "d",
+          "site_id": "T",
+          "start": 5,
+          "quantity": 2
+        },
+        {
+          "kind": "p",
+          "site_id": "T",
+          "start": 12,
+          "quantity": 2
+        }
+      ],
+      "return_complete": 17
+    },
+    {
+      "trip_id": "e1_b2_0",
+      "batch_id": "b2",
+      "vehicle_id": 0,
+      "departure": 69,
+      "events": [
+        {
+          "kind": "d",
+          "site_id": "S",
+          "start": 74,
+          "quantity": 2
+        },
+        {
+          "kind": "p",
+          "site_id": "S",
+          "start": 81,
+          "quantity": 2
+        }
+      ],
+      "return_complete": 86
+    }
+  ],
+  "e2_trips": [
+    {
+      "trip_id": "e2_S_0_0",
+      "satellite_id": "S",
+      "vehicle_id": 0,
+      "trip_index": 0,
+      "departure": 74,
+      "return_complete": 80,
+      "events": [
+        {
+          "order_id": "oC1",
+          "kind": "d",
+          "start": 75,
+          "quantity": 1
+        },
+        {
+          "order_id": "oC2",
+          "kind": "d",
+          "start": 76,
+          "quantity": 1
+        },
+        {
+          "order_id": "oC2",
+          "kind": "p",
+          "start": 78,
+          "quantity": 1
+        },
+        {
+          "order_id": "oC1",
+          "kind": "p",
+          "start": 79,
+          "quantity": 1
+        }
+      ]
+    },
+    {
+      "trip_id": "e2_T_0_0",
+      "satellite_id": "T",
+      "vehicle_id": 0,
+      "trip_index": 0,
+      "departure": 5,
+      "return_complete": 11,
+      "events": [
+        {
+          "order_id": "oC3",
+          "kind": "d",
+          "start": 6,
+          "quantity": 1
+        },
+        {
+          "order_id": "oC4",
+          "kind": "d",
+          "start": 7,
+          "quantity": 1
+        },
+        {
+          "order_id": "oC4",
+          "kind": "p",
+          "start": 9,
+          "quantity": 1
+        },
+        {
+          "order_id": "oC3",
+          "kind": "p",
+          "start": 10,
+          "quantity": 1
+        }
+      ]
+    }
+  ],
+  "info": {
+    "status": "FEASIBLE",
+    "proven_optimal": false,
+    "proven_infeasible": false,
+    "objective": 118.60000000000001,
+    "best_bound": null,
+    "mip_gap": null,
+    "proof_scope": null,
+    "runtime": 30.049766600015573,
+    "iterations": 2778,
+    "operator_attempts": {
+      "destroy_random_batch": 132,
+      "destroy_related_batch": 123,
+      "close_batch": 118,
+      "split_batch": 127,
+      "destroy_routes": 470,
+      "relocate": 135,
+      "pair": 200,
+      "split_merge": 82,
+      "vehicle": 250,
+      "wait": 163,
+      "e1_delivery": 235,
+      "e1_pickup": 246,
+      "reverse": 122,
+      "shift_cutoff": 86,
+      "align_cutoff": 121,
+      "shift_boundary": 68,
+      "align_boundary": 35,
+      "redistribute_lengths": 65
+    },
+    "operator_improvements": {
+      "destroy_random_batch": 0,
+      "destroy_related_batch": 1,
+      "close_batch": 0,
+      "split_batch": 1,
+      "destroy_routes": 12,
+      "relocate": 0,
+      "pair": 3,
+      "split_merge": 1,
+      "vehicle": 0,
+      "wait": 0,
+      "e1_delivery": 0,
+      "e1_pickup": 0,
+      "reverse": 0,
+      "shift_cutoff": 0,
+      "align_cutoff": 7,
+      "shift_boundary": 0,
+      "align_boundary": 0,
+      "redistribute_lengths": 2
+    },
+    "operator_weights": {
+      "shift_boundary": 0.8474156234790233,
+      "align_boundary": 0.22090001066666676,
+      "redistribute_lengths": 0.6577255694554456,
+      "destroy_random_batch": 0.12079595520000007,
+      "destroy_related_batch": 0.2097152000000002,
+      "close_batch": 0.13421772800000015,
+      "split_batch": 0.15393162788864007,
+      "destroy_routes": 0.9725035189598227,
+      "relocate": 0.41339070873600003,
+      "pair": 0.18635370911271762,
+      "split_merge": 0.1443645882368001,
+      "vehicle": 1.0,
+      "wait": 0.8567972216014987,
+      "e1_delivery": 1.0,
+      "e1_pickup": 1.0,
+      "reverse": 0.1892941824000001,
+      "shift_cutoff": 0.4099783655424001,
+      "align_cutoff": 0.4507466721901503
+    },
+    "accepted_moves": 325,
+    "history": [
+      {
+        "iteration": 0,
+        "objective": 186.94213562373096,
+        "time": 0.09844529998372309,
+        "source": "calendar_construction"
+      },
+      {
+        "iteration": 0,
+        "objective": 185.84213562373097,
+        "time": 0.4870513000059873,
+        "source": "calendar_construction"
+      },
+      {
+        "iteration": 4,
+        "objective": 183.84213562373097,
+        "time": 0.798096299986355,
+        "source": "pair"
+      },
+      {
+        "iteration": 16,
+        "objective": 181.84213562373097,
+        "time": 1.0939463999820873,
+        "source": "destroy_routes"
+      },
+      {
+        "iteration": 55,
+        "objective": 127.10000000000001,
+        "time": 1.8795760000066366,
+        "source": "split_batch"
+      },
+      {
+        "iteration": 57,
+        "objective": 125.30000000000001,
+        "time": 1.8898898999905214,
+        "source": "pair"
+      },
+      {
+        "iteration": 58,
+        "objective": 123.30000000000001,
+        "time": 1.915035899990471,
+        "source": "destroy_routes"
+      },
+      {
+        "iteration": 65,
+        "objective": 122.6,
+        "time": 2.0171753999893554,
+        "source": "align_cutoff"
+      },
+      {
+        "iteration": 66,
+        "objective": 122.4,
+        "time": 2.0246548999857623,
+        "source": "destroy_routes"
+      },
+      {
+        "iteration": 67,
+        "objective": 122.2,
+        "time": 2.0335961999953724,
+        "source": "destroy_routes"
+      },
+      {
+        "iteration": 134,
+        "objective": 120.5,
+        "time": 2.7038627000001725,
+        "source": "destroy_routes"
+      },
+      {
+        "iteration": 185,
+        "objective": 118.9,
+        "time": 3.7361558999982662,
+        "source": "destroy_routes"
+      },
+      {
+        "iteration": 191,
+        "objective": 118.7,
+        "time": 3.7794595999876037,
+        "source": "destroy_routes"
+      },
+      {
+        "iteration": 307,
+        "objective": 118.60000000000001,
+        "time": 5.986970099998871,
+        "source": "align_cutoff"
+      }
+    ],
+    "calendar_evaluations": 141,
+    "evaluations": 2537,
+    "cache_hits": 2779,
+    "time_budget": 30,
+    "seed": 46,
+    "iteration_budget": 1000000000,
+    "history_scope": "selected_batch_count_only",
+    "batch_count_candidates": [
+      1,
+      2,
+      3
+    ],
+    "selected_count_proven_optimal": false,
+    "proof_aggregation": null,
+    "initial_incumbent_cost": null
+  },
+  "strategy": "flexible_batch_cost_v1",
+  "model_module": "models.routing.model_8.alns",
+  "batch_mode": "flexible_cycle",
+  "order_batch_assignment": {
+    "oC1": "b2",
+    "oC2": "b2",
+    "oC3": "b1",
+    "oC4": "b1"
+  },
+  "container_pool_size": 2,
+  "delivery_batch_activation": {
+    "b1": true,
+    "b2": true
+  },
+  "delivery_batch_count": 2,
+  "candidate_schedule": [
+    {
+      "id": "b1",
+      "start": 0,
+      "cutoff": 34,
+      "end": 69
+    },
+    {
+      "id": "b2",
+      "start": 69,
+      "cutoff": 100,
+      "end": 132
+    }
+  ],
+  "batch_cutoffs": {
+    "b1": 12,
+    "b2": 81
+  },
+  "cutoff_mode": "optimized",
+  "shared_cutoff": false,
+  "cutoff_bounds": {
+    "b1": [
+      1,
+      68
+    ],
+    "b2": [
+      70,
+      131
+    ]
+  },
+  "economic_profile_hash": "8f65f978f5682d6e5e7473dc5ab63af72ceacdf8c9cad1d4847c11d22ca3a40e",
+  "evidence_hash": null,
+  "total_distance": 28.0,
+  "cost": {
+    "total": 118.60000000000001,
+    "components": {
+      "container_pool": 60,
+      "e1_distance": 20.0,
+      "e1_work": 3.4000000000000004,
+      "e1_vehicles": 10,
+      "e1_trips": 2,
+      "e2_distance": 8.0,
+      "e2_work": 1.2000000000000002,
+      "e2_vehicles": 10,
+      "e2_trips": 2,
+      "cleaning": 0.8,
+      "tracking": 0.4,
+      "container_wear": 0.8
+    },
+    "currency": "synthetic_units",
+    "initial_pool_investment": 20,
+    "cost_basis": "disjoint_distance_time_fixed",
+    "source_type": "synthetic_mechanism",
+    "price_basis": "Artificial unit prices, no claim of market calibration",
+    "evaluation_period": "one 132-minute cycle",
+    "work_time_basis": "occupied_route_minutes",
+    "economic_profile_hash": "8f65f978f5682d6e5e7473dc5ab63af72ceacdf8c9cad1d4847c11d22ca3a40e",
+    "evidence_hash": null,
+    "limitation": "Occupied route time excludes inter-trip idle payroll; investment is separate."
+  },
+  "cost_components": {
+    "container_pool": 60,
+    "e1_distance": 20.0,
+    "e1_work": 3.4000000000000004,
+    "e1_vehicles": 10,
+    "e1_trips": 2,
+    "e2_distance": 8.0,
+    "e2_work": 1.2000000000000002,
+    "e2_vehicles": 10,
+    "e2_trips": 2,
+    "cleaning": 0.8,
+    "tracking": 0.4,
+    "container_wear": 0.8
+  },
+  "cutoff_snapshots": [
+    {
+      "satellite_id": "S",
+      "batch_id": "b1",
+      "cutoff": 12,
+      "quantity": 0,
+      "eligible_events": [],
+      "pickup_trip": null,
+      "pickup_time": null
+    },
+    {
+      "satellite_id": "S",
+      "batch_id": "b2",
+      "cutoff": 81,
+      "quantity": 2,
+      "eligible_events": [
+        "e2_S_0_0"
+      ],
+      "pickup_trip": "e1_b2_0",
+      "pickup_time": 81
+    },
+    {
+      "satellite_id": "T",
+      "batch_id": "b1",
+      "cutoff": 12,
+      "quantity": 2,
+      "eligible_events": [
+        "e2_T_0_0"
+      ],
+      "pickup_trip": "e1_b1_0",
+      "pickup_time": 12
+    },
+    {
+      "satellite_id": "T",
+      "batch_id": "b2",
+      "cutoff": 81,
+      "quantity": 0,
+      "eligible_events": [],
+      "pickup_trip": null,
+      "pickup_time": null
+    }
+  ],
+  "depot_releases": [
+    {
+      "trip_id": "e1_b1_0",
+      "quantity": 2,
+      "unload_complete": 17,
+      "clean_ready": 22
+    },
+    {
+      "trip_id": "e1_b2_0",
+      "quantity": 2,
+      "unload_complete": 86,
+      "clean_ready": 91
+    }
+  ],
+  "recovery_rounds": [
+    {
+      "satellite_id": "S",
+      "batch_id": "b1",
+      "cutoff": 12,
+      "quantity": 0,
+      "eligible_events": [],
+      "pickup_trip": null,
+      "pickup_time": null
+    },
+    {
+      "satellite_id": "S",
+      "batch_id": "b2",
+      "cutoff": 81,
+      "quantity": 2,
+      "eligible_events": [
+        "e2_S_0_0"
+      ],
+      "pickup_trip": "e1_b2_0",
+      "pickup_time": 81
+    },
+    {
+      "satellite_id": "T",
+      "batch_id": "b1",
+      "cutoff": 12,
+      "quantity": 2,
+      "eligible_events": [
+        "e2_T_0_0"
+      ],
+      "pickup_trip": "e1_b1_0",
+      "pickup_time": 12
+    },
+    {
+      "satellite_id": "T",
+      "batch_id": "b2",
+      "cutoff": 81,
+      "quantity": 0,
+      "eligible_events": [],
+      "pickup_trip": null,
+      "pickup_time": null
+    }
+  ],
+  "audit": {
+    "valid": true,
+    "errors": [],
+    "objective": 118.60000000000001,
+    "distances": {
+      "e1": 20.0,
+      "e2": 8.0
+    },
+    "cutoff_snapshots": [
+      {
+        "satellite_id": "S",
+        "batch_id": "b1",
+        "cutoff": 12,
+        "quantity": 0,
+        "eligible_events": [],
+        "pickup_trip": null,
+        "pickup_time": null
+      },
+      {
+        "satellite_id": "S",
+        "batch_id": "b2",
+        "cutoff": 81,
+        "quantity": 2,
+        "eligible_events": [
+          "e2_S_0_0"
+        ],
+        "pickup_trip": "e1_b2_0",
+        "pickup_time": 81
+      },
+      {
+        "satellite_id": "T",
+        "batch_id": "b1",
+        "cutoff": 12,
+        "quantity": 2,
+        "eligible_events": [
+          "e2_T_0_0"
+        ],
+        "pickup_trip": "e1_b1_0",
+        "pickup_time": 12
+      },
+      {
+        "satellite_id": "T",
+        "batch_id": "b2",
+        "cutoff": 81,
+        "quantity": 0,
+        "eligible_events": [],
+        "pickup_trip": null,
+        "pickup_time": null
+      }
+    ],
+    "depot_releases": [
+      {
+        "trip_id": "e1_b1_0",
+        "quantity": 2,
+        "unload_complete": 17,
+        "clean_ready": 22
+      },
+      {
+        "trip_id": "e1_b2_0",
+        "quantity": 2,
+        "unload_complete": 86,
+        "clean_ready": 91
+      }
+    ],
+    "clean_stock": [
+      {
+        "batch_id": "b1",
+        "time": 0,
+        "available": 2,
+        "demand": 2,
+        "after": 0
+      },
+      {
+        "batch_id": "b2",
+        "time": 69,
+        "available": 2,
+        "demand": 2,
+        "after": 0
+      }
+    ],
+    "minimum_pool_for_schedule": 2,
+    "container_ledger": [
+      {
+        "time": 0,
+        "from": "clean",
+        "to": "forward",
+        "quantity": 2,
+        "source": "issue:b1",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 2,
+          "customer": 0,
+          "e2_empty": 0,
+          "e1_empty": 0,
+          "dirty": 0,
+          "sat:S": 0,
+          "sat:T": 0
+        }
+      },
+      {
+        "time": 6,
+        "from": "forward",
+        "to": "customer",
+        "quantity": 1,
+        "source": "oC3:d",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 1,
+          "customer": 1,
+          "e2_empty": 0,
+          "e1_empty": 0,
+          "dirty": 0,
+          "sat:S": 0,
+          "sat:T": 0
+        }
+      },
+      {
+        "time": 7,
+        "from": "forward",
+        "to": "customer",
+        "quantity": 1,
+        "source": "oC4:d",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 0,
+          "customer": 2,
+          "e2_empty": 0,
+          "e1_empty": 0,
+          "dirty": 0,
+          "sat:S": 0,
+          "sat:T": 0
+        }
+      },
+      {
+        "time": 9,
+        "from": "customer",
+        "to": "e2_empty",
+        "quantity": 1,
+        "source": "oC4:p",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 0,
+          "customer": 1,
+          "e2_empty": 1,
+          "e1_empty": 0,
+          "dirty": 0,
+          "sat:S": 0,
+          "sat:T": 0
+        }
+      },
+      {
+        "time": 10,
+        "from": "customer",
+        "to": "e2_empty",
+        "quantity": 1,
+        "source": "oC3:p",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 0,
+          "customer": 0,
+          "e2_empty": 2,
+          "e1_empty": 0,
+          "dirty": 0,
+          "sat:S": 0,
+          "sat:T": 0
+        }
+      },
+      {
+        "time": 11,
+        "from": "e2_empty",
+        "to": "sat:T",
+        "quantity": 2,
+        "source": "e2_T_0_0",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 0,
+          "customer": 0,
+          "e2_empty": 0,
+          "e1_empty": 0,
+          "dirty": 0,
+          "sat:S": 0,
+          "sat:T": 2
+        }
+      },
+      {
+        "time": 12,
+        "from": "sat:T",
+        "to": "e1_empty",
+        "quantity": 2,
+        "source": "e1_b1_0",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 0,
+          "customer": 0,
+          "e2_empty": 0,
+          "e1_empty": 2,
+          "dirty": 0,
+          "sat:S": 0,
+          "sat:T": 0
+        }
+      },
+      {
+        "time": 17,
+        "from": "e1_empty",
+        "to": "dirty",
+        "quantity": 2,
+        "source": "e1_b1_0",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 0,
+          "customer": 0,
+          "e2_empty": 0,
+          "e1_empty": 0,
+          "dirty": 2,
+          "sat:S": 0,
+          "sat:T": 0
+        }
+      },
+      {
+        "time": 22,
+        "from": "dirty",
+        "to": "clean",
+        "quantity": 2,
+        "source": "e1_b1_0",
+        "cycle": 1,
+        "states": {
+          "clean": 2,
+          "forward": 0,
+          "customer": 0,
+          "e2_empty": 0,
+          "e1_empty": 0,
+          "dirty": 0,
+          "sat:S": 0,
+          "sat:T": 0
+        }
+      },
+      {
+        "time": 69,
+        "from": "clean",
+        "to": "forward",
+        "quantity": 2,
+        "source": "issue:b2",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 2,
+          "customer": 0,
+          "e2_empty": 0,
+          "e1_empty": 0,
+          "dirty": 0,
+          "sat:S": 0,
+          "sat:T": 0
+        }
+      },
+      {
+        "time": 75,
+        "from": "forward",
+        "to": "customer",
+        "quantity": 1,
+        "source": "oC1:d",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 1,
+          "customer": 1,
+          "e2_empty": 0,
+          "e1_empty": 0,
+          "dirty": 0,
+          "sat:S": 0,
+          "sat:T": 0
+        }
+      },
+      {
+        "time": 76,
+        "from": "forward",
+        "to": "customer",
+        "quantity": 1,
+        "source": "oC2:d",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 0,
+          "customer": 2,
+          "e2_empty": 0,
+          "e1_empty": 0,
+          "dirty": 0,
+          "sat:S": 0,
+          "sat:T": 0
+        }
+      },
+      {
+        "time": 78,
+        "from": "customer",
+        "to": "e2_empty",
+        "quantity": 1,
+        "source": "oC2:p",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 0,
+          "customer": 1,
+          "e2_empty": 1,
+          "e1_empty": 0,
+          "dirty": 0,
+          "sat:S": 0,
+          "sat:T": 0
+        }
+      },
+      {
+        "time": 79,
+        "from": "customer",
+        "to": "e2_empty",
+        "quantity": 1,
+        "source": "oC1:p",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 0,
+          "customer": 0,
+          "e2_empty": 2,
+          "e1_empty": 0,
+          "dirty": 0,
+          "sat:S": 0,
+          "sat:T": 0
+        }
+      },
+      {
+        "time": 80,
+        "from": "e2_empty",
+        "to": "sat:S",
+        "quantity": 2,
+        "source": "e2_S_0_0",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 0,
+          "customer": 0,
+          "e2_empty": 0,
+          "e1_empty": 0,
+          "dirty": 0,
+          "sat:S": 2,
+          "sat:T": 0
+        }
+      },
+      {
+        "time": 81,
+        "from": "sat:S",
+        "to": "e1_empty",
+        "quantity": 2,
+        "source": "e1_b2_0",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 0,
+          "customer": 0,
+          "e2_empty": 0,
+          "e1_empty": 2,
+          "dirty": 0,
+          "sat:S": 0,
+          "sat:T": 0
+        }
+      },
+      {
+        "time": 86,
+        "from": "e1_empty",
+        "to": "dirty",
+        "quantity": 2,
+        "source": "e1_b2_0",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 0,
+          "customer": 0,
+          "e2_empty": 0,
+          "e1_empty": 0,
+          "dirty": 2,
+          "sat:S": 0,
+          "sat:T": 0
+        }
+      },
+      {
+        "time": 91,
+        "from": "dirty",
+        "to": "clean",
+        "quantity": 2,
+        "source": "e1_b2_0",
+        "cycle": 1,
+        "states": {
+          "clean": 2,
+          "forward": 0,
+          "customer": 0,
+          "e2_empty": 0,
+          "e1_empty": 0,
+          "dirty": 0,
+          "sat:S": 0,
+          "sat:T": 0
+        }
+      }
+    ],
+    "terminal_state": {
+      "clean": 2,
+      "forward": 0,
+      "customer": 0,
+      "e2_empty": 0,
+      "e1_empty": 0,
+      "dirty": 0,
+      "sat:S": 0,
+      "sat:T": 0
+    },
+    "periodic_replay": {
+      "valid": true,
+      "cycles": 2,
+      "terminal_state": {
+        "clean": 2,
+        "forward": 0,
+        "customer": 0,
+        "e2_empty": 0,
+        "e1_empty": 0,
+        "dirty": 0,
+        "sat:S": 0,
+        "sat:T": 0
+      }
+    },
+    "satellite_peak_inventory": {
+      "S": 2,
+      "T": 2
+    },
+    "container_balance": {
+      "issued": 4,
+      "e2_unloaded": 4,
+      "returned_to_depot": 4,
+      "pool": 2
+    },
+    "time_metrics": {
+      "waiting_ticks": {
+        "e1": 14,
+        "e2": 4
+      },
+      "working_ticks": {
+        "e1": 34,
+        "e2": 12
+      },
+      "working_minutes": {
+        "e1": 34.0,
+        "e2": 12.0
+      }
+    },
+    "e1_vehicle_count": 1,
+    "e2_vehicle_count": 2,
+    "e1_trip_count": 2,
+    "e2_trip_count": 2,
+    "total_distance": 28.0,
+    "cost": {
+      "total": 118.60000000000001,
+      "components": {
+        "container_pool": 60,
+        "e1_distance": 20.0,
+        "e1_work": 3.4000000000000004,
+        "e1_vehicles": 10,
+        "e1_trips": 2,
+        "e2_distance": 8.0,
+        "e2_work": 1.2000000000000002,
+        "e2_vehicles": 10,
+        "e2_trips": 2,
+        "cleaning": 0.8,
+        "tracking": 0.4,
+        "container_wear": 0.8
+      },
+      "currency": "synthetic_units",
+      "initial_pool_investment": 20,
+      "cost_basis": "disjoint_distance_time_fixed",
+      "source_type": "synthetic_mechanism",
+      "price_basis": "Artificial unit prices, no claim of market calibration",
+      "evaluation_period": "one 132-minute cycle",
+      "work_time_basis": "occupied_route_minutes",
+      "economic_profile_hash": "8f65f978f5682d6e5e7473dc5ab63af72ceacdf8c9cad1d4847c11d22ca3a40e",
+      "evidence_hash": null,
+      "limitation": "Occupied route time excludes inter-trip idle payroll; investment is separate."
+    },
+    "order_batch_assignment": {
+      "oC1": "b2",
+      "oC2": "b2",
+      "oC3": "b1",
+      "oC4": "b1"
+    },
+    "container_pool_size": 2,
+    "cycle_batch_count": 2,
+    "batch_durations_ticks": [
+      69,
+      63
+    ]
+  },
+  "schedule_mode": "flexible_cycle",
+  "calendar_config": {
+    "model": 8,
+    "schedule_mode": "flexible_cycle",
+    "batch_count_candidates": [
+      1,
+      2,
+      3
+    ],
+    "minimum_phase_ticks": 1,
+    "cycle_start": 0,
+    "cycle_end": 132,
+    "time_tick_seconds": 60
+  },
+  "cycle_batch_count": 2,
+  "batch_boundaries": [
+    0,
+    69,
+    132
+  ],
+  "batch_durations_ticks": [
+    69,
+    63
+  ],
+  "cutoff_offsets_ticks": {
+    "b1": 12,
+    "b2": 12
+  },
+  "cutoff_ratios": {
+    "b1": 0.17391304347826086,
+    "b2": 0.19047619047619047
+  },
+  "actual_recovery_round_count": 2,
+  "solver_module": "models.routing.model_8.alns.solver",
+  "count_search": [
+    {
+      "batch_count": 1,
+      "budget": 9.999337666667998,
+      "status": "FEASIBLE",
+      "objective": 181.54213562373096,
+      "valid": true,
+      "proven_optimal": false,
+      "proven_infeasible": false,
+      "best_bound": null,
+      "iterations": 1671,
+      "runtime": 9.186710000009043,
+      "container_pool_size": 4,
+      "operator_attempts": {
+        "destroy_random_batch": 102,
+        "destroy_related_batch": 92,
+        "close_batch": 86,
+        "split_batch": 92,
+        "destroy_routes": 319,
+        "relocate": 79,
+        "pair": 130,
+        "split_merge": 41,
+        "vehicle": 170,
+        "wait": 97,
+        "e1_delivery": 137,
+        "e1_pickup": 161,
+        "reverse": 88,
+        "shift_cutoff": 47,
+        "align_cutoff": 30
+      },
+      "operator_improvements": {
+        "destroy_random_batch": 0,
+        "destroy_related_batch": 0,
+        "close_batch": 0,
+        "split_batch": 0,
+        "destroy_routes": 3,
+        "relocate": 0,
+        "pair": 1,
+        "split_merge": 0,
+        "vehicle": 0,
+        "wait": 0,
+        "e1_delivery": 0,
+        "e1_pickup": 0,
+        "reverse": 0,
+        "shift_cutoff": 0,
+        "align_cutoff": 0
+      },
+      "evaluations": 749,
+      "cache_hits": 2114,
+      "calendar_evaluations": 0
+    },
+    {
+      "batch_count": 2,
+      "budget": 10.389371299999766,
+      "status": "FEASIBLE",
+      "objective": 118.60000000000001,
+      "valid": true,
+      "proven_optimal": false,
+      "proven_infeasible": false,
+      "best_bound": null,
+      "iterations": 550,
+      "runtime": 10.393415900005493,
+      "container_pool_size": 2,
+      "operator_attempts": {
+        "shift_boundary": 45,
+        "align_boundary": 15,
+        "redistribute_lengths": 29,
+        "destroy_random_batch": 14,
+        "destroy_related_batch": 9,
+        "close_batch": 15,
+        "split_batch": 20,
+        "destroy_routes": 81,
+        "relocate": 26,
+        "pair": 45,
+        "split_merge": 15,
+        "vehicle": 34,
+        "wait": 40,
+        "e1_delivery": 48,
+        "e1_pickup": 42,
+        "reverse": 19,
+        "shift_cutoff": 18,
+        "align_cutoff": 35
+      },
+      "operator_improvements": {
+        "shift_boundary": 0,
+        "align_boundary": 0,
+        "redistribute_lengths": 0,
+        "destroy_random_batch": 0,
+        "destroy_related_batch": 0,
+        "close_batch": 0,
+        "split_batch": 1,
+        "destroy_routes": 7,
+        "relocate": 0,
+        "pair": 2,
+        "split_merge": 0,
+        "vehicle": 0,
+        "wait": 0,
+        "e1_delivery": 0,
+        "e1_pickup": 0,
+        "reverse": 0,
+        "shift_cutoff": 0,
+        "align_cutoff": 2
+      },
+      "evaluations": 821,
+      "cache_hits": 321,
+      "calendar_evaluations": 57
+    },
+    {
+      "batch_count": 3,
+      "budget": 10.35545929998625,
+      "status": "FEASIBLE",
+      "objective": 118.60000000000001,
+      "valid": true,
+      "proven_optimal": false,
+      "proven_infeasible": false,
+      "best_bound": null,
+      "iterations": 557,
+      "runtime": 10.373602499981644,
+      "container_pool_size": 2,
+      "operator_attempts": {
+        "shift_boundary": 23,
+        "align_boundary": 20,
+        "redistribute_lengths": 36,
+        "destroy_random_batch": 16,
+        "destroy_related_batch": 22,
+        "close_batch": 17,
+        "split_batch": 15,
+        "destroy_routes": 70,
+        "relocate": 30,
+        "pair": 25,
+        "split_merge": 26,
+        "vehicle": 46,
+        "wait": 26,
+        "e1_delivery": 50,
+        "e1_pickup": 43,
+        "reverse": 15,
+        "shift_cutoff": 21,
+        "align_cutoff": 56
+      },
+      "operator_improvements": {
+        "shift_boundary": 0,
+        "align_boundary": 0,
+        "redistribute_lengths": 2,
+        "destroy_random_batch": 0,
+        "destroy_related_batch": 1,
+        "close_batch": 0,
+        "split_batch": 0,
+        "destroy_routes": 2,
+        "relocate": 0,
+        "pair": 0,
+        "split_merge": 1,
+        "vehicle": 0,
+        "wait": 0,
+        "e1_delivery": 0,
+        "e1_pickup": 0,
+        "reverse": 0,
+        "shift_cutoff": 0,
+        "align_cutoff": 5
+      },
+      "evaluations": 967,
+      "cache_hits": 344,
+      "calendar_evaluations": 84
+    }
+  ]
+}
