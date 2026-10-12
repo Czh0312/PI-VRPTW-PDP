@@ -6,7 +6,7 @@
 
 M2/M4 的精确法按规模采用联合分仓 MILP 或分仓域树，完整枚举作为显式对照；ALNS 使用启发式分仓搜索。精确与 ALNS 按需加载、互不导入；ALNS 不加载 Gurobi。
 
-当前模型独立位于 `models/routing/variants/model_1/`～`model_8/`。M1–M5 的共享求解内核在 `models/routing/solvers/`，M6–M8 的成本与日历实现在编号目录及 `variants/calendar_search.py`。共同业务规则在 `models/routing/common/cycle/`，成本核算在 `models/cost/`。
+当前模型独立位于 `models/routing/model_1/`～`model_8/`，每个编号下的 `alns/`、`exact/` 分别保存自己的完整求解实现，不导入其他模型的求解代码。批次数搜索也在各算法目录自己的 `batch_search.py` 中。业务实例、规则及独立审计仍在 `models/common/`，成本核算仍在 `models/cost/`；修改这些基础部分会影响相关模型。
 
 历史 M1–M4 仅在显式 `--baseline` 入口保留。旧 M5–M8 已归档，与当前同编号模型定义不同。研究费用包含合成情景和有来源说明的参考参数；真实容器回收、清洗、损耗及完整经营费用仍有缺口。
 

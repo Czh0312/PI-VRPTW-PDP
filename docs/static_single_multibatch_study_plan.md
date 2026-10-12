@@ -1,6 +1,6 @@
 **静态单批次与多批次容器循环：模型、数据与对照实验计划**
 
-模型编号确认：M1/M2 为纯两级配送，M3/M4 为单批次循环（M4 自由选仓），M5 为多批次循环。各编号独立放在 `models/routing/variants/model_1/`～`model_5/`，见 [目录说明](model_layout.md)。
+模型编号确认：M1/M2 为纯两级配送，M3/M4 为单批次循环（M4 自由选仓），M5 为多批次循环。各编号独立放在 `models/routing/model_1/`～`model_5/`，见 [目录说明](model_layout.md)。
 
 日期：2026-09-29。版本：`static_single_multibatch_study_plan_v1`。
 

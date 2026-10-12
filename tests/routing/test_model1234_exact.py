@@ -19,14 +19,14 @@ try:
 except gp.GurobiError as exc:
     pytest.skip(f"Gurobi license unavailable: {exc}", allow_module_level=True)
 
-from models.routing.common.domain.instance import ProblemInstance
-from models.routing.common.domain.node import Customer, Depot, Satellite
-from models.routing.common.solution_audit import audit_exact_solution
-from models.routing.common.task_builder import build_tasks_for_model
-from models.routing.baselines.variants.model_1.exact_solver import solve_exact as solve_m1
-from models.routing.baselines.variants.model_2.exact_solver import solve_exact as solve_m2
-from models.routing.baselines.variants.model_3.exact_solver import solve_exact as solve_m3
-from models.routing.baselines.variants.model_4.exact_solver import solve_exact as solve_m4
+from models.common.domain.instance import ProblemInstance
+from models.common.domain.node import Customer, Depot, Satellite
+from models.common.solution_audit import audit_exact_solution
+from models.common.task_builder import build_tasks_for_model
+from archive.routing_baselines.variants.model_1.exact_solver import solve_exact as solve_m1
+from archive.routing_baselines.variants.model_2.exact_solver import solve_exact as solve_m2
+from archive.routing_baselines.variants.model_3.exact_solver import solve_exact as solve_m3
+from archive.routing_baselines.variants.model_4.exact_solver import solve_exact as solve_m4
 
 
 TOL = 1e-6

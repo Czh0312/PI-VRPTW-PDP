@@ -8,8 +8,8 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from models.routing.common.cycle import load_instance
-from models.routing.common.cycle.audit import audit_solution
+from models.common.cycle import load_instance
+from models.common.cycle.audit import audit_solution
 from tools.configuration.loader import apply_container_pool_size
 
 

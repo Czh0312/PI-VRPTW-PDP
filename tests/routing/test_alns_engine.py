@@ -2,10 +2,8 @@ from types import SimpleNamespace
 import random
 import time
 
-from models.routing.alns.engine import (
-    ALNSConfig, run_alns_search, _first_improving_route_move,
-)
-from models.routing.alns.types import Route, Solution
+from archive.routing_baselines.alns.common.engine import ALNSConfig, run_alns_search, _first_improving_route_move
+from archive.routing_baselines.alns.common.types import Route, Solution
 from models.routing import service
 
 
@@ -46,7 +44,7 @@ def _noop_repair(solution, removed, evaluator, echelon="e2", k=2):
 
 
 def test_early_stop_preserves_nominal_search_trajectory(monkeypatch):
-    from models.routing.alns.engine import ALNSHooks
+    from archive.routing_baselines.alns.common.engine import ALNSHooks
 
     def run(stop_limit):
         clock = [0.0]

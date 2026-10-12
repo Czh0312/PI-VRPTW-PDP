@@ -2,9 +2,9 @@
 from copy import deepcopy
 import math
 import pytest
-from models.routing.solvers.exact.multibatch_cover_schedule import build_cover_schedule,conditional_cover_schedule
-from models.routing.solvers.exact.multibatch_cover_pool import preserve_cover_routes
-from models.routing.common.cycle.audit import audit_solution
+from models.routing.model_5.exact.multibatch_cover_schedule import build_cover_schedule, conditional_cover_schedule
+from models.routing.model_5.exact.multibatch_cover_pool import preserve_cover_routes
+from models.common.cycle.audit import audit_solution
 from tests.routing.test_multibatch_cycle import fixture,hand_solution
 from tests.routing.test_multibatch_route_pool import three_slot_case
 from tests.routing.test_multibatch_departure_loads import nonmetric_problem
@@ -21,7 +21,7 @@ def covers_of(result):
 @pytest.mark.parametrize('seed',range(6))
 def test_fixed_optimal_nonmetric_paths_attain_independent_complete_optimum(seed):
     pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact.solver import solve_exact
+    from models.routing.model_5.exact.engine import solve_exact
     p=nonmetric_problem(seed);opt=solve_exact(p,time_limit=5);assert opt['info']['proven_optimal']
     covers=covers_of(opt);copied=deepcopy(covers)
     trial=conditional_cover_schedule(p,covers,time_limit=3)
@@ -35,7 +35,7 @@ def test_fixed_optimal_nonmetric_paths_attain_independent_complete_optimum(seed)
 
 def test_independently_optimal_quality_cover_and_slot_count():
     pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact.solver import solve_exact
+    from models.routing.model_5.exact.engine import solve_exact
     p=quality_fixture();opt=solve_exact(p,time_limit=5);assert opt['info']['proven_optimal']
     trial=conditional_cover_schedule(p,covers_of(opt),time_limit=3)
     assert trial['certificate']['conditional_optimal']

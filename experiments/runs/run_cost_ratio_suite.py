@@ -44,7 +44,7 @@ def sha(path):
 def register(args, out):
     sys.path.insert(0, str(ROOT))
     from tools.configuration.loader import load_routing_case, resolve_project_path
-    from models.routing.common.cycle import load_instance
+    from models.common.cycle import load_instance
     from models.cost.joint_batch import JointCostProfile
     from experiments.runs.run_model6_comparison import freeze_case, snapshot_source
     if out.exists() and any(out.iterdir()):
@@ -124,8 +124,8 @@ def worker(out, job_id):
         from configuration.loader import load_routing_case
     else:
         from tools.configuration.loader import load_routing_case
-    from models.routing.common.cycle import load_instance
-    from models.routing.common.cycle.audit import audit_solution
+    from models.common.cycle import load_instance
+    from models.common.cycle.audit import audit_solution
     from models.routing.service import solve_routing
     from models.cost.comparison import evaluate_comparison_cost
     for name, digest in plan['source_hashes'].items():

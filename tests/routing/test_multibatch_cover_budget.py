@@ -11,13 +11,13 @@ from tests.routing.test_multibatch_cycle import fixture, hand_solution
 @pytest.mark.parametrize('fraction', [0, .25, .5])
 def test_subset_reservation_uses_same_total_cover_budget_and_zero_skips_selection(monkeypatch, fraction):
     import models.routing.service as service
-    import models.routing.solvers.exact.multibatch_hybrid as hybrid
-    import models.routing.solvers.exact.multibatch_route_cg as cg
-    import models.routing.solvers.exact.multibatch_capacity_cuts as cuts
-    import models.routing.solvers.exact.multibatch_route_pricing as pricing
+    import models.routing.model_5.exact.multibatch_hybrid as hybrid
+    import models.routing.model_5.exact.multibatch_route_cg as cg
+    import models.routing.model_5.exact.multibatch_capacity_cuts as cuts
+    import models.routing.model_5.exact.pickup_route_pricing as pricing
     # Load the module before patching pricing: its module-level import must
     # retain the real route_context for later full-model tests.
-    import models.routing.solvers.exact.multibatch_route_pool
+    import models.routing.model_5.exact.multibatch_route_pool
     p = fixture(pool=2)
     initial = hand_solution(p)
     clock = [100.0]
@@ -57,6 +57,6 @@ def test_subset_reservation_uses_same_total_cover_budget_and_zero_skips_selectio
 
 @pytest.mark.parametrize('value', [-.1, 1, math.inf, math.nan, True, '0'])
 def test_invalid_subset_fraction_is_rejected_before_starting_solver(value):
-    from models.routing.solvers.exact.multibatch_hybrid import solve_hybrid
+    from models.routing.model_5.exact.multibatch_hybrid import solve_hybrid
     with pytest.raises(ValueError, match='subset_time_fraction'):
         solve_hybrid(fixture(pool=2), subset_time_fraction=value)

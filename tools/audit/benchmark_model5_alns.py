@@ -92,8 +92,13 @@ def worker(job, destination):
         from configuration.loader import load_routing_case, apply_container_pool_size
     else:
         from tools.configuration.loader import load_routing_case, apply_container_pool_size
-    from models.routing.common.cycle import load_instance
-    from models.routing.common.cycle.audit import audit_solution
+    if (ROOT/'models/common').is_dir():
+        from models.common.cycle import load_instance
+        from models.common.cycle.audit import audit_solution
+    else:
+        # Explicit --source runs keep the historical source layout intact.
+        from models.routing.common.cycle import load_instance
+        from models.routing.common.cycle.audit import audit_solution
     from models.routing.service import solve_routing
     config, fleet = load_routing_case(job['case'], use_pool_config=False)
     config, fleet = apply_container_pool_size(config, fleet, job['pool'])

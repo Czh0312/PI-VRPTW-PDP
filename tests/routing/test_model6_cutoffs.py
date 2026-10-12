@@ -6,9 +6,10 @@ import json
 
 import pytest
 
-from models.routing.common.cycle.joint import JointBatchInstance
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.variants.model_6 import solve_exact, solve_alns
+from models.common.cycle.joint import JointBatchInstance
+from models.common.cycle.audit import audit_solution
+from models.routing.model_6.exact import solve_exact
+from models.routing.model_6.alns import solve_alns
 from tools.data.build_model6_demo_suite import synthetic_profile
 from tests.routing.test_model6_joint import joint_fixture, exact_available
 
@@ -137,8 +138,8 @@ def test_alns_retains_audited_fixed_window_incumbent_without_claiming_proof(exac
 
 
 def test_evaluator_cache_separates_identical_routes_with_different_cutoffs():
-    from models.routing.variants.model_6.alns.solver import JointEvaluator,clone_state
-    from models.routing.solvers.alns.evaluator import initial_state
+    from models.routing.model_6.alns.solver import JointEvaluator, clone_state
+    from models.routing.model_6.alns.evaluator import initial_state
     import random
     p=flexible(joint_fixture(pool_rate=30),{'b1':[35,45],'b2':[95,105]})
     assignment={'o1':'b1','o2':'b2'}; evaluator=JointEvaluator(p)
@@ -155,7 +156,7 @@ def test_evaluator_cache_separates_identical_routes_with_different_cutoffs():
 def test_cli_variable_cutoffs_and_frozen_initial_solution(tmp_path,exact_available):
     from tools.data.build_model6_demo_suite import build_suite
     from tools.configuration.loader import load_routing_case
-    from models.routing.common.cycle import load_instance
+    from models.common.cycle import load_instance
     from cli.route import main
     manifest=build_suite(tmp_path/'data')
     case=json.loads(manifest.read_text())['cases'][0]['m6_case']
@@ -187,4 +188,4 @@ def test_cutoff_comparison_runner_records_both_domains_and_failures(tmp_path,exa
     summary=json.loads((out/'cutoff_summary.json').read_text())
     assert summary['statistics']['variable_cost_higher']==0
     assert summary['cases'][0]['optimized']['cost_optimal_proven']
-    assert (out/'source_snapshot/models/routing/variants/model_6/exact/model.py').exists()
+    assert (out/'source_snapshot/models/routing/model_6/exact/model.py').exists()

@@ -17,9 +17,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tools.configuration.loader import load_routing_case, resolve_project_path
-from models.routing.common.cycle import load_instance
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.solvers.alns.evaluator import evaluate
+from models.common.cycle import load_instance
+from models.common.cycle.audit import audit_solution
+from models.routing.model_5.alns.evaluator import evaluate
 from tools.data.static_batch_dataset import check_pairing, load_manifest, verify_artifacts
 from tools.data.build_static_batch_suite import read_csv
 

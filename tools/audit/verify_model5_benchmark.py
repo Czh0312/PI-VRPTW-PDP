@@ -15,8 +15,8 @@ from tools.audit.summarize_model5_alns import compare, budget_extension
 
 def verify(folder, before='before', after='after'):
     from tools.configuration.loader import load_routing_case, apply_container_pool_size
-    from models.routing.common.cycle import load_instance
-    from models.routing.common.cycle.audit import audit_solution
+    from models.common.cycle import load_instance
+    from models.common.cycle.audit import audit_solution
     manifest = json.loads((folder/'benchmark_manifest.json').read_text())
     assert hashes(folder/'inputs') == manifest['input_sha256'], 'Frozen inputs changed'
     summaries, problems, checks = {}, {}, []
@@ -62,11 +62,11 @@ def verify(folder, before='before', after='after'):
     if (folder/'budget_extension.json').exists():
         assert dict(before=budget_extension(summaries[before]),after=budget_extension(summaries[after])) == json.loads(
             (folder/'budget_extension.json').read_text()), 'Cross-budget statistics changed'
-    current_paths = [f'models/routing/solvers/alns/{name}.py' for name in
+    current_paths = [f'models/routing/model_5/alns/{"engine" if name == "solver" else name}.py' for name in
                      ('solver','evaluator','cycle_cache','intensification','neighborhoods','construction')]
-    current_paths += [f'models/routing/common/cycle/{name}.py' for name in
+    current_paths += [f'models/common/cycle/{name}.py' for name in
                       ('instance','policy','audit','precheck','state')]
-    current_paths += ['models/routing/variants/model_5/alns/solver.py']
+    current_paths += ['models/routing/model_5/alns/solver.py']
     frozen = json.loads((folder/after/'manifest.json').read_text())['source_sha256']
     current = {path:hashlib.sha256((ROOT/path).read_bytes()).hexdigest() == frozen.get(path)
                for path in current_paths}

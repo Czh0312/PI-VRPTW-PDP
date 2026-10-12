@@ -7,12 +7,24 @@ import sys
 
 def main(root):
     sys.path.insert(0, str(root/'final/source'))
-    from models.routing.common.cycle.instance import load_instance
-    from models.routing.common.cycle.joint import joint_empty_result, STRATEGY
-    from models.routing.variants.calendar_search import solve_counts
-    from models.routing.variants.model_6.exact import solver
+    from importlib import import_module
+    source = root/'final/source'
+    independent = (source/'models/routing/model_7').is_dir()
+    method_first = (source/'models/routing/exact').is_dir()
+    common = 'models.common.cycle' if (source/'models/common').is_dir() else 'models.routing.common.cycle'
+    load_instance = import_module(common+'.instance').load_instance
+    joint = import_module(common+'.joint')
+    joint_empty_result, STRATEGY = joint.joint_empty_result, joint.STRATEGY
     records = []
     for number in (7, 8):
+        if independent:
+            solve_counts = import_module(f'models.routing.model_{number}.exact.calendar_search').solve_counts
+            solver = import_module(f'models.routing.model_{number}.exact.joint_solver')
+        else:
+            search = 'models.routing.exact.common.calendar_search' if method_first else 'models.routing.variants.calendar_search'
+            child = 'models.routing.exact.model_6.solver' if method_first else 'models.routing.variants.model_6.exact.solver'
+            solve_counts = import_module(search).solve_counts
+            solver = import_module(child)
         name = 'zhou_Set1_7-2-1__repeat_orders'
         origin = root/f'diagnostic_long_budget/candidate/results/{name}__m{number}_exact_42.json'
         archived = json.loads(origin.read_text())['result']

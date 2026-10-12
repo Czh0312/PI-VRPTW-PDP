@@ -3,12 +3,11 @@ import math
 
 import pytest
 
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.solvers.exact.multibatch_joint_inventory import build_joint_inventory, set_joint_projection
-from models.routing.solvers.exact.multibatch_physical_cuts import (
-    add_physical_cut, lift_physical_costs, project_physical_costs)
-from models.routing.solvers.exact.multibatch_physical_site import physical_site_certificate
-from models.routing.solvers.exact.solver import solve_exact
+from models.common.cycle.audit import audit_solution
+from models.routing.model_5.exact.multibatch_joint_inventory import build_joint_inventory, set_joint_projection
+from models.routing.model_5.exact.multibatch_physical_cuts import add_physical_cut, lift_physical_costs, project_physical_costs
+from models.routing.model_5.exact.multibatch_physical_site import physical_site_certificate
+from models.routing.model_5.exact.engine import solve_exact
 from tests.routing.test_multibatch_departure_loads import nonmetric_problem
 from tests.routing.test_multibatch_joint_inventory import domains
 from tests.routing.test_multibatch_route_service import congestion_problem

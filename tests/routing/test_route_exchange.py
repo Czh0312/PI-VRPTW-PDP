@@ -3,9 +3,9 @@ from tools.configuration.loader import load_json
 import time
 
 from tests.routing.baseline_helpers import ROOT, load_problem, as_solution
-from models.routing.alns.route_exchange import improve_route_exchanges
-from models.routing.baselines.alns.model_4 import Evaluator
-from models.routing.common.solution_audit import audit_exact_solution
+from archive.routing_baselines.alns.common.route_exchange import improve_route_exchanges
+from archive.routing_baselines.alns.model_4 import Evaluator
+from models.common.solution_audit import audit_exact_solution
 
 
 def fixture():

@@ -27,8 +27,8 @@ from matplotlib.patches import FancyArrowPatch
 import numpy as np
 
 from tools.configuration.loader import load_routing_case
-from models.routing.common.cycle import load_instance
-from models.routing.common.cycle.audit import audit_solution
+from models.common.cycle import load_instance
+from models.common.cycle.audit import audit_solution
 
 FONT = '/Library/Fonts/Arial Unicode.ttf'
 if Path(FONT).exists():

@@ -6,12 +6,12 @@ import time
 
 import pytest
 
-from models.routing.common.cycle import MultiBatchInstance, Order
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.common.domain.instance import ProblemInstance
-from models.routing.common.domain.node import Depot, Satellite, Customer
-from models.routing.solvers.exact.multibatch_route_cg import dual_certificate, route_cover_certificate, site_route_cover
-from models.routing.solvers.exact.multibatch_route_pricing import RoutePricer, TripPricingModel, evaluate_column, route_context
+from models.common.cycle import MultiBatchInstance, Order
+from models.common.cycle.audit import audit_solution
+from models.common.domain.instance import ProblemInstance
+from models.common.domain.node import Depot, Satellite, Customer
+from models.routing.model_5.exact.multibatch_route_cg import dual_certificate, route_cover_certificate, site_route_cover
+from models.routing.model_5.exact.pickup_route_pricing import RoutePricer, TripPricingModel, evaluate_column, route_context
 from tests.routing.test_multibatch_cycle import fixture, hand_solution
 from tests.routing.test_multibatch_departure_loads import nonmetric_problem
 
@@ -132,7 +132,7 @@ def test_exact_trip_pricing_matches_all_elementary_sequences(seed, phase_one, li
 @pytest.mark.parametrize('seed', range(6))
 def test_column_generation_matches_fully_enumerated_relaxation_and_bounds_integer_m5(seed):
     pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact.solver import solve_exact
+    from models.routing.model_5.exact.engine import solve_exact
     problem = nonmetric_problem(seed)
     result = route_cover_certificate(problem, time_limit=5)
     assert result['status'] == 'LP_CONVERGED'
@@ -189,7 +189,7 @@ def test_dual_bound_formula_is_valid_for_arbitrary_multipliers():
 def test_full_audited_trips_project_without_fixed_start_times_or_same_trip_pairing():
     pytest.importorskip('gurobipy')
     from dataclasses import replace
-    from models.routing.common.cycle.state import empty_result
+    from models.common.cycle.state import empty_result
     base = fixture(pool=2)
     problem = MultiBatchInstance(base.network,
         [replace(base.orders[0], pickup_window=(71, 80)), base.orders[1]], base.operating_policy)
@@ -244,7 +244,7 @@ def test_phase_one_failure_does_not_claim_full_integer_infeasibility():
 def test_unfinished_master_objective_is_never_reported_as_a_bound(monkeypatch):
     pytest.importorskip('gurobipy')
     from types import SimpleNamespace
-    from models.routing.solvers.exact import multibatch_route_cg as cg
+    from models.routing.model_5.exact import multibatch_route_cg as cg
     class Unresolved:
         def __init__(self, *args, **kwargs):
             self.model = SimpleNamespace(NumVars=1)
@@ -277,7 +277,7 @@ def test_total_budget_and_scope_validation():
 
 def test_numbered_bound_entry_exports_and_saves_replayable_pricing_model(tmp_path):
     gp = pytest.importorskip('gurobipy')
-    from models.routing.variants.model_5.exact import route_cover_certificate as public_bound
+    from models.routing.model_5.exact import route_cover_certificate as public_bound
     result = public_bound(fixture(pool=2), time_limit=5, diagnostics_dir=tmp_path)
     assert result['status'] == 'LP_CONVERGED' and not result['proven_optimal']
     site = result['sites'][0]

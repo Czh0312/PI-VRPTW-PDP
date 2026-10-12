@@ -49,7 +49,7 @@ def load_config(config, snapshot=None):
         from configuration.loader import load_json
     else:
         from tools.configuration.loader import load_json
-    from models.routing.common.cycle import load_instance
+    from models.common.cycle import load_instance
     fleet = load_json(config['routing_config'])
     if 'operating_policy' in config:
         policy = config['operating_policy']
@@ -62,8 +62,8 @@ def verify(out):
         from configuration.loader import load_routing_case
     else:
         from tools.configuration.loader import load_routing_case
-    from models.routing.common.cycle import load_instance
-    from models.routing.common.cycle.audit import audit_solution
+    from models.common.cycle import load_instance
+    from models.common.cycle.audit import audit_solution
     from models.cost.comparison import evaluate_comparison_cost
     plan, rows = read(out/'experiment.json'), read(out/'rows.json')
     checks = []
@@ -108,7 +108,7 @@ def verify(out):
 
 def reprice_prior(out, prior):
     from models.cost.joint_batch import JointCostProfile
-    from models.routing.common.cycle.audit import audit_solution
+    from models.common.cycle.audit import audit_solution
     from models.cost.comparison import evaluate_comparison_cost
     current_plan, current_rows = read(out/'experiment.json'), read(out/'rows.json')
     old_plan, old_rows = read(prior/'experiment.json'), read(prior/'rows.json')

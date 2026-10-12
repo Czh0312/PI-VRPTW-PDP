@@ -8,12 +8,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from models.routing.common.cycle import MultiBatchInstance
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.solvers.exact import multibatch_logic_benders as lbbd
-from models.routing.solvers.exact.multibatch_joint_inventory import build_joint_inventory,set_joint_projection
-from models.routing.solvers.exact.multibatch_physical_cuts import add_physical_cut,project_physical_costs
-from models.routing.solvers.exact.solver import solve_exact
+from models.common.cycle import MultiBatchInstance
+from models.common.cycle.audit import audit_solution
+from models.routing.model_5.exact import multibatch_logic_benders as lbbd
+from models.routing.model_5.exact.multibatch_joint_inventory import build_joint_inventory, set_joint_projection
+from models.routing.model_5.exact.multibatch_physical_cuts import add_physical_cut, project_physical_costs
+from models.routing.model_5.exact.engine import solve_exact
 from tests.routing.test_multibatch_cycle import fixture,hand_solution
 from tests.routing.test_multibatch_departure_loads import nonmetric_problem
 from tests.routing.test_multibatch_joint_inventory import domains
@@ -49,7 +49,7 @@ def test_calendar_conflict_is_automatically_detected_and_resume_uses_frozen_proo
     pytest.importorskip('gurobipy');p=congestion_problem()
     initial=solve_exact(p,time_limit=5)
     control=lbbd.logic_benders_certificate(p,time_limit=8,initial_result=initial,max_rounds=0)
-    from models.routing.variants.model_5.exact import logic_benders_certificate
+    from models.routing.model_5.exact import logic_benders_certificate
     treatment=logic_benders_certificate(p,time_limit=8,initial_result=initial,
         oracle_time_limit=2,reduction_checks=8,diagnostics_dir=tmp_path)
     assert control['rounds'][0]['raw_bound']==pytest.approx(8)

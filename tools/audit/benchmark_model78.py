@@ -114,8 +114,8 @@ def worker(out, phase, job_id):
         assert sha(source/name) == digest, name
     for name, digest in plan['input_sha256'].items():
         assert sha(out/name) == digest, name
-    from models.routing.common.cycle.instance import load_instance
-    from models.routing.common.cycle.audit import audit_solution
+    from models.common.cycle.instance import load_instance
+    from models.common.cycle.audit import audit_solution
     from models.routing.service import solve_routing
     payload = read(job['case'])
     config = payload['config']

@@ -5,8 +5,8 @@ from unittest.mock import patch
 
 import pytest
 
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.solvers.exact.multibatch_bounds import distance_certificate
+from models.common.cycle.audit import audit_solution
+from models.routing.model_5.exact.multibatch_bounds import distance_certificate
 from tests.routing.test_multibatch_cycle import fixture, hand_solution
 from tests.routing.test_multibatch_departure_loads import nonmetric_problem
 
@@ -15,8 +15,8 @@ from tests.routing.test_multibatch_departure_loads import nonmetric_problem
 @pytest.mark.parametrize('compressed', [False, True])
 def test_all_distance_cut_modes_preserve_nonmetric_integer_optimum(seed, compressed):
     pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact import solver
-    from models.routing.solvers.exact.formulation import build_model
+    from models.routing.model_5.exact import engine as solver
+    from models.routing.model_5.exact.formulation import build_model
     problem = nonmetric_problem(seed)
     results = []
     for mode in ('none', 'total', 'components'):
@@ -35,8 +35,8 @@ def test_all_distance_cut_modes_preserve_nonmetric_integer_optimum(seed, compres
 @pytest.mark.parametrize('unloaded', [29, 30, 31])
 def test_components_count_every_arc_once_and_preserve_cutoff_schedule(compressed, unloaded):
     gp = pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact.formulation import build_model
-    from models.routing.solvers.exact.solver import _set_start
+    from models.routing.model_5.exact.formulation import build_model
+    from models.routing.model_5.exact.engine import _set_start
     problem = fixture(pool=2)
     initial = hand_solution(problem, first_unload=unloaded)
     independent = audit_solution(problem, initial)
@@ -67,7 +67,7 @@ def test_components_count_every_arc_once_and_preserve_cutoff_schedule(compressed
 @pytest.mark.parametrize('seed', [0, 2, 5])
 def test_distance_rows_strengthen_linear_relaxation_without_new_variables(seed):
     gp = pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact.formulation import build_model
+    from models.routing.model_5.exact.formulation import build_model
     problem = nonmetric_problem(seed)
     values, sizes = [], []
     for mode in ('none', 'total', 'components'):
@@ -92,7 +92,7 @@ def test_distance_rows_strengthen_linear_relaxation_without_new_variables(seed):
 
 def test_zero_bounds_and_single_batch_do_not_get_certificate_rows():
     pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact.formulation import build_model
+    from models.routing.model_5.exact.formulation import build_model
     for problem in (fixture(pool=2, zero=True), fixture(pool=2, one_batch=True)):
         model, ctx = build_model(problem, distance_cuts='components')
         try:
@@ -105,7 +105,7 @@ def test_zero_bounds_and_single_batch_do_not_get_certificate_rows():
                                                     (False, False, False)])
 def test_distance_rows_keep_audited_cross_batch_split_witness(zero, share_cutoff, linear):
     pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact import formulation
+    from models.routing.model_5.exact import formulation
     from tests.routing.test_multibatch_route_compression import (
         test_cross_batch_split_witness_and_shared_start_are_preserved as verify_witness)
     original = formulation.build_model
@@ -117,7 +117,7 @@ def test_distance_rows_keep_audited_cross_batch_split_witness(zero, share_cutoff
 
 
 def test_invalid_modes_and_disabled_certificate_are_rejected():
-    from models.routing.solvers.exact.solver import solve_exact
+    from models.routing.model_5.exact.engine import solve_exact
     with pytest.raises(ValueError, match='distance_cuts'):
         solve_exact(fixture(pool=2), distance_cuts='unknown')
     with pytest.raises(ValueError, match='require the distance certificate'):
@@ -126,7 +126,7 @@ def test_invalid_modes_and_disabled_certificate_are_rejected():
 
 def test_numbered_m5_entry_exposes_opt_in_rows_and_keeps_default_reporting_only():
     pytest.importorskip('gurobipy')
-    from models.routing.variants.model_5.exact import solve_exact
+    from models.routing.model_5.exact import solve_exact
     problem = fixture(pool=2)
     baseline = solve_exact(problem, time_limit=5)
     strengthened = solve_exact(problem, time_limit=5, distance_cuts='components')
@@ -141,7 +141,7 @@ def test_numbered_m5_entry_exposes_opt_in_rows_and_keeps_default_reporting_only(
 
 def test_root_completion_measures_first_observed_optimal_root_only():
     gp = pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact.multibatch_cuts import CapacityCutSeparator
+    from models.routing.model_5.exact.multibatch_cuts import CapacityCutSeparator
     state = dict(node=1, seconds=.5, status=gp.GRB.OPTIMAL)
     def get(which):
         return {gp.GRB.Callback.MIPNODE_STATUS: state['status'],

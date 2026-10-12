@@ -6,10 +6,10 @@ import time
 
 import pytest
 
-from models.routing.common.cycle import MultiBatchInstance
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.solvers.exact.single_batch_columns import e1_delivery_tours, root_route_bound, solve_with_route_bound
-from models.routing.solvers.exact.single_batch_route_pool import route_pool_incumbent, route_profile
+from models.common.cycle import MultiBatchInstance
+from models.common.cycle.audit import audit_solution
+from models.routing.model_1.exact.single_batch_columns import e1_delivery_tours, root_route_bound, solve_with_route_bound
+from models.routing.model_1.exact.single_batch_route_pool import route_pool_incumbent, route_profile
 from tests.routing.test_single_batch_columns import contexts, independently_enumerated_trips
 from tests.routing.test_single_batch_solver_audit import tiny_problem, enumerate_tiny
 from tests.routing.test_single_batch_comparison import problem as one_customer

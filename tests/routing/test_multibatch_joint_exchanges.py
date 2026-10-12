@@ -3,13 +3,13 @@ from copy import deepcopy
 
 import pytest
 
-from models.routing.common.cycle import MultiBatchInstance, Order
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.common.cycle.state import empty_result
-from models.routing.common.domain.instance import ProblemInstance
-from models.routing.common.domain.node import Customer, Depot, Satellite
-from models.routing.solvers.exact.multibatch_route_pool import candidate_pools, reoptimize_route_pool
-from models.routing.solvers.exact.multibatch_e1_inventory import e1_inventory_certificate
+from models.common.cycle import MultiBatchInstance, Order
+from models.common.cycle.audit import audit_solution
+from models.common.cycle.state import empty_result
+from models.common.domain.instance import ProblemInstance
+from models.common.domain.node import Customer, Depot, Satellite
+from models.routing.model_5.exact.multibatch_route_pool import candidate_pools, reoptimize_route_pool
+from models.routing.model_5.exact.multibatch_e1_inventory import e1_inventory_certificate
 from tests.routing.test_multibatch_cycle import policy_config
 
 
@@ -88,7 +88,7 @@ def test_complementary_whole_order_exchange_unlocks_full_capacity_slots():
     assert after['audit']['valid'] and after['audit']['periodic_replay']['valid']
     assert after['info']['best_bound'] is None and after['info']['mip_gap'] is None
     assert not after['info']['proven_optimal'] and not after['info']['route_pool_complete']
-    from models.routing.solvers.exact.solver import solve_exact
+    from models.routing.model_5.exact.engine import solve_exact
     full=solve_exact(p,time_limit=5,initial_result=after)
     assert full['info']['proven_optimal'] and full['info']['objective']==pytest.approx(8)
 
@@ -105,7 +105,7 @@ def test_explicit_five_site_patterns_produce_audited_ub_and_scoped_lb():
     assert result['info']['objective']==0 and result['info']['best_bound'] is None
     default=reoptimize_route_pool(p,initial,time_limit=5)
     assert default['info']['route_pool_backend']=='indexed'
-    from models.routing.variants.model_5.exact import route_cover_certificate
+    from models.routing.model_5.exact import route_cover_certificate
     combined=route_cover_certificate(p,initial_result=result,time_limit=5,e1_time_limit=2,e1_backend='patterns')
     assert combined['e1_certificate']['backend']=='patterns'
     assert combined['bound']<=result['info']['objective']+1e-6

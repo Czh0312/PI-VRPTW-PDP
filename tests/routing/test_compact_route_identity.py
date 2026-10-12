@@ -4,9 +4,9 @@ from dataclasses import replace
 
 import pytest
 
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.solvers.exact import solver
-from models.routing.solvers.exact.single_batch_formulation import build_model
+from models.common.cycle.audit import audit_solution
+from models.routing.model_3.exact import engine as solver
+from models.routing.model_3.exact.single_batch_formulation import build_model
 from tests.routing.test_single_batch_solver_audit import tiny_problem
 from tests.routing.test_single_batch_primal import split_problem
 
@@ -36,7 +36,7 @@ def test_global_arcs_match_indexed_routes_with_multiple_vehicles_and_slots(monke
 
 def test_compressed_mixed_trip_start_is_not_overwritten_by_unused_route_copies():
     gp = pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact.primal import construct_incumbent
+    from models.routing.model_3.exact.initial_solution import construct_incumbent
     import time
     p = split_problem()
     p.fleet.e2_per_sat_count = 2
@@ -66,7 +66,7 @@ def test_selected_arc_cannot_join_tasks_on_different_physical_routes():
     p = tiny_problem(1, 0)
     # Zero travel/time avoids accidentally proving infeasible by a time window.
     p.fleet.e2_per_sat_count = 2
-    from models.routing.common.cycle.assignment import assigned_problem
+    from models.common.cycle.assignment import assigned_problem
     p = assigned_problem(p, {o.customer: 'S' for o in p.orders})
     m, ctx = build_model(p, compress_routes=True)
     try:
@@ -85,8 +85,8 @@ def test_selected_arc_cannot_join_tasks_on_different_physical_routes():
 @pytest.mark.parametrize('threshold', [0, 10**9])
 def test_size_dispatch_and_estimator_use_the_same_arc_representation(monkeypatch, threshold):
     pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact import strengthening, single_batch_formulation
-    from models.routing.solvers.exact.domains import assignment_domains
+    from models.routing.model_3.exact import strengthening, single_batch_formulation
+    from models.routing.model_3.exact.domains import assignment_domains
     monkeypatch.setattr(strengthening, 'COMPRESS_ROUTE_MIN_INTERNAL_ARCS', threshold)
     monkeypatch.setattr(single_batch_formulation, 'COMPRESS_ROUTE_MIN_INTERNAL_ARCS', threshold)
     p = tiny_problem(4, 1)

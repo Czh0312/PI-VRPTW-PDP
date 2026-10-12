@@ -49,9 +49,9 @@ def write(path, value):
 
 def worker(job, output):
     from tools.configuration.loader import load_routing_case
-    from models.routing.common.cycle import load_instance
-    from models.routing.common.cycle.audit import audit_solution
-    from models.routing.solvers.exact import solver
+    from models.common.cycle import load_instance
+    from models.common.cycle.audit import audit_solution
+    from models.routing.model_5.exact import engine as solver
     problem = load_instance(*load_routing_case(job['case']))
     initial = json.loads(Path(job['initial_result']).read_text()) if job.get('initial_result') else None
     begun = time.perf_counter()
@@ -59,7 +59,7 @@ def worker(job, output):
         if not job['warm_start']:
             stack.enter_context(patch.object(solver, 'construct_incumbent', return_value=None))
         if job.get('primal_improve') is False:
-            from models.routing.solvers.exact import multibatch_primal
+            from models.routing.model_5.exact import multibatch_primal
             original_primal = multibatch_primal.construct_multibatch_incumbent
             stack.enter_context(patch.object(multibatch_primal, 'construct_multibatch_incumbent',
                 side_effect=lambda *a, **kw: original_primal(*a, **kw, improve=False)))
@@ -97,8 +97,8 @@ def main(argv=None):
     if args.initial_results and args.mode in ('primal', 'incumbent'):
         parser.error('--initial-results requires a formulation ablation mode')
     from tools.configuration.loader import load_routing_case, resolve_project_path
-    from models.routing.common.cycle import load_instance
-    from models.routing.common.cycle.audit import audit_solution
+    from models.common.cycle import load_instance
+    from models.common.cycle.audit import audit_solution
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     jobs = []
@@ -176,7 +176,9 @@ def main(argv=None):
     # frozen solver before dispatching workers, including duplicate keywords
     # (which ast.parse alone does not reject).
     for name in ('formulation.py', 'solver.py', 'multibatch_cuts.py', 'primal.py', 'multibatch_primal.py', 'multibatch_bounds.py'):
-        path = output/'source_snapshot/models/routing/solvers/exact'/name
+        filename = {'multibatch_route_pricing.py': 'pickup_route_pricing.py', 'solver.py': 'engine.py',
+                    'primal.py': 'initial_solution.py'}.get(name, name)
+        path = output/'source_snapshot/models/routing/model_5/exact'/filename
         compile(path.read_text(), str(path), 'exec')
     hashes = {str(p.relative_to(output)): hashlib.sha256(p.read_bytes()).hexdigest()
               for p in sorted(output.rglob('*')) if p.is_file()}

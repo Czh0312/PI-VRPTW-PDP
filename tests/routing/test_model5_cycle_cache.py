@@ -6,15 +6,15 @@ import time
 
 import pytest
 
-from models.routing.solvers.alns.cycle_cache import CycleEvaluator
-from models.routing.solvers.alns.evaluator import evaluate
-from models.routing.solvers.alns.intensification import CycleDescent
-from models.routing.solvers.alns.neighborhoods import clone_state
-from models.routing.solvers.alns.solver import _move
+from models.routing.model_5.alns.cycle_cache import CycleEvaluator
+from models.routing.model_5.alns.evaluator import evaluate
+from models.routing.model_5.alns.intensification import CycleDescent
+from models.routing.model_5.alns.neighborhoods import clone_state
+from models.routing.model_5.alns.engine import _move
 from tests.routing.test_model5_intensification import directed_cycle
-from models.routing.common.cycle import MultiBatchInstance
-from models.routing.common.domain.instance import ProblemInstance
-from models.routing.common.domain.node import Satellite, Customer
+from models.common.cycle import MultiBatchInstance
+from models.common.domain.instance import ProblemInstance
+from models.common.domain.node import Satellite, Customer
 
 
 def test_cycle_cache_matches_full_decoder_across_moves_and_cutoffs():

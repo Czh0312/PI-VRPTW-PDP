@@ -3,10 +3,10 @@ from functools import lru_cache
 import random
 from types import SimpleNamespace
 
-from models.routing.solvers.alns import solver
-from models.routing.solvers.alns.evaluator import evaluate
-from models.routing.solvers.alns.intensification import CycleDescent, task_distance
-from models.routing.solvers.alns.neighborhoods import clone_state, state_key
+from models.routing.model_5.alns import engine as solver
+from models.routing.model_5.alns.evaluator import evaluate
+from models.routing.model_5.alns.intensification import CycleDescent, task_distance
+from models.routing.model_5.alns.neighborhoods import clone_state, state_key
 from tests.routing.test_model5_intensification import directed_cycle
 
 
@@ -60,7 +60,7 @@ def test_arc_reuse_preserves_search_trajectory_with_controlled_clock(monkeypatch
     # Remove wall-clock cooling/cutoff differences for this equivalence check.
     monkeypatch.setattr(solver.time,'perf_counter',lambda:1000.0)
     trace = []
-    from models.routing.solvers.alns.cycle_cache import CycleEvaluator
+    from models.routing.model_5.alns.cycle_cache import CycleEvaluator
     evaluate_original = CycleEvaluator.__call__
     def recording(self,problem,state):
         trace.append(state_key(state))
@@ -86,7 +86,7 @@ def test_arc_reuse_preserves_search_trajectory_with_controlled_clock(monkeypatch
 
 
 def test_public_model5_entry_keeps_arc_cache_opt_in(monkeypatch):
-    from models.routing.variants.model_5 import solve_alns
+    from models.routing.model_5.alns import solve_alns
     problem,_ = directed_cycle()
     monkeypatch.setattr(solver.time,'perf_counter',lambda:1000.0)
     default = solve_alns(problem,max_time=60,max_iterations=100,seed=42)

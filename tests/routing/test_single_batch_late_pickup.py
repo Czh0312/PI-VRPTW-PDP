@@ -2,9 +2,9 @@
 from copy import deepcopy
 import pytest
 from models.routing.service import solve_routing
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.solvers.alns import single_batch
-from models.routing.solvers.alns.evaluator import evaluate
+from models.common.cycle.audit import audit_solution
+from models.routing.model_4.alns import single_batch
+from models.routing.model_4.alns.evaluator import evaluate
 from tests.routing.test_single_batch_solver_audit import tiny_problem, nonmetric_problem
 
 @pytest.mark.parametrize('enabled', [False, True])

@@ -6,9 +6,9 @@ import pytest
 
 from models.routing.catalog import MODEL_SPECS
 from models.routing.service import solve_routing
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.common.cycle.migration import migrate_former_m3_result
-from models.routing.common.cycle import MultiBatchInstance, load_instance
+from models.common.cycle.audit import audit_solution
+from models.common.cycle.migration import migrate_former_m3_result
+from models.common.cycle import MultiBatchInstance, load_instance
 from tools.configuration.loader import load_routing_case
 from tests.routing.test_multibatch_cycle import fixture, hand_solution
 from tests.routing.test_single_batch_comparison import problem
@@ -18,21 +18,16 @@ from tests.routing.test_single_batch_comparison import problem
 def test_dispatch_uses_each_numbered_public_entry(monkeypatch, number):
     instance = fixture() if number == 5 else problem(number)
     mode = 'multi_batch' if number == 5 else 'single_batch'
-    path = MODEL_SPECS[number].module_path(mode)
-    assert path == f'models.routing.variants.model_{number}'
-    module = import_module(path)
-    assert module.MODEL_NUMBER == number and module.BATCH_MODE == mode
-    assert import_module(path+'.model').validate_problem(instance) is None
-    for method in ('exact', 'alns'):
-        package = import_module(path+'.'+method)
-        assert hasattr(package, '__path__')
-        assert callable(getattr(package, 'solve_'+method))
-        assert import_module(path+'.'+method+'.solver')
     called = []
-    def spy(p, **kwargs):
-        called.append(p)
-        return {'entry': path}
     for method in ('alns', 'exact'):
+        path = MODEL_SPECS[number].module_path(mode, method)
+        assert path == f'models.routing.model_{number}.{method}'
+        module = import_module(path)
+        assert module.MODEL_NUMBER == number and module.BATCH_MODE == mode
+        assert import_module(path+'.solver')
+        def spy(p, **kwargs):
+            called.append(p)
+            return {'entry': path}
         monkeypatch.setattr(module, 'solve_'+method, spy)
         assert solve_routing(model=number, method=method, problem=instance) == {'entry': path}
     assert called == [instance, instance]
@@ -41,7 +36,7 @@ def test_dispatch_uses_each_numbered_public_entry(monkeypatch, number):
 @pytest.mark.parametrize('number', [1, 2, 3, 4, 5])
 def test_real_entry_emits_its_model_identity(number):
     instance = fixture() if number == 5 else problem(number)
-    module = import_module(f'models.routing.variants.model_{number}')
+    module = import_module(f'models.routing.model_{number}.alns')
     result = module.solve_alns(instance, max_time=.1, max_iterations=30)
     assert result['model'] == number
     assert result['model_module'] == module.__name__
@@ -51,7 +46,7 @@ def test_real_entry_emits_its_model_identity(number):
 
 def test_single_and_multi_entries_cannot_be_interchanged():
     single, multi = fixture(one_batch=True), fixture()
-    m3, m5 = (import_module(f'models.routing.variants.model_{n}') for n in (3, 5))
+    m3, m5 = (import_module(f'models.routing.model_{n}.alns') for n in (3, 5))
     with pytest.raises(ValueError, match='M3 entry'):
         m3.solve_alns(multi)
     with pytest.raises(ValueError, match='M5 entry'):

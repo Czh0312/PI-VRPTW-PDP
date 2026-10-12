@@ -16,9 +16,9 @@ import math
 from pathlib import Path
 
 from tools.configuration.loader import PROJECT_ROOT,load_routing_case,resolve_project_path
-from models.routing.common.cycle import load_instance
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.common.cycle.joint import lift_result
+from models.common.cycle import load_instance
+from models.common.cycle.audit import audit_solution
+from models.common.cycle.joint import lift_result
 from experiments.runs.run_model6_comparison import freeze_case,snapshot_source,execute_jobs,write_json
 
 
@@ -170,7 +170,7 @@ def main(argv=None):
         fixed['joint_batch_options']['optimize_cutoffs']=False
         fixed['joint_batch_options'].pop('cutoff_bounds_minutes',None)
         p_fixed=load_instance(*load_routing_case(record['m6_case'],use_pool_config=False))
-        from models.routing.common.cycle.joint import JointBatchInstance
+        from models.common.cycle.joint import JointBatchInstance
         p_fixed=JointBatchInstance(p_fixed.network,p_fixed.orders,p_fixed.operating_policy,
                                   fixed['joint_batch_options'],p_fixed.cost_profile.config)
         # The original fixed split must be in the optimization domain.

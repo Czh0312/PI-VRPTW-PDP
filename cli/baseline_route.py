@@ -20,13 +20,13 @@ from tools.configuration.loader import (
     load_routing_case,
     resolve_project_path,
 )
-from models.routing.common.domain.instance import ProblemInstance
+from models.common.domain.instance import ProblemInstance
 from models.routing.catalog import require_model_number
 from models.routing.service import solve_routing
-from models.routing.common.data_loader import parse_dataset
-from models.routing.common.task_builder import build_tasks_for_model
-from models.routing.common.solution_audit import audit_exact_solution
-from models.routing.common.matrix_loader import load_square_matrix
+from models.common.data_loader import parse_dataset
+from models.common.task_builder import build_tasks_for_model
+from models.common.solution_audit import audit_exact_solution
+from models.common.matrix_loader import load_square_matrix
 from tools.reporting.route_plot import plot_vrp_solution
 
 

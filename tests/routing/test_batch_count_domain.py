@@ -4,9 +4,9 @@ import json
 
 import pytest
 
-from models.routing.common.cycle.calendar import CalendarCycleInstance
-from models.routing.common.cycle.uniform import UniformCycleInstance
-from models.routing.common.cycle.audit import audit_solution
+from models.common.cycle.calendar import CalendarCycleInstance
+from models.common.cycle.uniform import UniformCycleInstance
+from models.common.cycle.audit import audit_solution
 from models.cost.comparison import evaluate_comparison_cost
 from models.routing.service import solve_routing
 from tests.routing.test_model6_joint import joint_fixture, exact_available

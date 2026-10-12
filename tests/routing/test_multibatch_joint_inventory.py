@@ -7,24 +7,21 @@ from types import SimpleNamespace
 
 import pytest
 
-from models.routing.common.cycle import MultiBatchInstance, Order
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.common.cycle.state import empty_result
-from models.routing.common.cycle.precheck import travel_lower_bounds
-from models.routing.common.domain.instance import ProblemInstance
-from models.routing.common.domain.node import Depot, Satellite, Customer
-from models.routing.solvers.exact.multibatch_joint_inventory import (
-    build_joint_inventory, cutoff_domains, joint_route_inventory_certificate,
-    recover_joint_schedule, set_joint_projection, solve_joint_inventory,
-)
-from models.routing.solvers.exact.multibatch_route_enumeration import enumerate_route_universe
-from models.routing.solvers.exact.multibatch_route_pricing import route_context
+from models.common.cycle import MultiBatchInstance, Order
+from models.common.cycle.audit import audit_solution
+from models.common.cycle.state import empty_result
+from models.common.cycle.precheck import travel_lower_bounds
+from models.common.domain.instance import ProblemInstance
+from models.common.domain.node import Depot, Satellite, Customer
+from models.routing.model_5.exact.multibatch_joint_inventory import build_joint_inventory, cutoff_domains, joint_route_inventory_certificate, recover_joint_schedule, set_joint_projection, solve_joint_inventory
+from models.routing.model_5.exact.multibatch_route_enumeration import enumerate_route_universe
+from models.routing.model_5.exact.pickup_route_pricing import route_context
 from tests.routing.test_multibatch_cycle import fixture, hand_solution
 from tests.routing.test_multibatch_departure_loads import nonmetric_problem
 
 
 def domains(problem, timed=False):
-    from models.routing.solvers.exact.multibatch_route_timing import enumerate_timed_route_universe
+    from models.routing.model_5.exact.multibatch_route_timing import enumerate_timed_route_universe
     enumerate_routes = enumerate_timed_route_universe if timed else enumerate_route_universe
     return {s: (c, enumerate_routes(problem, c)) for s in problem.satellites
             for c in [route_context(problem, s)] if c['nodes']}
@@ -33,7 +30,7 @@ def domains(problem, timed=False):
 @pytest.mark.parametrize('seed', range(6))
 def test_known_nonmetric_full_optimum_projects_and_joint_bound_remains_below(seed):
     gp = pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact.solver import solve_exact
+    from models.routing.model_5.exact.engine import solve_exact
     p = nonmetric_problem(seed)
     initial = solve_exact(p, time_limit=5)
     assert initial['info']['proven_optimal'] and initial['audit']['valid']
@@ -129,7 +126,7 @@ def test_incomplete_or_missing_site_universe_cannot_create_joint_certificate():
 
 def test_deadline_keeps_previous_bound_without_an_incumbent_objective(monkeypatch):
     gp = pytest.importorskip('gurobipy')
-    import models.routing.solvers.exact.multibatch_joint_inventory as module
+    import models.routing.model_5.exact.multibatch_joint_inventory as module
     class TimedOut:
         Params = SimpleNamespace()
         Status, ObjBound, SolCount, NodeCount = gp.GRB.TIME_LIMIT, 4.75, 0, 1
@@ -177,7 +174,7 @@ def test_recovery_uses_physical_indexed_e1_for_positive_turnaround():
 
 def test_public_entry_same_total_budget_and_replayable_joint_exports(tmp_path):
     gp = pytest.importorskip('gurobipy')
-    from models.routing.variants.model_5.exact import joint_route_inventory_certificate as public
+    from models.routing.model_5.exact import joint_route_inventory_certificate as public
     p = fixture(pool=2)
     out = public(p, time_limit=5, joint_time_limit=1, recovery_time_limit=1,
                  initial_result=hand_solution(p), diagnostics_dir=tmp_path)

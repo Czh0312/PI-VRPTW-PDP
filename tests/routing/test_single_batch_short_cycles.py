@@ -7,10 +7,10 @@ from unittest.mock import patch
 
 import pytest
 
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.solvers.exact.single_batch_short_cycles import add_two_cycle_rows
-from models.routing.solvers.exact.single_batch_formulation import build_model
-from models.routing.solvers.exact.solver import _set_start
+from models.common.cycle.audit import audit_solution
+from models.routing.model_3.exact.single_batch_short_cycles import add_two_cycle_rows
+from models.routing.model_3.exact.single_batch_formulation import build_model
+from models.routing.model_3.exact.engine import _set_start
 from tests.routing.test_single_batch_solver_audit import tiny_problem,enumerate_tiny
 
 
@@ -52,7 +52,7 @@ def test_all_elementary_task_permutations_and_route_partitions_satisfy_actual_ro
 @pytest.mark.parametrize('linear',[False,'complete'])
 def test_complete_cut_solver_matches_original_integer_oracle(model,seed,compressed,linear):
     pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact import solver
+    from models.routing.model_3.exact import engine as solver
     p = tiny_problem(model,seed)
     oracle = enumerate_tiny(p)
     def build(*args,**kwargs):
@@ -139,7 +139,7 @@ def test_zero_duration_mtz_fractional_cycle_is_cut_by_actual_opposite_arc_row():
 def test_actual_audited_cross_trip_pickup_start_still_completes(monkeypatch,compressed):
     gp = pytest.importorskip('gurobipy')
     from tests.routing.test_single_batch_primal import split_problem
-    from models.routing.solvers.exact.primal import construct_incumbent
+    from models.routing.model_3.exact.initial_solution import construct_incumbent
     p = split_problem()
     initial = construct_incumbent(p,time.perf_counter()+1)
     assert initial and audit_solution(p,initial)['valid']
@@ -166,7 +166,7 @@ def test_row_generation_uses_build_deadline_and_cannot_silently_skip_a_failure()
 
 @pytest.mark.parametrize('value',[None,1,'pairs'])
 def test_invalid_hook_type_is_rejected(value):
-    from models.routing.solvers.exact.solver import solve_exact
+    from models.routing.model_3.exact.engine import solve_exact
     with pytest.raises(ValueError,match='boolean'):
         solve_exact(tiny_problem(1,1),_single_batch_cycle_cuts=value)
 
@@ -174,7 +174,7 @@ def test_invalid_hook_type_is_rejected(value):
 def test_cut_option_cannot_ignore_unshared_arcs_or_other_batch_models():
     with pytest.raises(ValueError,match='shared'):
         build_model(tiny_problem(1,1),share_e2=False,short_cycle_cuts=True)
-    from models.routing.solvers.exact.formulation import build_model as dispatch
+    from models.routing.model_3.exact.formulation import build_model as dispatch
     p = tiny_problem(1,1)
     p.operating_policy = replace(p.operating_policy,batches=p.operating_policy.batches*2)
     with pytest.raises(ValueError,match='B=1'):

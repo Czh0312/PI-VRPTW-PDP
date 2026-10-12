@@ -8,14 +8,14 @@ import time
 
 import pytest
 
-from models.routing.common.cycle import MultiBatchInstance, Order
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.common.domain.instance import ProblemInstance
-from models.routing.common.domain.node import Depot, Satellite, Customer
-from models.routing.solvers.exact.multibatch_route_cg import route_cover_certificate
-from models.routing.solvers.exact.multibatch_route_enumeration import enumerate_route_universe
-from models.routing.solvers.exact.multibatch_route_integer_cover import integer_route_cover
-from models.routing.solvers.exact.multibatch_route_pricing import route_context
+from models.common.cycle import MultiBatchInstance, Order
+from models.common.cycle.audit import audit_solution
+from models.common.domain.instance import ProblemInstance
+from models.common.domain.node import Depot, Satellite, Customer
+from models.routing.model_5.exact.multibatch_route_cg import route_cover_certificate
+from models.routing.model_5.exact.multibatch_route_enumeration import enumerate_route_universe
+from models.routing.model_5.exact.multibatch_route_integer_cover import integer_route_cover
+from models.routing.model_5.exact.pickup_route_pricing import route_context
 from tests.routing.test_multibatch_cycle import fixture, hand_solution
 from tests.routing.test_multibatch_departure_loads import nonmetric_problem
 from tests.routing.test_multibatch_route_cg import enumerate_trips, enumerated_lp
@@ -55,7 +55,7 @@ def fractional_problem():
 @pytest.mark.parametrize('seed', range(6))
 def test_integer_cover_matches_independent_all_path_mip_and_bounds_full_m5(seed):
     pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact.solver import solve_exact
+    from models.routing.model_5.exact.engine import solve_exact
     p = nonmetric_problem(seed)
     cert = route_cover_certificate(p, pricing_backend='hybrid', integer_cover_time_limit=1,
                                    e1_time_limit=1, time_limit=5)
@@ -193,7 +193,7 @@ def test_default_keeps_lp_only_path():
 
 def test_public_entry_exports_full_binary_cover_and_separate_lp(tmp_path):
     gp = pytest.importorskip('gurobipy')
-    from models.routing.variants.model_5.exact import route_cover_certificate as public
+    from models.routing.model_5.exact import route_cover_certificate as public
     p = fractional_problem()
     cert = public(p, time_limit=5, pricing_backend='hybrid', integer_cover_time_limit=1, diagnostics_dir=tmp_path)
     binary = list(tmp_path.glob('*_integer_master.mps.gz'))

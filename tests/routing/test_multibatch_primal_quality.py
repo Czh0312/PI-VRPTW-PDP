@@ -4,11 +4,11 @@ from math import sqrt
 
 import pytest
 
-from models.routing.common.cycle import MultiBatchInstance, Order
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.common.domain.instance import ProblemInstance
-from models.routing.common.domain.node import Customer, Depot, Satellite
-from models.routing.solvers.exact.multibatch_primal import construct_multibatch_incumbent
+from models.common.cycle import MultiBatchInstance, Order
+from models.common.cycle.audit import audit_solution
+from models.common.domain.instance import ProblemInstance
+from models.common.domain.node import Customer, Depot, Satellite
+from models.routing.model_5.exact.multibatch_primal import construct_multibatch_incumbent
 from tests.routing.test_multibatch_cycle import policy_config
 
 
@@ -59,8 +59,8 @@ def test_improvement_is_valid_and_compatible_with_full_milp(merge_e1, collinear,
         assert [(e['order_id'], e['kind']) for e in improved['e2_trips'][0]['events']] == [
             ('A', 'd'), ('B', 'd'), ('B', 'p'), ('A', 'p')]
     gp = pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact import solver
-    from models.routing.solvers.exact.formulation import build_model
+    from models.routing.model_5.exact import engine as solver
+    from models.routing.model_5.exact.formulation import build_model
     model, ctx = build_model(problem)
     try:
         assert solver._set_start(problem, model, ctx, improved)
@@ -76,7 +76,7 @@ def test_improvement_is_valid_and_compatible_with_full_milp(merge_e1, collinear,
 
 
 def test_improvement_deadline_retains_newly_audited_seed(monkeypatch):
-    from models.routing.solvers.exact import multibatch_primal
+    from models.routing.model_5.exact import multibatch_primal
     problem = quality_fixture()
     expired = False
 

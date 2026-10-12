@@ -5,9 +5,9 @@ import json
 from pathlib import Path
 import random
 
-from models.routing.common.cycle.policy import Batch
-from models.routing.common.cycle.calendar import CalendarCycleInstance
-from models.routing.common.cycle.uniform import UniformCycleInstance
+from models.common.cycle.policy import Batch
+from models.common.cycle.calendar import CalendarCycleInstance
+from models.common.cycle.uniform import UniformCycleInstance
 from models.routing.service import solve_routing
 from tests.routing.test_model6_joint import joint_fixture
 

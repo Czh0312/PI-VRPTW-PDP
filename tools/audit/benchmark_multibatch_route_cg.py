@@ -29,8 +29,8 @@ def write(path, value):
 
 def worker(job, destination):
     from tools.configuration.loader import load_routing_case
-    from models.routing.common.cycle import load_instance
-    from models.routing.common.cycle.audit import audit_solution
+    from models.common.cycle import load_instance
+    from models.common.cycle.audit import audit_solution
     problem = load_instance(*load_routing_case(job['case']))
     initial = json.loads(Path(job['initial_result']).read_text())
     independent = audit_solution(problem, initial)
@@ -38,14 +38,14 @@ def worker(job, destination):
         raise ValueError('Frozen incumbent failed audit')
     started = time.perf_counter()
     if job['variant'] == 'milp':
-        from models.routing.solvers.exact.solver import solve_exact
+        from models.routing.model_5.exact.engine import solve_exact
         result = solve_exact(problem, time_limit=job['budget'], seed=job['seed'], initial_result=initial,
                              distance_cuts='components', verbose=True)
         lower = result['info']['best_bound']
         payload = dict(result=result, independent_audit=audit_solution(problem, result))
         valid = payload['independent_audit']['valid']
     else:
-        from models.routing.solvers.exact.multibatch_route_cg import route_cover_certificate
+        from models.routing.model_5.exact.multibatch_route_cg import route_cover_certificate
         certificate = route_cover_certificate(problem, time_limit=job['budget'], initial_result=initial,
             seed=job['seed'], pricing_time_limit=job['pricing_time_limit'], verbose=True,
             e1_time_limit=job['e1_time_limit'] if job['variant'] == 'cg-e1' else 0,
@@ -81,8 +81,8 @@ def main():
     if len(set(args.variants)) != len(args.variants):
         parser.error('variants must be distinct')
     from tools.configuration.loader import load_routing_case, resolve_project_path
-    from models.routing.common.cycle import load_instance
-    from models.routing.common.cycle.audit import audit_solution
+    from models.common.cycle import load_instance
+    from models.common.cycle.audit import audit_solution
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     jobs = []
@@ -123,7 +123,9 @@ def main():
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
     for name in ('multibatch_route_cg.py', 'multibatch_route_pricing.py', 'multibatch_bounds.py', 'solver.py', 'formulation.py'):
-        path = output/'source_snapshot/models/routing/solvers/exact'/name
+        filename = {'multibatch_route_pricing.py': 'pickup_route_pricing.py', 'solver.py': 'engine.py',
+                    'primal.py': 'initial_solution.py'}.get(name, name)
+        path = output/'source_snapshot/models/routing/model_5/exact'/filename
         compile(path.read_text(), str(path), 'exec')
     hashes = {str(p.relative_to(output)): hashlib.sha256(p.read_bytes()).hexdigest()
               for p in sorted(output.rglob('*')) if p.is_file()}

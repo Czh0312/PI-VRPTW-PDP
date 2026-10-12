@@ -23,11 +23,11 @@ if str(ROOT) not in sys.path:
 import numpy as np
 
 from tools.configuration.loader import load_routing_case, resolve_project_path
-from models.routing.common.cycle import load_instance
-from models.routing.common.cycle.instance import MultiBatchInstance
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.common.cycle.precheck import check_necessary_conditions, travel_lower_bounds
-from models.routing.solvers.alns.evaluator import evaluate
+from models.common.cycle import load_instance
+from models.common.cycle.instance import MultiBatchInstance
+from models.common.cycle.audit import audit_solution
+from models.common.cycle.precheck import check_necessary_conditions, travel_lower_bounds
+from models.routing.model_3.alns.evaluator import evaluate
 from tools.audit.audit_static_batch_suite import constructive_state
 from tools.data.build_static_batch_suite import read_csv
 from tools.data.static_batch_dataset import load_manifest, check_pairing, verify_artifacts
@@ -279,9 +279,9 @@ def audit_design(manifest_path, output):
     verify_artifacts(manifest, manifest_path.parent)
     save_json(output/'audit_sources.json', {str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest()
         for p in [Path(__file__), ROOT/'tools/data/build_static_batch_suite.py',
-                  ROOT/'models/routing/common/cycle/instance.py', ROOT/'models/routing/common/cycle/policy.py',
-                  ROOT/'models/routing/common/cycle/precheck.py', ROOT/'models/routing/common/cycle/audit.py',
-                  ROOT/'models/routing/solvers/alns/evaluator.py', ROOT/'config/containers/pool_ratio.json']})
+                  ROOT/'models/common/cycle/instance.py', ROOT/'models/common/cycle/policy.py',
+                  ROOT/'models/common/cycle/precheck.py', ROOT/'models/common/cycle/audit.py',
+                  ROOT/'models/routing/model_3/alns/evaluator.py', ROOT/'config/containers/pool_ratio.json']})
     make_figures(plots, family_rows, output)
     return result
 

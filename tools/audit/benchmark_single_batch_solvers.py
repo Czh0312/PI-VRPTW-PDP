@@ -26,8 +26,8 @@ def write(path, value):
 
 def worker(job, destination):
     from tools.configuration.loader import load_routing_case
-    from models.routing.common.cycle import load_instance
-    from models.routing.common.cycle.audit import audit_solution
+    from models.common.cycle import load_instance
+    from models.common.cycle.audit import audit_solution
     from models.routing.service import solve_routing
     config, fleet = load_routing_case(job['case'])
     problem = load_instance({**config, 'model': job['model']}, fleet)

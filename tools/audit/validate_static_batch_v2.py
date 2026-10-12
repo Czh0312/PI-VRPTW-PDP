@@ -13,8 +13,8 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path: sys.path.insert(0,str(ROOT))
 from tools.configuration.loader import load_routing_case
-from models.routing.common.cycle import load_instance
-from models.routing.common.cycle.audit import audit_solution
+from models.common.cycle import load_instance
+from models.common.cycle.audit import audit_solution
 from tools.data.static_batch_dataset import load_manifest, check_pairing
 
 
@@ -33,7 +33,7 @@ def main(argv=None):
     def run(record, model, solver, budget, iterations, phase):
         cfg,fleet=load_routing_case(record['case_path'],use_pool_config=False)
         problem=load_instance({**cfg,'model':model},fleet)
-        entry=import_module(f'models.routing.variants.model_{model}.{solver}.solver')
+        entry=import_module(f'models.routing.model_{model}.{solver}.solver')
         result=(entry.solve_alns(problem,max_time=budget,max_iterations=iterations,seed=42)
                 if solver=='alns' else entry.solve_exact(problem,time_limit=budget,seed=42))
         audited=audit_solution(problem,result)

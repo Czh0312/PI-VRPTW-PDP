@@ -6,13 +6,13 @@ import time
 
 import pytest
 
-from models.routing.common.cycle import MultiBatchInstance
-from models.routing.common.cycle.audit import audit_solution
+from models.common.cycle import MultiBatchInstance
+from models.common.cycle.audit import audit_solution
 from models.routing.service import solve_routing
-from models.routing.solvers.alns.construction import chronological_state
-from models.routing.solvers.alns.evaluator import evaluate
-from models.routing.solvers.alns.neighborhoods import _route_score, repair_orders
-from models.routing.solvers.alns.single_batch_scoring import SingleBatchRouteScorer
+from models.routing.model_4.alns.construction import chronological_state
+from models.routing.model_4.alns.evaluator import evaluate
+from models.routing.model_4.alns.neighborhoods import _route_score, repair_orders
+from models.routing.model_4.alns.single_batch_scoring import SingleBatchRouteScorer
 from tests.routing.test_single_batch_solver_audit import tiny_problem
 
 
@@ -111,7 +111,7 @@ def test_custom_scorer_keeps_original_call_path(subclass):
 
 @pytest.mark.parametrize('model', [1, 2, 3, 4])
 def test_public_activation_is_only_m3_fixed_recovery(monkeypatch, model):
-    from models.routing.solvers.alns import single_batch
+    from models.routing.model_4.alns import single_batch
     original = single_batch.destroy_repair
     flags = []
     def wrapped(*args, **kwargs):
@@ -143,7 +143,7 @@ def test_preparing_prefixes_does_not_traverse_unrequested_events():
 
 
 def test_unchanged_route_prefix_is_shared_between_pickup_requests_within_one_repair(monkeypatch):
-    from models.routing.common.domain.instance import ProblemInstance
+    from models.common.domain.instance import ProblemInstance
     base = tiny_problem(3, 0)
     orders = [replace(base.orders[0], id=f'x{i}') for i in range(8)]
     fleet = dict(E1_vehicle_count=1, vehicles_per_satellite=3, E1_Qk=100, E1_Ck=100,

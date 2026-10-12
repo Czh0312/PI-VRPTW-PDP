@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from models.routing.alns.engine import ALNSResult
-from models.routing.baselines.alns import model_4
+from archive.routing_baselines.alns.common.engine import ALNSResult
+from archive.routing_baselines.alns import model_4
 from tests.routing.baseline_helpers import load_problem
 
 ROOT = Path(__file__).resolve().parents[2]

@@ -28,7 +28,7 @@ make test-full
 | 数据生成、清单与冻结源码恢复 | `data/` |
 
 当前周期与数据验收：`routing/test_multibatch_cycle.py`、`data/test_static_batch_suite.py`、`routing/test_model_scope.py`。
-历史 M1–M4 算法测试导入 models.routing.baselines，证明仅适用于相应旧规则。
+历史 M1–M4 算法测试导入 archive.routing_baselines，证明仅适用于相应旧规则。
 旧定义 M5–M8 的专属测试已随历史模型归档；当前同编号模型由现行多批与日历测试覆盖。
 
 `routing/test_single_batch_comparison.py` 覆盖四模型任务差异、自由分仓修复不可行、未闭合枚举的证明边界、时间规范化、寿命补购、价格敏感性及冻结执行。

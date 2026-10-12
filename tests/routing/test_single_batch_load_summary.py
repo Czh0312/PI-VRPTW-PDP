@@ -5,11 +5,11 @@ import random
 
 import pytest
 
-from models.routing.common.cycle import MultiBatchInstance
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.solvers.alns.evaluator import evaluate, initial_state
-from models.routing.solvers.alns.single_batch import _move
-from models.routing.solvers.alns.single_batch_cache import SingleBatchCache, SingleBatchEvaluator
+from models.common.cycle import MultiBatchInstance
+from models.common.cycle.audit import audit_solution
+from models.routing.model_3.alns.evaluator import evaluate, initial_state
+from models.routing.model_3.alns.single_batch import _move
+from models.routing.model_3.alns.single_batch_cache import SingleBatchCache, SingleBatchEvaluator
 from tests.routing.test_single_batch_solver_audit import tiny_problem
 
 

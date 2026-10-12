@@ -1,12 +1,12 @@
 """Dispatch current cycle solvers; historical algorithms require explicit opt-in."""
 from importlib import import_module
 from .catalog import MODEL_SPECS, require_model_number
-from .common.operating_policy import policy_for
+from models.common.operating_policy import policy_for
 
 
 def _load_solver(model, method):
-    module = (f"models.routing.baselines.variants.model_{model}" if method == "exact"
-              else f"models.routing.baselines.alns.model_{model}")
+    module = (f"archive.routing_baselines.variants.model_{model}" if method == "exact"
+              else f"archive.routing_baselines.alns.model_{model}")
     return getattr(import_module(module), "solve_exact" if method == "exact" else "solve_alns")
 
 
@@ -29,8 +29,8 @@ def solve_routing(*, model, method, problem, e1_tasks=None, e2_tasks_by_sat=None
         expected_backend = 'joint_batch_indexed' if model in (6, 7, 8) else 'multibatch_indexed'
         if exact_backend not in (None, expected_backend):
             raise ValueError(f'Model {model} requires {expected_backend}; incompatible or legacy backend: {exact_backend}')
-        from .common.cycle.scope import batch_mode_for
-        module = import_module(MODEL_SPECS[model].module_path(batch_mode_for(problem)))
+        from models.common.cycle.scope import batch_mode_for
+        module = import_module(MODEL_SPECS[model].module_path(batch_mode_for(problem), method))
         if method == "exact":
             return module.solve_exact(problem, time_limit=exact_time if exact_time is not None else 60, seed=seed)
         kwargs=dict(max_time=alns_time,max_iterations=alns_iter,seed=seed)

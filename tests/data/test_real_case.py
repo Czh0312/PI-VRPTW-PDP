@@ -3,11 +3,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from models.routing.common.domain.instance import ProblemInstance
-from models.routing.common.domain.node import Depot, Satellite
-from models.routing.common.data_loader import parse_dataset
-from models.routing.common.matrix_loader import load_square_matrix
-from models.routing.common.task_builder import build_tasks_for_model
+from models.common.domain.instance import ProblemInstance
+from models.common.domain.node import Depot, Satellite
+from models.common.data_loader import parse_dataset
+from models.common.matrix_loader import load_square_matrix
+from models.common.task_builder import build_tasks_for_model
 
 
 FLEET = {

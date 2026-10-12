@@ -5,14 +5,14 @@ import time
 
 import pytest
 
-from models.routing.common.cycle import MultiBatchInstance, Order
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.common.domain.instance import ProblemInstance
-from models.routing.common.domain.node import Customer, Depot, Satellite
-from models.routing.solvers.alns.evaluator import evaluate
-from models.routing.solvers.alns.single_batch_descent import SingleBatchDescent, task_distance
-from models.routing.solvers.alns.single_batch_scoring import SingleBatchRouteScorer
-from models.routing.solvers.alns.neighborhoods import _goods_ready, _route_score, state_key
+from models.common.cycle import MultiBatchInstance, Order
+from models.common.cycle.audit import audit_solution
+from models.common.domain.instance import ProblemInstance
+from models.common.domain.node import Customer, Depot, Satellite
+from models.routing.model_3.alns.evaluator import evaluate
+from models.routing.model_3.alns.single_batch_descent import SingleBatchDescent, task_distance
+from models.routing.model_3.alns.single_batch_scoring import SingleBatchRouteScorer
+from models.routing.model_3.alns.neighborhoods import _goods_ready, _route_score, state_key
 
 
 def sequential_trips(model):
@@ -132,7 +132,7 @@ def test_empty_trips_do_not_shift_decoded_vehicle_readiness_indices(model):
 
 
 def test_cached_context_refreshes_when_absolute_wait_changes(monkeypatch):
-    import models.routing.solvers.alns.single_batch_descent as module
+    import models.routing.model_3.alns.single_batch_descent as module
     problem, state, _ = sequential_trips(1)
     _, decoded, _ = evaluate(problem, state)
     calls = []
@@ -157,7 +157,7 @@ def test_cached_context_refreshes_when_absolute_wait_changes(monkeypatch):
 
 
 def test_expired_or_interrupted_screen_retains_complete_candidate(monkeypatch):
-    import models.routing.solvers.alns.single_batch_descent as module
+    import models.routing.model_3.alns.single_batch_descent as module
     problem, state, merged = sequential_trips(1)
     saved = deepcopy(state)
     _, decoded, _ = evaluate(problem, state)

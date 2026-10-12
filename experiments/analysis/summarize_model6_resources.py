@@ -7,8 +7,8 @@ import math
 from pathlib import Path
 
 from tools.configuration.loader import load_routing_case,resolve_project_path
-from models.routing.common.cycle import load_instance
-from models.routing.common.cycle.audit import audit_solution
+from models.common.cycle import load_instance
+from models.common.cycle.audit import audit_solution
 
 
 def resource_certificate(problem,result):

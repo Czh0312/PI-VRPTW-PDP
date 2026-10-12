@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
-from models.routing.common.domain.instance import ProblemInstance
+from models.common.domain.instance import ProblemInstance
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_DIR = PROJECT_ROOT / "output"

@@ -5,16 +5,16 @@ import json
 import random
 import pytest
 from tools.configuration.loader import load_routing_case
-from models.routing.common.domain.node import Depot, Satellite, Customer
-from models.routing.common.domain.instance import ProblemInstance
-from models.routing.common.task_builder import build_tasks_for_model
+from models.common.domain.node import Depot, Satellite, Customer
+from models.common.domain.instance import ProblemInstance
+from models.common.task_builder import build_tasks_for_model
 from models.routing.service import solve_routing
-from models.routing.common.cycle import MultiBatchInstance, MultiBatchPolicy, Order, load_instance
-from models.routing.common.cycle.instance import load_orders
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.common.cycle.state import empty_result
-from models.routing.solvers.alns.evaluator import evaluate, initial_state
-from models.routing.solvers.alns.solver import solve_alns
+from models.common.cycle import MultiBatchInstance, MultiBatchPolicy, Order, load_instance
+from models.common.cycle.instance import load_orders
+from models.common.cycle.audit import audit_solution
+from models.common.cycle.state import empty_result
+from models.routing.model_5.alns.evaluator import evaluate, initial_state
+from models.routing.model_5.alns.engine import solve_alns
 
 
 def policy_config():
@@ -296,7 +296,7 @@ def exact():
         m.dispose()
     except gp.GurobiError as exc:
         pytest.skip(f'Gurobi unavailable: {exc}')
-    from models.routing.solvers.exact.solver import solve_exact
+    from models.routing.model_5.exact.engine import solve_exact
     return solve_exact
 
 

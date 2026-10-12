@@ -10,8 +10,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tools.configuration.loader import load_routing_case, resolve_project_path
-from models.routing.common.cycle import load_instance
-from models.routing.common.cycle.migration import migrate_former_m3_result
+from models.common.cycle import load_instance
+from models.common.cycle.migration import migrate_former_m3_result
 
 
 def main(argv=None):

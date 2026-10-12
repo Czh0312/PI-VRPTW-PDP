@@ -2,10 +2,10 @@
 from dataclasses import replace
 import random
 
-from models.routing.common.cycle import MultiBatchInstance, Order
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.solvers.alns.construction import appointment_state, chronological_state
-from models.routing.solvers.alns.evaluator import evaluate
+from models.common.cycle import MultiBatchInstance, Order
+from models.common.cycle.audit import audit_solution
+from models.routing.model_3.alns.construction import appointment_state, chronological_state
+from models.routing.model_3.alns.evaluator import evaluate
 from tests.routing.test_multibatch_cycle import fixture
 
 
@@ -33,8 +33,8 @@ def test_grouping_does_not_hide_an_insufficient_container_pool():
 
 
 def test_forward_only_grouping_does_not_block_early_jobs_with_a_late_appointment():
-    from models.routing.common.domain.node import Customer
-    from models.routing.common.domain.instance import ProblemInstance
+    from models.common.domain.node import Customer
+    from models.common.domain.instance import ProblemInstance
     original=fixture(one_batch=True,pool=3)
     nodes=dict(original.network.nodes)
     nodes['F']=Customer('F',12,0,0,0,(0,135),(0,135),'S')

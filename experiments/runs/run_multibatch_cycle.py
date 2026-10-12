@@ -22,7 +22,7 @@ from tools.configuration.snapshots import freeze_input
 from tools.configuration.container_pools import apply_pool_config
 from experiments.analysis.summarize_multibatch_cycle import summarize
 from experiments.analysis.summarize_static_multibatch import summarize_study
-from models.routing.common.cycle import load_instance, MultiBatchPolicy
+from models.common.cycle import load_instance, MultiBatchPolicy
 from tools.data.static_batch_dataset import load_manifest, check_pairing, suggested_pool_sizes
 
 INPUT_KEYS = ('data', 'orders', 'routing_config', 'operating_policy', 'algorithm_config',

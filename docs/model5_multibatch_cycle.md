@@ -153,10 +153,10 @@ ALNS 在全周期状态上搜索订单任务移动、成对移动、拆合趟次
 
 **代码位置**
 
-M5 的定义和求解入口位于 `models/routing/variants/model_5/`；精确实现位于 `models/routing/solvers/exact/`，ALNS 实现位于 `models/routing/solvers/alns/`；实例、时间策略和独立审计位于 `models/routing/common/cycle/`。两种求解方式按需加载、互不导入。`models/routing/service.py` 和 `cli/route.py` 在旧静态任务创建之前分流至新入口；`cli/multibatch.py` 负责新输出。费用核心位于 `models/cost/multibatch.py`，CLI 为 `cli/multibatch_cost.py`。M1–M4 由各自编号目录接入新版单批次；历史 M1–M4 只可显式使用 --baseline。
+M5 的定义和求解入口位于 `models/routing/model_5/`；精确实现位于 `models/routing/model_5/exact/`，ALNS 实现位于 `models/routing/model_5/alns/`；实例、时间策略和独立审计位于 `models/common/cycle/`。两种求解方式按需加载、互不导入。`models/routing/service.py` 和 `cli/route.py` 在旧静态任务创建之前分流至新入口；`cli/multibatch.py` 负责新输出。费用核心位于 `models/cost/multibatch.py`，CLI 为 `cli/multibatch_cost.py`。M1–M4 由各自编号目录接入新版单批次；历史 M1–M4 只可显式使用 --baseline。
 
 **2026-09-29 主线清理更新**
 
-默认入口现为 `config/cases/single_batch_demo.json`，采用同一框架 B=1。历史单日版已隔离到 `models/routing/baselines/`，仅能显式启用。上文 253 项为清理前历史回归计数，清理后验收见 [清理记录](../archive/docs/repository_cleanup_20260929.md)。旧 M5 中转、旧 M6–M8 与旧经济对比不再从正式命令调用。新版 M5 是本页的多批次模型。
+默认入口现为 `config/cases/single_batch_demo.json`，采用同一框架 B=1。历史单日版已隔离到 `archive/routing_baselines/`，仅能显式启用。上文 253 项为清理前历史回归计数，清理后验收见 [清理记录](../archive/docs/repository_cleanup_20260929.md)。旧 M5 中转、旧 M6–M8 与旧经济对比不再从正式命令调用。新版 M5 是本页的多批次模型。
 
 编号修正说明：以前保存的多批次结果可能仍标为 M3；它们来自当时的源码快照。新运行标为 M5，旧结果可用显式迁移工具重标并重新审计，见 [布局与迁移](model_layout.md)。

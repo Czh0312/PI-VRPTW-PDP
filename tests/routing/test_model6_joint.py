@@ -9,15 +9,24 @@ import sys
 
 import pytest
 
-from models.routing.common.cycle.instance import Order
-from models.routing.common.cycle.policy import MultiBatchPolicy
-from models.routing.common.cycle.joint import JointBatchInstance
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.common.domain.node import Depot,Satellite,Customer
-from models.routing.common.domain.instance import ProblemInstance
-from models.routing.variants.model_6 import solve_exact,solve_alns
+from models.common.cycle.instance import Order
+from models.common.cycle.policy import MultiBatchPolicy
+from models.common.cycle.joint import JointBatchInstance
+from models.common.cycle.audit import audit_solution
+from models.common.domain.node import Depot, Satellite, Customer
+from models.common.domain.instance import ProblemInstance
 from models.cost.joint_batch import JointCostProfile
 from tools.data.build_model6_demo_suite import synthetic_profile,build_suite
+
+
+def solve_exact(*args, **kwargs):
+    from models.routing.model_6.exact import solve_exact as solve
+    return solve(*args, **kwargs)
+
+
+def solve_alns(*args, **kwargs):
+    from models.routing.model_6.alns import solve_alns as solve
+    return solve(*args, **kwargs)
 
 
 def joint_fixture(pool_rate=5,cleaning=5,late=False,one_batch=False,zero=False,**options):
@@ -250,7 +259,7 @@ def test_frozen_comparison_runs_matched_cost_ablation_and_all_seeds(tmp_path,exa
         if row['treatment']=='M6_joint' and row['solver']=='alns':
             assert row['joint_optimal_gap_percent']==pytest.approx(100*(row['cost']-exact['cost'])/exact['cost'])
             assert row['joint_optimal_gap_percent']>=-1e-6
-    assert (out/'source_snapshot/models/routing/variants/model_6/exact/model.py').exists()
+    assert (out/'source_snapshot/models/routing/model_6/exact/model.py').exists()
     assert 'synthetic_units' in (out/'report.md').read_text()
     baseline=next(r for r in rows if r['treatment']=='M5_distance' and r['solver']=='exact')
     assert baseline['total_container_uses']==2 and baseline['order_count']==2
@@ -263,7 +272,7 @@ def test_frozen_comparison_runs_matched_cost_ablation_and_all_seeds(tmp_path,exa
     proof=resources['cases'][0]['resource_certificate']
     assert not proof['pool_minimum_proven']
     from tools.configuration.loader import load_routing_case
-    from models.routing.common.cycle import load_instance
+    from models.common.cycle import load_instance
     from experiments.analysis.summarize_model6_resources import resource_certificate
     p=load_instance(*load_routing_case(out/'cases/0_M6_joint.json',use_pool_config=False))
     direct=resource_certificate(p,json.loads((out/exact['run']/'result.json').read_text()))
@@ -290,7 +299,7 @@ def test_evidence_snapshot_is_shared_and_hashes_describe_rewritten_profile(tmp_p
 
 def test_case_loading_service_dispatch_and_cli(tmp_path):
     from tools.configuration.loader import load_routing_case
-    from models.routing.common.cycle import load_instance
+    from models.common.cycle import load_instance
     from models.routing.service import solve_routing
     from cli.route import main
     from cli.cost import main as price
@@ -317,7 +326,7 @@ method=sys.argv[1]
 opposite='alns' if method=='exact' else 'exact'
 class Guard(importlib.abc.MetaPathFinder):
     def find_spec(self,fullname,path=None,target=None):
-        if fullname.startswith('models.routing.solvers.'+opposite) or fullname.startswith('models.routing.variants.model_6.'+opposite) or (method=='alns' and fullname.startswith('gurobipy')):
+        if (fullname.startswith('models.routing.model_') and '.'+opposite in fullname) or (method=='alns' and fullname.startswith('gurobipy')):
             raise AssertionError('Unexpected dependency '+fullname)
 sys.meta_path.insert(0,Guard())
 from tests.routing.test_model6_joint import joint_fixture

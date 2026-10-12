@@ -6,10 +6,10 @@ import random
 import pytest
 
 from tools.configuration.loader import load_routing_case, resolve_project_path
-from models.routing.common.cycle import MultiBatchInstance, load_instance
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.common.cycle.precheck import check_necessary_conditions
-from models.routing.solvers.alns.evaluator import evaluate, initial_state
+from models.common.cycle import MultiBatchInstance, load_instance
+from models.common.cycle.audit import audit_solution
+from models.common.cycle.precheck import check_necessary_conditions
+from models.routing.model_5.alns.evaluator import evaluate, initial_state
 from tests.routing.test_multibatch_cycle import fixture, hand_solution
 from tests.routing.test_model6_joint import exact_available
 from tools.data.build_model5_model6_shared_dataset import build_suite, load_shared_suite, verify_pair
@@ -43,10 +43,10 @@ def test_public_m5_entries_reject_bad_availability_without_importing_gurobi(kind
         return original_import(name,*args,**kwargs)
     monkeypatch.setattr(builtins,'__import__',guarded)
     if method=='exact':
-        from models.routing.variants.model_5.exact.solver import solve_exact
+        from models.routing.model_5.exact.solver import solve_exact
         result=solve_exact(unavailable_problem(kind),time_limit=.2)
     else:
-        from models.routing.variants.model_5.alns.solver import solve_alns
+        from models.routing.model_5.alns.solver import solve_alns
         result=solve_alns(unavailable_problem(kind),max_time=.2)
     assert result['info']['status']=='INFEASIBLE' and result['info']['proven_infeasible']
 
@@ -54,7 +54,7 @@ def test_public_m5_entries_reject_bad_availability_without_importing_gurobi(kind
 @pytest.mark.parametrize('kind',['release','allowed'])
 def test_direct_m5_milp_enforces_availability(kind,exact_available):
     import gurobipy as gp
-    from models.routing.variants.model_5.exact.model import build_model
+    from models.routing.model_5.exact.model import build_model
     model,_=build_model(unavailable_problem(kind))
     try:
         model.Params.TimeLimit=3

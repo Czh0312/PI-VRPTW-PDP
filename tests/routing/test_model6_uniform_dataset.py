@@ -5,7 +5,7 @@ import json
 import pytest
 
 from tools.configuration.loader import load_routing_case, resolve_project_path
-from models.routing.common.cycle import load_instance
+from models.common.cycle import load_instance
 from tools.data.build_model6_uniform_dataset import (
     ARMS, DEFAULT_DESIGN, appointment_orders, build_suite, load_suite, treatment_config,
 )

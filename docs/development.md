@@ -32,15 +32,15 @@ python3 -m venv .venv
 | 任务 | 入口 |
 | --- | --- |
 | 增加命令参数或调整单次运行输出 | `cli/main.py`、`cli/route.py`、`cli/multibatch.py`、`cli/multibatch_cost.py` |
-| 修改模型编号、分流或输入范围 | `models/routing/catalog.py`、`service.py`、`variants/model_n/` |
-| 修改 M1–M5 求解实现 | `models/routing/solvers/exact/` 或 `solvers/alns/` |
-| 修改 M6–M8 日历搜索及成本内核 | `models/routing/variants/calendar_search.py`、`model_6/`、`model_7/`、`model_8/` |
-| 修改业务约束或独立审计 | `models/routing/common/cycle/` |
+| 修改模型编号、分流或输入范围 | `models/routing/catalog.py`、`service.py`、两种算法的 `model_n/` |
+| 修改 M1–M5 求解实现 | 对应 `models/routing/model_n/exact/` 或 `alns/` |
+| 修改 M6–M8 日历搜索及成本内核 | 各模型自己的 `batch_search.py`、`model_6/`、`model_7/`、`model_8/` |
+| 修改业务约束或独立审计 | `models/common/cycle/` |
 | 调整场景参数 / 配置加载逻辑 | `config/` / `tools/configuration/` |
 | 增加批量实验 / 分析 | `experiments/runs/` / `experiments/analysis/` |
 | 构造数据、审计或恢复已有材料 | `tools/data/`、`tools/audit/` |
 
-编号模型保留独立公开入口，求解服务经这些入口调用。共用业务层不导入求解器，精确与 ALNS 实现互不导入。共享内核与模型特有实现的位置详见各目录 README。
+编号模型保留独立公开入口，求解服务经这些入口调用。基础业务层不导入求解器；普通精确与 ALNS 入口互不导入，求解算法不跨模型导入。M5 显式混合实验入口除外，它只组合本模型的两种方法。各模型独立实现的位置详见[逐文件说明](../models/routing/README.md)。
 
 ## 源码检索
 
@@ -88,6 +88,10 @@ make test-full
 新实验使用新的输出目录，记录配置、预算、随机种子、运行环境、原始结果及审计。日历段数 K、实际配送批次数、独立箱池 N 和需求箱次 Q 分别报告。限时可行、未找到解和已证不可行分别记录。
 
 已有实验的输入、源码、结果和哈希保持原路径；整理当前源码时不批量改写这些快照。`output/` 中带 `run_study.py` 的脚本可能只服务相应的冻结实验，复现先读该实验报告。通用的新入口放入 `experiments/` 或 `tools/`。
+
+`run_single_batch_physical_bounds.py`、`run_single_batch_composite_proof.py`、`run_single_batch_balanced_columns.py`
+以及 `benchmark_model5_round8*.py` 是已封存实验的驱动，保留旧模块路径以匹配其冻结源码；
+重放使用该实验内的冻结驱动与源码。可选择新旧源码的 `benchmark_model5_alns.py --source` 已兼容两种目录。
 
 已共享或分片保存的材料使用现有工具校验和恢复：
 

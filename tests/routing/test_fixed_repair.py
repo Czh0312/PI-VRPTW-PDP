@@ -6,13 +6,13 @@ import random
 
 import pytest
 
-from models.routing.alns.fixed_repair import FixedRouteInsertionCache
-from models.routing.alns.initial_solution import build_strong_initial_solution
-from models.routing.alns.types import Route
-from models.routing.baselines.alns import model_3
-from models.routing.common.data_loader import parse_dataset
-from models.routing.common.domain.instance import ProblemInstance
-from models.routing.common.task_builder import build_tasks_for_model
+from archive.routing_baselines.alns.common.fixed_repair import FixedRouteInsertionCache
+from archive.routing_baselines.alns.common.initial_solution import build_strong_initial_solution
+from archive.routing_baselines.alns.common.types import Route
+from archive.routing_baselines.alns import model_3
+from models.common.data_loader import parse_dataset
+from models.common.domain.instance import ProblemInstance
+from models.common.task_builder import build_tasks_for_model
 
 ROOT = Path(__file__).resolve().parents[2]
 

@@ -3,8 +3,8 @@ from copy import deepcopy
 
 import pytest
 
-from models.routing.solvers.exact.multibatch_hybrid import solve_hybrid
-from models.routing.solvers.exact.multibatch_hybrid_primal import collect_pricing_columns, near_target_primal_budget
+from models.routing.model_5.exact.multibatch_hybrid import solve_hybrid
+from models.routing.model_5.exact.multibatch_hybrid_primal import collect_pricing_columns, near_target_primal_budget
 from tests.routing.test_multibatch_cycle import fixture, hand_solution
 
 
@@ -32,9 +32,9 @@ def test_near_target_budget_for_actual_failed_seed_preserves_certification_time(
 
 def test_public_revisit_occurs_before_conditions_and_does_not_change_floor(monkeypatch):
     import models.routing.service as service
-    import models.routing.solvers.exact.multibatch_route_pool as pool
-    import models.routing.solvers.exact.multibatch_route_cg as cg
-    import models.routing.solvers.exact.multibatch_conditional_inventory as inventory
+    import models.routing.model_5.exact.multibatch_route_pool as pool
+    import models.routing.model_5.exact.multibatch_route_cg as cg
+    import models.routing.model_5.exact.multibatch_conditional_inventory as inventory
     p, initial = fixture(pool=2), hand_solution(fixture(pool=2))
     calls = []
     monkeypatch.setattr(service, 'solve_routing', lambda **kwargs: deepcopy(initial))
@@ -72,8 +72,8 @@ def test_invalid_policy_is_rejected_before_search(options):
 
 def test_primal_focus_keeps_physical_fleet_and_never_promotes_pool_bound():
     pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact.multibatch_route_pool import reoptimize_route_pool
-    from models.routing.common.cycle.audit import audit_solution
+    from models.routing.model_5.exact.multibatch_route_pool import reoptimize_route_pool
+    from models.common.cycle.audit import audit_solution
     from tests.routing.test_multibatch_extra_slots import split_fixture
     p, initial = split_fixture()
     original = deepcopy(initial)

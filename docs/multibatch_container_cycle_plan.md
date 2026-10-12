@@ -305,9 +305,9 @@ q_(s,b)=Σ[n_o * w_(o,r,b)：趟次 r 的基地为 s]
 
 | 位置 | 当前限制 | 修改计划 |
 | --- | --- | --- |
-| 现有 `models/routing/common/operating_policy.py` | 只接受 legacy/single_day，单日 N>=全天需求 | 增加版本分派接口；新策略独立类型；保留旧校验，新策略以每批库存约束验证 N |
+| 现有 `models/common/operating_policy.py` | 只接受 legacy/single_day，单日 N>=全天需求 | 增加版本分派接口；新策略独立类型；保留旧校验，新策略以每批库存约束验证 N |
 | 现有 `tools/configuration/loader.py` | 合并单份 data/fleet/policy | 支持 schema 2、orders、批次表与单位转换，严格校验不兼容配置 |
-| 现有 `models/routing/common/data_loader.py` | 一行顾客就是一个订单 | 保留旧解析器；新增订单表解析，禁止重复物理 customer_id 覆盖订单 |
+| 现有 `models/common/data_loader.py` | 一行顾客就是一个订单 | 保留旧解析器；新增订单表解析，禁止重复物理 customer_id 覆盖订单 |
 | 现有 `common/domain/instance.py`、`node.py` | 静态 Customer 与全日 Satellite 聚合 | 网络继续复用，新建组合实例和订单类；避免污染旧属性语义 |
 | 现有 `common/task_builder.py` | E1 回收量在求解前静态汇总 | 新策略在入口分流，只预建配送任务和潜在取箱访问；实际回收量从事件得到 |
 | 新增建议 `common/cycle/policy.py`、`instance.py` | 无 | 策略、日程、订单、组合实例与输入验证 |

@@ -20,9 +20,9 @@ def write(path, value):
 
 def worker(job, destination):
     from tools.configuration.loader import load_routing_case
-    from models.routing.common.cycle import load_instance
-    from models.routing.common.cycle.audit import audit_solution
-    from models.routing.variants.model_5.exact import solve_hybrid
+    from models.common.cycle import load_instance
+    from models.common.cycle.audit import audit_solution
+    from models.routing.model_5.exact import solve_hybrid
     problem = load_instance(*load_routing_case(job['case'], use_pool_config=False))
     start = time.perf_counter()
     experiment = solve_hybrid(problem, **job['options'], verbose=True,
@@ -49,7 +49,7 @@ def main():
         if args.plan is None:
             parser.error('--plan is required for registration')
         from tools.configuration.loader import load_routing_case, resolve_project_path
-        from models.routing.common.cycle import load_instance
+        from models.common.cycle import load_instance
         plan = json.loads(args.plan.read_text())
         output.mkdir(parents=True, exist_ok=False)
         dataset = json.loads((ROOT/'data/manifest.json').read_text())

@@ -6,8 +6,8 @@ from unittest.mock import patch
 
 import pytest
 
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.solvers.exact.single_batch_cuts import build_capacity_separator, minimum_routes
+from models.common.cycle.audit import audit_solution
+from models.routing.model_3.exact.single_batch_cuts import build_capacity_separator, minimum_routes
 from tests.routing.test_single_batch_solver_audit import tiny_problem, enumerate_tiny
 
 
@@ -76,8 +76,8 @@ def test_every_capacity_feasible_partition_satisfies_every_candidate():
 @pytest.mark.parametrize('compressed', [False, True])
 def test_cut_model_matches_independent_tiny_oracle(model, seed, compressed):
     pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact import solver
-    from models.routing.solvers.exact.single_batch_formulation import build_model
+    from models.routing.model_3.exact import engine as solver
+    from models.routing.model_3.exact.single_batch_formulation import build_model
     p = tiny_problem(model, seed)
     expected = enumerate_tiny(p)
     with patch.object(solver, 'build_model', side_effect=lambda *a, **kw: build_model(
@@ -90,7 +90,7 @@ def test_cut_model_matches_independent_tiny_oracle(model, seed, compressed):
 
 def test_callback_skips_nonroot_nodes_and_reports_failure():
     gp = pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact.single_batch_cuts import CapacityCutSeparator
+    from models.routing.model_3.exact.single_batch_cuts import CapacityCutSeparator
     separator = CapacityCutSeparator([])
     node = [1]
     queried = []
@@ -121,7 +121,7 @@ def test_cuts_follow_build_deadline():
 @pytest.mark.parametrize('compressed', [False, True])
 def test_default_separation_is_limited_to_compressed_pickup_models(model, compressed):
     pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact.single_batch_formulation import build_model
+    from models.routing.model_3.exact.single_batch_formulation import build_model
     p = tiny_problem(model, 1)
     m, ctx = build_model(p, compress_routes=compressed)
     try:
@@ -133,9 +133,9 @@ def test_default_separation_is_limited_to_compressed_pickup_models(model, compre
 def test_audited_cross_trip_start_satisfies_all_static_candidates():
     gp = pytest.importorskip('gurobipy')
     import time
-    from models.routing.solvers.exact.single_batch_formulation import build_model
-    from models.routing.solvers.exact.primal import construct_incumbent
-    from models.routing.solvers.exact.solver import _set_start
+    from models.routing.model_3.exact.single_batch_formulation import build_model
+    from models.routing.model_3.exact.initial_solution import construct_incumbent
+    from models.routing.model_3.exact.engine import _set_start
     from tests.routing.test_single_batch_primal import split_problem
     p = split_problem()
     start = construct_incumbent(p, time.perf_counter()+1)

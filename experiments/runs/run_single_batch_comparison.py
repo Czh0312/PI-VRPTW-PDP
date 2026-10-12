@@ -17,8 +17,8 @@ if str(ROOT) not in sys.path:
 from tools.configuration.loader import load_routing_case, load_json, resolve_project_path
 from experiments.runs.run_multibatch_cycle import (
     INPUT_KEYS, freeze_inputs, source_snapshot, run_worker, write_json)
-from models.routing.common.cycle import load_instance, MultiBatchPolicy
-from models.routing.common.cycle.state import empty_result
+from models.common.cycle import load_instance, MultiBatchPolicy
+from models.common.cycle.state import empty_result
 from models.cost.single_batch import compare_single_batch
 
 

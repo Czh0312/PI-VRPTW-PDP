@@ -28,15 +28,15 @@ def write(path, value):
 
 def worker(job, destination):
     from tools.configuration.loader import load_routing_case
-    from models.routing.common.cycle import load_instance
-    from models.routing.common.cycle.audit import audit_solution
+    from models.common.cycle import load_instance
+    from models.common.cycle.audit import audit_solution
     problem = load_instance(*load_routing_case(job['case']))
     initial = json.loads(Path(job['initial_result']).read_text())
     independent = audit_solution(problem, initial)
     if not independent['valid']:
         raise ValueError('Frozen incumbent failed audit')
     started = time.perf_counter()
-    from models.routing.variants.model_5.exact import joint_route_inventory_certificate
+    from models.routing.model_5.exact import joint_route_inventory_certificate
     experiment = joint_route_inventory_certificate(problem,
         time_limit=job['budget'], initial_result=initial, seed=job['seed'], verbose=True,
         joint_time_limit=0 if job['variant'] == 'separate' else job['joint_time_limit'],
@@ -85,8 +85,8 @@ def main():
     if len(set(args.variants)) != len(args.variants):
         parser.error('variants must be distinct')
     from tools.configuration.loader import load_routing_case, resolve_project_path
-    from models.routing.common.cycle import load_instance
-    from models.routing.common.cycle.audit import audit_solution
+    from models.common.cycle import load_instance
+    from models.common.cycle.audit import audit_solution
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     jobs = []
@@ -128,7 +128,9 @@ def main():
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
     for name in ('multibatch_joint_inventory.py', 'multibatch_route_pool.py', 'multibatch_e1_inventory.py', 'multibatch_e1_routes.py', 'multibatch_route_integer_cover.py', 'multibatch_route_enumeration.py', 'multibatch_route_cg.py', 'multibatch_route_pricing.py', 'multibatch_bounds.py', 'solver.py', 'formulation.py'):
-        path = output/'source_snapshot/models/routing/solvers/exact'/name
+        filename = {'multibatch_route_pricing.py': 'pickup_route_pricing.py', 'solver.py': 'engine.py',
+                    'primal.py': 'initial_solution.py'}.get(name, name)
+        path = output/'source_snapshot/models/routing/model_5/exact'/filename
         compile(path.read_text(), str(path), 'exec')
     hashes = {str(p.relative_to(output)): hashlib.sha256(p.read_bytes()).hexdigest()
               for p in sorted(output.rglob('*')) if p.is_file()}

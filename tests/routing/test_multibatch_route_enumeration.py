@@ -7,10 +7,10 @@ import time
 
 import pytest
 
-from models.routing.common.cycle import MultiBatchInstance
-from models.routing.solvers.exact.multibatch_route_cg import route_cover_certificate
-from models.routing.solvers.exact.multibatch_route_enumeration import enumerate_route_universe, EnumeratedRoutePricer
-from models.routing.solvers.exact.multibatch_route_pricing import evaluate_column, route_context
+from models.common.cycle import MultiBatchInstance
+from models.routing.model_5.exact.multibatch_route_cg import route_cover_certificate
+from models.routing.model_5.exact.multibatch_route_enumeration import enumerate_route_universe, EnumeratedRoutePricer
+from models.routing.model_5.exact.pickup_route_pricing import evaluate_column, route_context
 from tests.routing.test_multibatch_cycle import fixture, hand_solution
 from tests.routing.test_multibatch_departure_loads import nonmetric_problem
 from tests.routing.test_multibatch_route_cg import enumerate_trips, enumerated_lp, detour_problem
@@ -51,7 +51,7 @@ def test_complete_task_sets_and_pricing_match_independent_all_path_oracle(seed, 
 @pytest.mark.parametrize('seed', range(6))
 def test_complete_cover_lp_matches_oracle_and_never_claims_integer_optimality(seed):
     pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact.solver import solve_exact
+    from models.routing.model_5.exact.engine import solve_exact
     p = nonmetric_problem(seed)
     cert = route_cover_certificate(p, pricing_backend='hybrid', e1_time_limit=1, time_limit=5)
     assert cert['status'] == 'LP_CONVERGED'
@@ -140,7 +140,7 @@ def test_deadline_and_parameter_validation():
 
 def test_full_route_cover_exports_complete_universe_and_replayable_lp(tmp_path):
     gp = pytest.importorskip('gurobipy')
-    from models.routing.variants.model_5.exact import route_cover_certificate as public
+    from models.routing.model_5.exact import route_cover_certificate as public
     p = fixture(pool=2)
     cert = public(p, time_limit=5, initial_result=hand_solution(p), pricing_backend='hybrid', diagnostics_dir=tmp_path)
     universes = list(tmp_path.glob('*_best_pricing.json.gz'))

@@ -7,8 +7,8 @@ import pytest
 
 from experiments.analysis.summarize_model6_costs import cost_change, summarize
 from models.cost.comparison import evaluate_comparison_cost
-from models.routing.common.cycle import load_instance
-from models.routing.common.cycle.audit import audit_solution
+from models.common.cycle import load_instance
+from models.common.cycle.audit import audit_solution
 from tools.configuration.loader import load_routing_case
 from tools.data.build_model6_demo_suite import build_suite
 

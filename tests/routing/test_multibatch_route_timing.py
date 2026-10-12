@@ -8,13 +8,12 @@ import time
 
 import pytest
 
-from models.routing.common.cycle import MultiBatchInstance, Order
-from models.routing.common.domain.instance import ProblemInstance
-from models.routing.common.domain.node import Depot, Satellite, Customer
-from models.routing.solvers.exact.multibatch_route_pricing import route_context
-from models.routing.solvers.exact.multibatch_route_timing import enumerate_timed_route_universe
-from models.routing.solvers.exact.multibatch_joint_inventory import (
-    build_joint_inventory, set_joint_projection, solve_joint_inventory, joint_route_inventory_certificate)
+from models.common.cycle import MultiBatchInstance, Order
+from models.common.domain.instance import ProblemInstance
+from models.common.domain.node import Depot, Satellite, Customer
+from models.routing.model_5.exact.pickup_route_pricing import route_context
+from models.routing.model_5.exact.multibatch_route_timing import enumerate_timed_route_universe
+from models.routing.model_5.exact.multibatch_joint_inventory import build_joint_inventory, set_joint_projection, solve_joint_inventory, joint_route_inventory_certificate
 from tests.routing.test_multibatch_cycle import fixture, hand_solution
 from tests.routing.test_multibatch_departure_loads import nonmetric_problem
 from tests.routing.test_multibatch_route_cg import enumerate_trips, detour_problem
@@ -107,7 +106,7 @@ def test_frontiers_match_all_paths_and_independent_forward_binary_search(seed):
 @pytest.mark.parametrize('seed', range(6))
 def test_known_full_optimum_projects_to_complete_timed_joint_model(seed):
     gp = pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact.solver import solve_exact
+    from models.routing.model_5.exact.engine import solve_exact
     problem = nonmetric_problem(seed)
     initial = solve_exact(problem, time_limit=5)
     assert initial['info']['proven_optimal'] and initial['audit']['valid']
@@ -192,7 +191,7 @@ def test_partial_frontier_cannot_supply_joint_lower_bound_and_parameter_guards()
 
 def test_public_export_separates_complete_ordinary_and_timing_universes(tmp_path):
     pytest.importorskip('gurobipy')
-    from models.routing.variants.model_5.exact import joint_route_inventory_certificate as public
+    from models.routing.model_5.exact import joint_route_inventory_certificate as public
     problem = fixture(pool=2)
     out = public(problem, time_limit=5, joint_time_limit=1, recovery_time_limit=1,
         initial_result=hand_solution(problem), timing_envelopes=True, diagnostics_dir=tmp_path)
@@ -206,7 +205,7 @@ def test_public_export_separates_complete_ordinary_and_timing_universes(tmp_path
 
 
 def test_supply_profile_dominance_uses_only_complete_e1_supply_values():
-    from models.routing.solvers.exact.multibatch_route_timing import compress_supply_profiles
+    from models.routing.model_5.exact.multibatch_route_timing import compress_supply_profiles
     def row(cost, latest):
         return dict(column=dict(cost=cost), keys=(('a', 'd'),), allowed_cutoffs=(None,), latest_departure=latest)
     rows = [row(3, 19), row(9, 39), row(1, 5)]
@@ -217,7 +216,7 @@ def test_supply_profile_dominance_uses_only_complete_e1_supply_values():
 
 def test_delayed_actual_supply_projects_using_earliest_complete_e1_pattern_supply():
     gp = pytest.importorskip('gurobipy')
-    from models.routing.common.cycle.audit import audit_solution
+    from models.common.cycle.audit import audit_solution
     problem = fixture(pool=2, zero=True)
     initial = hand_solution(problem)
     assert audit_solution(problem, initial)['valid']

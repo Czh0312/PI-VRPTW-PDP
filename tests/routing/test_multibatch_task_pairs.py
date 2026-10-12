@@ -2,10 +2,9 @@
 from types import SimpleNamespace
 import itertools
 import pytest
-from models.routing.solvers.exact.multibatch_task_pairs import (
-    add_task_pair_integrality, project_task_pairs)
-from models.routing.solvers.exact.multibatch_joint_inventory import build_joint_inventory, set_joint_projection
-from models.routing.solvers.exact.solver import solve_exact
+from models.routing.model_5.exact.multibatch_task_pairs import add_task_pair_integrality, project_task_pairs
+from models.routing.model_5.exact.multibatch_joint_inventory import build_joint_inventory, set_joint_projection
+from models.routing.model_5.exact.engine import solve_exact
 from tests.routing.test_multibatch_departure_loads import nonmetric_problem
 from tests.routing.test_multibatch_joint_inventory import domains
 

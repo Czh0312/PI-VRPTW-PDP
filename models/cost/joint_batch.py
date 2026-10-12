@@ -6,7 +6,7 @@ import hashlib
 import json
 
 from tools.configuration.loader import load_json
-from models.routing.common.cycle.policy import nonnegative, integer
+from models.common.cycle.policy import nonnegative, integer
 
 RATE_FIELDS = (
     'distance_scale_to_km', 'container_pool_cost_per_period',

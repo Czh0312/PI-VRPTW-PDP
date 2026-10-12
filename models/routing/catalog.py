@@ -9,13 +9,15 @@ class ModelSpec:
     supports_cutoff: bool = False
     supports_multi_batch: bool = False
 
-    def module_path(self, batch_mode):
+    def module_path(self, batch_mode, method):
         if batch_mode not in ('single_batch', 'multi_batch'):
             raise ValueError(f'Unknown batch mode: {batch_mode}')
         expected = 'multi_batch' if self.supports_multi_batch else 'single_batch'
         if self.number not in (6, 7, 8) and batch_mode != expected:
             raise ValueError(f'M{self.number} requires {expected}')
-        return f'models.routing.variants.model_{self.number}'
+        if method not in ('exact', 'alns'):
+            raise ValueError(f'Unknown solver method: {method}')
+        return f'models.routing.model_{self.number}.{method}'
 
 MODEL_SPECS = {
     1: ModelSpec(1, "fixed_pure_delivery", "固定分仓、一次性包装纯配送；支持 B=1", True),

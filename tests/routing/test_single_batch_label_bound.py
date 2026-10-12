@@ -7,13 +7,13 @@ import time
 
 import pytest
 
-from models.routing.solvers.exact.single_batch_label_bound import completion_cost_floor
-from models.routing.solvers.exact.single_batch_route_pricing import price_delivery_routes
-from models.routing.solvers.exact.single_batch_columns import root_route_bound
-from models.routing.solvers.exact.single_batch_time_budget import reduced_route_cost
+from models.routing.model_3.exact.single_batch_label_bound import completion_cost_floor
+from models.routing.model_3.exact.single_batch_route_pricing import price_delivery_routes
+from models.routing.model_3.exact.single_batch_columns import root_route_bound
+from models.routing.model_3.exact.single_batch_time_budget import reduced_route_cost
 from tests.routing.test_single_batch_columns import contexts,independently_enumerated_trips
 from tests.routing.test_single_batch_solver_audit import tiny_problem,enumerate_tiny
-from models.routing.common.cycle import MultiBatchInstance
+from models.common.cycle import MultiBatchInstance
 
 
 @pytest.mark.parametrize('seed',range(12))
@@ -36,7 +36,7 @@ def test_interrupted_shortest_paths_discard_tentative_upper_bounds():
 
 
 def test_partially_settled_shortest_paths_also_discard_all_tentative_distances(monkeypatch):
-    from models.routing.solvers.exact import single_batch_label_bound as module
+    from models.routing.model_3.exact import single_batch_label_bound as module
     ticks = iter([0.0,0.0,2.0])
     monkeypatch.setattr(module.time,'perf_counter',lambda:next(ticks))
     floor,complete = module.completion_cost_floor([[0,1,80],[30,0,1],[30,30,0]],

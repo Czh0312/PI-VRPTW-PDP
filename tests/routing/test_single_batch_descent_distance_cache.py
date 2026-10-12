@@ -6,12 +6,12 @@ import time
 
 import pytest
 
-from models.routing.common.cycle import MultiBatchInstance
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.solvers.alns.construction import chronological_state
-from models.routing.solvers.alns.evaluator import evaluate
-from models.routing.solvers.alns.neighborhoods import state_key
-from models.routing.solvers.alns.single_batch_descent import SingleBatchDescent, task_distance
+from models.common.cycle import MultiBatchInstance
+from models.common.cycle.audit import audit_solution
+from models.routing.model_3.alns.construction import chronological_state
+from models.routing.model_3.alns.evaluator import evaluate
+from models.routing.model_3.alns.neighborhoods import state_key
+from models.routing.model_3.alns.single_batch_descent import SingleBatchDescent, task_distance
 from tests.routing.test_single_batch_solver_audit import tiny_problem
 from tests.routing.test_single_batch_descent_readiness import sequential_trips
 

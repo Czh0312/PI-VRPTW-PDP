@@ -6,10 +6,10 @@ import time
 
 import pytest
 
-from models.routing.common.cycle import MultiBatchInstance
-from models.routing.solvers.alns.construction import chronological_state
-from models.routing.solvers.alns.neighborhoods import _route_score, repair_orders
-from models.routing.solvers.alns.single_batch_scoring import SingleBatchRouteScorer
+from models.common.cycle import MultiBatchInstance
+from models.routing.model_3.alns.construction import chronological_state
+from models.routing.model_3.alns.neighborhoods import _route_score, repair_orders
+from models.routing.model_3.alns.single_batch_scoring import SingleBatchRouteScorer
 from tests.routing.test_single_batch_solver_audit import tiny_problem
 
 
@@ -97,7 +97,7 @@ def test_changed_problem_uses_new_geometry_and_rejects_old_scorer():
 @pytest.mark.parametrize('model', [1, 2, 3, 4])
 def test_solver_enables_geometry_only_for_m3(model, monkeypatch):
     from models.routing.service import solve_routing
-    from models.routing.solvers.alns import single_batch
+    from models.routing.model_3.alns import single_batch
     flags = []
     original = single_batch.destroy_repair
     def repair(*args, **kwargs):

@@ -2,7 +2,7 @@
 
 正式入口将 `multi_batch_cutoff_v1` 分发到各编号目录的 `exact/solver.py`。
 M1/M3 为单批固定分仓；M2/M4 为单批自由分仓；M5 为多批固定分仓。
-各模型的 MILP 建模入口位于 `exact/model.py`，共用实现位于 `models/routing/solvers/exact/`。
+各模型的 MILP 建模入口位于 `models/routing/model_n/exact/model.py`，实现分别位于 `models/routing/model_n/exact/`。
 M2/M4 根据删弧及对称性处理后的实际展开规模选择联合分仓 MILP 或分仓域树；
 联合模型直接覆盖全部合法顾客分仓，域树通过互不重叠的完整分支覆盖这些分仓。
 完整分仓枚举保留为显式 `strategy='enumeration'` 对照。
@@ -91,7 +91,7 @@ M5 完整二层路线域还可通过 `integer_cover_time_limit` 在原预算内�
 部分枚举不进入整数证书，限时保留已有有效界；默认关闭。
 整数覆盖仍放松真实跨层日程，见 [完整整数覆盖下界](../archive/docs/m5_integer_cover_20261001.md)。
 
-历史 M1–M4 的 indexed 和 commodity_flow 后端保存在 `models/routing/baselines/`，需要 `--baseline` 或 `allow_baseline=True`。这些证明只针对历史业务规则，不能作为新版四模型的证明。
+历史 M1–M4 的 indexed 和 commodity_flow 后端保存在 `archive/routing_baselines/`，需要 `--baseline` 或 `allow_baseline=True`。这些证明只针对历史业务规则，不能作为新版四模型的证明。
 
 第四轮将 B=1 建模隔离到 `single_batch_formulation.py`。`strengthening.py` 提供一级供货截止的
 反向传播、实际载荷界、因果序位界和按趟数排序后的车辆槽位界；Gurobi 初解也按同样规则重编号。

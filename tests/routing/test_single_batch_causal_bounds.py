@@ -7,11 +7,11 @@ from unittest.mock import patch
 
 import pytest
 
-from models.routing.common.cycle import MultiBatchInstance
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.common.cycle.state import empty_result
-from models.routing.solvers.exact.single_batch_formulation import build_model
-from models.routing.solvers.exact.solver import _set_start
+from models.common.cycle import MultiBatchInstance
+from models.common.cycle.audit import audit_solution
+from models.common.cycle.state import empty_result
+from models.routing.model_3.exact.single_batch_formulation import build_model
+from models.routing.model_3.exact.engine import _set_start
 from tests.routing.test_single_batch_solver_audit import tiny_problem,enumerate_tiny
 
 
@@ -21,7 +21,7 @@ from tests.routing.test_single_batch_solver_audit import tiny_problem,enumerate_
 @pytest.mark.parametrize('cycles',[False,True])
 def test_full_bound_model_matches_original_integer_oracle(model,seed,compressed,cycles):
     pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact import solver
+    from models.routing.model_3.exact import engine as solver
     p = tiny_problem(model,seed)
     oracle = enumerate_tiny(p)
     def builder(*args,**kw):
@@ -73,7 +73,7 @@ def test_many_unused_slots_and_noncanonical_vehicle_start_remain_feasible(compre
 def test_cross_trip_pickup_start_preserves_original_tasks_and_integer_schedule(shared,compressed):
     gp = pytest.importorskip('gurobipy')
     from tests.routing.test_single_batch_primal import split_problem
-    from models.routing.solvers.exact.primal import construct_incumbent
+    from models.routing.model_3.exact.initial_solution import construct_incumbent
     p = split_problem()
     initial = construct_incumbent(p,time.perf_counter()+1)
     assert initial and audit_solution(p,initial)['valid']
@@ -163,6 +163,6 @@ def test_bounds_and_explicit_slack_shrink_without_extra_variables_or_rows(model)
 
 @pytest.mark.parametrize('value',[None,1,'bounds'])
 def test_bound_hook_rejects_invalid_types(value):
-    from models.routing.solvers.exact.solver import solve_exact
+    from models.routing.model_3.exact.engine import solve_exact
     with pytest.raises(ValueError,match='boolean'):
         solve_exact(tiny_problem(1,1),_single_batch_causal_bounds=value)

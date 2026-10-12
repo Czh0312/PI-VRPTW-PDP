@@ -5,10 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from models.routing.baselines.alns import model_2, model_3, model_4
-from models.routing.common.data_loader import parse_dataset
-from models.routing.common.domain.instance import ProblemInstance
-from models.routing.common.task_builder import build_tasks_for_model
+from archive.routing_baselines.alns import model_2, model_3, model_4
+from models.common.data_loader import parse_dataset
+from models.common.domain.instance import ProblemInstance
+from models.common.task_builder import build_tasks_for_model
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -69,7 +69,7 @@ def test_assignment_cache_reuses_tasks_but_rechecks_route_schedule(problem):
 
 
 def test_m2_route_seed_keeps_incumbent_and_shares_iteration_budget(problem):
-    from models.routing.common.solution_audit import audit_exact_solution
+    from models.common.solution_audit import audit_exact_solution
     r1,r2,assignment,info = model_2.solve_alns(problem,
         vehicles_per_satellite=problem.fleet.e2_per_sat_count,
         max_iterations=120,max_time=5,seed=42,verbose=False,return_info=True,
@@ -84,7 +84,7 @@ def test_m2_route_seed_keeps_incumbent_and_shares_iteration_budget(problem):
 
 @pytest.mark.parametrize('module',[model_4])
 def test_free_seed_search_respects_total_iteration_cap(problem,module):
-    from models.routing.common.solution_audit import audit_exact_solution
+    from models.common.solution_audit import audit_exact_solution
     r1,r2,assignment,info = module.solve_alns(problem,
         vehicles_per_satellite=problem.fleet.e2_per_sat_count,
         max_iterations=120,max_time=5,seed=42,verbose=False,return_info=True,

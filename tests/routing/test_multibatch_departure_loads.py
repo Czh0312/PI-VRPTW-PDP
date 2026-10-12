@@ -5,9 +5,9 @@ from unittest.mock import patch
 
 import pytest
 
-from models.routing.common.cycle import MultiBatchInstance
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.common.cycle.state import empty_result
+from models.common.cycle import MultiBatchInstance
+from models.common.cycle.audit import audit_solution
+from models.common.cycle.state import empty_result
 from tests.routing.test_multibatch_cycle import fixture, hand_solution
 from tests.routing.test_single_batch_solver_audit import tiny_problem
 
@@ -28,8 +28,8 @@ def nonmetric_problem(seed):
 @pytest.mark.parametrize('compressed,linear', [(False, True), (True, True), (True, False)])
 def test_nonmetric_integer_optima_match(seed, compressed, linear):
     pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact import solver
-    from models.routing.solvers.exact.formulation import build_model
+    from models.routing.model_5.exact import engine as solver
+    from models.routing.model_5.exact.formulation import build_model
     problem = nonmetric_problem(seed)
     results = []
     for factored in (False, True):
@@ -47,7 +47,7 @@ def test_nonmetric_integer_optima_match(seed, compressed, linear):
 @pytest.mark.parametrize('seed', [0, 2, 5])
 def test_linear_relaxation_projection_is_preserved(seed):
     gp = pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact.formulation import build_model
+    from models.routing.model_5.exact.formulation import build_model
     values = []
     for factored in (False, True):
         model, ctx = build_model(nonmetric_problem(seed), compress_multibatch_routes=True,
@@ -81,8 +81,8 @@ def test_linear_relaxation_projection_is_preserved(seed):
 @pytest.mark.parametrize('unloaded', [29, 30, 31])
 def test_fixed_starts_and_cutoff_boundaries_include_departure_loads(unloaded):
     gp = pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact.formulation import build_model
-    from models.routing.solvers.exact.solver import _set_start
+    from models.routing.model_5.exact.formulation import build_model
+    from models.routing.model_5.exact.engine import _set_start
     problem = fixture(pool=2)
     start = hand_solution(problem, first_unload=unloaded)
     independent = audit_solution(problem, start)
@@ -109,8 +109,8 @@ def test_fixed_starts_and_cutoff_boundaries_include_departure_loads(unloaded):
 
 def test_pickup_first_cross_batch_trip_does_not_add_pickups_to_departure_load():
     gp = pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact.formulation import build_model
-    from models.routing.solvers.exact.solver import _set_start
+    from models.routing.model_5.exact.formulation import build_model
+    from models.routing.model_5.exact.engine import _set_start
     base = fixture(pool=2)
     problem = MultiBatchInstance(base.network,
         [replace(base.orders[0], pickup_window=(71, 80)), base.orders[1]], base.operating_policy)

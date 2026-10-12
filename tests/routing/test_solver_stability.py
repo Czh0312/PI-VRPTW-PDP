@@ -6,13 +6,13 @@ import time
 
 import pytest
 
-from models.routing.common.cycle import MultiBatchInstance
-from models.routing.common.cycle.assignment import assigned_problem, input_assignment
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.common.cycle.precheck import check_necessary_conditions, travel_lower_bounds
-from models.routing.solvers.alns.construction import reassigned_state
-from models.routing.solvers.alns.evaluator import initial_state, evaluate
-from models.routing.solvers.alns.neighborhoods import repair_orders, state_key
+from models.common.cycle import MultiBatchInstance
+from models.common.cycle.assignment import assigned_problem, input_assignment
+from models.common.cycle.audit import audit_solution
+from models.common.cycle.precheck import check_necessary_conditions, travel_lower_bounds
+from models.routing.model_3.alns.construction import reassigned_state
+from models.routing.model_3.alns.evaluator import initial_state, evaluate
+from models.routing.model_3.alns.neighborhoods import repair_orders, state_key
 from tests.routing.test_single_batch_solver_audit import tiny_problem
 
 
@@ -76,8 +76,8 @@ def test_travel_bounds_are_scoped_to_solve_and_service_cache_observes_edits():
 @pytest.mark.parametrize('seed', [0, 1, 2, 4])
 def test_shared_event_milp_matches_indexed_reference_with_multiple_vehicles_and_trips(monkeypatch, model, seed):
     pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact import solver
-    from models.routing.solvers.exact.formulation import build_model
+    from models.routing.model_3.exact import engine as solver
+    from models.routing.model_3.exact.formulation import build_model
     base = tiny_problem(model, seed)
     p = MultiBatchInstance(base.network, base.orders,
                            replace(base.operating_policy, e2_max_trips_per_vehicle=2), model=model)
@@ -94,7 +94,7 @@ def test_shared_event_milp_matches_indexed_reference_with_multiple_vehicles_and_
 
 
 def test_primal_seed_is_audited_and_failure_is_not_an_infeasibility_proof():
-    from models.routing.solvers.exact.primal import construct_incumbent
+    from models.routing.model_3.exact.initial_solution import construct_incumbent
     base = tiny_problem(3, 1)
     # An exhausted construction budget conveys no infeasibility proof.
     assert construct_incumbent(base, 0) is None
@@ -107,9 +107,9 @@ def test_primal_seed_is_audited_and_failure_is_not_an_infeasibility_proof():
 
 def test_mip_start_relabels_sparse_vehicle_ids_and_keeps_audited_incumbent_on_build_timeout(monkeypatch):
     pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact import solver
-    from models.routing.solvers.exact.formulation import build_model
-    from models.routing.solvers.exact.primal import construct_incumbent
+    from models.routing.model_3.exact import engine as solver
+    from models.routing.model_3.exact.formulation import build_model
+    from models.routing.model_3.exact.initial_solution import construct_incumbent
     p = tiny_problem(3, 2)
     p.fleet.e1_count = p.fleet.e2_per_sat_count = 3
     start = construct_incumbent(p, time.perf_counter()+1)

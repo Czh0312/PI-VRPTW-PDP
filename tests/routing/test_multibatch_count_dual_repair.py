@@ -6,9 +6,9 @@ import time
 
 import pytest
 
-from models.routing.solvers.exact.multibatch_count_dual_repair import repair_count_duals
-from models.routing.solvers.exact.multibatch_route_cg import repair_category_duals
-from models.routing.solvers.exact.multibatch_route_pricing import route_context
+from models.routing.model_5.exact.multibatch_count_dual_repair import repair_count_duals
+from models.routing.model_5.exact.multibatch_route_cg import repair_category_duals
+from models.routing.model_5.exact.pickup_route_pricing import route_context
 from tests.routing.test_multibatch_hybrid import capacity_problem
 from tests.routing.test_multibatch_route_cg import enumerate_trips
 
@@ -80,7 +80,7 @@ def test_invalid_dual_certificate_domain_is_rejected(change):
 
 def test_actual_cover_loop_uses_count_repair_and_matches_complete_route_oracle():
     pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact.multibatch_route_cg import site_route_cover
+    from models.routing.model_5.exact.multibatch_route_cg import site_route_cover
     p=capacity_problem();ctx=route_context(p,'S')
     out=site_route_cover(p,ctx,deadline=time.perf_counter()+3,batch_pricing=True,
                         delivery_count_cuts=True,dual_repair=True,count_dual_repair=True)
@@ -92,8 +92,8 @@ def test_actual_public_pipeline_supports_count_repair_and_retains_full_audit(mon
     pytest.importorskip('gurobipy')
     from copy import deepcopy
     import models.routing.service as service
-    from models.routing.solvers.exact.multibatch_hybrid import solve_hybrid
-    from models.routing.common.cycle.audit import audit_solution
+    from models.routing.model_5.exact.multibatch_hybrid import solve_hybrid
+    from models.common.cycle.audit import audit_solution
     from tests.routing.test_multibatch_cycle import fixture,hand_solution
     p=fixture(pool=2);initial=hand_solution(p)
     monkeypatch.setattr(service,'solve_routing',lambda **kw:deepcopy(initial))

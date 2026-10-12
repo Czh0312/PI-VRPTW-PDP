@@ -1,8 +1,8 @@
 """Small fixtures for retained baseline algorithms, independent of old runners."""
 from pathlib import Path
-from models.routing.common.data_loader import parse_dataset
-from models.routing.common.domain.instance import ProblemInstance
-from models.routing.alns.types import Route, Solution
+from models.common.data_loader import parse_dataset
+from models.common.domain.instance import ProblemInstance
+from archive.routing_baselines.alns.common.types import Route, Solution
 
 ROOT = Path(__file__).resolve().parents[2]
 

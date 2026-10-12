@@ -11,11 +11,11 @@ import time
 
 import pytest
 
-from models.routing.common.cycle import MultiBatchInstance
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.solvers.exact.single_batch_columns import DeliveryMaster, solve_with_route_bound
-from models.routing.solvers.exact.single_batch_pool_master import DeliveryPoolMaster
-from models.routing.solvers.exact.single_batch_route_pool import route_pool_incumbent
+from models.common.cycle import MultiBatchInstance
+from models.common.cycle.audit import audit_solution
+from models.routing.model_1.exact.single_batch_columns import DeliveryMaster, solve_with_route_bound
+from models.routing.model_1.exact.single_batch_pool_master import DeliveryPoolMaster
+from models.routing.model_1.exact.single_batch_route_pool import route_pool_incumbent
 from tests.routing.test_single_batch_route_pool import full_pool, physical_case
 from tests.routing.test_single_batch_solver_audit import tiny_problem, enumerate_tiny
 

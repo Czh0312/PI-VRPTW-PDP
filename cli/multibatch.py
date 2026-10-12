@@ -13,8 +13,8 @@ import time
 
 from tools.configuration.loader import PROJECT_ROOT, config_sources, resolve_project_path, load_json
 from models.routing.service import solve_routing
-from models.routing.common.cycle import load_instance
-from models.routing.common.cycle.audit import audit_solution
+from models.common.cycle import load_instance
+from models.common.cycle.audit import audit_solution
 
 
 def _json(path, value):
@@ -113,9 +113,9 @@ def run_case(config, fleet, *, case_path=None, output=None):
     if getattr(instance, 'joint_batch', False) and instance.cost_profile.config.get('evidence_file'):
         input_paths.append(resolve_project_path(instance.cost_profile.config['evidence_file']))
     input_paths = sorted({dependency for path in input_paths for dependency in config_sources(path)})
-    sources = [path for name in ('models/routing', 'models/cost', 'tools/configuration', 'cli')
+    sources = [path for name in ('models/routing', 'models/common', 'models/cost', 'tools/configuration', 'cli')
                for path in (PROJECT_ROOT/name).rglob('*.py')]
-    sources += [PROJECT_ROOT/'main.py', PROJECT_ROOT/'tools/__init__.py']
+    sources += [PROJECT_ROOT/'main.py', PROJECT_ROOT/'models/__init__.py', PROJECT_ROOT/'tools/__init__.py']
     for source in sources:
         target = out/'source_snapshot'/source.relative_to(PROJECT_ROOT)
         target.parent.mkdir(parents=True, exist_ok=True)

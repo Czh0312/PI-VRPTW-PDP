@@ -8,11 +8,10 @@ import sys
 
 import pytest
 
-from models.routing.common.cycle.uniform import UniformCycleInstance
-from models.routing.common.cycle.joint import JointBatchInstance, joint_empty_result
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.variants.model_6 import solve_exact, solve_alns
-from tests.routing.test_model6_joint import joint_fixture, exact_available
+from models.common.cycle.uniform import UniformCycleInstance
+from models.common.cycle.joint import JointBatchInstance, joint_empty_result
+from models.common.cycle.audit import audit_solution
+from tests.routing.test_model6_joint import joint_fixture, exact_available, solve_exact, solve_alns
 
 
 def uniform_fixture(pool_rate=5,counts=(1,2),**options):
@@ -78,7 +77,7 @@ def test_shared_milp_matches_exhaustive_counts_and_offsets(exact_available):
 def test_one_k_optimum_does_not_prove_all_k(monkeypatch,exact_available):
     p=uniform_fixture()
     known=solve_exact(p.for_count(1),time_limit=3)
-    from models.routing.variants.model_6.exact import solver
+    from models.routing.model_6.exact import solver
     def partial(child,**kwargs):
         if len(child.batch_map)==1:
             return deepcopy(known)
@@ -86,8 +85,8 @@ def test_one_k_optimum_does_not_prove_all_k(monkeypatch,exact_available):
         empty['info'].update(status='TIME_LIMIT',proven_infeasible=False,best_bound=0.)
         return empty
     monkeypatch.setattr(solver,'solve_exact',partial)
-    from models.routing.variants.model_6.uniform import solve_uniform
-    result=solve_uniform(p,method='exact',budget=1,seed=42)
+    from models.routing.model_6.exact.batch_search import solve_uniform
+    result=solve_uniform(p,solve_candidate=solver.solve_exact,method='exact',budget=1,seed=42)
     assert result['audit']['valid'] and result['info']['selected_count_proven_optimal']
     assert not result['info']['proven_optimal']
     assert result['info']['best_bound']==0
@@ -112,7 +111,7 @@ def test_uniform_contract_and_cutoffs_cannot_be_forged(mutation):
 
 
 def test_shared_cutoff_moves_never_break_equality():
-    from models.routing.variants.model_6.alns.solver import _cutoff_move
+    from models.routing.model_6.alns.solver import _cutoff_move
     import random
     child=uniform_fixture(counts=(2,)).for_count(2)
     state=dict(deliveries={},pickup_order={},pickup_vehicle={},e2=[],cutoffs=child.default_cutoffs)
@@ -127,7 +126,7 @@ def test_shared_cutoff_moves_never_break_equality():
 
 def test_multi_satellite_recovery_is_counted_once_per_batch(tmp_path,exact_available):
     from tools.configuration.loader import load_routing_case
-    from models.routing.common.cycle import load_instance
+    from models.common.cycle import load_instance
     from tools.data.build_model6_static_suite import build_suite
     manifest=build_suite(tmp_path/'data',families=['mechanism_cutoff_choice'])
     case=json.loads(manifest.read_text(encoding='utf-8'))['cases'][0]['m6_case']
@@ -144,14 +143,14 @@ def test_multi_satellite_recovery_is_counted_once_per_batch(tmp_path,exact_avail
 def test_supplied_uniform_incumbent_is_retained_and_proofs_cleared(monkeypatch,exact_available):
     p=uniform_fixture()
     initial=solve_exact(p,time_limit=10)
-    from models.routing.variants.model_6.alns import solver
+    from models.routing.model_6.alns import solver
     def empty(child,**kwargs):
         result=joint_empty_result(child,'alns')
         result['info'].update(status='HEURISTIC_NO_SOLUTION',iterations=0,proven_infeasible=False)
         return result
     monkeypatch.setattr(solver,'solve_alns',empty)
-    from models.routing.variants.model_6.uniform import solve_uniform
-    result=solve_uniform(p,method='alns',budget=.1,max_iterations=2,seed=42,initial_result=initial)
+    from models.routing.model_6.alns.batch_search import solve_uniform
+    result=solve_uniform(p,solve_candidate=solver.solve_alns,method='alns',budget=.1,max_iterations=2,seed=42,initial_result=initial)
     assert result['audit']['valid'] and result['info']['objective']==initial['info']['objective']
     assert not result['info']['proven_optimal'] and result['info']['best_bound'] is None
 
@@ -165,7 +164,7 @@ def guarded(name,*args,**kwargs):
     return original(name,*args,**kwargs)
 builtins.__import__=guarded
 from tests.routing.test_model6_uniform import uniform_fixture
-from models.routing.variants.model_6 import solve_alns
+from models.routing.model_6.alns import solve_alns
 r=solve_alns(uniform_fixture(),max_time=.4,max_iterations=10)
 assert r['audit']['valid'] and not r['info']['proven_optimal']
 assert r['info']['iterations']<=10
@@ -210,7 +209,7 @@ def test_uniform_terminal_cleaning_keeps_equality_but_rejects_later_returns(exac
 
 
 def test_supplied_k2_seed_remains_k2_when_k1_improves_first(exact_available):
-    from models.routing.common.cycle.uniform import attach_uniform_decisions
+    from models.common.cycle.uniform import attach_uniform_decisions
     p=uniform_fixture()
     initial=solve_exact(p.for_count(2),time_limit=5)
     attach_uniform_decisions(p,initial,2)
@@ -270,4 +269,4 @@ def test_uniform_comparison_runner_preserves_all_runs_and_uniform_windows(tmp_pa
     selected=summary['cases'][0]['m6']
     assert selected['cycle_batches'] in (1,2)
     assert selected['first_minutes']+selected['second_minutes']==selected['batch_minutes']
-    assert (out/'experiment.json').exists() and (out/'source_snapshot/models/routing/common/cycle/uniform.py').exists()
+    assert (out/'experiment.json').exists() and (out/'source_snapshot/models/common/cycle/uniform.py').exists()

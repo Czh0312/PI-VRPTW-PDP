@@ -22,10 +22,10 @@ def write(path, value):
 
 def worker(job_path):
     from tools.configuration.loader import load_routing_case
-    from models.routing.common.cycle import load_instance
-    from models.routing.common.cycle.audit import audit_solution
-    from models.routing.solvers.exact.solver import solve_exact
-    from models.routing.solvers.exact.single_batch_columns import solve_with_route_bound
+    from models.common.cycle import load_instance
+    from models.common.cycle.audit import audit_solution
+    from models.routing.model_1.exact.engine import solve_exact
+    from models.routing.model_1.exact.single_batch_columns import solve_with_route_bound
     job = json.loads(Path(job_path).read_text())
     config, fleet = load_routing_case(job['case_path'])
     problem = load_instance(config, fleet)
@@ -39,7 +39,7 @@ def worker(job_path):
                 'columns_negative': 'negative'}.get(job['method'], 'optimal')
     begin = time.perf_counter()
     if job.get('root_only'):
-        from models.routing.solvers.exact.single_batch_columns import root_route_bound
+        from models.routing.model_1.exact.single_batch_columns import root_route_bound
         certificate = root_route_bound(problem, pricing_method=job['pricing_method'],
             mip_strategy=strategy, dual_cuts=True,
             pricing_continuous_time=job['method'] == 'columns_clock',
@@ -139,8 +139,8 @@ def main(argv=None):
     out.mkdir(parents=True, exist_ok=True)
     from tools.configuration.loader import load_routing_case, resolve_project_path
     from experiments.runs.run_multibatch_cycle import INPUT_KEYS, freeze_inputs, source_snapshot
-    from models.routing.common.cycle import load_instance
-    from models.routing.common.cycle.audit import audit_solution
+    from models.common.cycle import load_instance
+    from models.common.cycle.audit import audit_solution
     variants, starts = [], []
     handoff, handoff_source = None, None
     for value in args.frozen_runs:
@@ -154,7 +154,7 @@ def main(argv=None):
             raise ValueError('This prototype only supports M1/M2')
         initial = json.loads((source/'result.json').read_text())
         if args.handoff_result:
-            from models.routing.solvers.exact.single_batch_columns import problem_fingerprint
+            from models.routing.model_1.exact.single_batch_columns import problem_fingerprint
             handoff_source = resolve_project_path(args.handoff_result).resolve()
             initial = json.loads(handoff_source.read_text())
             handoff = initial['info']['route_bound_certificate']

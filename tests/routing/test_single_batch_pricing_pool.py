@@ -6,9 +6,9 @@ from copy import deepcopy
 
 import pytest
 
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.solvers.exact.single_batch_columns import root_route_bound, solve_with_route_bound
-from models.routing.solvers.exact.single_batch_delivery_pricer import DeliveryMipPricer
+from models.common.cycle.audit import audit_solution
+from models.routing.model_1.exact.single_batch_columns import root_route_bound, solve_with_route_bound
+from models.routing.model_1.exact.single_batch_delivery_pricer import DeliveryMipPricer
 from tests.routing.test_single_batch_columns import contexts, independently_enumerated_trips
 from tests.routing.test_single_batch_time_budget import manual_work
 from tests.routing.test_single_batch_dual_cuts import check_all_partitions
@@ -131,9 +131,9 @@ def test_pool_column_limit_is_validated(limit):
 @pytest.mark.parametrize('root_elapsed', [4, 9, 10])
 @pytest.mark.parametrize('reuse', [False, True])
 def test_unused_root_time_can_help_the_primal_stage_without_extending_total_budget(monkeypatch, root_elapsed, reuse):
-    from models.routing.solvers.exact import single_batch_columns as cg
-    from models.routing.solvers.exact import single_batch_route_pool as primal
-    from models.routing.solvers.exact import solver
+    from models.routing.model_1.exact import single_batch_columns as cg
+    from models.routing.model_1.exact import single_batch_route_pool as primal
+    from models.routing.model_1.exact import engine as solver
     p = tiny_problem(2, 0)
     initial = solver.solve_exact(p, time_limit=2)
     assert audit_solution(p, initial)['valid']

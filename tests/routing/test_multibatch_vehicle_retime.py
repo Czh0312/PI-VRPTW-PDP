@@ -5,13 +5,12 @@ import math
 
 import pytest
 
-from models.routing.common.cycle import MultiBatchInstance, Order
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.common.cycle.state import empty_result
-from models.routing.common.domain.instance import ProblemInstance
-from models.routing.solvers.exact.multibatch_vehicle_retime import (
-    build_vehicle_retiming, set_vehicle_projection, reoptimize_vehicle_retiming)
-from models.routing.solvers.exact.solver import solve_exact
+from models.common.cycle import MultiBatchInstance, Order
+from models.common.cycle.audit import audit_solution
+from models.common.cycle.state import empty_result
+from models.common.domain.instance import ProblemInstance
+from models.routing.model_5.exact.multibatch_vehicle_retime import build_vehicle_retiming, set_vehicle_projection, reoptimize_vehicle_retiming
+from models.routing.model_5.exact.engine import solve_exact
 from tests.routing.test_multibatch_cycle import fixture, hand_solution
 from tests.routing.test_multibatch_departure_loads import nonmetric_problem
 

@@ -5,13 +5,11 @@ import math
 
 import pytest
 
-from models.routing.common.cycle import MultiBatchInstance
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.solvers.exact.multibatch_e1_inventory import (
-    build_e1_inventory, e1_inventory_certificate, set_e1_projection,
-)
-from models.routing.solvers.exact.multibatch_route_cg import route_cover_certificate
-from models.routing.solvers.exact.multibatch_e1_routes import build_e1_routes, enumerate_e1_routes, set_route_projection
+from models.common.cycle import MultiBatchInstance
+from models.common.cycle.audit import audit_solution
+from models.routing.model_5.exact.multibatch_e1_inventory import build_e1_inventory, e1_inventory_certificate, set_e1_projection
+from models.routing.model_5.exact.multibatch_route_cg import route_cover_certificate
+from models.routing.model_5.exact.multibatch_e1_routes import build_e1_routes, enumerate_e1_routes, set_route_projection
 from tests.routing.test_multibatch_cycle import fixture, hand_solution
 from tests.routing.test_multibatch_departure_loads import nonmetric_problem
 
@@ -49,7 +47,7 @@ def test_full_hand_schedule_projects_at_exact_cutoff_and_clean_boundaries(unload
 @pytest.mark.parametrize('backend', ['indexed', 'patterns'])
 def test_nonmetric_full_optimum_projects_and_relaxation_bounds_its_e1_cost(seed, backend):
     pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact.solver import solve_exact
+    from models.routing.model_5.exact.engine import solve_exact
     p = nonmetric_problem(seed)
     full = solve_exact(p, time_limit=5)
     assert full['info']['proven_optimal'] and full['audit']['valid']
@@ -146,7 +144,7 @@ def test_zero_times_and_positive_turnaround_do_not_apply_batch_vehicle_symmetry(
 
 def test_noncanonical_vehicle_labels_are_reordered_only_with_zero_turnaround():
     p = nonmetric_problem(2)
-    from models.routing.solvers.exact.solver import solve_exact
+    from models.routing.model_5.exact.engine import solve_exact
     full = solve_exact(p, time_limit=5)
     copied = deepcopy(full)
     for trip in copied['e1_trips']:
@@ -156,7 +154,7 @@ def test_noncanonical_vehicle_labels_are_reordered_only_with_zero_turnaround():
 
 def test_combined_certificate_replaces_e1_component_and_counts_total_budget(tmp_path):
     gp = pytest.importorskip('gurobipy')
-    from models.routing.variants.model_5.exact import e1_inventory_certificate as public
+    from models.routing.model_5.exact import e1_inventory_certificate as public
     p = fixture(pool=1)
     base = route_cover_certificate(p, time_limit=2, initial_result=hand_solution(p))
     combined = route_cover_certificate(p, time_limit=2, e1_time_limit=1,

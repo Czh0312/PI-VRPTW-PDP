@@ -7,13 +7,13 @@ import pytest
 
 from tests.routing.test_multibatch_hybrid import capacity_problem
 from tests.routing.test_multibatch_route_cg import enumerate_trips, enumerated_lp
-from models.routing.solvers.exact.multibatch_route_pricing import route_context
+from models.routing.model_5.exact.pickup_route_pricing import route_context
 
 
 @pytest.mark.parametrize('capacity_rows', [False,True])
 def test_same_live_pricer_continues_after_interrupted_phase_and_snapshots_do_not_mutate(monkeypatch,capacity_rows):
     pytest.importorskip('gurobipy')
-    import models.routing.solvers.exact.multibatch_route_cg as cg
+    import models.routing.model_5.exact.multibatch_route_cg as cg
     real_clock=time.perf_counter;forced=[None];deadline=real_clock()+3
     monkeypatch.setattr(cg,'time',SimpleNamespace(perf_counter=lambda:forced[0] if forced[0] is not None else real_clock()))
     original=cg.RoutePricer;created=[];disposed=[]
@@ -46,7 +46,7 @@ def test_same_live_pricer_continues_after_interrupted_phase_and_snapshots_do_not
 
 
 def test_expired_empty_session_returns_safe_bound_and_releases_resources():
-    from models.routing.solvers.exact.multibatch_route_cg import SiteRouteCoverSession
+    from models.routing.model_5.exact.multibatch_route_cg import SiteRouteCoverSession
     p=capacity_problem();s=SiteRouteCoverSession(p,route_context(p,'S'))
     try:
         row=s.run(deadline=0)
@@ -55,7 +55,7 @@ def test_expired_empty_session_returns_safe_bound_and_releases_resources():
 
 
 def test_public_hybrid_disposes_all_live_sessions_when_a_stage_raises(monkeypatch):
-    import models.routing.solvers.exact.multibatch_hybrid as hybrid
+    import models.routing.model_5.exact.multibatch_hybrid as hybrid
     closed=[]
     def fail(p,**options):
         options['_route_sessions']['S']=SimpleNamespace(dispose=lambda:closed.append('S'))
@@ -68,9 +68,9 @@ def test_public_hybrid_disposes_all_live_sessions_when_a_stage_raises(monkeypatc
 def test_actual_public_resume_pipeline_keeps_full_audit_and_releases_owned_sessions(monkeypatch):
     pytest.importorskip('gurobipy')
     import models.routing.service as service
-    import models.routing.solvers.exact.multibatch_route_cg as cg
-    from models.routing.solvers.exact.multibatch_hybrid import solve_hybrid
-    from models.routing.common.cycle.audit import audit_solution
+    import models.routing.model_5.exact.multibatch_route_cg as cg
+    from models.routing.model_5.exact.multibatch_hybrid import solve_hybrid
+    from models.common.cycle.audit import audit_solution
     from tests.routing.test_multibatch_cycle import fixture,hand_solution
     p=fixture(pool=2);initial=hand_solution(p);owned=[]
     original=cg.SiteRouteCoverSession

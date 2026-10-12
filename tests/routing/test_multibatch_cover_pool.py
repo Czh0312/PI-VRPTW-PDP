@@ -3,9 +3,9 @@ from copy import deepcopy
 import math
 import pytest
 
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.solvers.exact.multibatch_cover_pool import preserve_cover_routes, reoptimize_cover_pool
-from models.routing.solvers.exact.multibatch_route_pool import candidate_pools
+from models.common.cycle.audit import audit_solution
+from models.routing.model_5.exact.multibatch_cover_pool import preserve_cover_routes, reoptimize_cover_pool
+from models.routing.model_5.exact.multibatch_route_pool import candidate_pools
 from tests.routing.test_multibatch_cycle import fixture, hand_solution
 from tests.routing.test_multibatch_departure_loads import nonmetric_problem
 from tests.routing.test_multibatch_primal_quality import quality_fixture
@@ -44,7 +44,7 @@ def test_complete_cover_is_appended_beyond_cap_without_mutation_or_cached_costs(
 @pytest.mark.parametrize('seed', range(6))
 def test_nonmetric_complete_optimum_is_preserved_in_actual_pool_master(seed):
     pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact.solver import solve_exact
+    from models.routing.model_5.exact.engine import solve_exact
     p = nonmetric_problem(seed)
     initial = solve_exact(p, time_limit=5)
     assert initial['info']['proven_optimal']
@@ -63,8 +63,8 @@ def test_nonmetric_complete_optimum_is_preserved_in_actual_pool_master(seed):
 
 def test_pin_independent_optimal_cover_improves_a_capped_bad_initial():
     pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact.multibatch_primal import construct_multibatch_incumbent
-    from models.routing.solvers.exact.solver import solve_exact
+    from models.routing.model_5.exact.multibatch_primal import construct_multibatch_incumbent
+    from models.routing.model_5.exact.engine import solve_exact
     import time
     p = quality_fixture()
     initial = construct_multibatch_incumbent(p, time.perf_counter()+2, improve=False)

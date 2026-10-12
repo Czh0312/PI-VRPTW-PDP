@@ -15,7 +15,7 @@ def main(argv=None):
     if args.model is not None:
         config['model'] = args.model
         if args.model in (7, 8):
-            from models.routing.common.cycle.calendar import SCHEDULE_MODES
+            from models.common.cycle.calendar import SCHEDULE_MODES
             config['joint_batch_options'] = {**config.get('joint_batch_options', {}),
                                              'schedule_mode': SCHEDULE_MODES[args.model]}
     if (fleet.get("operating_policy") or {}).get("policy_version") != "multi_batch_cutoff_v1":

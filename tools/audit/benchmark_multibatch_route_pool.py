@@ -23,9 +23,9 @@ def write(path, value):
 
 def worker(job, destination):
     from tools.configuration.loader import load_routing_case
-    from models.routing.common.cycle import load_instance
-    from models.routing.common.cycle.audit import audit_solution
-    from models.routing.variants.model_5.exact import reoptimize_route_pool, route_cover_certificate, solve_exact
+    from models.common.cycle import load_instance
+    from models.common.cycle.audit import audit_solution
+    from models.routing.model_5.exact import reoptimize_route_pool, route_cover_certificate, solve_exact
     p = load_instance(*load_routing_case(job['case']))
     initial = json.loads(Path(job['initial_result']).read_text())
     assert audit_solution(p, initial)['valid']
@@ -79,8 +79,8 @@ def main():
     if len(set(args.variants)) != len(args.variants):
         parser.error('variants must be distinct')
     from tools.configuration.loader import load_routing_case, resolve_project_path
-    from models.routing.common.cycle import load_instance
-    from models.routing.common.cycle.audit import audit_solution
+    from models.common.cycle import load_instance
+    from models.common.cycle.audit import audit_solution
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     jobs = []
@@ -120,7 +120,9 @@ def main():
         shutil.copy2(source, target)
     for name in ('multibatch_route_pool.py', 'multibatch_e1_polish.py', 'multibatch_e1_inventory.py', 'multibatch_e1_routes.py',
                  'multibatch_route_cg.py', 'multibatch_route_pricing.py', 'solver.py', 'formulation.py'):
-        path = output/'source_snapshot/models/routing/solvers/exact'/name
+        filename = {'multibatch_route_pricing.py': 'pickup_route_pricing.py', 'solver.py': 'engine.py',
+                    'primal.py': 'initial_solution.py'}.get(name, name)
+        path = output/'source_snapshot/models/routing/model_5/exact'/filename
         compile(path.read_text(), str(path), 'exec')
     compile(Path(__file__).read_text(), str(Path(__file__)), 'exec')
     hashes = {str(p.relative_to(output)): hashlib.sha256(p.read_bytes()).hexdigest()

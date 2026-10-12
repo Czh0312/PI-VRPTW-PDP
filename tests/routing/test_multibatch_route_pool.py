@@ -6,9 +6,9 @@ import time
 
 import pytest
 
-from models.routing.common.cycle import MultiBatchInstance
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.solvers.exact.multibatch_route_pool import candidate_pools, reoptimize_route_pool
+from models.common.cycle import MultiBatchInstance
+from models.common.cycle.audit import audit_solution
+from models.routing.model_5.exact.multibatch_route_pool import candidate_pools, reoptimize_route_pool
 from tests.routing.test_multibatch_cycle import fixture, hand_solution
 from tests.routing.test_multibatch_departure_loads import nonmetric_problem
 from tests.routing.test_multibatch_primal_quality import quality_fixture
@@ -18,7 +18,7 @@ from tests.routing.test_multibatch_primal_quality import quality_fixture
 @pytest.mark.parametrize('transfers', [False, True])
 def test_pool_cannot_beat_known_full_optimum_and_does_not_claim_global_proof(seed, transfers):
     pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact.solver import solve_exact
+    from models.routing.model_5.exact.engine import solve_exact
     p = nonmetric_problem(seed)
     initial = solve_exact(p, time_limit=5)
     assert initial['info']['proven_optimal']
@@ -34,8 +34,8 @@ def test_pool_cannot_beat_known_full_optimum_and_does_not_claim_global_proof(see
 
 def test_reordering_improves_actual_e2_path_and_matches_full_optimum():
     pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact.multibatch_primal import construct_multibatch_incumbent
-    from models.routing.solvers.exact.solver import solve_exact
+    from models.routing.model_5.exact.multibatch_primal import construct_multibatch_incumbent
+    from models.routing.model_5.exact.engine import solve_exact
     p = quality_fixture()
     initial = construct_multibatch_incumbent(p, time.perf_counter()+2, improve=False)
     result = reoptimize_route_pool(p, initial, time_limit=2, transfers=False)
@@ -132,8 +132,8 @@ def test_whole_order_transfer_merges_two_trips_without_losing_any_task():
 
 def test_physical_vehicle_links_survive_inactive_intermediate_slot():
     gp = pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact.multibatch_e1_routes import build_e1_routes
-    from models.routing.solvers.exact.multibatch_route_pool import add_route_pool
+    from models.routing.model_5.exact.multibatch_e1_routes import build_e1_routes
+    from models.routing.model_5.exact.multibatch_route_pool import add_route_pool
     p, initial = three_slot_case()
     # Slot 1 is absent; slot 0 cannot stay out beyond slot 2's departure.
     initial['e2_trips'].pop(1)
@@ -155,8 +155,8 @@ def test_physical_vehicle_links_survive_inactive_intermediate_slot():
 
 def test_busy_vehicle_preparation_is_part_of_route_pool_timeline():
     gp = pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact.multibatch_e1_routes import build_e1_routes
-    from models.routing.solvers.exact.multibatch_route_pool import add_route_pool
+    from models.routing.model_5.exact.multibatch_e1_routes import build_e1_routes
+    from models.routing.model_5.exact.multibatch_route_pool import add_route_pool
     p, initial = three_slot_case(prep=2)
     pools = candidate_pools(p, initial, max_columns=1)
     m, ctx = build_e1_routes(p)
@@ -172,9 +172,9 @@ def test_busy_vehicle_preparation_is_part_of_route_pool_timeline():
 
 def test_zero_time_cross_trip_precedence_cycle_is_excluded():
     gp = pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact.multibatch_e1_routes import build_e1_routes
-    from models.routing.solvers.exact.multibatch_route_pool import add_route_pool
-    from models.routing.solvers.exact.multibatch_route_pricing import evaluate_column, route_context
+    from models.routing.model_5.exact.multibatch_e1_routes import build_e1_routes
+    from models.routing.model_5.exact.multibatch_route_pool import add_route_pool
+    from models.routing.model_5.exact.pickup_route_pricing import evaluate_column, route_context
     p, initial = three_slot_case(zero=True)
     context = route_context(p, 'S')
     pools = [[evaluate_column(p, context, [('extra', 'p'), ('o1', 'd')])],
@@ -192,7 +192,7 @@ def test_zero_time_cross_trip_precedence_cycle_is_excluded():
 
 def test_public_warm_start_preprocessing_shares_original_total_budget():
     pytest.importorskip('gurobipy')
-    from models.routing.variants.model_5.exact import reoptimize_route_pool as public, solve_exact
+    from models.routing.model_5.exact import reoptimize_route_pool as public, solve_exact
     p = fixture(pool=2)
     assert public(p, hand_solution(p), time_limit=1)['audit']['valid']
     result = solve_exact(p, initial_result=hand_solution(p), time_limit=2,

@@ -23,7 +23,7 @@ if str(ROOT) not in sys.path:
 from tools.configuration.loader import load_routing_case, resolve_project_path
 from experiments.runs.run_multibatch_cycle import (
     INPUT_KEYS, freeze_inputs, source_snapshot, run_worker, write_json)
-from models.routing.common.cycle import load_instance
+from models.common.cycle import load_instance
 from tools.data.static_batch_dataset import load_manifest, check_pairing
 
 

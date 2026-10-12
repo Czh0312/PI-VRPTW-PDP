@@ -5,9 +5,9 @@ import math
 
 import pytest
 
-from models.routing.common.cycle.calendar import CalendarCycleInstance
-from models.routing.common.cycle.uniform import UniformCycleInstance
-from models.routing.common.cycle.policy import Batch
+from models.common.cycle.calendar import CalendarCycleInstance
+from models.common.cycle.uniform import UniformCycleInstance
+from models.common.cycle.policy import Batch
 from models.routing.service import solve_routing
 from tests.routing.test_model6_joint import joint_fixture, exact_available
 
@@ -21,7 +21,7 @@ def one_order_problem(number, variant):
     source.network.nodes['S'].x = 1
     source.network.nodes['C1'].x = 2
     source.network.nodes['S'].service_time = variant % 2
-    from models.routing.common.domain.instance import ProblemInstance
+    from models.common.domain.instance import ProblemInstance
     network = ProblemInstance(source.network.nodes, dict(E1_vehicle_count=1, vehicles_per_satellite=1,
         E1_Qk=100, E1_Ck=100, E2_Qv=100, E2_Cv=100, container_weight=1, container_volume=1))
     policy = replace(source.operating_policy, cycle_start=origin, cycle_end=origin+horizon,

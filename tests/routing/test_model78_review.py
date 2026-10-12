@@ -1,9 +1,10 @@
 """Regression checks for issues discovered by the calendar assessment."""
 from dataclasses import replace
+from importlib import import_module
 
 import pytest
 
-from models.routing.common.cycle.calendar import CalendarCycleInstance
+from models.common.cycle.calendar import CalendarCycleInstance
 from models.routing.service import solve_routing
 from tests.routing.test_model6_joint import joint_fixture, exact_available
 from tests.routing.test_model78_calendar import calendar_fixture
@@ -23,7 +24,7 @@ def test_late_pickup_constructor_finds_narrow_feasible_terminal_cutoff(number):
 
 
 def test_missing_batch_domain_is_not_a_late_seed_crash():
-    from models.routing.variants.model_6.alns.solver import _initial_cutoff_profiles
+    from models.routing.model_8.alns.joint_solver import _initial_cutoff_profiles
     source = calendar_fixture(8, counts=(1,), late_release=True)
     child = source.fixed_calendar(1)
     assert not child.legal_batches['o2']
@@ -33,8 +34,8 @@ def test_missing_batch_domain_is_not_a_late_seed_crash():
 
 
 def test_one_batch_m8_delegates_to_identical_fixed_calendar_alns(monkeypatch):
-    from models.routing.variants.model_6.alns import solver
-    from models.routing.variants.model_8.alns.search import solve_variable_count
+    from models.routing.model_8.alns import joint_solver as solver
+    from models.routing.model_8.alns.search import solve_variable_count
     p = calendar_fixture(8, counts=(1,))
     calls = []
     def inspect(child, **kwargs):
@@ -47,7 +48,7 @@ def test_one_batch_m8_delegates_to_identical_fixed_calendar_alns(monkeypatch):
 
 
 def test_event_seed_slots_are_not_consumed_by_duplicate_times():
-    from models.routing.variants.model_8.alns.search import boundary_events
+    from models.routing.model_8.alns.search import boundary_events
     p = calendar_fixture(8, counts=(2,)).for_count(2)
     events = boundary_events(p)
     assert events == sorted(set(events))
@@ -57,8 +58,8 @@ def test_event_seed_slots_are_not_consumed_by_duplicate_times():
 @pytest.mark.parametrize('bound_delta, optimal', [(1, True), (-1, False), (None, False)])
 def test_unfinished_count_can_be_excluded_only_by_its_certified_bound(number, bound_delta, optimal, monkeypatch, exact_available):
     from copy import deepcopy
-    from models.routing.common.cycle.joint import joint_empty_result
-    from models.routing.variants.model_6.exact import solver
+    from models.common.cycle.joint import joint_empty_result
+    solver = import_module(f'models.routing.model_{number}.exact.joint_solver')
     p = calendar_fixture(number, counts=(1, 2))
     incumbent = solver.solve_exact(p.for_count(1), time_limit=5)
     assert incumbent['info']['proven_optimal'] and incumbent['audit']['valid']

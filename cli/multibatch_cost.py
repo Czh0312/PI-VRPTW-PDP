@@ -2,7 +2,7 @@
 from datetime import datetime
 import json
 from tools.configuration.loader import PROJECT_ROOT, load_json, resolve_project_path
-from models.routing.common.cycle import load_instance
+from models.common.cycle import load_instance
 from models.cost.multibatch import evaluate_cycle_cost
 
 

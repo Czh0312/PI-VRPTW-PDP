@@ -10,9 +10,9 @@ import sys
 
 import pytest
 
-from models.routing.common.cycle.calendar import CalendarCycleInstance
-from models.routing.common.cycle.joint import JointBatchInstance, joint_empty_result
-from models.routing.common.cycle.audit import audit_solution
+from models.common.cycle.calendar import CalendarCycleInstance
+from models.common.cycle.joint import JointBatchInstance, joint_empty_result
+from models.common.cycle.audit import audit_solution
 from models.routing.service import solve_routing
 from tests.routing.test_model6_joint import joint_fixture, exact_available
 
@@ -32,12 +32,12 @@ def calendar_fixture(number=8, counts=(1, 2), late_release=False, **options):
 def test_public_entry_identity_dispatch_and_cost(number, exact_available):
     from models.cost.comparison import evaluate_comparison_cost
     p = calendar_fixture(number)
-    entry = import_module(f'models.routing.variants.model_{number}')
-    assert entry.MODEL_NUMBER == number
     for method in ('exact', 'alns'):
+        entry = import_module(f'models.routing.model_{number}.{method}')
+        assert entry.MODEL_NUMBER == number
         r = solve_routing(model=number, method=method, problem=p, exact_time=10, alns_time=.5, alns_iter=200)
         assert r['model'] == number and r['model_module'] == entry.__name__
-        assert r['solver_module'] == entry.__name__+f'.{method}.solver'
+        assert r['solver_module'] == entry.__name__+'.solver'
         assert r['batch_mode'] == entry.BATCH_MODE
         assert r['audit']['valid'] and r['audit']['periodic_replay']['valid']
         cost = evaluate_comparison_cost(p, r, p.cost_profile.config)
@@ -79,7 +79,7 @@ def test_m8_moving_boundary_restores_release_feasibility(exact_available):
 
 
 def test_integer_milp_matches_exhaustive_fixed_calendar_oracle(exact_available):
-    from models.routing.variants.model_6 import solve_exact
+    from models.routing.model_6.exact import solve_exact
     source = joint_fixture(zero=True, cleaning=1, pool_rate=30)
     policy = replace(source.operating_policy, cycle_end=8,
                      batches=tuple(replace(b, start=i*4, cutoff=i*4+2, end=(i+1)*4)
@@ -161,7 +161,7 @@ def test_initial_incumbent_is_retained_and_proof_is_cleared(number, exact_availa
 
 @pytest.mark.parametrize('number', [7, 8])
 def test_unresolved_k_never_inherits_another_counts_optimal_proof(number, exact_available, monkeypatch):
-    from models.routing.variants.model_6.exact import solver
+    solver = import_module(f'models.routing.model_{number}.exact.joint_solver')
     p = calendar_fixture(number)
     original = solver.solve_exact
     def partial(child, **kwargs):
@@ -212,7 +212,7 @@ def test_repartitioning_never_silently_drops_source_batch_restrictions():
     with pytest.raises(ValueError, match='all source batches'):
         CalendarCycleInstance(source.network, orders, source.operating_policy, {}, source.cost_profile.config, model=8)
     with pytest.raises(ValueError, match='Model 7'):
-        import_module('models.routing.variants.model_7').solve_alns(calendar_fixture(8))
+        import_module('models.routing.model_7.alns').solve_alns(calendar_fixture(8))
 
 
 @pytest.mark.parametrize('number', [7, 8])
@@ -224,8 +224,7 @@ number, method = int(sys.argv[1]), sys.argv[2]
 opposite = 'alns' if method == 'exact' else 'exact'
 class Guard(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if (fullname.startswith('models.routing.solvers.'+opposite)
-            or any(fullname.startswith('models.routing.variants.model_'+str(n)+'.'+opposite) for n in (6, 7, 8))
+        if ((fullname.startswith('models.routing.model_') and '.'+opposite in fullname)
             or (method == 'alns' and fullname.startswith('gurobipy'))):
             raise AssertionError('Unexpected dependency '+fullname)
 sys.meta_path.insert(0, Guard())
@@ -244,7 +243,7 @@ assert r['audit']['valid'], r
 def test_cli_native_cases_override_and_snapshot(tmp_path, number):
     from cli.route import main
     from tools.configuration.loader import load_routing_case
-    from models.routing.common.cycle.instance import load_instance
+    from models.common.cycle.instance import load_instance
     case = f'config/experiments/examples/model{number}_demo.json'
     config, fleet = load_routing_case(case)
     assert load_instance(config, fleet).model_number == number
@@ -252,7 +251,7 @@ def test_cli_native_cases_override_and_snapshot(tmp_path, number):
     assert r['audit']['valid'] and r['model'] == number
     manifest = json.loads((tmp_path/'run/manifest.json').read_text())
     assert manifest['calendar_config']['model'] == number
-    assert (tmp_path/f'run/source_snapshot/models/routing/variants/model_{number}/exact/model.py').is_file()
+    assert (tmp_path/f'run/source_snapshot/models/routing/model_{number}/exact/model.py').is_file()
     # Keep the override fixture portable; archived generated cases contain
     # absolute paths from the machine that originally produced the dataset.
     portable = json.loads(Path(case).read_text(encoding='utf-8'))

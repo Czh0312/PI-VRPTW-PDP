@@ -30,8 +30,8 @@ def worker(job_path):
         from configuration.loader import load_routing_case
     else:
         from tools.configuration.loader import load_routing_case
-    from models.routing.common.cycle import load_instance
-    from models.routing.variants.model_5.exact import logic_benders_certificate
+    from models.common.cycle import load_instance
+    from models.routing.model_5.exact import logic_benders_certificate
     p=load_instance(*load_routing_case(job['case']))
     initial=json.loads(Path(job['initial']).read_text())
     options = {k:job[k] for k in ('conflict_learning','final_master_reserve') if k in job}
@@ -73,13 +73,13 @@ def validate(job_path,output_dir=None):
         from configuration.loader import load_routing_case
     else:
         from tools.configuration.loader import load_routing_case
-    from models.routing.common.cycle import load_instance
-    from models.routing.common.cycle.audit import audit_solution
-    from models.routing.solvers.exact.multibatch_logic_benders import _read_model,_write_model,business_fingerprint,source_fingerprint
-    from models.routing.solvers.exact.multibatch_route_pricing import route_context
-    from models.routing.solvers.exact.multibatch_route_timing import enumerate_timed_route_universe
-    from models.routing.solvers.exact.multibatch_joint_inventory import build_joint_inventory,set_joint_projection
-    from models.routing.solvers.exact.multibatch_physical_cuts import lift_physical_costs,add_physical_cut,project_physical_costs
+    from models.common.cycle import load_instance
+    from models.common.cycle.audit import audit_solution
+    from models.routing.model_5.exact.multibatch_logic_benders import _read_model, _write_model, business_fingerprint, source_fingerprint
+    from models.routing.model_5.exact.pickup_route_pricing import route_context
+    from models.routing.model_5.exact.multibatch_route_timing import enumerate_timed_route_universe
+    from models.routing.model_5.exact.multibatch_joint_inventory import build_joint_inventory, set_joint_projection
+    from models.routing.model_5.exact.multibatch_physical_cuts import lift_physical_costs, add_physical_cut, project_physical_costs
     import gurobipy as gp
     p=load_instance(*load_routing_case(job['case']));r=json.loads(Path(job_path).with_name('result.json').read_text())
     destination=Path(output_dir) if output_dir else Path(job_path).parent
@@ -167,8 +167,8 @@ def main():
     protected_sha={str(p):sha(p) for p in protected};write(out/'protected_before.json',protected_sha)
     jobs=[]
     from tools.configuration.loader import load_routing_case
-    from models.routing.common.cycle import load_instance
-    from models.routing.solvers.exact.multibatch_logic_benders import business_fingerprint
+    from models.common.cycle import load_instance
+    from models.routing.model_5.exact.multibatch_logic_benders import business_fingerprint
     for customers in args.cases:
         original=old/('medium25/'+('0' if customers==20 else '1'))/'inputs'
         destination=out/'inputs'/str(customers)

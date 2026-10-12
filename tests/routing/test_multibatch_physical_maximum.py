@@ -3,13 +3,13 @@ from dataclasses import replace
 
 import pytest
 
-from models.routing.common.cycle import MultiBatchInstance
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.common.cycle.state import empty_result
-from models.routing.common.domain.instance import ProblemInstance
-from models.routing.common.domain.node import Depot, Satellite, Customer
-from models.routing.solvers.exact.multibatch_joint_inventory import build_joint_inventory, set_joint_projection
-from models.routing.solvers.exact.multibatch_physical_cuts import add_physical_cut, project_physical_costs
+from models.common.cycle import MultiBatchInstance
+from models.common.cycle.audit import audit_solution
+from models.common.cycle.state import empty_result
+from models.common.domain.instance import ProblemInstance
+from models.common.domain.node import Depot, Satellite, Customer
+from models.routing.model_5.exact.multibatch_joint_inventory import build_joint_inventory, set_joint_projection
+from models.routing.model_5.exact.multibatch_physical_cuts import add_physical_cut, project_physical_costs
 from tests.routing.test_multibatch_cycle import fixture
 from tests.routing.test_multibatch_joint_inventory import domains
 

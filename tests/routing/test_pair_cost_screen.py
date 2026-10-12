@@ -4,13 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from models.routing.alns.initial_solution import (
-    _best_e2_item_insert, _e2_positions, _apply_positions, _remove_inserted,
-)
-from models.routing.alns.types import Route, FEAS_TOL
-from models.routing.baselines.alns.model_4 import Evaluator, build_initial_solution, _remove_customer
-from models.routing.common.data_loader import parse_dataset
-from models.routing.common.domain.instance import ProblemInstance
+from archive.routing_baselines.alns.common.initial_solution import _best_e2_item_insert, _e2_positions, _apply_positions, _remove_inserted
+from archive.routing_baselines.alns.common.types import Route, FEAS_TOL
+from archive.routing_baselines.alns.model_4 import Evaluator, build_initial_solution, _remove_customer
+from models.common.data_loader import parse_dataset
+from models.common.domain.instance import ProblemInstance
 
 ROOT = Path(__file__).resolve().parents[2]
 

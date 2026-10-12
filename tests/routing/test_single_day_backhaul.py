@@ -4,13 +4,13 @@ import json
 import pytest
 
 from tools.configuration.loader import load_routing_case
-from models.routing.common.domain.instance import ProblemInstance
-from models.routing.common.domain.node import Customer, Depot, Satellite
-from models.routing.common.operating_policy import OperatingPolicy
-from models.routing.common.task_builder import build_tasks_for_model
-from models.routing.common.solution_audit import audit_exact_solution
-from models.routing.alns.types import Route, Solution
-from models.routing.baselines.alns.model_3 import Evaluator, solve_alns
+from models.common.domain.instance import ProblemInstance
+from models.common.domain.node import Customer, Depot, Satellite
+from models.common.operating_policy import OperatingPolicy
+from models.common.task_builder import build_tasks_for_model
+from models.common.solution_audit import audit_exact_solution
+from archive.routing_baselines.alns.common.types import Route, Solution
+from archive.routing_baselines.alns.model_3 import Evaluator, solve_alns
 
 
 def problem(policy=True, **overrides):
@@ -224,7 +224,7 @@ def exact_solver():
         env.dispose()
     except gp.GurobiError as exc:
         pytest.skip(f'Gurobi license unavailable: {exc}')
-    from models.routing.baselines.variants.model_3.exact_solver import solve_exact
+    from archive.routing_baselines.variants.model_3.exact_solver import solve_exact
     return solve_exact
 
 

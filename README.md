@@ -60,10 +60,9 @@ make test
 | --- | --- |
 | `main.py`、`cli/` | 命令分发、单次执行与结果输出 |
 | `pyproject.toml`、`Makefile` | 依赖、测试配置与日常检查命令 |
-| `models/routing/variants/model_1/`～`model_8/` | 八个编号模型，各有 `model.py`、`exact/`、`alns/` |
-| `models/routing/solvers/` | M1–M5 共用的精确与 ALNS 内核 |
-| `models/routing/common/cycle/` | 输入、业务规则、结果格式与独立审计 |
-| `models/routing/baselines/`、`models/routing/alns/` | 历史基线及其共享搜索组件 |
+| `models/routing/model_1/`～`model_8/` | 每个模型独立拥有 `alns/`、`exact/`，见[逐文件说明](models/routing/README.md) |
+| `models/common/` | 两种算法共用的数据、业务规则、结果与独立审计 |
+| `archive/routing_baselines/` | 显式调用的历史 M1–M4 及旧搜索组件 |
 | `models/cost/` | 成本、生命周期与经济对照 |
 | `config/` | 按车辆、容器、运行规则、成本、求解器、数据生成、实验组合分类的参数 |
 | `tools/configuration/` | 配置读取和路径解析的 Python 代码 |

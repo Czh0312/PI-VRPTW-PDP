@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 from tools.configuration.loader import PROJECT_ROOT, load_routing_case, resolve_project_path
-from models.routing.common.cycle import load_instance
+from models.common.cycle import load_instance
 
 FAMILIES = (
     'zhou_Set2_100-10-1_subset50', 'zhou_Set2_100-10-1',

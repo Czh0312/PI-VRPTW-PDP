@@ -4,9 +4,9 @@ from unittest.mock import patch
 
 import pytest
 
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.solvers.exact import solver
-from models.routing.solvers.exact.single_batch_formulation import build_model
+from models.common.cycle.audit import audit_solution
+from models.routing.model_3.exact import engine as solver
+from models.routing.model_3.exact.single_batch_formulation import build_model
 from tests.routing.test_single_batch_solver_audit import tiny_problem, enumerate_tiny
 
 

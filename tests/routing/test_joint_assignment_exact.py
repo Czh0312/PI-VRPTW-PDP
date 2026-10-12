@@ -6,12 +6,12 @@ import time
 
 import pytest
 
-from models.routing.common.cycle import MultiBatchInstance
-from models.routing.common.cycle.assignment import assigned_problem, input_assignment
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.solvers.exact.assignment import solve_exact
-from models.routing.solvers.exact.bounds import free_assignment_lower_bound
-from models.routing.solvers.exact.domains import assignment_domains
+from models.common.cycle import MultiBatchInstance
+from models.common.cycle.assignment import assigned_problem, input_assignment
+from models.common.cycle.audit import audit_solution
+from models.routing.model_4.exact.assignment import solve_exact
+from models.routing.model_4.exact.distance_bounds import free_assignment_lower_bound
+from models.routing.model_4.exact.domains import assignment_domains
 from tests.routing.test_single_batch_solver_audit import tiny_problem, enumerate_tiny
 from tests.routing.test_single_batch_comparison import problem as one_customer
 
@@ -79,7 +79,7 @@ def test_empty_orders_joint_zero_objective(model):
 
 def test_joint_contains_no_quadratic_quantity_times_visit_products():
     pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact.formulation import build_model
+    from models.routing.model_4.exact.formulation import build_model
     p = tiny_problem(4, 1)
     model, ctx = build_model(p)
     try:
@@ -91,7 +91,7 @@ def test_joint_contains_no_quadratic_quantity_times_visit_products():
 
 def test_joint_build_timeout_returns_audited_seed_without_proof(monkeypatch):
     pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact import solver
+    from models.routing.model_4.exact import engine as solver
     def timeout(*args, **kwargs):
         raise TimeoutError('test interrupted construction')
     monkeypatch.setattr(solver, 'build_model', timeout)
@@ -104,8 +104,8 @@ def test_joint_build_timeout_returns_audited_seed_without_proof(monkeypatch):
 
 
 def test_global_bound_covers_unvisited_assignments_without_claiming_closure(monkeypatch):
-    from models.routing.solvers.exact import assignment, solver
-    from models.routing.solvers.exact.primal import construct_incumbent
+    from models.routing.model_4.exact import assignment, engine as solver
+    from models.routing.model_4.exact.initial_solution import construct_incumbent
     p = one_customer(2)
     def unclosed(fixed, **kwargs):
         result = construct_incumbent(fixed, time.perf_counter()+1)
@@ -134,7 +134,7 @@ def test_domain_and_lower_bound_use_directed_shortest_distances_not_direct_round
 
 
 def test_preferred_assignments_are_complete_unique_and_respect_domains():
-    from models.routing.solvers.exact.assignment import _assignment_stream
+    from models.routing.model_4.exact.assignment import _assignment_stream
     p = tiny_problem(4, 1)
     domains = {c: list(p.satellites) for c in input_assignment(p)}
     domains[next(iter(domains))] = [p.satellites[0]]
@@ -159,8 +159,8 @@ def test_domain_filter_does_not_reject_any_feasible_independent_tiny_partition()
 
 
 def test_fixed_partition_warm_start_never_transfers_its_local_certificate(monkeypatch):
-    from models.routing.solvers.exact import solver
-    from models.routing.solvers.exact.primal import construct_incumbent
+    from models.routing.model_4.exact import engine as solver
+    from models.routing.model_4.exact.initial_solution import construct_incumbent
     base = one_customer(4, pool=12)
     p = MultiBatchInstance(base.network, [replace(base.orders[0], id=f'o{i}') for i in range(12)],
                            replace(base.operating_policy, e2_max_trips_per_vehicle=10), model=4)

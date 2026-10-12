@@ -1,8 +1,8 @@
 """Physical boundary cases for covers that are only local proposals."""
 import pytest
-from models.routing.solvers.exact.multibatch_cover_pool import preserve_cover_routes, reoptimize_cover_pool
-from models.routing.solvers.exact.multibatch_e1_routes import build_e1_routes
-from models.routing.solvers.exact.multibatch_route_pool import add_route_pool
+from models.routing.model_5.exact.multibatch_cover_pool import preserve_cover_routes, reoptimize_cover_pool
+from models.routing.model_5.exact.multibatch_e1_routes import build_e1_routes
+from models.routing.model_5.exact.multibatch_route_pool import add_route_pool
 from tests.routing.test_multibatch_cycle import fixture, hand_solution
 from tests.routing.test_multibatch_route_pool import three_slot_case
 

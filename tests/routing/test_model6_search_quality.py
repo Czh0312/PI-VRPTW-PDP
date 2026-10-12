@@ -5,11 +5,11 @@ import time
 
 import pytest
 
-from models.routing.common.cycle.joint import JointBatchInstance
-from models.routing.common.cycle.uniform import UniformCycleInstance
-from models.routing.variants.model_6 import solve_alns, solve_exact
-from models.routing.variants.model_6.alns.solver import (
-    JointEvaluator, _best_construction, _cutoff_events, _polish_cutoff)
+from models.common.cycle.joint import JointBatchInstance
+from models.common.cycle.uniform import UniformCycleInstance
+from models.routing.model_6.alns import solve_alns
+from models.routing.model_6.exact import solve_exact
+from models.routing.model_6.alns.solver import JointEvaluator, _best_construction, _cutoff_events, _polish_cutoff
 from tests.routing.test_model6_joint import joint_fixture, exact_available
 
 
@@ -32,7 +32,7 @@ def test_polish_hits_cleaning_equality_and_reduces_pool_without_changing_routes(
     assert candidate['audit']['periodic_replay']['valid'] and improved<score
     offsets={polished['cutoffs'][b.id]-b.start for b in p.operating_policy.batches}
     assert len(offsets)==1 and next(iter(offsets))<=30
-    from models.routing.variants.model_6.alns.solver import _with_cutoff
+    from models.routing.model_6.alns.solver import _with_cutoff
     assert evaluator(assignment,_with_cutoff(p,state,'b1',30))[1]['container_pool_size']==1
     assert evaluator(assignment,_with_cutoff(p,state,'b1',31))[1]['container_pool_size']==2
     for key in ('deliveries','pickup_order','pickup_vehicle','e2'):
@@ -63,7 +63,7 @@ def test_shared_events_include_other_batches_and_cleaning_terminal_boundary():
 
 
 def test_route_duration_lower_bound_strengthens_lp_and_preserves_exact_optimum(exact_available):
-    from models.routing.variants.model_6.exact.model import build_model
+    from models.routing.model_6.exact.model import build_model
     p=joint_fixture()
     model,_=build_model(p)
     relaxed=None

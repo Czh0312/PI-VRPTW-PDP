@@ -14,7 +14,7 @@ import math
 from pathlib import Path
 
 from tools.configuration.loader import PROJECT_ROOT, load_routing_case, resolve_project_path
-from models.routing.common.cycle import load_instance
+from models.common.cycle import load_instance
 from tools.data.build_model6_demo_suite import synthetic_profile
 from tools.data.static_batch_dataset import load_manifest, verify_artifacts
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from tools.configuration.loader import load_json
 from models.cost.joint_batch import JointCostProfile
-from models.routing.common.cycle.audit import audit_solution
+from models.common.cycle.audit import audit_solution
 
 
 def evaluate_comparison_cost(problem, result, parameters, *, audit=None):

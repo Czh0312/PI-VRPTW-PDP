@@ -7,12 +7,12 @@ import time
 
 import pytest
 
-from models.routing.common.cycle import MultiBatchInstance
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.common.cycle.state import empty_result
-from models.routing.solvers.exact.single_batch_columns import DeliveryMaster, solve_with_route_bound
-from models.routing.solvers.exact.single_batch_pool_master import DeliveryPoolMaster
-from models.routing.solvers.exact.single_batch_route_pool import _physical_slots, route_pool_incumbent
+from models.common.cycle import MultiBatchInstance
+from models.common.cycle.audit import audit_solution
+from models.common.cycle.state import empty_result
+from models.routing.model_1.exact.single_batch_columns import DeliveryMaster, solve_with_route_bound
+from models.routing.model_1.exact.single_batch_pool_master import DeliveryPoolMaster
+from models.routing.model_1.exact.single_batch_route_pool import _physical_slots, route_pool_incumbent
 from tests.routing.test_single_batch_route_pool import full_pool, physical_case, raw_trip, schedule_oracle
 from tests.routing.test_single_batch_solver_audit import tiny_problem, enumerate_tiny
 
@@ -237,9 +237,9 @@ def test_tight_delivery_pool_still_rejects_pickups(model):
 @pytest.mark.parametrize('pool_cost', [0, 3, 20])
 @pytest.mark.parametrize('aggregate_time', [False, True])
 def test_tight_option_uses_only_remaining_total_budget(monkeypatch, tight, pool_cost, aggregate_time):
-    from models.routing.solvers.exact import single_batch_columns as cg
-    from models.routing.solvers.exact import single_batch_route_pool as primal
-    from models.routing.solvers.exact import solver
+    from models.routing.model_1.exact import single_batch_columns as cg
+    from models.routing.model_1.exact import single_batch_route_pool as primal
+    from models.routing.model_1.exact import engine as solver
     from tests.routing.test_single_batch_schedule_start import delayed_three_trip_start
     p, initial = delayed_three_trip_start()
     now, seen = [0.0], {}

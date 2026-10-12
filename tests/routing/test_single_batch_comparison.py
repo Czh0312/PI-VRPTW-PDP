@@ -6,13 +6,13 @@ import json
 import pytest
 
 from tools.configuration.loader import load_json, load_routing_case
-from models.routing.common.domain.node import Depot, Satellite, Customer
-from models.routing.common.domain.instance import ProblemInstance
+from models.common.domain.node import Depot, Satellite, Customer
+from models.common.domain.instance import ProblemInstance
 from models.routing.service import solve_routing
-from models.routing.common.cycle import MultiBatchInstance, MultiBatchPolicy, Order, load_instance
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.common.cycle.state import empty_result
-from models.routing.common.cycle.timing import normalize_schedule
+from models.common.cycle import MultiBatchInstance, MultiBatchPolicy, Order, load_instance
+from models.common.cycle.audit import audit_solution
+from models.common.cycle.state import empty_result
+from models.common.cycle.timing import normalize_schedule
 from models.cost.multibatch import evaluate_cycle_cost
 from models.cost.single_batch import compare_single_batch, lifecycle_pair
 
@@ -93,8 +93,8 @@ def test_request_cannot_silently_switch_model():
 
 def test_unclosed_assignment_never_becomes_global_certificate(monkeypatch):
     from types import SimpleNamespace
-    from models.routing.solvers.exact import assignment
-    from models.routing.solvers.exact import solver as exact_solver
+    from models.routing.model_4.exact import assignment
+    from models.routing.model_3.exact import engine as exact_solver
     now, examples = [0.0], {}
     def unclosed(fixed, **_):
         key = tuple(o.satellite for o in fixed.orders)

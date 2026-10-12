@@ -6,11 +6,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from models.routing.common.cycle import MultiBatchInstance, MultiBatchPolicy, Order
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.common.domain.instance import ProblemInstance
-from models.routing.common.domain.node import Customer, Depot, Satellite
-from models.routing.solvers.exact.primal import construct_incumbent
+from models.common.cycle import MultiBatchInstance, MultiBatchPolicy, Order
+from models.common.cycle.audit import audit_solution
+from models.common.domain.instance import ProblemInstance
+from models.common.domain.node import Customer, Depot, Satellite
+from models.routing.model_3.exact.initial_solution import construct_incumbent
 
 
 def split_problem():
@@ -59,7 +59,7 @@ def test_exhaustion_and_insufficient_slots_never_return_partial_seed():
 
 
 def test_expiry_after_auditing_retains_complete_seed(monkeypatch):
-    from models.routing.solvers.exact import single_batch_primal
+    from models.routing.model_3.exact import single_batch_primal
     p = split_problem()
     expired = [False]
     def audited(*args):
@@ -75,7 +75,7 @@ def test_expiry_after_auditing_retains_complete_seed(monkeypatch):
 
 def test_split_start_is_extendable_in_milp_and_survives_build_timeout(monkeypatch):
     gp = pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact import solver
+    from models.routing.model_3.exact import engine as solver
     p = split_problem()
     start = construct_incumbent(p, time.perf_counter()+1)
     saved = deepcopy(start)
@@ -103,9 +103,10 @@ def test_split_start_is_extendable_in_milp_and_survives_build_timeout(monkeypatc
 
 
 def test_assignment_refinement_preserves_fast_probe_breadth(monkeypatch):
-    from models.routing.solvers.exact import primal, assignment
+    from models.routing.model_3.exact import initial_solution as primal
+    from models.routing.model_4.exact import assignment
     from tests.routing.test_single_batch_solver_audit import tiny_problem
-    from models.routing.solvers.exact.domains import assignment_domains
+    from models.routing.model_3.exact.domains import assignment_domains
     p = tiny_problem(4, 1)
     check = assignment_domains(p)
     original = primal.construct_incumbent

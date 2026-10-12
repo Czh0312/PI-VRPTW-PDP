@@ -21,11 +21,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tools.configuration.loader import load_routing_case, load_json, resolve_project_path
-from models.routing.common.data_loader import parse_dataset
-from models.routing.common.domain.instance import ProblemInstance
-from models.routing.common.matrix_loader import load_square_matrix
-from models.routing.common.solution_audit import audit_exact_solution
-from models.routing.common.task_builder import build_tasks_for_model
+from models.common.data_loader import parse_dataset
+from models.common.domain.instance import ProblemInstance
+from models.common.matrix_loader import load_square_matrix
+from models.common.solution_audit import audit_exact_solution
+from models.common.task_builder import build_tasks_for_model
 from models.routing.service import solve_routing
 
 
@@ -68,8 +68,9 @@ def main(argv=None):
         parser.error(f'output directory is not empty: {out}')
     out.mkdir(parents=True, exist_ok=True)
     revision = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=ROOT, capture_output=True, text=True).stdout.strip()
-    sources = [p for base in ('models/routing', 'tools/configuration', 'cli') for p in (ROOT / base).rglob('*.py')]
-    sources.extend([ROOT / 'main.py', ROOT / 'tools/__init__.py', Path(__file__).resolve(),
+    sources = [p for base in ('models/routing', 'models/common', 'archive/routing_baselines', 'tools/configuration', 'cli') for p in (ROOT / base).rglob('*.py')]
+    sources.extend([ROOT / 'main.py', ROOT / 'models/__init__.py', ROOT / 'archive/__init__.py',
+                    ROOT / 'tools/__init__.py', Path(__file__).resolve(),
                     ROOT / 'experiments/analysis/summarize_single_day_backhaul.py'])
     for source in sources:
         target = out / 'source_snapshot' / source.relative_to(ROOT)

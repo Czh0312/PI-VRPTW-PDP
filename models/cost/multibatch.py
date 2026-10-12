@@ -1,7 +1,7 @@
 """Post-process an audited cycle; investment is separate from recurring costs."""
 from __future__ import annotations
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.common.cycle.policy import nonnegative, integer
+from models.common.cycle.audit import audit_solution
+from models.common.cycle.policy import nonnegative, integer
 
 
 def evaluate_cycle_cost(problem, result, config):

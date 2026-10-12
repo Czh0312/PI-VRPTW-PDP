@@ -7,16 +7,16 @@ import random
 
 import pytest
 
-from models.routing.common.cycle import MultiBatchInstance, MultiBatchPolicy, Order
-from models.routing.common.cycle.assignment import assigned_problem
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.common.cycle.state import empty_result
-from models.routing.common.domain.instance import ProblemInstance
-from models.routing.common.domain.node import Customer, Depot, Satellite
+from models.common.cycle import MultiBatchInstance, MultiBatchPolicy, Order
+from models.common.cycle.assignment import assigned_problem
+from models.common.cycle.audit import audit_solution
+from models.common.cycle.state import empty_result
+from models.common.domain.instance import ProblemInstance
+from models.common.domain.node import Customer, Depot, Satellite
 from models.routing.service import solve_routing
-from models.routing.solvers.alns.evaluator import evaluate, initial_state
-from models.routing.solvers.alns.neighborhoods import EvaluationCache, clone_state, destroy_repair, state_key
-from models.routing.solvers.exact.bounds import distance_lower_bound
+from models.routing.model_3.alns.evaluator import evaluate, initial_state
+from models.routing.model_3.alns.neighborhoods import EvaluationCache, clone_state, destroy_repair, state_key
+from models.routing.model_3.exact.distance_bounds import distance_lower_bound
 
 
 def nonmetric_problem():

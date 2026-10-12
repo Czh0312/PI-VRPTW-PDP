@@ -65,7 +65,7 @@ def main(argv=None):
         config["routing_config"] = args.fleet_config
     options=dict(config.get('joint_batch_options',{}))
     if args.model in (7, 8):
-        from models.routing.common.cycle.calendar import SCHEDULE_MODES
+        from models.common.cycle.calendar import SCHEDULE_MODES
         options['schedule_mode'] = SCHEDULE_MODES[args.model]
         config['joint_batch_options'] = options
     if args.uniform_cycle is not None:

@@ -126,9 +126,9 @@ class StaticBatchDatasetTests(unittest.TestCase):
                         self.assertEqual(float(provenance['original_windows'][order['order_id']][key]), float(old[key]))
 
     def test_v2_resource_pairing_and_window_meaning(self):
-        from models.routing.common.cycle import load_instance
-        from models.routing.common.cycle.audit import audit_solution
-        from models.routing.solvers.alns.evaluator import evaluate
+        from models.common.cycle import load_instance
+        from models.common.cycle.audit import audit_solution
+        from models.routing.model_5.alns.evaluator import evaluate
         from tools.audit.audit_static_batch_suite import constructive_state
         pairs, nonredundant, count, first_wave_early = {}, 0, 0, 0
         for family in self.manifest['families']:
@@ -197,8 +197,8 @@ class StaticBatchDatasetTests(unittest.TestCase):
                 check_pairing(pair)
 
     def test_mechanism_witnesses_distinguish_late_returns(self):
-        from models.routing.common.cycle.audit import audit_solution
-        from models.routing.solvers.alns.evaluator import evaluate
+        from models.common.cycle.audit import audit_solution
+        from models.routing.model_5.alns.evaluator import evaluate
         from tools.audit.audit_static_batch_suite import constructive_state, load_declared_data
 
         # Same six uses: the first forced-late return needs an extra box at

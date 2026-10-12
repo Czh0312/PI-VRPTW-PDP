@@ -5,9 +5,9 @@ from unittest.mock import patch
 
 import pytest
 
-from models.routing.common.cycle import MultiBatchInstance
-from models.routing.common.cycle.audit import audit_solution
-from models.routing.common.cycle.state import empty_result
+from models.common.cycle import MultiBatchInstance
+from models.common.cycle.audit import audit_solution
+from models.common.cycle.state import empty_result
 from tests.routing.test_multibatch_cycle import fixture, hand_solution
 from tests.routing.test_single_batch_solver_audit import tiny_problem
 
@@ -15,8 +15,8 @@ from tests.routing.test_single_batch_solver_audit import tiny_problem
 @pytest.mark.parametrize('seed', [0, 1, 2, 4, 5])
 def test_compressed_and_indexed_m5_have_same_nonmetric_optimum(seed):
     pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact import solver
-    from models.routing.solvers.exact.formulation import build_model
+    from models.routing.model_5.exact import engine as solver
+    from models.routing.model_5.exact.formulation import build_model
     base = tiny_problem(3, seed)
     policy = fixture(pool=4, e2_max_trips_per_vehicle=3, e2_dispatch_prep_time=1,
                      e2_return_unload_time=1, e2_turnaround_time=1).operating_policy
@@ -41,8 +41,8 @@ def test_compressed_and_indexed_m5_have_same_nonmetric_optimum(seed):
                                                    (False, False, False)])
 def test_cross_batch_split_witness_and_shared_start_are_preserved(zero, share_cutoff, linear):
     gp = pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact.formulation import build_model
-    from models.routing.solvers.exact.solver import _set_start
+    from models.routing.model_5.exact.formulation import build_model
+    from models.routing.model_5.exact.engine import _set_start
     base = fixture(pool=2, zero=zero)
     problem = MultiBatchInstance(base.network,
         [replace(base.orders[0], pickup_window=(72, 78)), base.orders[1]], base.operating_policy)
@@ -92,7 +92,7 @@ def test_cross_batch_split_witness_and_shared_start_are_preserved(zero, share_cu
 @pytest.mark.parametrize('invalid', ['foreign_route', 'zero_cycle'])
 def test_global_graph_cannot_cross_fixed_route_memberships_or_form_zero_cycles(invalid):
     gp = pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact.formulation import build_model
+    from models.routing.model_5.exact.formulation import build_model
     base = fixture(pool=3 if invalid == 'zero_cycle' else 2, zero=True)
     orders = ([replace(base.orders[0], id=f'o{i}', goods_weight=0, pickup_window=(0, 25))
                for i in (1, 2, 3)] if invalid == 'zero_cycle' else
@@ -125,7 +125,7 @@ def test_global_graph_cannot_cross_fixed_route_memberships_or_form_zero_cycles(i
 
 def test_unshared_task_states_keep_indexed_routes():
     pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact.formulation import build_model
+    from models.routing.model_5.exact.formulation import build_model
     model, ctx = build_model(fixture(), share_e2=False, compress_multibatch_routes=True)
     try:
         assert not ctx['compressed_e2_routes'] and not ctx['global_e2_arcs']
@@ -136,8 +136,8 @@ def test_unshared_task_states_keep_indexed_routes():
 @pytest.mark.parametrize('unloaded', [29, 30, 31])
 def test_shared_routes_and_all_capacity_cuts_preserve_cutoff_boundary(unloaded):
     gp = pytest.importorskip('gurobipy')
-    from models.routing.solvers.exact.formulation import build_model
-    from models.routing.solvers.exact.solver import _set_start
+    from models.routing.model_5.exact.formulation import build_model
+    from models.routing.model_5.exact.engine import _set_start
     problem = fixture(pool=2)
     result = hand_solution(problem, first_unload=unloaded)
     independent = audit_solution(problem, result)

@@ -19,9 +19,9 @@ if (OUT/'source_snapshot/configuration/loader.py').is_file():
     from configuration.loader import load_routing_case
 else:
     from tools.configuration.loader import load_routing_case
-from models.routing.common.cycle import load_instance
-from models.routing.solvers.exact.multibatch_bounds import distance_certificate
-from models.routing.solvers.exact.multibatch_route_pricing import route_context
+from models.common.cycle import load_instance
+from models.routing.model_5.exact.multibatch_bounds import distance_certificate
+from models.routing.model_5.exact.pickup_route_pricing import route_context
 
 
 def read(path):

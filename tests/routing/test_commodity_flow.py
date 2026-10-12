@@ -5,11 +5,11 @@ import random
 import pytest
 
 gp = pytest.importorskip('gurobipy')
-from models.routing.common.commodity_flow import solve_commodity_flow
-from models.routing.common.task_builder import build_tasks_for_model
-from models.routing.common.solution_audit import audit_exact_solution
-from models.routing.common.domain.instance import ProblemInstance
-from models.routing.common.domain.node import Customer, Depot, Satellite
+from archive.routing_baselines.common.commodity_flow import solve_commodity_flow
+from models.common.task_builder import build_tasks_for_model
+from models.common.solution_audit import audit_exact_solution
+from models.common.domain.instance import ProblemInstance
+from models.common.domain.node import Customer, Depot, Satellite
 from importlib import import_module
 
 
@@ -33,7 +33,7 @@ def problem(seed):
 def test_complete_flow_matches_vehicle_indexed_model(seed, model):
     p = problem(seed)
     e1,e2 = build_tasks_for_model(p,model)
-    solver = import_module(f'models.routing.baselines.variants.model_{model}').solve_exact
+    solver = import_module(f'archive.routing_baselines.variants.model_{model}').solve_exact
     common = dict(problem=p,e1_tasks=e1,e2_tasks_by_sat=e2,vehicles_per_satellite=2,
                   time_limit=30,verbose=False,return_info=True,gurobi_params={'Threads':2})
     reference = solver(**common,backend='indexed')
