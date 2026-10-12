@@ -55,6 +55,8 @@ from models.common.cycle.audit import audit_solution
 
 def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_result=None):
     validate_problem(problem, 6)
+    if problem.optimize_loading:
+        raise ValueError('Optimized loading requires the M7 extended exact entry')
     if (
         isinstance(max_time, bool)
         or not math.isfinite(max_time)

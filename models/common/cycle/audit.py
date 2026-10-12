@@ -65,12 +65,13 @@ def audit_solution(problem, result, repeat=True):
 def _audit(problem, result, repeat):
     p, f = problem.operating_policy, problem.fleet
     errors, ledger_events = [], []
+    loading_starts = getattr(problem, 'batch_loading_starts', {b.id: b.start for b in p.batches})
 
     # Recheck the input assignment independently of solver prechecks. Goods
     # must exist when their batch starts loading, not merely at customer service.
     for order in problem.orders:
         batch = problem.batch_map[order.batch]
-        if order.release_time is not None and batch.start < order.release_time:
+        if order.release_time is not None and loading_starts[batch.id] < order.release_time:
             errors.append(dict(code='ORDER_RELEASE_AFTER_BATCH_START', order_id=order.id,
                                batch_id=batch.id, batch_start=batch.start, release_time=order.release_time))
         if order.allowed_batch_ids is not None and order.batch not in order.allowed_batch_ids:
@@ -109,7 +110,7 @@ def _audit(problem, result, repeat):
     if result.get('batches') != expected_batches:
         error('BATCH_CALENDAR_MISMATCH')
     for b in p.batches:
-        transfer(b.start, 'clean', 'forward', problem.batch_demands[b.id], f'issue:{b.id}')
+        transfer(loading_starts[b.id], 'clean', 'forward', problem.batch_demands[b.id], f'issue:{b.id}')
 
     e1_d, e1_p = defaultdict(list), defaultdict(list)
     e2_d, e2_p = defaultdict(list), defaultdict(list)
@@ -143,7 +144,7 @@ def _audit(problem, result, repeat):
                 key = ('e1', vehicle)
                 slot = problem.batch_index[batch.id]
                 delivery_events = [e for e in events if e['kind'] == 'd']
-                if delivery_events and departure != batch.start+p.e1_load_time:
+                if delivery_events and departure != loading_starts[batch.id]+p.e1_load_time:
                     error('E1_PHASE_VIOLATION', trip=rid, detail='delivery departure must follow scheduled loading')
                 if not delivery_events and departure < batch.cutoff:
                     error('E1_PHASE_VIOLATION', trip=rid, detail='pickup-only departure precedes cutoff')
@@ -151,7 +152,7 @@ def _audit(problem, result, repeat):
                     error('RETURN_DEADLINE', trip=rid, deadline=batch.end, actual=completed)
                 load_w = sum(problem.weights[e['site_id'], batch.id] for e in delivery_events)
                 load_v = sum(problem.demands[e['site_id'], batch.id]*f.container_volume for e in delivery_events)
-                vehicle_begin = batch.start if delivery_events else departure
+                vehicle_begin = loading_starts[batch.id] if delivery_events else departure
                 unload, turnaround = p.depot_return_unload_time, p.e1_turnaround_time
             else:
                 base = trip['satellite_id']
@@ -328,14 +329,15 @@ def _audit(problem, result, repeat):
 
     stocks, issued, required_pool = [], 0, 0
     for b in p.batches if problem.reusable else ():
-        available = p.container_pool_size-issued+sum(r['quantity'] for r in releases if r['clean_ready'] <= b.start)
+        loading = loading_starts[b.id]
+        available = p.container_pool_size-issued+sum(r['quantity'] for r in releases if r['clean_ready'] <= loading)
         n = problem.batch_demands[b.id]
         required_pool = max(required_pool, p.container_pool_size-available+n)
         if available < n:
-            future = [r['clean_ready'] for r in releases if r['clean_ready'] > b.start]
-            error('CLEAN_STOCK_SHORTAGE', batch=b.id, time=b.start, needed=n, available=available,
+            future = [r['clean_ready'] for r in releases if r['clean_ready'] > loading]
+            error('CLEAN_STOCK_SHORTAGE', batch=b.id, time=loading, needed=n, available=available,
                   shortage=n-available, next_release=min(future) if future else None)
-        stocks.append(dict(batch_id=b.id, time=b.start, available=available, demand=n, after=available-n))
+        stocks.append(dict(batch_id=b.id, time=loading, available=available, demand=n, after=available-n))
         issued += n
 
     in_cycle = [e for e in ledger_events if e['time'] <= p.cycle_end]

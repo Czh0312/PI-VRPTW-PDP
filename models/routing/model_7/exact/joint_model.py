@@ -154,6 +154,7 @@ def build_model(problem, *, verbose=False, deadline=None):
             cost_parts=parts,
             batch_starts=starts,
             batch_ends=ends,
+            loading_starts=variables.calendar['loading_starts'],
             physical_vehicles=physical_vehicles,
         )
     except BaseException:

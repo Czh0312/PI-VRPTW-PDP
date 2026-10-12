@@ -47,6 +47,18 @@ def add_calendar_constraints(parameters, variables):
             variables.model.addConstr(
                 cutoffs[b.id] <= ends[b.id] - parameters.problem.minimum_phase_ticks
             )
+    loading = starts
+    if parameters.problem.optimize_loading:
+        from gurobipy import GRB
+        loading = {
+            b.id: variables.model.addVar(vtype=GRB.INTEGER, lb=b.start,
+                                        ub=parameters.problem.cutoff_bounds[b.id][1],
+                                        name=f'loading_start_{b.id}')
+            for b in parameters.policy.batches
+        }
+        for b in parameters.policy.batches:
+            variables.model.addConstr(loading[b.id] <= cutoffs[b.id])
+    variables.calendar['loading_starts'] = loading
     return variable_calendar, starts, ends, cutoffs
 
 
@@ -69,16 +81,21 @@ def add_order_batch_constraints(
         variables.model.addConstr(
             gp.quicksum(y[o.id, b] for b in parameters.problem.legal_batches[o.id]) == 1
         )
-        if variable_calendar:
+        if variable_calendar or parameters.problem.optimize_loading:
             for bid in parameters.problem.legal_batches[o.id]:
                 variables.model.addConstr(
-                    (y[o.id, bid] == 1) >> (variables.calendar["starts"][bid] >= o.release_time)
+                    (y[o.id, bid] == 1) >> (variables.calendar["loading_starts"][bid] >= o.release_time)
                 )
     for b in parameters.policy.batches:
         members = [v for (oid, bid), v in y.items() if bid == b.id]
         for v in members:
             variables.model.addConstr(v <= z[b.id])
         variables.model.addConstr(z[b.id] <= gp.quicksum(members))
+        if parameters.problem.optimize_loading:
+            variables.model.addConstr((z[b.id] == 0) >> (variables.calendar['loading_starts'][b.id] == b.start))
+            variables.model.addConstr((z[b.id] == 1) >> (
+                variables.calendar['loading_starts'][b.id] + parameters.policy.e1_load_time
+                <= variables.calendar['cutoffs'][b.id]))
     return y, z
 
 
@@ -345,7 +362,7 @@ def add_first_echelon_constraints(
                 (hd == 1)
                 >> (
                     r["start"]
-                    == variables.calendar["starts"][b.id] + parameters.policy.e1_load_time
+                    == variables.calendar["loading_starts"][b.id] + parameters.policy.e1_load_time
                 )
             )
             variables.model.addConstr(
@@ -606,14 +623,14 @@ def add_inventory_constraints(
                 (ready == 1)
                 >> (
                     r["end"] + parameters.policy.cleaning_duration
-                    <= variables.calendar["starts"][b.id]
+                    <= variables.calendar["loading_starts"][b.id]
                 )
             )
             variables.model.addConstr(
                 (late == 1)
                 >> (
                     r["end"] + parameters.policy.cleaning_duration
-                    >= variables.calendar["starts"][b.id] + 1
+                    >= variables.calendar["loading_starts"][b.id] + 1
                 )
             )
             released = variables.create_released(parameters.total_containers)

@@ -388,6 +388,94 @@ The same observer wraps both source versions and its time counts in the call.
     return observed
 
 
+@contextmanager
+def diagnostic_observer(model, enabled, begun):
+    """Optional E1c observation of frozen ALNS implementations, inside budget.
+
+    Evaluation statistics include construction and cache hits. They are not
+    mislabelled as accepted moves; search-level attempts/improvements remain in
+    the candidate's own info. No candidate input or returned object is changed.
+    """
+    data = dict(enabled=enabled, evaluation_calls=0, evaluation_seconds=0.,
+                valid_evaluations=0, cache_hits=0, construction_calls=0, construction_seconds=0.,
+                construction_successes=0, violations={}, improvements=[])
+    originals = []
+    if enabled and model == 2:
+        data.update(assignment_proposals=[], assignment_subsolves=[], projection_attempts=0, projection_successes=0,
+                    projection_seconds=0.)
+        partition = import_module('models.routing.model_2.alns.partitioned_assignment')
+        inner = import_module('models.routing.model_2.alns.single_batch')
+        old_assign, old_project, old_solve = partition.assigned_problem, partition.reassigned_state, inner.solve_alns
+        def assign(problem, assignment):
+            result = old_assign(problem, assignment)
+            data['assignment_proposals'].append(dict(elapsed=time.perf_counter()-begun, assignment=dict(assignment)))
+            return result
+        def project(*args, **kwargs):
+            start = time.perf_counter()
+            result = old_project(*args, **kwargs)
+            data['projection_seconds'] += time.perf_counter()-start
+            data['projection_attempts'] += 1
+            data['projection_successes'] += int(result is not None)
+            return result
+        def solve(*args, **kwargs):
+            start = time.perf_counter()
+            result = old_solve(*args, **kwargs)
+            data['assignment_subsolves'].append(dict(elapsed=time.perf_counter()-begun,
+                wall_seconds=time.perf_counter()-start, info=deepcopy(result['info']),
+                valid=bool(result.get('audit', {}).get('valid'))))
+            return result
+        originals.extend([(partition, 'assigned_problem', old_assign), (partition, 'reassigned_state', old_project),
+                          (inner, 'solve_alns', old_solve)])
+        partition.assigned_problem, partition.reassigned_state, inner.solve_alns = assign, project, solve
+    elif enabled:
+        module = import_module(f'models.routing.model_{model}.alns.evaluator')
+        cls, original = module.JointEvaluator, module.JointEvaluator.__call__
+        def evaluate(self, assignment, state):
+            start, hits = time.perf_counter(), self.hits
+            value = original(self, assignment, state)
+            data['evaluation_seconds'] += time.perf_counter()-start
+            data['evaluation_calls'] += 1
+            data['cache_hits'] += self.hits-hits
+            score, result, issues = value
+            valid = result is not None and result.get('audit', {}).get('valid')
+            data['valid_evaluations'] += int(bool(valid))
+            for issue in issues:
+                key = str(issue)
+                data['violations'][key] = data['violations'].get(key, 0)+1
+            if valid and (not data['improvements'] or score < data['improvements'][-1]['objective']-1e-8):
+                data['improvements'].append(dict(elapsed=time.perf_counter()-begun, objective=score,
+                    pool=result['container_pool_size'], assignment=deepcopy(assignment),
+                    cutoffs=deepcopy(result['batch_cutoffs']),
+                    boundaries=[b.start for b in self.problem.operating_policy.batches]+[self.problem.operating_policy.cycle_end],
+                    e1_trips=deepcopy(result['e1_trips']), e2_trips=deepcopy(result['e2_trips']),
+                    scope='audited_candidate_evaluation_not_outer_incumbent'))
+            return value
+        originals.append((cls, '__call__', original))
+        cls.__call__ = evaluate
+        modules = [f'models.routing.model_{model}.alns.'+('solver' if model == 6 else 'joint_solver')]
+        if model == 8:
+            modules.append('models.routing.model_8.alns.search')
+        def construction_wrapper(function):
+            def observed(*args, **kwargs):
+                start = time.perf_counter()
+                value = function(*args, **kwargs)
+                data['construction_calls'] += 1
+                data['construction_seconds'] += time.perf_counter()-start
+                data['construction_successes'] += int(value[2] is not None)
+                return value
+            return observed
+        for name in modules:
+            target = import_module(name)
+            old = target._best_construction
+            originals.append((target, '_best_construction', old))
+            target._best_construction = construction_wrapper(old)
+    try:
+        yield data
+    finally:
+        for owner, name, original in reversed(originals):
+            setattr(owner, name, original)
+
+
 def worker(args):
     out = Path(args.output).resolve()
     manifest = read(out/'manifest.json')
@@ -405,32 +493,42 @@ def worker(args):
     started = time.perf_counter()
     trace = []
     observed_history = [dict(elapsed=0., objective=None, batch_count=None, source='call_start')]
-    scheduler = import_module(f'models.routing.model_{job["model"]}.{job["method"]}.batch_search')
-    name = 'solve_uniform' if job['model'] == 6 else 'solve_counts'
-    original = getattr(scheduler, name)
-    observed = observe_counts(original, trace, observed_history, started)
-    setattr(scheduler, name, observed)
+    has_counts = getattr(problem, 'uniform_cycle', False) or getattr(problem, 'calendar_cycle', False)
+    scheduler = None
     calendar_entry = None
-    if job['model'] != 6:
-        calendar_entry = import_module(f'models.routing.model_{job["model"]}.{job["method"]}.calendar_search')
-        calendar_entry.aggregate = observed
+    if has_counts:
+        scheduler = import_module(f'models.routing.model_{job["model"]}.{job["method"]}.batch_search')
+        name = 'solve_uniform' if job['model'] == 6 else 'solve_counts'
+        original = getattr(scheduler, name)
+        observed = observe_counts(original, trace, observed_history, started)
+        setattr(scheduler, name, observed)
+        if job['model'] != 6:
+            calendar_entry = import_module(f'models.routing.model_{job["model"]}.{job["method"]}.calendar_search')
+            calendar_entry.aggregate = observed
     try:
-        result = solve_routing(model=job['model'], method=job['method'], problem=problem,
-                               exact_time=job['budget'], alns_time=job['budget'],
-                               alns_iter=job['iterations'], seed=job['seed'])
+        with diagnostic_observer(job['model'], job.get('diagnostics', False) and job['method'] == 'alns', started) as diagnostics:
+            result = solve_routing(model=job['model'], method=job['method'], problem=problem,
+                                   exact_time=job['budget'], alns_time=job['budget'],
+                                   alns_iter=job['iterations'], seed=job['seed'])
     finally:
-        setattr(scheduler, name, original)
+        if scheduler is not None:
+            setattr(scheduler, name, original)
         if calendar_entry is not None:
             calendar_entry.aggregate = original
     solve_wall = time.perf_counter()-started
+    if not has_counts:
+        observed_history.append(dict(elapsed=solve_wall,
+            objective=result['info'].get('objective') if result.get('audit', {}).get('valid') else None,
+            batch_count=len(problem.operating_policy.batches), source='confirmed_call_return'))
     write(path/'result.json', result)
     write(path/'candidate_diagnostics.json', trace)
+    write(path/'search_diagnostics.json', diagnostics)
     info = result['info']
     row = terminal_row(job, info['status'])
     row.update(attempt=args.attempt, solve_wall_seconds=solve_wall, solver_runtime=info.get('runtime'),
                iterations=info.get('iterations'), best_bound=info.get('best_bound'),
                mip_gap=info.get('mip_gap'), proven_infeasible=bool(info.get('proven_infeasible')),
-               k=result.get('cycle_batch_count'), demand=problem.total,
+               k=result.get('cycle_batch_count', len(problem.operating_policy.batches)), demand=problem.total,
                any_audit_failure=bool(info.get('audit_failure_count')),
                certificate_errors=info.get('certificate_error_count', 0))
     audit_start = time.perf_counter()
@@ -441,7 +539,9 @@ def worker(args):
     if info.get('objective') is not None:
         row.update(valid=bool(audit['valid']), audit_errors=audit['errors'])
         if audit['valid']:
-            cost = evaluate_comparison_cost(problem, result, config['economic_config'], audit=audit)
+            cost = (evaluate_comparison_cost(problem, result, config['economic_config'], audit=audit)
+                    if job['model'] >= 6 else dict(total=audit['objective'], components={},
+                        container_pool_size=problem.operating_policy.container_pool_size))
             if not math.isclose(cost['total'], info['objective'], rel_tol=1e-7, abs_tol=1e-6):
                 raise ValueError('Independent cost differs from solver objective')
             if not audit['periodic_replay']['valid']:
@@ -466,13 +566,13 @@ def worker(args):
         writer.writeheader()
         writer.writerows(history)
     row['anytime_scope'] = 'global_all_counts'
-    row['anytime_granularity'] = 'confirmed_next_candidate_or_call_return'
+    row['anytime_granularity'] = 'confirmed_next_candidate_or_call_return' if has_counts else 'confirmed_call_return'
     finite_history = [v for v in history if v.get('objective') is not None]
     row['first_observed_feasible_seconds'] = finite_history[0]['elapsed'] if finite_history else None
     row['first_observed_cost'] = finite_history[0]['objective'] if finite_history else None
     row['best_observed_seconds'] = next((v['elapsed'] for v in finite_history
                                         if math.isclose(v['objective'], row['objective'], abs_tol=1e-7)), None) if row['valid'] else None
-    finalize_attempt(path, row, ('result.json', 'audit.json', 'anytime.csv', 'candidate_diagnostics.json'))
+    finalize_attempt(path, row, ('result.json', 'audit.json', 'anytime.csv', 'candidate_diagnostics.json', 'search_diagnostics.json'))
 
 
 def execute(out, manifest, job):
@@ -570,6 +670,10 @@ def run(args):
     out = Path(args.output).resolve()
     manifest = read(out/'manifest.json')
     verify(out, manifest)
+    for prerequisite in manifest.get('prerequisites', []):
+        gate_path = Path(prerequisite)/'stage_gate.json'
+        if not gate_path.is_file() or not read(gate_path).get('ready'):
+            raise RuntimeError(f'Prerequisite has not passed its correctness gate: {prerequisite}')
     with study_lock(out):
         pending = []
         for job in manifest['jobs']:
@@ -646,6 +750,30 @@ def analyze(out):
         writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
         writer.writerows(comparisons)
+    # Restricted domains must not contradict an audited feasible solution in
+    # a subset, even when an exact solve stops with only a valid lower bound.
+    groups = {}
+    for row in rows:
+        if row.get('group') in ('A', 'B', 'C', 'D'):
+            groups.setdefault((row['case'], row['seed'], row['budget']), {})[row['group']] = row
+        elif row.get('group') in ('standard_m7', 'delayed_m7'):
+            groups.setdefault((row['mechanism'], tuple(row['counts']), row['seed']), {})[row['group']] = row
+    for members in groups.values():
+        for subset, superset in [('A', 'B'), ('A', 'C'), ('B', 'D'), ('C', 'D'), ('standard_m7', 'delayed_m7')]:
+            a, b = members.get(subset), members.get(superset)
+            if a and b and a['valid']:
+                lower = b.get('best_bound')
+                if b.get('proven_infeasible') or (lower is not None and lower > a['objective']+1e-6+1e-7*abs(a['objective'])):
+                    contradictions.append(dict(id=b['id'], subset_reference=a['id'], reason='superset certificate contradicts audited subset'))
+    fixed_pools = {}
+    for row in rows:
+        if 'fixed_pool' in row and 'reference_case' in row:
+            fixed_pools.setdefault(row['reference_case'], []).append(row)
+    for members in fixed_pools.values():
+        for a in members:
+            for b in members:
+                if a['valid'] and b.get('proven_infeasible') and a['fixed_pool'] <= b['fixed_pool']:
+                    contradictions.append(dict(id=b['id'], subset_reference=a['id'], reason='larger pool claimed infeasible despite feasible smaller pool'))
     bad = [r['id'] for r in rows if r['status'] in
            ('ERROR', 'OUTER_TIMEOUT', 'INTERRUPTED', 'AUDIT_FAILED', 'DIAGNOSTIC_FAILURE')]
     gate = dict(planned=len(manifest['jobs']), terminal=len(rows), failures=bad,
@@ -662,6 +790,24 @@ def pipeline(args):
     root.mkdir(parents=True, exist_ok=True)
     studies = [Path(p).resolve() for p in args.studies]
     with study_lock(root):
+        predecessor = getattr(args, 'after_pipeline', None)
+        if predecessor:
+            previous = Path(predecessor).resolve()/'pipeline.json'
+            if previous == root/'pipeline.json':
+                raise ValueError('A pipeline cannot wait for itself')
+            while True:
+                if (root/'STOP').exists():
+                    return
+                status = read(previous) if previous.exists() else {'state': 'NOT_STARTED'}
+                if status['state'] == 'COMPLETED':
+                    break
+                if status['state'] == 'NEEDS_REVIEW':
+                    write(root/'pipeline.json', dict(state='NEEDS_REVIEW', predecessor=str(previous),
+                        reason='Predecessor correctness gate needs review', updated_at=now()))
+                    return
+                write(root/'pipeline.json', dict(state='WAITING', predecessor=str(previous),
+                    studies=[str(p) for p in studies], updated_at=now()))
+                time.sleep(30)
         for study in studies:
             if (root/'STOP').exists():
                 print('Pipeline STOP requested', flush=True)
@@ -690,6 +836,7 @@ def main():
     parser.add_argument('--output', required=True)
     parser.add_argument('--phase', choices=['e0', 'e1a', 'e1exact', 'smoke'], default='e0')
     parser.add_argument('--suite')
+    parser.add_argument('--design', help='Preregistered explicit jobs and source versions for later thesis stages')
     parser.add_argument('--baseline')
     parser.add_argument('--workers', type=int, default=2)
     parser.add_argument('--timeout-overhead', type=float, default=60.)
@@ -700,11 +847,17 @@ def main():
     parser.add_argument('--job')
     parser.add_argument('--attempt', type=int)
     parser.add_argument('--studies', nargs='+')
+    parser.add_argument('--after-pipeline', help='Wait for an existing pipeline to complete; stop on a failed gate')
     args = parser.parse_args()
     if args.action == 'prepare':
-        if not args.suite or not args.baseline:
+        if args.design:
+            sys.path.insert(0, str(ROOT))
+            from experiments.runs.thesis_design import prepare_design
+            prepare_design(args)
+        elif not args.suite or not args.baseline:
             parser.error('prepare requires --suite and --baseline')
-        prepare(args)
+        else:
+            prepare(args)
     elif args.action == 'run':
         run(args)
     elif args.action == 'worker':

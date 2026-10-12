@@ -32,6 +32,54 @@ def test_hash_change_blocks_resume_before_worker_launch(tmp_path, monkeypatch):
         driver.run(Namespace(output=str(tmp_path), retry_failed=False))
 
 
+def test_missing_stage_gate_prevents_launch(tmp_path, monkeypatch):
+    manifest, _ = study(tmp_path)
+    manifest['prerequisites'] = [str(tmp_path/'prior')]
+    driver.write(tmp_path/'manifest.json', manifest)
+    driver.write(tmp_path/'manifest.sha256.json', dict(sha256=driver.sha(tmp_path/'manifest.json')))
+    monkeypatch.setattr(driver, 'execute', lambda *a: pytest.fail('must not launch without prerequisite'))
+    with pytest.raises(RuntimeError, match='Prerequisite'):
+        driver.run(Namespace(output=str(tmp_path), retry_failed=False))
+
+
+def test_continuation_stops_on_predecessor_failure(tmp_path):
+    previous, following = tmp_path/'previous', tmp_path/'following'
+    driver.write(previous/'pipeline.json', dict(state='NEEDS_REVIEW'))
+    driver.pipeline(Namespace(output=str(following), studies=[], after_pipeline=str(previous)))
+    assert driver.read(following/'pipeline.json')['state'] == 'NEEDS_REVIEW'
+
+
+def test_continuation_waits_until_predecessor_completed(tmp_path, monkeypatch):
+    previous, following = tmp_path/'previous', tmp_path/'following'
+    driver.write(previous/'pipeline.json', dict(state='RUNNING'))
+    sleeps = []
+    def advance(seconds):
+        sleeps.append(seconds)
+        assert driver.read(following/'pipeline.json')['state'] == 'WAITING'
+        driver.write(previous/'pipeline.json', dict(state='COMPLETED'))
+    monkeypatch.setattr(driver.time, 'sleep', advance)
+    driver.pipeline(Namespace(output=str(following), studies=[], after_pipeline=str(previous)))
+    assert sleeps == [30]
+    assert driver.read(following/'pipeline.json')['state'] == 'COMPLETED'
+
+
+def test_extended_calendar_cannot_claim_infeasible_against_standard_witness(tmp_path):
+    manifest, job = study(tmp_path)
+    jobs = [dict(job, id=group, group=group, mechanism='same_input', counts=[2])
+            for group in ('standard_m7', 'delayed_m7')]
+    manifest['jobs'] = jobs
+    driver.write(tmp_path/'manifest.json', manifest)
+    driver.write(tmp_path/'manifest.sha256.json', dict(sha256=driver.sha(tmp_path/'manifest.json')))
+    (tmp_path/'tables').mkdir()
+    for index, item in enumerate(jobs):
+        row = driver.terminal_row(item, 'FEASIBLE' if index == 0 else 'INFEASIBLE')
+        row.update(valid=index == 0, objective=10 if index == 0 else None, proven_infeasible=index == 1)
+        driver.finalize_attempt(tmp_path/'runs'/item['id']/'attempt_001', row)
+    gate = driver.analyze(tmp_path)
+    assert not gate['ready']
+    assert gate['certificate_contradictions'][0]['subset_reference'] == 'standard_m7'
+
+
 def test_corrupted_completed_result_is_not_silently_skipped(tmp_path):
     _, job = study(tmp_path)
     path = tmp_path/'runs'/job['id']/'attempt_001'

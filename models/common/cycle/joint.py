@@ -23,8 +23,12 @@ class JointBatchInstance(MultiBatchInstance):
         self.options = deepcopy(options)
         if set(options)-{'pool_min', 'pool_max', 'fixed_assignment',
                          'optimize_cutoffs', 'cutoff_bounds_minutes', 'shared_cutoff', 'shared_min_phase_ticks',
-                         'min_phase_ticks'}:
+                         'min_phase_ticks', 'loading_mode'}:
             raise ValueError('Unknown joint_batch_options')
+        self.loading_mode = options.get('loading_mode', 'batch_start')
+        if self.loading_mode not in ('batch_start', 'optimized'):
+            raise ValueError('loading_mode must be batch_start or optimized')
+        self.optimize_loading = self.loading_mode == 'optimized'
         self.optimize_cutoffs = options.get('optimize_cutoffs', False)
         if not isinstance(self.optimize_cutoffs, bool):
             raise ValueError('optimize_cutoffs must be boolean')
@@ -96,9 +100,10 @@ class JointBatchInstance(MultiBatchInstance):
             candidates = []
             for bid in o.allowed_batch_ids:
                 b = self.batch_map[bid]
-                if b.start < o.release_time:
+                if not self.optimize_loading and b.start < o.release_time:
                     continue
-                supplied = b.start + self.operating_policy.e1_load_time + self.travel_bounds['outward'][self.depot][o.satellite] + self.service(o.satellite)
+                loading = max(b.start, o.release_time) if self.optimize_loading else b.start
+                supplied = loading + self.operating_policy.e1_load_time + self.travel_bounds['outward'][self.depot][o.satellite] + self.service(o.satellite)
                 delivered = max(o.delivery_window[0], supplied+self.operating_policy.e2_dispatch_prep_time+
                                 self.travel_bounds['outward'][o.satellite][o.customer])
                 picked = max(o.pickup_window[0], delivered+o.service_time+o.min_use_time)
@@ -123,7 +128,35 @@ class JointBatchInstance(MultiBatchInstance):
             raise ValueError('All batches must share the same relative cutoff')
         return checked
 
-    def project(self, assignment, pool=None, cutoffs=None):
+    def validated_loading_starts(self, assignment, cutoffs, loading_starts=None):
+        """One physical loading event per batch, strictly inside its calendar.
+
+        All trucks carrying that batch load together. Empty delivery batches
+        use the calendar start as a canonical, zero-quantity event.
+        """
+        expected = {b.id: b.start for b in self.operating_policy.batches}
+        if not self.optimize_loading:
+            if loading_starts is not None and loading_starts != expected:
+                raise ValueError('Standard loading must begin at the batch start')
+            return expected
+        if not isinstance(loading_starts, dict) or set(loading_starts) != set(expected):
+            raise ValueError('Optimized loading requires every batch_loading_start')
+        checked = {bid: integer(t, 'batch_loading_start') for bid, t in loading_starts.items()}
+        for b in self.operating_policy.batches:
+            members = [o for o in self.orders if assignment[o.id] == b.id]
+            t = checked[b.id]
+            if not b.start <= t <= cutoffs[b.id]:
+                raise ValueError('Loading start outside batch delivery phase')
+            if members:
+                if t < max(o.release_time for o in members):
+                    raise ValueError('Loading precedes order release')
+                if t + self.operating_policy.e1_load_time > cutoffs[b.id]:
+                    raise ValueError('Loading ends after delivery cutoff')
+            elif t != b.start:
+                raise ValueError('Inactive batch loading must use its calendar start')
+        return checked
+
+    def project(self, assignment, pool=None, cutoffs=None, loading_starts=None):
         if not isinstance(assignment, dict) or set(assignment) != set(self.order_map):
             raise ValueError('Order batch assignment must cover exactly all orders')
         if any(assignment[o.id] not in self.legal_batches[o.id] for o in self.orders):
@@ -133,12 +166,16 @@ class JointBatchInstance(MultiBatchInstance):
         if pool > self.total:
             raise ValueError('Projection pool exceeds total container uses')
         checked = self.validated_cutoffs(cutoffs)
+        loading = self.validated_loading_starts(assignment, checked, loading_starts)
         p = replace(self.operating_policy, container_pool_size=pool,
                     batches=tuple(replace(b, cutoff=checked[b.id])
                                   for b in self.operating_policy.batches))
         orders = [replace(o, batch=assignment[o.id]) for o in self.orders]
-        return MultiBatchInstance(self.network, orders, p, model=3 if len(p.batches)==1 else 5,
-                                  _physical_source=self)
+        fixed = MultiBatchInstance(self.network, orders, p, model=3 if len(p.batches)==1 else 5,
+                                   _physical_source=self)
+        if self.optimize_loading:
+            fixed.batch_loading_starts = loading
+        return fixed
 
 
 def joint_empty_result(problem, method):
@@ -155,10 +192,10 @@ def joint_empty_result(problem, method):
     return result
 
 
-def lift_result(problem, raw, assignment, pool, method, cutoffs=None):
+def lift_result(problem, raw, assignment, pool, method, cutoffs=None, loading_starts=None):
     """Attach joint decisions, then check them against the original instance."""
     checked = problem.validated_cutoffs(cutoffs)
-    fixed = problem.project(assignment, pool, checked)
+    fixed = problem.project(assignment, pool, checked, loading_starts)
     result = deepcopy(raw)
     result.update(model=6, strategy=STRATEGY, solver=method, objective_mode='cost',
                   operating_policy=fixed.operating_policy.as_dict(),
@@ -175,6 +212,9 @@ def lift_result(problem, raw, assignment, pool, method, cutoffs=None):
                   cutoff_bounds={bid:list(bounds) for bid,bounds in problem.cutoff_bounds.items()},
                   economic_profile_hash=problem.cost_profile.hash,
                   evidence_hash=problem.cost_profile.evidence_hash)
+    if problem.optimize_loading:
+        result.update(loading_mode=problem.loading_mode,
+                      batch_loading_starts=dict(fixed.batch_loading_starts))
     from models.common.cycle.audit import _audit
     physical = _audit(fixed, {**result, 'model':fixed.model_number,
                              'info':{**result['info'], 'objective':None}}, True)
@@ -207,7 +247,9 @@ def audit_joint_solution(problem, result, repeat=True):
         if cutoffs is None and problem.optimize_cutoffs:
             raise ValueError('Missing optimized batch_cutoffs')
         checked = problem.validated_cutoffs(cutoffs)
-        fixed = problem.project(assignment, pool, checked)
+        if result.get('loading_mode', 'batch_start') != problem.loading_mode:
+            raise ValueError('Loading mode contract mismatch')
+        fixed = problem.project(assignment, pool, checked, result.get('batch_loading_starts'))
         if (result.get('cutoff_mode', 'fixed') != ('optimized' if problem.optimize_cutoffs else 'fixed')
                 or result.get('shared_cutoff', False) != problem.shared_cutoff
                 or ('cutoff_bounds' in result and result['cutoff_bounds'] != {

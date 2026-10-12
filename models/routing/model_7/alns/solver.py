@@ -5,6 +5,8 @@ from models.routing.model_7.alns.calendar_search import solve_counts
 
 def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_result=None):
     validate_problem(problem, 7)
+    if problem.optimize_loading:
+        raise ValueError('The M7 optimized-loading baseline currently supports exact solving only')
     return solve_counts(
         problem,
         method="alns",

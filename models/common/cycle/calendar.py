@@ -24,14 +24,18 @@ class CalendarCycleInstance(JointBatchInstance):
     def __init__(self, network, orders, policy, options, economic_config, *, model):
         if model not in SCHEDULE_MODES:
             raise ValueError('CalendarCycleInstance requires model 7 or 8')
-        allowed = {'schedule_mode', 'batch_count_candidates', 'min_phase_minutes', 'pool_min', 'pool_max'}
+        allowed = {'schedule_mode', 'batch_count_candidates', 'min_phase_minutes', 'pool_min', 'pool_max',
+                   'loading_mode'}
         if not isinstance(options, dict) or set(options)-allowed:
             raise ValueError('Unknown M7/M8 joint_batch_options')
         mode = SCHEDULE_MODES[model]
+        loading_mode = options.get('loading_mode', 'batch_start')
+        if loading_mode not in ('batch_start', 'optimized') or (model != 7 and loading_mode != 'batch_start'):
+            raise ValueError('Optimized loading is defined only for the M7 extended baseline')
         if options.get('schedule_mode', mode) != mode:
             raise ValueError(f'M{model} requires schedule_mode={mode}')
         super().__init__(network, orders, policy,
-                         {k: options[k] for k in ('pool_min', 'pool_max') if k in options}, economic_config)
+                         {k: options[k] for k in ('pool_min', 'pool_max', 'loading_mode') if k in options}, economic_config)
         if any(set(o.allowed_batch_ids) != set(self.batch_map) for o in self.orders):
             raise ValueError('Repartitioning requires every order to allow all source batches')
         minimum = nonnegative(options.get('min_phase_minutes', 1), 'min_phase_minutes')
@@ -49,10 +53,13 @@ class CalendarCycleInstance(JointBatchInstance):
     @property
     def calendar_contract(self):
         p = self.operating_policy
-        return dict(model=self.model_number, schedule_mode=self.schedule_mode,
+        contract = dict(model=self.model_number, schedule_mode=self.schedule_mode,
                     batch_count_candidates=list(self.batch_count_candidates),
                     minimum_phase_ticks=self.minimum_phase_ticks, cycle_start=p.cycle_start,
                     cycle_end=p.cycle_end, time_tick_seconds=p.time_tick_seconds)
+        if self.optimize_loading:
+            contract['loading_mode'] = self.loading_mode
+        return contract
 
     def balanced_boundaries(self, count):
         count = self.validate_count(count)
@@ -97,7 +104,7 @@ class CalendarCycleInstance(JointBatchInstance):
             orders = [replace(o, batch=ids[0], allowed_batch_ids=ids) for o in source_orders]
             child = JointBatchInstance(self.network, orders, replace(p, batches=batches),
                         dict(pool_min=self.pool_min, pool_max=self.pool_max, optimize_cutoffs=True,
-                             min_phase_ticks=minimum),
+                             min_phase_ticks=minimum, loading_mode=self.loading_mode),
                         self.cost_profile.config, _physical_source=self)
             child.calendar_model_number = self.model_number
             self._calendars[key] = child

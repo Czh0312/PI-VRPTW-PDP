@@ -12,6 +12,8 @@ from models.common.cycle.state import empty_result
 
 def solve_exact(problem, time_limit=60, seed=42, verbose=False):
     validate_problem(problem, 6)
+    if problem.optimize_loading:
+        raise ValueError('Optimized loading requires the M7 extended exact entry')
     if isinstance(time_limit,bool) or not math.isfinite(time_limit) or time_limit<=0:
         raise ValueError('time_limit must be finite and positive')
     if getattr(problem, 'uniform_cycle', False):

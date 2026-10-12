@@ -249,7 +249,10 @@ def test_frozen_comparison_runs_matched_cost_ablation_and_all_seeds(tmp_path,exa
     value=json.loads(manifest.read_text()); value['cases']=value['cases'][:1]
     manifest.write_text(json.dumps(value))
     out=main(['--manifest',str(manifest),'--exact-time','5','--time','.1','--iterations','50',
-              '--seeds','42','43','--workers','2','--output',str(tmp_path/'comparison')])
+              # This checks the nine frozen jobs and audits, not process spawn
+              # speed. Keep solver budgets unchanged and allow cold imports.
+              '--seeds','42','43','--workers','2','--timeout-overhead','60',
+              '--output',str(tmp_path/'comparison')])
     rows=json.loads((out/'rows.json').read_text())
     assert len(rows)==9 and all(r['valid'] for r in rows)
     exact=next(r for r in rows if r['treatment']=='M6_joint' and r['solver']=='exact')
