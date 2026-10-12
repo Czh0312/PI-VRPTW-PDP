@@ -16,12 +16,30 @@
 | M5/M6 共享数据比较 | `experiments.runs.run_model5_model6_shared` | [数据与比较口径](../docs/model5_model6_shared_dataset_20261005.md) |
 | M6 等长批次与共同分界 | `experiments.runs.run_model6_uniform_comparison` | [模型设计](../docs/model6_joint_batch_cost_design.md) |
 | M6–M8 日历审查 | `tools.audit.benchmark_model78` | [测评报告](../output/inspections/model78_review_20261005/model78_review_20261005.md) |
+| 论文 E0 / E1a 冻结与恢复 | `experiments.runs.run_thesis_completion` | [执行计划与阶段记录](../docs/thesis_experiment_completion_plan_20261012.md) |
 | 运输 / 容器成本比例实验 | `experiments.runs.run_cost_ratio_suite` | [比例测试](../docs/transport_container_ratio_tests_v1.md) |
 | 已保存方案的经济重计价 | `experiments.analysis.recalculate_economics` | [重新核算](../output/economic_recalculation_20261005/economic_recalculation_20261005.md) |
 
 从仓库根目录使用 `.venv/bin/python -m 模块名 --help` 查看参数；新的运行写入新目录。
 M3/M5/M6/M7/M8 最新成本对比的逐轮专属脚本及复现步骤见[结果索引](../output/model35678_comparison/README.md)。
 这些冻结实验脚本维持原路径。通用验证、源码检索与恢复方法见[开发指南](../docs/development.md)。
+
+## 论文补充实验驱动
+
+先按项目运行环境约定预检，再用项目解释器运行以下模块。`prepare` 冻结源码 ZIP、逐文件哈希、输入、完整命令、机器与并发设置；执行时使用实验目录里的冻结 `driver.py`。`--baseline` 指向修改前的源码快照。`e0` 固定 12 例、3 模型、精确 300 秒及 ALNS 五种子各 30 秒；`e1a` 为 3 例、3 模型、两版本、五种子、300 秒；`e1exact` 为 3 例、3 模型、两版本、单种子、300 秒。
+
+```sh
+.venv/bin/python -m tools.data.build_thesis_completion_suite --output config/cases/thesis_completion/new_pilot
+.venv/bin/python -m experiments.runs.run_thesis_completion prepare --phase smoke --suite config/cases/thesis_completion/new_pilot/manifest.json --baseline /path/to/original/source_snapshot --output output/thesis_completion/new_smoke
+.venv/bin/python output/thesis_completion/new_smoke/driver.py run --output output/thesis_completion/new_smoke
+.venv/bin/python -m experiments.runs.run_thesis_completion status --output output/thesis_completion/new_smoke
+```
+
+正式 `prepare` 须用 `--overhead-basis` 记录短预算试跑测得的外层启动/收尾开销，`--timeout-overhead` 给出登记宽限。`--full-k-domain` 用于 E1a 的同模型新旧策略对照；E0 保持共同 K={1,2,3} 和整数时钟。新旧策略隔离检查只允许六个 `batch_search.py` 的求解代码有差异。
+
+重复运行 `run` 会校验哈希并跳过完整任务；`--retry-failed` 为错误、外层超时或中断另建 attempt，首轮分母保持不变。`restore` 从校验过的 ZIP 恢复未随 Git 重复保存的源码副本，拒绝覆盖修改过的文件。`analyze` 生成逐种子的参照差异和阶段门槛，区分精确最优值与仅可行参照。`pipeline --output <队列目录> --studies <阶段目录...>` 顺序执行已冻结阶段，遇到执行错误、审计或证书矛盾时停在该阶段。运行目录中的 `STOP` 文件使当前阶段在活动子进程结束后停下；队列目录的 `STOP` 在下一阶段前生效。
+
+`count_search` 保留每个 K 一行，`count_search_visits` 保留逐轮访问；`anytime.csv` 对两版使用同一外层观察器，在下一候选开始或全调用返回时确认已处理候选的最好可行费用，不把局部历史提前记成全局发现。原生细粒度轨迹仍保存在新版 `result.json`，逐 K 建模和搜索诊断另存 `candidate_diagnostics.json`。`summary.csv` 包含全部计划任务，`attempts.csv` 保留每一次尝试；完成状态不代表所有任务可行或最优。
 
 ## 模型6均匀周期基础版（2026-10-05）
 
