@@ -18,7 +18,7 @@
 | E2 共同截点恢复 | [e2_refcutoff_20261013_v1/manifest.json](e2_refcutoff_20261013_v1/manifest.json) | 6 | 全部审计可行；原失败参考保留；四组配置共同冻结实际截点 |
 | E1c 第一轮候选 | [e1c_comparison_20261013_v1/decision.md](e1c_comparison_20261013_v1/decision.md) | 90 | 全部审计可行；首次可行更早，最终费用基本持平；采用候选并结束改进 |
 | E6 分仓预算候选 | [e6_comparison_20261013_v1/findings.md](e6_comparison_20261013_v1/findings.md) | 150 | 全部审计有效；平均最优误差 11.76% → 8.51%，65 改善/5 恶化/80 持平；E6 分析完成 |
-| E1b 正式多预算 | [e1b_20261013_v1/manifest.json](e1b_20261013_v1/manifest.json) | 270 | 15:19 自动开始正式运行 |
+| E1b 正式多预算 | [e1b_20261013_v1/manifest.json](e1b_20261013_v1/manifest.json) | 270 | 运行中；10-14 05:22 已有 172 终态、171 审计可行、1 状态文件写入错误，待补跑及复核 |
 | E2 正式消融 | [e2_20261013_v1/manifest.json](e2_20261013_v1/manifest.json) | 144 | 已冻结，E1b 后运行 |
 | E4 固定池重优化 | [e4_20261013_v1/manifest.json](e4_20261013_v1/manifest.json) | 21 | 已冻结，E2 后运行；必要条件排除点另存 restricted_v2 |
 | E5 价格情景 | [e5_20261013_v1/manifest.json](e5_20261013_v1/manifest.json) | 135 | 已冻结，E4 后运行；仅为合成价格 |
