@@ -14,9 +14,9 @@
 | E2 原输入精确诊断 | [e2_refdiag_20261013_v1/report.md](e2_refdiag_20261013_v1/report.md) | 6 | 1 已证不可行、3 限时未解、2 建模限时；保留全部失败 |
 | E6 当前精确参照 | [e6_reference_20261012_v1/report.md](e6_reference_20261012_v1/report.md) | 30 | 全部最优 |
 | E6 原版 | [e6_analysis_20261012_v1/report.md](e6_analysis_20261012_v1/report.md) | 150 | 全部审计可行，部分实例仍有较大最优误差 |
-| E3 正式三策略 | [e3_20261013_v1/progress.json](e3_20261013_v1/progress.json) | 54 | 运行中；2026-10-13 13:40 快照为 29 终态，以实时文件为准 |
-| E2 共同截点恢复 | [e2_refcutoff_20261013_v1/manifest.json](e2_refcutoff_20261013_v1/manifest.json) | 6 | 冻结并等待 E3；原失败参考保留 |
-| E1c 第一轮候选 | [e1c_poolbound_20261013_v1/manifest.json](e1c_poolbound_20261013_v1/manifest.json) | 90 | 冻结并等待 E2 恢复；只增加强制同批领箱必要下界 |
+| E3 正式三策略 | [e3_20261013_v1/findings.md](e3_20261013_v1/findings.md) | 54 | 全部完成：33 最优、3 限时可行、18 不可行；图表及有限 K 域机制分析完成 |
+| E2 共同截点恢复 | [e2_refcutoff_20261013_v1/manifest.json](e2_refcutoff_20261013_v1/manifest.json) | 6 | 全部审计可行；原失败参考保留；四组配置共同冻结实际截点 |
+| E1c 第一轮候选 | [e1c_poolbound_20261013_v1/progress.json](e1c_poolbound_20261013_v1/progress.json) | 90 | 运行中；只增加强制同批领箱必要下界 |
 | E6 分仓预算候选 | [e6_candidate_20261013_v1/manifest.json](e6_candidate_20261013_v1/manifest.json) | 150 | 冻结并等待 E1c；每次分仓访问上限改为总预算 5% |
 
 E1b/E2/E4/E5 正式版本尚未冻结或启动。`COMPLETED` 或门槛 ready 只说明登记调用已有终态且证据流程有效，不保证全部问题可行、最优或研究阶段验收完成。预算和不等于墙钟耗时。
