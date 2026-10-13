@@ -8,9 +8,9 @@
 | E0 原版参照 | [e0_20261012_v1/findings.md](e0_20261012_v1/findings.md) | 216 | 186 审计可行，28 最优，15 已证不可行，15 启发式未解；门槛通过 |
 | E1a ALNS 预算策略 | [e1a_20261012_v1/analysis.md](e1a_20261012_v1/analysis.md) | 90 | 全部审计可行；45 对中 8 改善、1 恶化、36 持平 |
 | 精确预算策略先导 | [e1exact_20261012_v1/analysis.md](e1exact_20261012_v1/analysis.md) | 18 | 全部最优，门槛通过 |
-| E1c 困难结构诊断基线 | [e1c_20261012_v1/analysis.md](e1c_20261012_v1/analysis.md) | 90 | 全部审计可行；候选改善尚待对照 |
+| E1c 困难结构诊断基线 | [e1c_20261012_v1/analysis.md](e1c_20261012_v1/analysis.md) | 90 | 全部审计可行；候选对照已完成，结论见下 |
 | E3 三策略先导 | [e3_pilot_20261012_v1/mechanism_analysis.json](e3_pilot_20261012_v1/mechanism_analysis.json) | 9 | 8 最优、1 已证不可行 |
-| E2 共同参考日程 | [e2_reference_20261012_v1/report.md](e2_reference_20261012_v1/report.md) | 12 | 6 小例最优；6 中大例未找到可行解，尚不能启动正式消融 |
+| E2 共同参考日程 | [e2_reference_20261012_v1/report.md](e2_reference_20261012_v1/report.md) | 12 | 6 小例最优；6 中大例原始失败保留，已另行完成参考恢复 |
 | E2 原输入精确诊断 | [e2_refdiag_20261013_v1/report.md](e2_refdiag_20261013_v1/report.md) | 6 | 1 已证不可行、3 限时未解、2 建模限时；保留全部失败 |
 | E6 当前精确参照 | [e6_reference_20261012_v1/report.md](e6_reference_20261012_v1/report.md) | 30 | 全部最优 |
 | E6 原版 | [e6_analysis_20261012_v1/report.md](e6_analysis_20261012_v1/report.md) | 150 | 全部审计可行，部分实例仍有较大最优误差 |
@@ -25,7 +25,7 @@
 
 E1b/E2/E4/E5 已统一冻结至源码提交 4ed30cd11，并加入完成 E1c 候选的阶段门槛。后继队列 formal_pipeline_20261013_v1 于 14:44 开始等待；570 次调用预算和 56.5 小时，尚未产生正式结果。`COMPLETED` 或门槛 ready 只说明登记调用已有终态且证据流程有效，不保证全部问题可行、最优或研究阶段验收完成。预算和不等于墙钟耗时。
 
-三个 2026-10-12 队列均已完成；当前队列顺序为 `pipeline_20261013_v1` → `continuation_20261013_v1` → `e6_pipeline_20261013_v1`。每个队列并发 2，精确每进程 1 线程；后继等待前驱完成，不重复启动。启动记录在各自 `launch.json`，实时状态在 `pipeline.json`。
+三个 2026-10-12 队列均已完成；当前队列顺序为 `pipeline_20261013_v1` → `continuation_20261013_v1` → `e6_pipeline_20261013_v1` → `formal_pipeline_20261013_v1`。每个队列并发 2，精确每进程 1 线程；后继等待前驱完成，不重复启动。启动记录在各自 `launch.json`，实时状态在 `pipeline.json`。
 
 原始结果、逐 K 诊断、费用轨迹和独立双周期审计位于 `runs/<id>/attempt_<n>/`。`summary.csv` 统计所有登记的首次尝试；重试另存 `attempts.csv`，不替换失败分母。源码版本、文件哈希、冻结输入、解释器和完整命令均在阶段 `manifest.json`。`source_*.zip` 可恢复源码；副本由 Git 忽略，恢复入口 `run_thesis_completion restore --output <阶段目录>` 不覆盖已修改文件。Git 中 progress/report 是提交时快照。
 

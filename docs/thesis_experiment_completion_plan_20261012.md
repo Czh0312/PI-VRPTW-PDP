@@ -1,6 +1,6 @@
 # 毕设论文补充实验执行计划
 
-日期：2026-10-13。状态：**v6 执行中：E0、E1a、E1c 和 E3 完成；E2 十二个有效共同参考已建立；M2 候选运行中。E1c 采用第一轮强制领箱下界版，正在冻结 E1b/E2/E4/E5 正式矩阵。全计划尚未完成，实时状态见 output/thesis_completion/README.md 与 next_steps.md。**
+日期：2026-10-13。状态：**v6 执行中：E0、E1a、E1c 和 E3 完成；E2 十二个有效共同参考已建立；M2 候选运行中。E1c 采用第一轮强制领箱下界版，已冻结并排队 E1b/E2/E4/E5 正式矩阵。全计划尚未完成，实时状态见 output/thesis_completion/README.md 与 next_steps.md。**
 
 来源：论文正文证据缺口审查、当前求解器代码及本项目已有实验报告。Origin Skill：academic-research-suite / experiment-agent；Mode：plan；Version：v2；Verification Status：ANALYZED（代码和历史记录检查，未重跑）。历史结果仅作为立项依据，不能代替本计划的新实验结果。
 
