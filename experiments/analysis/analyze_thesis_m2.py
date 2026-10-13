@@ -74,9 +74,16 @@ def analyze(studies, reference_study, output):
 
     reference_map = {r['case']: r for r in references}
     rows, errors, diagnostics, contradictions, sources = [], [], [], [], []
+    matched_jobs, resources = None, None
     for name in studies:
         study = Path(name).resolve()
         manifest, members = primary_rows(study)
+        job_fields = ('model', 'method', 'budget', 'iterations', 'counts', 'family', 'diagnostics')
+        current_jobs = {(j['case'], j['seed']): {k: j.get(k) for k in job_fields} for j in manifest['jobs']}
+        current_resources = {k: manifest.get(k) for k in ('workers', 'timeout_overhead', 'interpreter', 'ordering_seed')}
+        if matched_jobs is not None and (matched_jobs != current_jobs or resources != current_resources):
+            raise ValueError('E6 versions differ in registered call budgets, seeds, domains or resources')
+        matched_jobs, resources = current_jobs, current_resources
         if len(members) != 150 or {r['case'] for r in members} != set(reference_map):
             raise ValueError('Every E6 version must retain all 30 cases and 150 planned seed calls')
         counts = defaultdict(list)
@@ -105,7 +112,13 @@ def analyze(studies, reference_study, output):
     table(out/'reference_errors.csv', errors)
     table(out/'assignment_diagnostics.csv', diagnostics)
     table(out/'per_case_statistics.csv', grouped_statistics(rows))
-    table(out/'paired_versions.csv', paired_versions(rows, versions))
+    pairs = paired_versions(rows, versions)
+    table(out/'paired_versions.csv', pairs)
+    write(out/'paired_outcomes.json', dict(planned=len(pairs), both_valid=sum(r['both_valid'] for r in pairs),
+        improved=sum(r['both_valid'] and r['first_minus_second'] > 1e-6 for r in pairs),
+        worsened=sum(r['both_valid'] and r['first_minus_second'] < -1e-6 for r in pairs),
+        tied=sum(r['both_valid'] and abs(r['first_minus_second']) <= 1e-6 for r in pairs),
+        absolute_tolerance=1e-6))
     summaries = []
     groups = defaultdict(list)
     for row in errors:
@@ -117,6 +130,7 @@ def analyze(studies, reference_study, output):
             stdev=statistics.stdev(values) if len(values) > 1 else None, best=min(values) if values else None,
             worst=max(values) if values else None))
     table(out/'optimal_error_statistics.csv', summaries)
+    descriptive_outputs(out, rows, errors, diagnostics, summaries, versions)
     result = dict(studies=sources, reference_manifest_sha256=sha(reference_study/'manifest.json'),
         planned=len(rows), terminal=sum(r['status'] not in ('NOT_RUN', 'RUNNING') for r in rows),
         valid=sum(r['valid'] for r in rows), proven_optimal_references=sum(r['valid'] and r['proven_optimal'] for r in references),
@@ -135,6 +149,62 @@ def analyze(studies, reference_study, output):
         '保留全部原 30 例及每例 5 个种子；同一源案例的情景变体不作为独立实例作显著性推断。', '']
     (out/'report.md').write_text('\n'.join(lines), encoding='utf-8')
     return result
+
+
+def descriptive_outputs(out, rows, errors, diagnostics, summaries, versions):
+    """Descriptive family summaries and plots; no independent-sample inference."""
+    family_groups = defaultdict(list)
+    for row in errors:
+        family_groups[row['family'], row['version']].append(row)
+    family_rows = []
+    for (family, version), members in sorted(family_groups.items()):
+        values = [r['relative_optimal_error'] for r in members if r['relative_optimal_error'] is not None]
+        family_rows.append(dict(family=family, version=version, planned=len(members),
+            valid=sum(r['valid'] for r in members), optimal_reference_samples=len(values),
+            mean_optimal_error=statistics.mean(values) if values else None))
+    table(out/'family_statistics.csv', family_rows)
+    aggregates = []
+    for version in versions:
+        cases = [r for r in summaries if r['version'] == version]
+        calls = [r for r in rows if r['version'] == version]
+        observed = [r for r in diagnostics if r['version'] == version]
+        attempts = sum(r['projection_attempts'] for r in observed)
+        def avg(values):
+            values = [v for v in values if v is not None]
+            return statistics.mean(values) if values else None
+        aggregates.append(dict(version=version, planned=len(calls), valid=sum(r['valid'] for r in calls),
+            case_mean_optimal_error=avg(r['mean'] for r in cases),
+            case_best_optimal_error=avg(r['best'] for r in cases),
+            case_worst_optimal_error=avg(r['worst'] for r in cases),
+            mean_within_case_stdev=avg(r['stdev'] for r in cases),
+            mean_call_seconds=avg(r.get('solve_wall_seconds') for r in calls),
+            diagnostics_calls=len(observed), mean_proposals=avg(r['proposal_calls'] for r in observed),
+            mean_unique_partitions=avg(r['unique_partitions'] for r in observed),
+            mean_first_valid_subsolve_return=avg(r['first_valid_subsolve_return'] for r in observed),
+            pooled_projection_success_fraction=sum(r['successful_projections'] for r in observed)/attempts if attempts else None))
+    table(out/'version_statistics.csv', aggregates)
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    directory = out/'figures'
+    directory.mkdir(exist_ok=True)
+    cases = sorted({r['case'] for r in summaries})
+    lookup = {(r['case'], r['version']): r for r in summaries}
+    fig, ax = plt.subplots(figsize=(11, 10), constrained_layout=True)
+    for offset, version in enumerate(versions):
+        selected = [(i, lookup[case, version]) for i, case in enumerate(cases)
+                    if (case, version) in lookup and lookup[case, version]['mean'] is not None]
+        ax.errorbar([100*r['mean'] for i, r in selected],
+                    [i+(offset-(len(versions)-1)/2)*.22 for i, r in selected],
+                    xerr=[100*(r['stdev'] or 0) for i, r in selected],
+                    fmt='o', markersize=4, capsize=2, label=version)
+    ax.set_yticks(range(len(cases)), [c.removeprefix('zhou_Set1_') for c in cases])
+    ax.invert_yaxis()
+    ax.set(xlabel='Optimal error (%) — mean +/- sample SD across five seeds', ylabel='Registered case')
+    ax.legend()
+    fig.savefig(directory/'optimal_errors.png', dpi=150)
+    fig.savefig(directory/'optimal_errors.pdf')
+    plt.close(fig)
 
 
 if __name__ == '__main__':

@@ -6,8 +6,8 @@
 
 1. pipeline_20261013_v1：E2 原输入精确诊断 6 次、E3 正式 54 次均已完成。
 2. continuation_20261013_v1：共同截点恢复 6 次和 E1c 候选 90 次均完成，全部审计可行；候选决定见 e1c_comparison_20261013_v1/decision.md。
-3. e6_pipeline_20261013_v1：14:34 后运行 M2 分仓预算候选 150 次。
-4. formal_pipeline_20261013_v1：14:44 启动，父 PID 22368，等待 M2 队列；随后 E1b 270 → E2 144 → E4 21 → E5 135，共 570 次、调用预算和 56.5 小时。四阶段源码压缩包完全一致，冻结提交 4ed30cd11，源码工作区干净。先读实时 pipeline.json，不重复启动。
+3. e6_pipeline_20261013_v1：15:18 完成 M2 候选 150 次，全部独立审计有效，阶段门槛 ready；E6 最终对照与图表见 e6_comparison_20261013_v1/findings.md。
+4. formal_pipeline_20261013_v1：14:44 启动，父 PID 22368，15:19 自动开始 E1b；随后 E1b 270 → E2 144 → E4 21 → E5 135，共 570 次、调用预算和 56.5 小时。四阶段源码压缩包完全一致，冻结提交 4ed30cd11，冻结时源码工作区干净。先读实时 pipeline.json，不重复启动。
 
 启动时父 PID 分别 22952、2068、25504，仅供定位，不能据此推断仍存活。前驱/互斥锁由驱动维护。每队列并发 2；不要另开求解负载。
 
@@ -18,7 +18,7 @@
 - 对比入口已实现：`tools/run.ps1 python -WithoutGurobi -Arguments @('-m','experiments.analysis.compare_thesis_candidates','--baseline','output/thesis_completion/e1c_20261012_v1','--candidate','output/thesis_completion/e1c_poolbound_20261013_v1','--output','output/thesis_completion/e1c_comparison_20261013_v1')`。已重建最终 90 对比较，complete=true；加 --reference-study output/thesis_completion/e0_20261012_v1 可重建 exact_reference_comparison.csv。统计专项选测 9 通过、0 失败、0 跳过；此轮显式 WithoutGurobi，未检查 Gurobi，不是精确求解器验证。
 - E1b 正式版已冻结，共 270 次，60/300/900 秒、五种子、相同 K 域，排在 M2 队列之后。每次预算/种子匹配分析，保留未解与失败；不随中间结果改矩阵。
 - 15:06 已补充 analyze_thesis_stages 的 paired_budgets.csv：按同实例/模型/版本/种子及消融组、固定池配对，核对冻结输入路径和 K 域，保留单侧失败及长预算恶化。用冻结 E1b 清单验证得到三种预算组合各 90 对，全部 NOT_RUN，属于分析管道验证而非实验结果。选测 tests/test_thesis_analysis.py 和 tests/test_thesis_candidate_comparison.py 共 14 通过、0 失败、0 跳过；显式 WithoutGurobi，未检查 Gurobi。运行完成后必须用当前工作区分析入口重建表（冻结求解源码不含此新增离线统计）。
-- E6：analyze_thesis_m2 比较当前 30 个最优参照、150 原版及 150 候选；候选协议在 e6_analysis_20261012_v1/candidate_protocol.md。保留全 30 例和五种子，不要求候选必胜。
+- E6 已完成：采用分仓预算候选，结束本轮，不额外调参重跑。两版共 300/300 审计有效，30/30 当前最优参照；平均最优误差 11.76% → 8.51%，65 对改善、5 对恶化、80 对持平。五种子最好误差逐例均值 9.46% → 6.05%，但种子标准差平均 1.75 → 2.73 个百分点。15 个原始实例族分别汇总；M2 双周期审计仅覆盖车辆/配送及每周期新一次性包装，不作循环箱池结论。最终 findings.md、CSV、PNG/PDF 已生成并检查。分析入口增加匹配资源/预算校验；统计选测 10 通过、0 失败、0 跳过（WithoutGurobi，未检查 Gurobi）。
 - 14:16 接续检查：E1c 正常推进，两个队列父进程均存活，未重复启动。已为比较工具增加 per_k_diagnostics.csv，累计每个 K 的全部访问耗时及审计有效候选费用，未观测时留空而非记零；统计选测 10 通过、0 失败、0 跳过（WithoutGurobi，本轮未核验 Gurobi）。最新检查快照保存 heartbeat_checks.jsonl，候选全部完成后重建比较表再作版本决策。
 
 ## E2/E4 参考恢复及正式设计

@@ -17,13 +17,13 @@
 | E3 正式三策略 | [e3_20261013_v1/findings.md](e3_20261013_v1/findings.md) | 54 | 全部完成：33 最优、3 限时可行、18 不可行；图表及有限 K 域机制分析完成 |
 | E2 共同截点恢复 | [e2_refcutoff_20261013_v1/manifest.json](e2_refcutoff_20261013_v1/manifest.json) | 6 | 全部审计可行；原失败参考保留；四组配置共同冻结实际截点 |
 | E1c 第一轮候选 | [e1c_comparison_20261013_v1/decision.md](e1c_comparison_20261013_v1/decision.md) | 90 | 全部审计可行；首次可行更早，最终费用基本持平；采用候选并结束改进 |
-| E6 分仓预算候选 | [e6_candidate_20261013_v1/progress.json](e6_candidate_20261013_v1/progress.json) | 150 | 运行中；每次分仓访问上限改为总预算 5% |
-| E1b 正式多预算 | [e1b_20261013_v1/manifest.json](e1b_20261013_v1/manifest.json) | 270 | 已冻结，等待当前 M2 队列完成 |
+| E6 分仓预算候选 | [e6_comparison_20261013_v1/findings.md](e6_comparison_20261013_v1/findings.md) | 150 | 全部审计有效；平均最优误差 11.76% → 8.51%，65 改善/5 恶化/80 持平；E6 分析完成 |
+| E1b 正式多预算 | [e1b_20261013_v1/manifest.json](e1b_20261013_v1/manifest.json) | 270 | 15:19 自动开始正式运行 |
 | E2 正式消融 | [e2_20261013_v1/manifest.json](e2_20261013_v1/manifest.json) | 144 | 已冻结，E1b 后运行 |
 | E4 固定池重优化 | [e4_20261013_v1/manifest.json](e4_20261013_v1/manifest.json) | 21 | 已冻结，E2 后运行；必要条件排除点另存 restricted_v2 |
 | E5 价格情景 | [e5_20261013_v1/manifest.json](e5_20261013_v1/manifest.json) | 135 | 已冻结，E4 后运行；仅为合成价格 |
 
-E1b/E2/E4/E5 已统一冻结至源码提交 4ed30cd11，并加入完成 E1c 候选的阶段门槛。后继队列 formal_pipeline_20261013_v1 于 14:44 开始等待；570 次调用预算和 56.5 小时，尚未产生正式结果。`COMPLETED` 或门槛 ready 只说明登记调用已有终态且证据流程有效，不保证全部问题可行、最优或研究阶段验收完成。预算和不等于墙钟耗时。
+E1b/E2/E4/E5 已统一冻结至源码提交 4ed30cd11，并加入完成 E1c 候选的阶段门槛。后继队列 formal_pipeline_20261013_v1 于 14:44 开始等待，15:19 已进入 E1b；570 次调用预算和 56.5 小时，当前正式结果仍不完整。`COMPLETED` 或门槛 ready 只说明登记调用已有终态且证据流程有效，不保证全部问题可行、最优或研究阶段验收完成。预算和不等于墙钟耗时。
 
 三个 2026-10-12 队列均已完成；当前队列顺序为 `pipeline_20261013_v1` → `continuation_20261013_v1` → `e6_pipeline_20261013_v1` → `formal_pipeline_20261013_v1`。每个队列并发 2，精确每进程 1 线程；后继等待前驱完成，不重复启动。启动记录在各自 `launch.json`，实时状态在 `pipeline.json`。
 
@@ -36,3 +36,4 @@ E1b/E2/E4/E5 已统一冻结至源码提交 4ed30cd11，并加入完成 E1c 候�
 后续物理定义见 [受限模型说明](../../docs/thesis_extended_models.md)。`config/cases/thesis_completion/followup_v2/` 中含 draft 的设计尚待阶段决定。`followup_smoke_20261012_v1` 的 11 次验证全部审计通过，不代替正式结果。`followup_v1` 是失败的生成目录，`smoke_v2` 只冻结未执行，均不计入正式证据。
 
 用户授权持续推进全部计划；工作保留在本地 main，不推送，保留其他未提交文件。同一聊天的自动接续仍有效，先核对进程和冻结证据；只在实质进展、失败或需要用户处理时通知。论文仓库当前未接入，先交付可直接引用的表、报告及局限，再单列待同步项。
+
