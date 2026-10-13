@@ -51,6 +51,7 @@ import time
 from models.common.cycle.scope import validate_problem
 from models.common.cycle.joint import joint_empty_result, lift_result
 from models.common.cycle.audit import audit_solution
+from models.common.cycle.pool_bound import forced_batch_pool_violation
 
 
 def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_result=None):
@@ -81,6 +82,13 @@ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_resul
             proof_scope="empty_necessary_order_batch_domain",
             orders=missing,
         )
+        return result
+    pool_violation = forced_batch_pool_violation(problem)
+    if pool_violation:
+        result = joint_empty_result(problem, "alns")
+        result["info"].update(status="INFEASIBLE", proven_infeasible=True,
+            proof_scope="forced_batch_demand_exceeds_pool_max", pool_certificate=pool_violation,
+            runtime=time.perf_counter()-begun, iterations=0)
         return result
     rng = random.Random(seed)
     evaluator = JointEvaluator(problem)
