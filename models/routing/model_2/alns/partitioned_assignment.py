@@ -54,7 +54,10 @@ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42):
         remaining = max_time-(time.perf_counter()-start)
         if remaining <= 0:
             break
-        share = .4 if attempts == 0 and len(customers) > 8 else .1
+        # Bound every partition visit so the initial ownership cannot consume
+        # 40% of the call before alternatives are proposed. Existing warm
+        # starts and periodic incumbent revisits still deepen useful routes.
+        share = .05
         iteration_budget = min(max_iterations-iterations, max(1, int(max_iterations*share))) if max_iterations else 0
         key = tuple(sorted(candidate.items()))
         warm = incumbents.get(key)
@@ -105,6 +108,6 @@ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42):
                           initial_objective=initial_objective, incumbent_history=history,
                           operator_statistics_scope='all_partition_subsolves',
                           history_scope='best_at_completed_partition_subsolve',
-                          assignment_budget_policy='initial_40pct_then_project_and_refine')
+                          assignment_budget_policy='uniform_5pct_partition_visits')
     result['info'].update(operator_totals, **descent_totals)
     return result
