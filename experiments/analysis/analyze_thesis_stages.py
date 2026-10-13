@@ -43,14 +43,16 @@ def primary_rows(study):
 def grouped_statistics(rows):
     groups = defaultdict(list)
     for row in rows:
-        groups[row['case'], row['model'], row['method'], row['version'], row['budget']].append(row)
+        groups[row['case'], row['model'], row['method'], row['version'], row['budget'],
+               row.get('group') or '', row.get('fixed_pool') if row.get('fixed_pool') is not None else -1].append(row)
     output = []
-    for (case, model, method, version, budget), members in sorted(groups.items()):
+    for (case, model, method, version, budget, group, fixed_pool), members in sorted(groups.items()):
         valid = [r for r in members if r['valid']]
         costs = [r['objective'] for r in valid]
         times = [r['solve_wall_seconds'] for r in members if r.get('solve_wall_seconds') is not None]
         output.append(dict(case=case, family=members[0].get('family'), model=model, method=method,
-            version=version, budget=budget, planned=len(members), valid=len(valid),
+            version=version, budget=budget, group=group or None, fixed_pool=fixed_pool if fixed_pool != -1 else None,
+            planned=len(members), valid=len(valid),
             feasible_rate=len(valid)/len(members), mean=statistics.mean(costs) if costs else None,
             stdev=statistics.stdev(costs) if len(costs) > 1 else None,
             best=min(costs) if costs else None, worst=max(costs) if costs else None,
@@ -67,12 +69,17 @@ def paired_versions(rows, versions):
         return []
     pairs = defaultdict(dict)
     for row in rows:
-        pairs[row['case'], row['model'], row['method'], row['seed'], row['budget']][row['version']] = row
+        key = (row['case'], row['model'], row['method'], row['seed'], row['budget'],
+               row.get('group') or '', row.get('fixed_pool') if row.get('fixed_pool') is not None else -1)
+        if row['version'] in pairs[key]:
+            raise ValueError('Duplicate version in matched comparison')
+        pairs[key][row['version']] = row
     output = []
     for key, values in sorted(pairs.items()):
         a, b = (values.get(v) for v in versions)
         both = a is not None and b is not None and a['valid'] and b['valid']
         output.append(dict(case=key[0], model=key[1], method=key[2], seed=key[3], budget=key[4],
+            group=key[5] or None, fixed_pool=key[6] if key[6] != -1 else None,
             first_version=versions[0], second_version=versions[1],
             first_status=a['status'] if a else 'NOT_PLANNED', second_status=b['status'] if b else 'NOT_PLANNED',
             both_valid=bool(both), first_cost=a['objective'] if a and a['valid'] else None,
@@ -87,7 +94,7 @@ def paired_budgets(rows):
     groups = defaultdict(dict)
     for row in rows:
         key = (row['case'], row['model'], row['method'], row['version'], row['seed'],
-               row.get('group') or '', row.get('fixed_pool') or 0)
+               row.get('group') or '', row.get('fixed_pool') if row.get('fixed_pool') is not None else -1)
         if row['budget'] in groups[key]:
             raise ValueError('Duplicate instance/version/seed/budget in budget comparison')
         groups[key][row['budget']] = row
@@ -99,7 +106,7 @@ def paired_budgets(rows):
                 raise ValueError('Budget comparison changed frozen input or K domain')
             both = a['valid'] and b['valid']
             output.append(dict(case=key[0], model=key[1], method=key[2], version=key[3], seed=key[4],
-                group=key[5] or None, fixed_pool=key[6] or None,
+                group=key[5] or None, fixed_pool=key[6] if key[6] != -1 else None,
                 short_budget=small, long_budget=large, short_status=a['status'], long_status=b['status'],
                 short_valid=a['valid'], long_valid=b['valid'], both_valid=both,
                 short_cost=a['objective'] if a['valid'] else None,
@@ -132,6 +139,7 @@ def diagnostics(rows):
                 improvements[key] += value
         discoveries = diag['improvements']
         output.append(dict(case=row['case'], model=row['model'], seed=row['seed'], split=row.get('split'),
+            version=row['version'], budget=row['budget'], group=row.get('group'), fixed_pool=row.get('fixed_pool'),
             status=row['status'], valid=row['valid'], objective=row['objective'],
             evaluation_calls=diag['evaluation_calls'], valid_evaluations=diag['valid_evaluations'],
             valid_evaluation_fraction=diag['valid_evaluations']/diag['evaluation_calls'] if diag['evaluation_calls'] else None,
@@ -150,10 +158,13 @@ def ablation_contrasts(rows):
     groups = defaultdict(dict)
     for row in rows:
         if row.get('group') in ('A', 'B', 'C', 'D'):
-            groups[row['case'], row['seed'], row['method'], row['budget']][row['group']] = row
+            key = (row['case'], row['seed'], row['method'], row['budget'], row['model'], row['version'])
+            if row['group'] in groups[key]:
+                raise ValueError('Duplicate ablation group in matched comparison')
+            groups[key][row['group']] = row
     output = []
     for key, members in sorted(groups.items()):
-        record = dict(case=key[0], seed=key[1], method=key[2], budget=key[3])
+        record = dict(case=key[0], seed=key[1], method=key[2], budget=key[3], model=key[4], version=key[5])
         costs = {g: r['objective'] for g, r in members.items() if r['valid']}
         record.update({f'{g}_status': members[g]['status'] if g in members else 'NOT_PLANNED' for g in 'ABCD'})
         for a, b in ('AB', 'AC', 'CD', 'BD', 'AD'):
@@ -189,7 +200,8 @@ def figures(study, rows, stats):
     curves = defaultdict(list)
     for row in rows:
         if '_path' in row and (row['_path']/'anytime.csv').exists():
-            curves[row['case'], row['model'], row['method'], row['budget']].append(row)
+            curves[row['case'], row['model'], row['method'], row['budget'],
+                   row.get('group') or '', row.get('fixed_pool') if row.get('fixed_pool') is not None else -1].append(row)
     for index, (key, members) in enumerate(sorted(curves.items())):
         fig, ax = plt.subplots(figsize=(7, 4), constrained_layout=True)
         count = 0
@@ -201,7 +213,8 @@ def figures(study, rows, stats):
                         where='post', label=f'{row["version"]} s{row["seed"]}', alpha=.8)
                 count += 1
         if count:
-            ax.set(title=f'{key[0]} / M{key[1]} / {key[2]} / {key[3]} s', xlabel='Global elapsed seconds', ylabel='Audited objective')
+            restriction = (f' / group {key[4]}' if key[4] else '') + (f' / N={key[5]}' if key[5] != -1 else '')
+            ax.set(title=f'{key[0]} / M{key[1]} / {key[2]} / {key[3]} s{restriction}', xlabel='Global elapsed seconds', ylabel='Audited objective')
             ax.legend(fontsize=7, ncol=2)
             fig.savefig(directory/f'anytime_{index:03d}.png', dpi=130)
         plt.close(fig)

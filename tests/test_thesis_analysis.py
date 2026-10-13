@@ -65,3 +65,35 @@ def test_budget_pairs_do_not_compare_different_ablation_groups():
     pairs = paired_budgets([a, b, dict(a, budget=60, objective=8)])
     assert len(pairs) == 1 and pairs[0]['group'] == 'A'
     assert pairs[0]['short_minus_long'] == 2
+
+
+def test_statistics_keep_ablation_and_pool_conditions_separate():
+    rows = [row('final', True, 100, group='A'), row('final', True, 60, group='B'),
+            row('final', False, None, group='B'), row('final', True, 10, fixed_pool=0),
+            row('final', True, 20, fixed_pool=2), row('final', True, 30)]
+    stats = {(r['group'], r['fixed_pool']): r for r in grouped_statistics(rows)}
+    assert len(stats) == 5
+    assert stats['A', None]['mean'] == 100
+    assert stats['B', None]['mean'] == 60 and stats['B', None]['feasible_rate'] == .5
+    assert stats[None, 0]['mean'] == 10 and stats[None, None]['mean'] == 30
+
+
+def test_version_pairs_keep_restrictions_and_reject_duplicates():
+    a = row('old', True, 100, group='A')
+    b = row('new', True, 60, group='B')
+    pairs = paired_versions([a, b, dict(a, version='new', objective=90)], ['old', 'new'])
+    assert len(pairs) == 2
+    assert pairs[0]['first_minus_second'] == 10
+    assert not pairs[1]['both_valid']
+    with pytest.raises(ValueError, match='Duplicate'):
+        paired_versions([a, a], ['old', 'new'])
+
+
+def test_ablation_contrasts_keep_model_and_version_separate():
+    a = row('v1', True, 100, group='A')
+    b = row('v1', True, 90, group='B')
+    results = ablation_contrasts([a, b, dict(a, version='v2'), dict(b, model=7)])
+    assert len(results) == 3
+    assert sum(r['A_minus_B'] is not None for r in results) == 1
+    with pytest.raises(ValueError, match='Duplicate'):
+        ablation_contrasts([a, a])
