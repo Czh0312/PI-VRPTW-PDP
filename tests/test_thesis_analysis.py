@@ -97,3 +97,30 @@ def test_ablation_contrasts_keep_model_and_version_separate():
     assert sum(r['A_minus_B'] is not None for r in results) == 1
     with pytest.raises(ValueError, match='Duplicate'):
         ablation_contrasts([a, a])
+
+
+def test_ablation_bounds_distinguish_search_reversal_from_certificate_conflict():
+    a = row('v1', True, 100, group='A', best_bound=80)
+    b = row('v1', True, 110, group='B', best_bound=70)
+    result = ablation_contrasts([a, b])[0]
+    assert result['A_minus_B'] == -10
+    assert result['A_minus_B_lower'] == -30 and result['A_minus_B_upper'] == 30
+    assert result['A_to_B_incumbent_reversal']
+    assert not result['A_to_B_certificate_conflict']
+    b.update(valid=False, objective=None, status='TIME_LIMIT', best_bound=101)
+    result = ablation_contrasts([a, b])[0]
+    assert result['A_minus_B'] is None and result['A_minus_B_lower'] is None
+    assert result['A_minus_B_upper'] == -1 and result['A_to_B_certificate_conflict']
+    b.update(best_bound=None, proven_infeasible=True, status='INFEASIBLE')
+    assert ablation_contrasts([a, b])[0]['A_to_B_certificate_conflict']
+
+
+def test_ablation_optimal_contrast_intervals_collapse_and_unknown_bounds_stay_unknown():
+    rows = [dict(row('v1', True, cost, group=g), proven_optimal=True) for g, cost in zip('ABCD', (100, 90, 80, 65))]
+    result = ablation_contrasts(rows)[0]
+    assert result['interaction_lower'] == result['interaction_upper'] == -5
+    assert result['A_minus_D_lower'] == result['A_minus_D_upper'] == 35
+    rows[-1].update(proven_optimal=False, best_bound=None)
+    result = ablation_contrasts(rows)[0]
+    assert result['interaction_lower'] is None and result['interaction_upper'] == -5
+    assert result['A_minus_D_upper'] is None

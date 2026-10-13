@@ -166,10 +166,29 @@ def ablation_contrasts(rows):
     for key, members in sorted(groups.items()):
         record = dict(case=key[0], seed=key[1], method=key[2], budget=key[3], model=key[4], version=key[5])
         costs = {g: r['objective'] for g, r in members.items() if r['valid']}
+        bounds = {}
+        for g, r in members.items():
+            lower = r['objective'] if r['valid'] and r['proven_optimal'] else r.get('best_bound')
+            if lower is not None and math.isfinite(lower):
+                bounds[g] = lower
         record.update({f'{g}_status': members[g]['status'] if g in members else 'NOT_PLANNED' for g in 'ABCD'})
+        for g in 'ABCD':
+            record[f'{g}_upper'] = costs.get(g)
+            record[f'{g}_lower'] = bounds.get(g)
+            record[f'{g}_proven_optimal'] = members[g]['proven_optimal'] if g in members else False
         for a, b in ('AB', 'AC', 'CD', 'BD', 'AD'):
             record[f'{a}_minus_{b}'] = costs[a]-costs[b] if a in costs and b in costs else None
+            record[f'{a}_minus_{b}_lower'] = bounds[a]-costs[b] if a in bounds and b in costs else None
+            record[f'{a}_minus_{b}_upper'] = costs[a]-bounds[b] if a in costs and b in bounds else None
+            # In the registered E2 design b relaxes a. An incumbent reversal
+            # alone diagnoses search quality, not a contradiction of inclusion.
+            tolerance = 1e-6+abs(costs.get(a, 0))*1e-7
+            record[f'{a}_to_{b}_incumbent_reversal'] = a in costs and b in costs and costs[b] > costs[a]+tolerance
+            record[f'{a}_to_{b}_certificate_conflict'] = a in costs and b in members and (
+                members[b]['proven_infeasible'] or b in bounds and bounds[b] > costs[a]+tolerance)
         record['interaction_A_minus_B_minus_C_plus_D'] = costs['A']-costs['B']-costs['C']+costs['D'] if len(costs) == 4 else None
+        record['interaction_lower'] = bounds['A']-costs['B']-costs['C']+bounds['D'] if all(g in bounds for g in 'AD') and all(g in costs for g in 'BC') else None
+        record['interaction_upper'] = costs['A']-bounds['B']-bounds['C']+costs['D'] if all(g in costs for g in 'AD') and all(g in bounds for g in 'BC') else None
         record['all_four_valid'] = len(costs) == 4
         output.append(record)
     return output
@@ -252,7 +271,7 @@ def analyze(study, plots=True):
         '- `tables/paired_budgets.csv`：同实例/模型/版本/种子、相同冻结输入与 K 域的预算对照；保留单侧失败，不把长预算的偶然恶化删掉。',
         '- `tables/cost_components.csv`：总费用、分量、N/Q、K 与实际配送批数。',
         '- `tables/search_diagnostics.csv`：构造和评价耗时、违规类型、各算子尝试/改进；评价有效率与移动接受数分开。',
-        '- `tables/ablation_contrasts.csv`：A−B、A−C、C−D、B−D、A−D 和 A−B−C+D；不将边际差相加作独立贡献。',
+        '- `tables/ablation_contrasts.csv`：A−B、A−C、C−D、B−D、A−D 和 A−B−C+D，并保留上下界区间。限时可行解的逆序与允许域包含关系的证书冲突分开；不将边际差相加作独立贡献。',
         '- `figures/`：实际预算使用率及外层确认的全局费用轨迹；未知最优时不称最优误差。', '']
     if pairs:
         lines += [f'配对共 {len(pairs)} 组，其中双方有效 {sum(r["both_valid"] for r in pairs)} 组；一侧失败见逐组状态。', '']
