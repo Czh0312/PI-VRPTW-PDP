@@ -17,6 +17,7 @@
 - E1c 已完成：90 对均可行，88 对费用持平，M8 开发集一对 +0.1、一对 -0.1；紧池首次可行由约 9 秒变为 0.11–0.83 秒。采用首轮下界版，结束改进，不追加第二轮。已与 E0 精确参照核对域和输入：150 次有最优参照，30 次 tight_pool_1 只有可行上界；报告不混淆最优误差。
 - 对比入口已实现：`tools/run.ps1 python -WithoutGurobi -Arguments @('-m','experiments.analysis.compare_thesis_candidates','--baseline','output/thesis_completion/e1c_20261012_v1','--candidate','output/thesis_completion/e1c_poolbound_20261013_v1','--output','output/thesis_completion/e1c_comparison_20261013_v1')`。已重建最终 90 对比较，complete=true；加 --reference-study output/thesis_completion/e0_20261012_v1 可重建 exact_reference_comparison.csv。统计专项选测 9 通过、0 失败、0 跳过；此轮显式 WithoutGurobi，未检查 Gurobi，不是精确求解器验证。
 - E1b 正式版已冻结，共 270 次，60/300/900 秒、五种子、相同 K 域，排在 M2 队列之后。每次预算/种子匹配分析，保留未解与失败；不随中间结果改矩阵。
+- 15:06 已补充 analyze_thesis_stages 的 paired_budgets.csv：按同实例/模型/版本/种子及消融组、固定池配对，核对冻结输入路径和 K 域，保留单侧失败及长预算恶化。用冻结 E1b 清单验证得到三种预算组合各 90 对，全部 NOT_RUN，属于分析管道验证而非实验结果。选测 tests/test_thesis_analysis.py 和 tests/test_thesis_candidate_comparison.py 共 14 通过、0 失败、0 跳过；显式 WithoutGurobi，未检查 Gurobi。运行完成后必须用当前工作区分析入口重建表（冻结求解源码不含此新增离线统计）。
 - E6：analyze_thesis_m2 比较当前 30 个最优参照、150 原版及 150 候选；候选协议在 e6_analysis_20261012_v1/candidate_protocol.md。保留全 30 例和五种子，不要求候选必胜。
 - 14:16 接续检查：E1c 正常推进，两个队列父进程均存活，未重复启动。已为比较工具增加 per_k_diagnostics.csv，累计每个 K 的全部访问耗时及审计有效候选费用，未观测时留空而非记零；统计选测 10 通过、0 失败、0 跳过（WithoutGurobi，本轮未核验 Gurobi）。最新检查快照保存 heartbeat_checks.jsonl，候选全部完成后重建比较表再作版本决策。
 

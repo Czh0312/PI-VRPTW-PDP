@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 from collections import defaultdict
 import csv
+from itertools import combinations
 import math
 from pathlib import Path
 import statistics
@@ -78,6 +79,34 @@ def paired_versions(rows, versions):
             second_cost=b['objective'] if b and b['valid'] else None,
             first_minus_second=a['objective']-b['objective'] if both else None,
             relative_improvement=(a['objective']-b['objective'])/a['objective'] if both and a['objective'] else None))
+    return output
+
+
+def paired_budgets(rows):
+    """Match budgets within the same instance/model/version/seed, including failures."""
+    groups = defaultdict(dict)
+    for row in rows:
+        key = (row['case'], row['model'], row['method'], row['version'], row['seed'],
+               row.get('group') or '', row.get('fixed_pool') or 0)
+        if row['budget'] in groups[key]:
+            raise ValueError('Duplicate instance/version/seed/budget in budget comparison')
+        groups[key][row['budget']] = row
+    output = []
+    for key, members in sorted(groups.items()):
+        for small, large in combinations(sorted(members), 2):
+            a, b = members[small], members[large]
+            if (a.get('case_path') != b.get('case_path') or a.get('counts') != b.get('counts')):
+                raise ValueError('Budget comparison changed frozen input or K domain')
+            both = a['valid'] and b['valid']
+            output.append(dict(case=key[0], model=key[1], method=key[2], version=key[3], seed=key[4],
+                group=key[5] or None, fixed_pool=key[6] or None,
+                short_budget=small, long_budget=large, short_status=a['status'], long_status=b['status'],
+                short_valid=a['valid'], long_valid=b['valid'], both_valid=both,
+                short_cost=a['objective'] if a['valid'] else None,
+                long_cost=b['objective'] if b['valid'] else None,
+                short_minus_long=a['objective']-b['objective'] if both else None,
+                relative_improvement=(a['objective']-b['objective'])/a['objective'] if both and a['objective'] else None,
+                short_call_seconds=a.get('solve_wall_seconds'), long_call_seconds=b.get('solve_wall_seconds')))
     return output
 
 
@@ -185,6 +214,8 @@ def analyze(study, plots=True):
     table(study/'tables/per_instance_statistics.csv', stats)
     pairs = paired_versions(rows, manifest['source_versions'])
     table(study/'tables/paired_versions.csv', pairs)
+    budget_pairs = paired_budgets(rows)
+    table(study/'tables/paired_budgets.csv', budget_pairs)
     diagnostic_rows = diagnostics(rows)
     table(study/'tables/search_diagnostics.csv', diagnostic_rows)
     contrasts = ablation_contrasts(rows)
@@ -205,6 +236,7 @@ def analyze(study, plots=True):
         '同源嵌套案例必须按 family 解释，不将种子或嵌套子集作为独立经验样本。', '',
         '- `tables/per_instance_statistics.csv`：逐实例、模型、版本和预算的费用分布及有效样本数。',
         '- `tables/paired_versions.csv`：匹配实例/模型/方法/种子/预算的新旧版本对照；双方有效时才算差异。',
+        '- `tables/paired_budgets.csv`：同实例/模型/版本/种子、相同冻结输入与 K 域的预算对照；保留单侧失败，不把长预算的偶然恶化删掉。',
         '- `tables/cost_components.csv`：总费用、分量、N/Q、K 与实际配送批数。',
         '- `tables/search_diagnostics.csv`：构造和评价耗时、违规类型、各算子尝试/改进；评价有效率与移动接受数分开。',
         '- `tables/ablation_contrasts.csv`：A−B、A−C、C−D、B−D、A−D 和 A−B−C+D；不将边际差相加作独立贡献。',
