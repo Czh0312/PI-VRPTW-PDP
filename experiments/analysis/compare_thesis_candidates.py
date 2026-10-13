@@ -85,7 +85,45 @@ def per_k_diagnostics(rows, jobs, label):
     return output
 
 
-def compare(baseline, candidate, output):
+def reference_comparisons(studies, reference_study):
+    from experiments.analysis.analyze_thesis_m2 import reference_error
+    reference_study = Path(reference_study).resolve()
+    manifest, rows = primary_rows(reference_study)
+    references = {}
+    for row in rows:
+        if row['method'] != 'exact':
+            continue
+        match = row['case'], row['model']
+        if match in references:
+            raise ValueError('Ambiguous exact reference version')
+        references[match] = row
+    ref_jobs = {j['id']: j for j in manifest['jobs']}
+    output = []
+    for study, design, candidates, label in studies:
+        jobs = {j['id']: j for j in design['jobs']}
+        for row in candidates:
+            ref = references.get((row['case'], row['model']))
+            if ref is None:
+                raise ValueError('Missing registered exact reference')
+            if (jobs[row['id']]['counts'] != ref_jobs[ref['id']]['counts'] or
+                    normalized_case(study, design, jobs[row['id']]) !=
+                    normalized_case(reference_study, manifest, ref_jobs[ref['id']])):
+                raise ValueError('Reference physical/configuration domain differs')
+            error = reference_error(row, ref)
+            if row['valid']:
+                tolerance = 1e-6 + 1e-7 * abs(row['objective'])
+                lower = ref.get('best_bound')
+                if ref.get('proven_infeasible') or (lower is not None and lower > row['objective'] + tolerance):
+                    raise ValueError('Candidate contradicts exact reference certificate')
+                if error['absolute_optimal_error'] is not None and error['absolute_optimal_error'] < -tolerance:
+                    raise ValueError('Candidate beats claimed exact optimum')
+            output.append(dict(case=row['case'], model=row['model'], seed=row['seed'],
+                split=row['split'], version_label=label, status=row['status'], valid=row['valid'],
+                objective=row['objective'], reference_id=ref['id'], **error))
+    return output
+
+
+def compare(baseline, candidate, output, reference_study=None):
     baseline, candidate, output = map(lambda p: Path(p).resolve(), (baseline, candidate, output))
     ma, a = primary_rows(baseline)
     mb, b = primary_rows(candidate)
@@ -130,10 +168,15 @@ def compare(baseline, candidate, output):
     table(output / 'split_summary.csv', summary)
     table(output / 'per_k_diagnostics.csv', per_k_diagnostics(a, ma['jobs'], 'baseline')
           + per_k_diagnostics(b, mb['jobs'], 'candidate'))
+    if reference_study:
+        table(output / 'exact_reference_comparison.csv', reference_comparisons(
+            [(baseline, ma, a, 'baseline'), (candidate, mb, b, 'candidate')], reference_study))
     finished = all(r['status'] not in ('NOT_RUN', 'RUNNING') for r in a + b)
     evidence = dict(baseline=str(baseline), candidate=str(candidate), complete=finished,
                     pairs=len(pairs), baseline_manifest_sha256=driver.sha(baseline / 'manifest.json'),
                     candidate_manifest_sha256=driver.sha(candidate / 'manifest.json'), summary=summary)
+    if reference_study:
+        evidence['reference_manifest_sha256'] = driver.sha(Path(reference_study) / 'manifest.json')
     driver.write(output / 'comparison.json', evidence)
     return evidence
 
@@ -143,5 +186,6 @@ if __name__ == '__main__':
     parser.add_argument('--baseline', required=True)
     parser.add_argument('--candidate', required=True)
     parser.add_argument('--output', required=True)
+    parser.add_argument('--reference-study')
     args = parser.parse_args()
-    print(compare(args.baseline, args.candidate, args.output))
+    print(compare(args.baseline, args.candidate, args.output, args.reference_study))

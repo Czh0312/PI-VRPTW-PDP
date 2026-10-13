@@ -75,3 +75,25 @@ def test_revisits_are_summed_and_unaudited_costs_not_used(tmp_path):
     missing.pop('_path')
     rows = comparison.per_k_diagnostics([missing], manifest['jobs'], 'candidate')
     assert all(not r['diagnostics_observed'] and r['measured_visit_seconds'] is None for r in rows)
+
+
+def test_exact_comparison_checks_domain_and_certificate(tmp_path, monkeypatch):
+    a, b = tmp_path / 'ref', tmp_path / 'candidate'
+    ma, mb = frozen(a), frozen(b)
+    ma['jobs'][0].update(id='ref', method='exact')
+    mb['jobs'][0]['id'] = 'candidate'
+    reference = dict(ma['jobs'][0], valid=True, objective=11., best_bound=9.,
+                     proven_optimal=False, proven_infeasible=False, status='FEASIBLE')
+    candidate = dict(mb['jobs'][0], valid=True, objective=12., status='FEASIBLE')
+    monkeypatch.setattr(comparison, 'primary_rows', lambda path: (ma, [reference]))
+    studies = [(b, mb, [candidate], 'candidate')]
+    error = comparison.reference_comparisons(studies, a)[0]
+    assert error['relative_optimal_error'] is None
+    assert error['difference_from_reference_incumbent'] == 1.
+    candidate['objective'] = 8.
+    with pytest.raises(ValueError, match='contradicts'):
+        comparison.reference_comparisons(studies, a)
+    candidate['objective'] = 12.
+    mb['input_hashes']['data.csv'] = 'different'
+    with pytest.raises(ValueError, match='domain differs'):
+        comparison.reference_comparisons(studies, a)
