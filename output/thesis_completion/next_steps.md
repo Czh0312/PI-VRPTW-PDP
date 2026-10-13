@@ -17,6 +17,7 @@
 - 对比入口已实现：`tools/run.ps1 python -WithoutGurobi -Arguments @('-m','experiments.analysis.compare_thesis_candidates','--baseline','output/thesis_completion/e1c_20261012_v1','--candidate','output/thesis_completion/e1c_poolbound_20261013_v1','--output','output/thesis_completion/e1c_comparison_20261013_v1')`。初次检查 90 对冻结输入一致，但候选尚未运行，comparison.json 明确 complete=false；完成后重建表，不引用这个空结果作结论。统计专项选测 9 通过、0 失败、0 跳过；此轮显式 WithoutGurobi，未检查 Gurobi，不是精确求解器验证。
 - E1b：followup_v2/e1b_design_draft.json，共 270 次，60/300/900 秒、五种子、相同 K 域。冻结最终 M6–8 源码后排在现有队列之后，不能与诊断候选混为同版本。
 - E6：analyze_thesis_m2 比较当前 30 个最优参照、150 原版及 150 候选；候选协议在 e6_analysis_20261012_v1/candidate_protocol.md。保留全 30 例和五种子，不要求候选必胜。
+- 14:16 接续检查：E1c 正常推进，两个队列父进程均存活，未重复启动。已为比较工具增加 per_k_diagnostics.csv，累计每个 K 的全部访问耗时及审计有效候选费用，未观测时留空而非记零；统计选测 10 通过、0 失败、0 跳过（WithoutGurobi，本轮未核验 Gurobi）。最新检查快照保存 heartbeat_checks.jsonl，候选全部完成后重建比较表再作版本决策。
 
 ## E2/E4 参考恢复及正式设计
 

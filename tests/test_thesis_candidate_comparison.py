@@ -54,3 +54,24 @@ def test_failed_candidate_and_unfinished_study_retain_denominator(tmp_path, monk
     assert summary['planned'] == summary['baseline_valid'] == 1
     assert summary['candidate_valid'] == summary['both_valid'] == summary['better'] == 0
     assert summary['mean_relative_improvement'] is None
+
+
+def test_revisits_are_summed_and_unaudited_costs_not_used(tmp_path):
+    manifest = frozen(tmp_path)
+    row = dict(manifest['jobs'][0], _path=tmp_path, status='FEASIBLE')
+    driver.write(tmp_path / 'candidate_diagnostics.json', [
+        dict(batch_count=1, started=1, returned=3, child_audit_valid=True,
+             info=dict(status='FEASIBLE', objective=10)),
+        dict(batch_count=2, started=3, returned=4, child_audit_valid=False,
+             info=dict(status='HEURISTIC_NO_SOLUTION', objective=1)),
+        dict(batch_count=1, started=4, returned=7, child_audit_valid=True,
+             info=dict(status='FEASIBLE', objective=8))])
+    rows = comparison.per_k_diagnostics([row], manifest['jobs'], 'baseline')
+    assert rows[0]['visits'] == 2 and rows[0]['measured_visit_seconds'] == 5
+    assert rows[0]['best_audited_child_cost'] == 8
+    assert rows[1]['best_audited_child_cost'] is None
+    assert rows[2]['diagnostics_observed'] and rows[2]['visits'] == 0
+    missing = dict(row, status='RUNNING')
+    missing.pop('_path')
+    rows = comparison.per_k_diagnostics([missing], manifest['jobs'], 'candidate')
+    assert all(not r['diagnostics_observed'] and r['measured_visit_seconds'] is None for r in rows)

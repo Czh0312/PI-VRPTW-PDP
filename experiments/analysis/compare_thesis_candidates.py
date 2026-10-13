@@ -54,6 +54,37 @@ def verify_matching(left_study, left, right_study, right):
             raise ValueError(f'Frozen physical/configuration inputs differ: {match}')
 
 
+def per_k_diagnostics(rows, jobs, label):
+    """Sum every visit to a K; absent observations are not zero-time solves."""
+    planned = indexed(jobs)
+    output = []
+    for row in rows:
+        path = row.get('_path')
+        file = path / 'candidate_diagnostics.json' if path is not None else None
+        observed = file is not None and file.exists()
+        candidates = driver.read(file) if observed else []
+        allowed = planned[key(row)]['counts']
+        if any(c['batch_count'] not in allowed for c in candidates):
+            raise ValueError('Diagnostic K outside registered domain')
+        for count in allowed:
+            visits = [c for c in candidates if c['batch_count'] == count]
+            elapsed = [c['returned'] - c['started'] for c in visits]
+            if any(t < 0 for t in elapsed):
+                raise ValueError('Candidate return time precedes its start')
+            costs = [c['info']['objective'] for c in visits
+                     if c.get('child_audit_valid') and c['info'].get('objective') is not None]
+            output.append(dict(case=row['case'], model=row['model'], seed=row['seed'],
+                budget=row['budget'], split=row['split'], version_label=label, k=count,
+                call_status=row['status'], diagnostics_observed=observed, visits=len(visits),
+                measured_visit_seconds=sum(elapsed) if observed else None,
+                first_started=visits[0]['started'] if visits else None,
+                last_returned=visits[-1]['returned'] if visits else None,
+                best_audited_child_cost=min(costs) if costs else None,
+                infeasibility_certificates=sum(bool(c['info'].get('proven_infeasible')) for c in visits),
+                statuses=';'.join(c['info']['status'] for c in visits)))
+    return output
+
+
 def compare(baseline, candidate, output):
     baseline, candidate, output = map(lambda p: Path(p).resolve(), (baseline, candidate, output))
     ma, a = primary_rows(baseline)
@@ -97,6 +128,8 @@ def compare(baseline, candidate, output):
     output.mkdir(parents=True, exist_ok=True)
     table(output / 'matched_candidates.csv', pairs)
     table(output / 'split_summary.csv', summary)
+    table(output / 'per_k_diagnostics.csv', per_k_diagnostics(a, ma['jobs'], 'baseline')
+          + per_k_diagnostics(b, mb['jobs'], 'candidate'))
     finished = all(r['status'] not in ('NOT_RUN', 'RUNNING') for r in a + b)
     evidence = dict(baseline=str(baseline), candidate=str(candidate), complete=finished,
                     pairs=len(pairs), baseline_manifest_sha256=driver.sha(baseline / 'manifest.json'),
