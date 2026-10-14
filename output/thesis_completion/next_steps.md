@@ -43,6 +43,8 @@ E4 三小例枚举必要下界至 Q 的全部整数。三个中大例的既定�
 
 ### 2026-10-14 05:22 优先接续修正
 
+14:02 恢复准备：新增 experiments/runs/recover_thesis_infrastructure.py，加载原冻结驱动并仅替换控制器 JSON 写入函数，对 Windows 5/32/33 错误最多重试 8 次；worker 仍从冻结 driver.py 启动。必须全部首次调用完成、失败 row 哈希匹配、原 gate 恰仅该失败且无证书矛盾才补跑一次；结果独立核对配置、结果哈希和双周期审计，输出 infrastructure_recovery/review.json，原 stage_gate.json 与主统计不改。恢复单独运行，仅一个活跃调用，资源差异列为恢复敏感性分析的局限。选测 test_thesis_infrastructure_recovery.py 与 test_thesis_completion_driver.py 共 24 通过、0 失败、0 跳过（WithoutGurobi，未检查 Gurobi），尚未启动恢复调用。
+
 E1b 172/270 终态中有一条基础设施 ERROR：Zhou 50 / M8 / 300 秒 / seed42 的 attempt_001 在 57.74 秒时因 live.json 替换 WinError 5 被控制器终止，无解或审计输出。详见 e1b_20261013_v1/infrastructure_incident_20261014.md；全部原始文件保留。当前队列继续完成其余首次尝试，不并行补跑。待 E1b 结束核对 NEEDS_REVIEW，保存首次失败门槛，再预检、追加同冻结配置 attempt_002 和恢复审计；原门槛只看首次尝试，需显式、有证据的基础设施复核才能继续 E2，不能手工简单改 ready=true。主统计保留首次失败，补跑仅单列恢复及敏感性分析。
 
 此后禁止 Get-Content 读取运行中 live.json；用文件 LastWriteTimeUtc 及静态 launch.json/PID 检查活性。必须读取的 progress/pipeline JSON 可先点导入 tools/data/read_thesis_json_shared.ps1，再用 Read-ThesisJsonShared，读完即关闭句柄再解析。显式共享删除的替换验证仍失败（沙箱及正常用户均如此），所以该函数不是已验证的消冲突保证。未来恢复控制器应增加有界写入重试并独立登记，冻结 driver.py/source 不改。
