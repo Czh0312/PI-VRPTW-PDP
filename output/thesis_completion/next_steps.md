@@ -2,6 +2,14 @@
 
 整体未完成。先读计划、README、最新 progress.json/stage_gate.json/pipeline.json，检查进程后再行动。仅本地 main 提交，不推送；保留无关用户文件；项目 Python 使用 tools/run.ps1，精确工作先预检。冻结文件不可改写，所有首次失败保留。
 
+## 最新接续：2026-10-14 20:00
+
+E2 19:33 完成 144/144，144 审计有效，23 OPTIMAL、120 FEASIBLE、1 TIME_LIMIT 有有效解，gate ready 且无证书矛盾。已用当前工作区工具重建全部表/图，新增 report_thesis_ablation.py 复核同案例四组所有物理/经济/日历输入内容哈希、固定分批/池及 144 个独立双周期审计；final_audits 与 ablation_review.json 绑定证据。初次集成漏将外部距离/时长矩阵路径转换为内容哈希而误报不匹配；修正并增加回归后通过，未改冻结输入。报告/分析选测 14 通过、0 失败、0 跳过，WithoutGurobi 未检查 Gurobi，非新增精确验证。费用分量图修复长标题裁切及遮挡，已目视核对。
+
+E2 结论见 findings.md：小例 23/24 证明最优，tight_pool_1/D 上下界 117/88.5；中大例 D 对 A 9 改善、21 恶化，A→B 全 30 对恶化。五种条件比较共 94 条 incumbent 逆序，无证书冲突。Zhou 四个规模同源，LaDe 20/30 AOI 保守归为同一来源块，映射另存，种子不当独立样本。完整 Zhou 的 D 缩池仅 3.8，却增加拆批、运输和占用费用；报告明确算法未稳定实现更宽允许域的潜力，不追加事后热启动覆盖首次数据。
+
+formal_continuation_20261014_v1 父 PID 25904 仍运行，19:33 自动转入 E4，19:56 快照 12/21 均审计有效（2 最优）；随后 E5 135 次。每次重新查最新进度/PID，不重复启动。E4 完成后用当前 analyze_thesis_stages 和 analyze_thesis_mechanisms --stage e4，加 --reference-evidence config/cases/thesis_completion/restricted_v2/reference_evidence.json --pool-reference config/cases/thesis_completion/restricted_v2/unchanged_schedule_pool_reference.json，重建固定日程/重优化对比、整数阈值、按预登记种子选择的连续双周期时间线，再写 findings。E5 完成后生成匹配重计价/重优化与来源组结论。最终跨阶段验收、论文可用汇总及未接入论文仓库的同步清单尚待完成；全部验收前保留自动接续。
+
 ## 当前串行队列
 
 1. pipeline_20261013_v1：E2 原输入精确诊断 6 次、E3 正式 54 次均已完成。

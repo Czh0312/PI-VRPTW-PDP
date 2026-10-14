@@ -24,18 +24,21 @@ def e2(study, rows):
     for index, case in enumerate(cases):
         grouped = {g: [r for r in rows if r['case'] == case and r.get('group') == g] for g in 'ABCD'}
         keys = sorted({key for members in grouped.values() for r in members if r['valid'] for key in r['cost_components']})
-        fig, (ax, pool_ax) = plt.subplots(1, 2, figsize=(10, 4), constrained_layout=True)
+        fig, (ax, pool_ax) = plt.subplots(1, 2, figsize=(11, 5.2), constrained_layout=True)
+        fig.suptitle(case, fontsize=11)
         bottoms = [0.]*4
         valid = [[r for r in grouped[g] if r['valid']] for g in 'ABCD']
-        for key in keys:
+        for color_index, key in enumerate(keys):
             heights = [statistics.mean(r['cost_components'][key] for r in rs) if rs else 0 for rs in valid]
-            ax.bar(list('ABCD'), heights, bottom=bottoms, label=key)
+            ax.bar(list('ABCD'), heights, bottom=bottoms, label=key,
+                   color=plt.get_cmap('tab20')(color_index))
             bottoms = [a+b for a, b in zip(bottoms, heights)]
         for i, rs in enumerate(valid):
             ax.text(i, bottoms[i], f'{len(rs)}/{len(grouped["ABCD"[i]])}', ha='center', va='bottom', fontsize=8)
-        ax.set(title=f'{case}: audited cost (valid/planned)', ylabel='Synthetic cost units')
+        ax.set(title='Audited cost (valid/planned)', ylabel='Synthetic cost units')
+        ax.margins(y=.12)
         if keys:
-            ax.legend(fontsize=6, ncol=2)
+            ax.legend(fontsize=7, ncol=3, loc='upper center', bbox_to_anchor=(.5, -.1))
         for i, rs in enumerate(valid):
             if rs:
                 pool_ax.bar(i, statistics.mean(r['pool'] for r in rs))
