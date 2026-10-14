@@ -5,6 +5,9 @@ from pathlib import Path
 from experiments.analysis.analyze_thesis_mechanisms import e3, e4
 from experiments.analysis.analyze_thesis_m2 import reference_error, assignment_diagnostics
 from experiments.runs.run_thesis_completion import write
+from experiments.analysis.thesis_pool_reference import threshold_with_reference, fixed_schedule_at_pool
+from types import SimpleNamespace
+import pytest
 
 
 def rows(path):
@@ -54,6 +57,33 @@ def test_m2_limited_reference_is_not_an_optimum():
     assert reference_error(candidate, reference)['absolute_optimal_error'] == 1.
     candidate.update(valid=False, objective=None)
     assert reference_error(candidate, reference)['relative_optimal_error'] is None
+
+
+def test_reference_witness_does_not_turn_failed_formal_calls_into_success():
+    data = [dict(fixed_pool=2, valid=False, proven_infeasible=False)]
+    result = threshold_with_reference(2, data, 2)
+    assert result['formal_smallest_feasible'] is None
+    assert result['proven_threshold'] == 2
+    assert threshold_with_reference(1, data, 2)['proven_threshold'] is None
+    data[0]['proven_infeasible'] = True
+    with pytest.raises(ValueError, match='contradicts'):
+        threshold_with_reference(2, data, 2)
+
+
+def test_fixed_schedule_projection_changes_only_pool_and_cost_audit_metadata():
+    policy = dict(container_pool_size=2, cleaning_duration=5, cycle_end=100)
+    source = dict(operating_policy=policy, container_pool_size=2, model=6,
+                  info={'objective': 100}, total_distance=20, e1_trips=[{'departure': 10}])
+    target = {**policy, 'container_pool_size': 1}
+    fixed = SimpleNamespace(model_number=4, operating_policy=SimpleNamespace(as_dict=lambda: target))
+    copied = fixed_schedule_at_pool(source, fixed, 1)
+    assert source['operating_policy']['container_pool_size'] == 2
+    assert source['info']['objective'] == 100
+    assert copied['operating_policy']['container_pool_size'] == 1
+    assert copied['e1_trips'] == source['e1_trips']
+    target['cleaning_duration'] = 4
+    with pytest.raises(ValueError, match='other than pool'):
+        fixed_schedule_at_pool(source, fixed, 1)
 
 
 def test_m2_projection_and_partition_diagnostics_are_distinct(tmp_path):

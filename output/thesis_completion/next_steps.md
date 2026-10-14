@@ -68,3 +68,13 @@ E1b 首次 270/270 完成，269 FEASIBLE、1 ERROR；原 formal_pipeline_2026101
 已新增 experiments/analysis/thesis_pool_timeline.py，并接入当前 analyze_thesis_mechanisms --stage e4。按既定最小可行 N、最小有效种子选择首次尝试；验证 completion 与 result/audit 哈希绑定，从独立审计的一周期事件连续重放两周期，核对逐事件状态和期末全清洁库存，不在周期边界重置库存。同一时刻先释放后领箱由因果重放处理，CSV 保留全部事件，图画该时刻最后状态及清洗/释放时点。无有效首次解时明确没有时间线。
 
 选测 tests/test_thesis_pool_timeline.py 与 tests/test_thesis_mechanism_analysis.py：7 通过、0 失败、0 跳过，一个第三方弃用警告；使用 WithoutGurobi，未检查 Gurobi，不计为精确验证。用已结束 E2 reference ordinary_0 的不可变解生成 output/tmp/e4_timeline_validation 参考预览（REFERENCE ONLY），PNG 已目视检查，不算 E4 正式执行。正式 E4 仍未运行；后续需完成固定日程重计费用叠加、阈值证据和最终 findings。
+
+### 2026-10-14 15:00 固定日程参考复核
+
+E2 最新 18/144 终态均审计有效，父进程 25904 存活、队列 stderr 空；未重复启动或修改冻结实验。E4/E5 仍排队。
+
+新增 thesis_pool_reference.py，当前机制分析入口支持 --reference-evidence config/cases/thesis_completion/restricted_v2/reference_evidence.json --pool-reference config/cases/thesis_completion/restricted_v2/unchanged_schedule_pool_reference.json（与 --stage e4 一起使用）。检查参考阶段冻结哈希、completion 与 result/audit 绑定，重新独立审计原解；再于 E4 冻结配置各 N 点，仅改变内存副本的池规模，保持路线/事件时刻/日历/清洗/截点与分批，重放物理箱流并在可行点重计成本。初次集成发现副本策略元数据未随 N 更新导致 POLICY_MISMATCH（没有求解调用），已添加只允许池字段变化的检查与回归后修正；原始参考文件没有改写。
+
+9 个参考点复核完成：6 可行、3 原日程不可行。三个中大例下界=参考可行上界 48/78/201，阈值证据来自既定同时领箱必要条件加独立参考见证；不是正式调用成功。三个小例仍各有一个更小未决整数，等待正式精确结果。pool_fixed_schedule_comparison.csv、pool_thresholds_with_reference.csv、reference_audits 和参考叠加图已生成，formal_terminal=0/21，solver_called=false；不得把参考复核标为 E4 完成。正式结果后重建同命令，并完成时间线与 findings。
+
+tests/test_thesis_mechanism_analysis.py 与 tests/test_thesis_pool_timeline.py 9 通过、0 失败、0 跳过，一个第三方弃用警告；WithoutGurobi，未检查 Gurobi。首次真实集成失败和修正均留在本记录；成功复核来源哈希记录 pool_reference_analysis.json。参考叠加图已检查布局。

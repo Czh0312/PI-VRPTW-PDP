@@ -203,11 +203,18 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--study', required=True)
     parser.add_argument('--stage', choices=['e2', 'e3', 'e4', 'e5'], required=True)
+    parser.add_argument('--reference-evidence', help='E4 preregistered reference_evidence.json')
+    parser.add_argument('--pool-reference', help='E4 unchanged_schedule_pool_reference.json')
     args = parser.parse_args()
     study = Path(args.study).resolve()
     manifest, rows = primary_rows(study)
     (study/'figures').mkdir(exist_ok=True)
     globals()[args.stage](study, rows)
+    if args.reference_evidence or args.pool_reference:
+        if args.stage != 'e4' or not (args.reference_evidence and args.pool_reference):
+            parser.error('E4 reference overlay requires both reference arguments')
+        from experiments.analysis.thesis_pool_reference import reference_overlay
+        reference_overlay(study, rows, args.reference_evidence, args.pool_reference)
     write(study/'mechanism_analysis.json', dict(stage=args.stage, planned=len(rows),
         terminal=sum(r['status'] not in ('NOT_RUN', 'RUNNING') for r in rows),
         limitations=['Conditional means use audited feasible runs only.', 'Finite call budgets; no empirical price or universal dominance claim.']))
