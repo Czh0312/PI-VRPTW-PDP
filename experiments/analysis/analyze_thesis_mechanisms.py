@@ -156,6 +156,8 @@ def e4(study, rows):
 
 def e5(study, rows):
     from models.cost.joint_batch import JointCostProfile
+    from experiments.analysis.thesis_price_matching import validate_price_design
+    table(study/'tables/price_input_matching.csv', validate_price_design(study, rows))
     baselines = {(r['base_case'], r['model'], r['seed']): r for r in rows if r['price_factor'] == 1. and r['valid']}
     output = []
     for row in rows:
@@ -193,7 +195,8 @@ def e5(study, rows):
             line, = axes[0].plot(x, optimized, marker='o', label=f'M{model} reoptimized')
             axes[0].plot(x, replayed, ls='--', color=line.get_color(), label=f'M{model} fixed-schedule repricing')
             axes[1].plot(x, pools, marker='o', label=f'M{model}')
-        axes[0].set(title=case, xlabel='Pool price multiplier (synthetic scenario)', ylabel='Mean cost, paired valid runs')
+        fig.suptitle(case, fontsize=10)
+        axes[0].set(xlabel='Pool price multiplier (synthetic scenario)', ylabel='Mean cost, paired valid runs')
         axes[1].set(xlabel='Pool price multiplier', ylabel='Mean physical pool N, paired valid runs')
         axes[0].legend(fontsize=7)
         axes[1].legend(fontsize=7)

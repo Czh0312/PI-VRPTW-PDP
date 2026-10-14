@@ -2,7 +2,13 @@
 
 整体未完成。先读计划、README、最新 progress.json/stage_gate.json/pipeline.json，检查进程后再行动。仅本地 main 提交，不推送；保留无关用户文件；项目 Python 使用 tools/run.ps1，精确工作先预检。冻结文件不可改写，所有首次失败保留。
 
-## 最新接续：2026-10-14 20:20
+## 最新接续：2026-10-14 20:33
+
+E5 正常运行，未重复启动。新增离线 thesis_price_matching.py 并接入 analyze_thesis_mechanisms --stage e5：按实例/模型/种子核对三价格点齐全且无重复，物理输入文件按内容哈希匹配，固定分批/池等限制不剔除，K 域、迭代上限、预算/方法/版本相同；经济参数除箱池费率与说明文字外相同，费率必须等于基准的 0.5/1/2 倍。不同模型之间不假定时间域相同。冻结清单实际集成 135 个任务、45 个匹配三元组全部通过，price_design_review.json 明确 experiment_complete=false、solver_called=false；这不是 E5 结果验收。
+
+tests/test_thesis_price_matching.py 和 tests/test_thesis_mechanism_analysis.py 共 15 通过、0 失败、0 跳过，一个第三方弃用警告；WithoutGurobi 未检查 Gurobi。新增回归覆盖矩阵/物理政策/池约束/其他费率/预算/K 域混杂，以及缺失基准和重复点。价格图标题改为整图标题以容纳长实例名，最终图仍待 E5 完成后生成与目视复核。后续按下述 E5 和总验收清单继续，冻结求解源码/输入保持不变。
+
+## 前次接续：2026-10-14 20:20
 
 E4 于 20:10 完成 21/21 首次调用，6 OPTIMAL、15 FEASIBLE，gate ready 且无失败/证书矛盾。当前工作区三个离线入口已重建全部统计、固定日程叠加、六份预登记种子双周期时间线和 findings.md；新增 report_thesis_pool.py 验证固定分批/N、结果哈希并重新独立审计全部 21 份解，final_audits 与 pool_final_review.json 绑定证据。九点原日程参考六可行三不可行；正式重优化全部有效。三个小例阈值分别 1/2/1，中大例为 Q=48/78/201，必要下界与正式见证相等，无更小未决整数；中大例费用仍未知最优，仅两个来源组，不能画连续缩池收益曲线。代表性图已检查。该轮离线集成复核 WithoutGurobi，不计作新增精确求解器验证。
 
