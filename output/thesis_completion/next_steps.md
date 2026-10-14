@@ -60,3 +60,11 @@ E1b 首次 270/270 完成，269 FEASIBLE、1 ERROR；原 formal_pipeline_2026101
 新增 report_thesis_budgets.py，已重建首次尝试主表、配对/四实例族预算响应图和 findings.md；900 对 60 秒费用相对改善均值 M6/M7/M8 为 6.31%/6.22%/5.81%，保留长预算恶化及一侧失败；补跑的受影响种子配对单列 budget_sensitivity.csv，不替换主表。图已目视检查。24 项恢复/驱动选测通过、无失败/跳过；该组选测 WithoutGurobi，另行正常身份预检成功。未宣称完整测试套件。
 
 复核原进程退出、恢复 ready 且 E2/E4/E5 所有登记前置门槛通过后，14:16 启动 formal_continuation_20261014_v1（父 PID 25904，仅为启动记录），顺序 E2 144 → E4 21 → E5 135，并发 2，预算和 25 小时，仍使用冻结 4ed30cd11 源码/输入。新队列 registration 绑定恢复 review 哈希；旧队列 NEEDS_REVIEW 保留。先读新队列 pipeline 和 E2 progress，勿重复启动；不要读取运行中 live.json 内容。完成每阶段后用当前分析工具生成匹配表、机制图/独立复核和论文结论；E4 按 analysis_protocol 选时间线，E5 区分重计价/重优化。全计划和自动接续继续，未完成前不停止。
+
+### 2026-10-14 14:30 离线图表准备
+
+新队列仍正常运行 E2（最近快照 4/144 均审计有效，父 PID 25904，两个活动 launcher PID 17172/15884；PID 仅定位，接续须重新检查）。未重复启动、未改冻结源码或正式输入。
+
+已新增 experiments/analysis/thesis_pool_timeline.py，并接入当前 analyze_thesis_mechanisms --stage e4。按既定最小可行 N、最小有效种子选择首次尝试；验证 completion 与 result/audit 哈希绑定，从独立审计的一周期事件连续重放两周期，核对逐事件状态和期末全清洁库存，不在周期边界重置库存。同一时刻先释放后领箱由因果重放处理，CSV 保留全部事件，图画该时刻最后状态及清洗/释放时点。无有效首次解时明确没有时间线。
+
+选测 tests/test_thesis_pool_timeline.py 与 tests/test_thesis_mechanism_analysis.py：7 通过、0 失败、0 跳过，一个第三方弃用警告；使用 WithoutGurobi，未检查 Gurobi，不计为精确验证。用已结束 E2 reference ordinary_0 的不可变解生成 output/tmp/e4_timeline_validation 参考预览（REFERENCE ONLY），PNG 已目视检查，不算 E4 正式执行。正式 E4 仍未运行；后续需完成固定日程重计费用叠加、阈值证据和最终 findings。

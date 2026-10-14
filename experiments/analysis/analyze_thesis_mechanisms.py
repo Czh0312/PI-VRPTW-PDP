@@ -144,6 +144,11 @@ def e4(study, rows):
         fig.savefig(study/'figures'/f'e4_pool_{index:02d}.png', dpi=160)
         fig.savefig(study/'figures'/f'e4_pool_{index:02d}.pdf')
         plt.close(fig)
+    # Final timelines require original completed artifacts. Synthetic unit-test
+    # rows and unexecuted designs contain no witness paths.
+    if any(r.get('_path') for r in rows):
+        from experiments.analysis.thesis_pool_timeline import timelines
+        timelines(study, rows)
 
 
 def e5(study, rows):
