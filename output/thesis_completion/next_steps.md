@@ -52,3 +52,11 @@ E1b 172/270 终态中有一条基础设施 ERROR：Zhou 50 / M8 / 300 秒 / seed
 E5 135 次 300 秒合成价格重优化已冻结并排在 E4 之后。必须区别固定日程重计价。
 
 生成的表和图片之后仍需写出论文结论、反例、局限，核对独立双周期审计及证明范围。工作区内未找到论文源码仓库，最终单列待同步项，不伪称已改论文。全部验收完成后才停止 automation 自动接续。
+
+### 2026-10-14 14:18 接续结果
+
+E1b 首次 270/270 完成，269 FEASIBLE、1 ERROR；原 formal_pipeline_20261013_v1 于 14:05 NEEDS_REVIEW 停止，原 stage_gate 未修改。正常身份预检 Python 3.11.3 / Gurobi 11.0.3 / 整数目标 1 成功。首次启动恢复脚本的模块路径错误已记录 startup_failure.json（未产生求解 attempt）；改由 tools/run.ps1 python -c runpy 从根目录执行同一不可变快照后，attempt_002 于 14:15 完成且独立双周期审计通过。恢复登记/失败哈希/控制器快照/结果/复核在 infrastructure_recovery/。
+
+新增 report_thesis_budgets.py，已重建首次尝试主表、配对/四实例族预算响应图和 findings.md；900 对 60 秒费用相对改善均值 M6/M7/M8 为 6.31%/6.22%/5.81%，保留长预算恶化及一侧失败；补跑的受影响种子配对单列 budget_sensitivity.csv，不替换主表。图已目视检查。24 项恢复/驱动选测通过、无失败/跳过；该组选测 WithoutGurobi，另行正常身份预检成功。未宣称完整测试套件。
+
+复核原进程退出、恢复 ready 且 E2/E4/E5 所有登记前置门槛通过后，14:16 启动 formal_continuation_20261014_v1（父 PID 25904，仅为启动记录），顺序 E2 144 → E4 21 → E5 135，并发 2，预算和 25 小时，仍使用冻结 4ed30cd11 源码/输入。新队列 registration 绑定恢复 review 哈希；旧队列 NEEDS_REVIEW 保留。先读新队列 pipeline 和 E2 progress，勿重复启动；不要读取运行中 live.json 内容。完成每阶段后用当前分析工具生成匹配表、机制图/独立复核和论文结论；E4 按 analysis_protocol 选时间线，E5 区分重计价/重优化。全计划和自动接续继续，未完成前不停止。
