@@ -1,0 +1,71 @@
+# 正式27例八模型实验
+
+状态：IN_PROGRESS；0/1296 次有终态，0 次独立双周期审计可行，0 次已证最优。
+
+数据修订 2；清单 SHA-256：`6a33b3c9f5766221af321841bfb66f2eb5a1cce963884055542151c072539e3a`。
+源码提交 `c1d04cee90a501d98ffedec2d7f7383e930d8d95`；实际执行字节见 source_current.zip 和 manifest.json。
+
+精确每例 300 秒、种子42；ALNS每种子 30 秒，种子 [42, 43, 44, 45, 46]，迭代上限10^9；并发 2、精确单线程。
+登记调用预算 27 小时；外层宽限 60 秒，不扩展内部搜索预算。所有计划首次尝试均保留在分母，失败重试另列。
+
+| 规模 | 模型 | 方法 | 可行/计划 | 最优 | 原生目标均值（仅可行） |
+| --- | ---: | --- | ---: | ---: | ---: |
+| large | M1 | alns | 0/45 | 0 | — |
+| large | M1 | exact | 0/9 | 0 | — |
+| large | M2 | alns | 0/45 | 0 | — |
+| large | M2 | exact | 0/9 | 0 | — |
+| large | M3 | alns | 0/45 | 0 | — |
+| large | M3 | exact | 0/9 | 0 | — |
+| large | M4 | alns | 0/45 | 0 | — |
+| large | M4 | exact | 0/9 | 0 | — |
+| large | M5 | alns | 0/45 | 0 | — |
+| large | M5 | exact | 0/9 | 0 | — |
+| large | M6 | alns | 0/45 | 0 | — |
+| large | M6 | exact | 0/9 | 0 | — |
+| large | M7 | alns | 0/45 | 0 | — |
+| large | M7 | exact | 0/9 | 0 | — |
+| large | M8 | alns | 0/45 | 0 | — |
+| large | M8 | exact | 0/9 | 0 | — |
+| medium | M1 | alns | 0/45 | 0 | — |
+| medium | M1 | exact | 0/9 | 0 | — |
+| medium | M2 | alns | 0/45 | 0 | — |
+| medium | M2 | exact | 0/9 | 0 | — |
+| medium | M3 | alns | 0/45 | 0 | — |
+| medium | M3 | exact | 0/9 | 0 | — |
+| medium | M4 | alns | 0/45 | 0 | — |
+| medium | M4 | exact | 0/9 | 0 | — |
+| medium | M5 | alns | 0/45 | 0 | — |
+| medium | M5 | exact | 0/9 | 0 | — |
+| medium | M6 | alns | 0/45 | 0 | — |
+| medium | M6 | exact | 0/9 | 0 | — |
+| medium | M7 | alns | 0/45 | 0 | — |
+| medium | M7 | exact | 0/9 | 0 | — |
+| medium | M8 | alns | 0/45 | 0 | — |
+| medium | M8 | exact | 0/9 | 0 | — |
+| small | M1 | alns | 0/45 | 0 | — |
+| small | M1 | exact | 0/9 | 0 | — |
+| small | M2 | alns | 0/45 | 0 | — |
+| small | M2 | exact | 0/9 | 0 | — |
+| small | M3 | alns | 0/45 | 0 | — |
+| small | M3 | exact | 0/9 | 0 | — |
+| small | M4 | alns | 0/45 | 0 | — |
+| small | M4 | exact | 0/9 | 0 | — |
+| small | M5 | alns | 0/45 | 0 | — |
+| small | M5 | exact | 0/9 | 0 | — |
+| small | M6 | alns | 0/45 | 0 | — |
+| small | M6 | exact | 0/9 | 0 | — |
+| small | M7 | alns | 0/45 | 0 | — |
+| small | M7 | exact | 0/9 | 0 | — |
+| small | M8 | alns | 0/45 | 0 | — |
+| small | M8 | exact | 0/9 | 0 | — |
+
+逐种子、逐例均值/最好/最差/标准差、同源块均值及块平衡均值、模型配对、精确参照误差见 tables/。
+均值仅对可行结果计算；可行率以全部计划调用为分母。各规模分别报告，种子不计为独立算例。
+M1–M5原生目标为距离，M6–M8为合成成本。M3–M8另按共同费用评价，M1/M2无一次性包装单价，不报告可比总费用。
+M5/M6目标和批次作业规则均不同，其差值不能单独归因为增加决策自由度。
+仅精确已证最优参照计算最优误差；限时可行参照只报告费用差。未找到解不等于不可行。
+27例来自14个来源块，中大规模含嵌套；不作独立同分布总体推断。可行性见证未作为算法初始解。
+完整输入、环境、命令、K域、时间精度、上下界和原始日志随实验保存。
+
+验收状态：待完成或待复核。
+执行/审计异常：0；最优参照矛盾：0。
