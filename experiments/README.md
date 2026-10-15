@@ -9,6 +9,7 @@
 
 | 任务 | 运行模块 | 结果 / 说明 |
 | --- | --- | --- |
+| 正式27例八模型、精确与多种子ALNS | `experiments.runs.run_formal_benchmark27` | [冻结、恢复与结果口径](../docs/benchmark27_remote_run.md) |
 | 单批四模型机制与经济对照 | `experiments.runs.run_single_batch_comparison` | [四模型说明](../docs/single_batch_comparison.md) |
 | M1–M4 全规模算法比较 | `experiments.runs.run_single_batch_benchmark` | [预算与结果](../output/experiments/m1_m4_comparison_20261004/m1_m4_solver_comparison_20261004.md) |
 | 固定批次与池规模扫描 | `experiments.runs.run_multibatch_cycle` | [使用说明](../docs/static_multibatch_implementation.md) |
