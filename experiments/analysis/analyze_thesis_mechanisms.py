@@ -156,8 +156,8 @@ def e4(study, rows):
 
 def e5(study, rows):
     from models.cost.joint_batch import JointCostProfile
-    from experiments.analysis.thesis_price_matching import validate_price_design
-    table(study/'tables/price_input_matching.csv', validate_price_design(study, rows))
+    from experiments.analysis.thesis_price_matching import validate_price_results
+    table(study/'tables/price_input_matching.csv', validate_price_results(study, rows))
     baselines = {(r['base_case'], r['model'], r['seed']): r for r in rows if r['price_factor'] == 1. and r['valid']}
     output = []
     for row in rows:

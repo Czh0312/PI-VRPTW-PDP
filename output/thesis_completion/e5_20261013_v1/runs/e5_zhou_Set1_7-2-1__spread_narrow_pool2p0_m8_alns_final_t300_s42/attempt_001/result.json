@@ -1,0 +1,2438 @@
+{
+  "schema_version": 2,
+  "policy_version": "multi_batch_cutoff_v1",
+  "time_unit": "ticks",
+  "model": 8,
+  "packaging": "reusable",
+  "time_tick_seconds": 1,
+  "objective_mode": "cost",
+  "operating_policy": {
+    "cycle_start": 28800,
+    "cycle_end": 75600,
+    "batches": [
+      {
+        "id": "b1",
+        "start": 28800,
+        "cutoff": 65130,
+        "end": 75600
+      }
+    ],
+    "container_pool_size": 12,
+    "cleaning_duration": 900,
+    "e2_max_trips_per_vehicle": 12,
+    "time_tick_seconds": 1,
+    "e1_load_time": 120,
+    "e2_dispatch_prep_time": 60,
+    "e2_return_unload_time": 60,
+    "depot_return_unload_time": 60,
+    "e1_turnaround_time": 0,
+    "e2_turnaround_time": 60,
+    "policy_version": "multi_batch_cutoff_v1",
+    "terminal_policy": "all_clean_at_depot",
+    "time_unit": "ticks",
+    "pickup_policy": "cutoff_all_available",
+    "batch_overlap": false,
+    "allow_transfers": false,
+    "input_time_unit": "minutes",
+    "objective_mode": "distance"
+  },
+  "solver": "alns",
+  "batches": [
+    {
+      "id": "b1",
+      "start": 28800,
+      "cutoff": 65130,
+      "end": 75600,
+      "container_demand": 12
+    }
+  ],
+  "e1_trips": [
+    {
+      "trip_id": "e1_b1_1",
+      "batch_id": "b1",
+      "vehicle_id": 1,
+      "departure": 28920,
+      "events": [
+        {
+          "kind": "d",
+          "site_id": "S0",
+          "start": 29578,
+          "quantity": 5
+        },
+        {
+          "kind": "d",
+          "site_id": "S1",
+          "start": 30824,
+          "quantity": 7
+        },
+        {
+          "kind": "p",
+          "site_id": "S1",
+          "start": 65130,
+          "quantity": 7
+        },
+        {
+          "kind": "p",
+          "site_id": "S0",
+          "start": 66376,
+          "quantity": 5
+        }
+      ],
+      "return_complete": 67274
+    }
+  ],
+  "e2_trips": [
+    {
+      "trip_id": "e2_S0_0_0",
+      "satellite_id": "S0",
+      "vehicle_id": 0,
+      "trip_index": 0,
+      "departure": 34400,
+      "return_complete": 65130,
+      "events": [
+        {
+          "order_id": "C1_order",
+          "kind": "d",
+          "start": 35160,
+          "quantity": 2
+        },
+        {
+          "order_id": "C1_order",
+          "kind": "p",
+          "start": 38280,
+          "quantity": 2
+        },
+        {
+          "order_id": "C2_order",
+          "kind": "d",
+          "start": 48060,
+          "quantity": 2
+        },
+        {
+          "order_id": "C2_order",
+          "kind": "p",
+          "start": 50580,
+          "quantity": 2
+        },
+        {
+          "order_id": "C4_order",
+          "kind": "d",
+          "start": 60180,
+          "quantity": 1
+        },
+        {
+          "order_id": "C4_order",
+          "kind": "p",
+          "start": 64200,
+          "quantity": 1
+        }
+      ]
+    },
+    {
+      "trip_id": "e2_S1_0_0",
+      "satellite_id": "S1",
+      "vehicle_id": 0,
+      "trip_index": 0,
+      "departure": 32803,
+      "return_complete": 47959,
+      "events": [
+        {
+          "order_id": "C6_order",
+          "kind": "d",
+          "start": 33480,
+          "quantity": 1
+        },
+        {
+          "order_id": "C6_order",
+          "kind": "p",
+          "start": 37500,
+          "quantity": 1
+        },
+        {
+          "order_id": "C0_order",
+          "kind": "d",
+          "start": 41460,
+          "quantity": 2
+        },
+        {
+          "order_id": "C0_order",
+          "kind": "p",
+          "start": 46680,
+          "quantity": 2
+        }
+      ]
+    },
+    {
+      "trip_id": "e2_S1_0_1",
+      "satellite_id": "S1",
+      "vehicle_id": 0,
+      "trip_index": 1,
+      "departure": 50953,
+      "return_complete": 63637,
+      "events": [
+        {
+          "order_id": "C5_order",
+          "kind": "d",
+          "start": 52080,
+          "quantity": 2
+        },
+        {
+          "order_id": "C5_order",
+          "kind": "p",
+          "start": 57300,
+          "quantity": 2
+        },
+        {
+          "order_id": "C3_order",
+          "kind": "d",
+          "start": 60180,
+          "quantity": 2
+        },
+        {
+          "order_id": "C3_order",
+          "kind": "p",
+          "start": 62100,
+          "quantity": 2
+        }
+      ]
+    }
+  ],
+  "info": {
+    "status": "FEASIBLE",
+    "proven_optimal": false,
+    "proven_infeasible": false,
+    "objective": 631.2556702352136,
+    "best_bound": null,
+    "mip_gap": null,
+    "runtime": 300.15383050002856,
+    "iterations": 34198,
+    "seed": 42,
+    "accepted_moves": 9795,
+    "restarts": 218,
+    "operator_attempts": {
+      "destroy_random_batch": 752,
+      "destroy_related_batch": 713,
+      "close_batch": 705,
+      "split_batch": 710,
+      "destroy_routes": 5331,
+      "relocate": 1063,
+      "pair": 1204,
+      "split_merge": 965,
+      "vehicle": 4765,
+      "wait": 4177,
+      "e1_delivery": 2744,
+      "e1_pickup": 4202,
+      "reverse": 743,
+      "shift_cutoff": 1794,
+      "align_cutoff": 1316,
+      "shift_boundary": 1197,
+      "align_boundary": 1091,
+      "redistribute_lengths": 726
+    },
+    "operator_improvements": {
+      "destroy_random_batch": 1,
+      "destroy_related_batch": 0,
+      "close_batch": 0,
+      "split_batch": 1,
+      "destroy_routes": 20,
+      "relocate": 0,
+      "pair": 1,
+      "split_merge": 0,
+      "vehicle": 0,
+      "wait": 7,
+      "e1_delivery": 10,
+      "e1_pickup": 5,
+      "reverse": 0,
+      "shift_cutoff": 5,
+      "align_cutoff": 3,
+      "shift_boundary": 0,
+      "align_boundary": 0,
+      "redistribute_lengths": 0
+    },
+    "operator_weights": {
+      "destroy_random_batch": 0.10000000000000002,
+      "destroy_related_batch": 0.10000000000000002,
+      "close_batch": 0.10000000000000002,
+      "split_batch": 0.1,
+      "destroy_routes": 0.5865230071510945,
+      "relocate": 0.10000000000000002,
+      "pair": 0.1,
+      "split_merge": 0.10000000000000002,
+      "vehicle": 0.800413869229999,
+      "wait": 0.6788616376004113,
+      "e1_delivery": 0.2913081662518942,
+      "e1_pickup": 0.6728220694499983,
+      "reverse": 0.1,
+      "shift_cutoff": 0.1,
+      "align_cutoff": 0.1
+    },
+    "cache_hits": 23679,
+    "evaluations": 33304,
+    "cutoff_polish_calls": 1,
+    "cutoff_polish_improvements": 0,
+    "cutoff_polish_evaluations": 14,
+    "cutoff_polish_runtime": 0.18391890003113076,
+    "cutoff_polish_budget": 9.999955586666086,
+    "encountered_violations": [
+      "E1_DELIVERY_DEADLINE",
+      "E1_RETURN_DEADLINE",
+      "E1_TERMINAL_VEHICLE",
+      "E2_CAPACITY",
+      "E2_TIME_WINDOW",
+      "TERMINAL_DIRTY",
+      "TERMINAL_OUTSTANDING",
+      "TIMING_CYCLE"
+    ],
+    "history": [
+      {
+        "iteration": 0,
+        "objective": 867.5353740195156,
+        "time": 0.014705399982631207
+      },
+      {
+        "iteration": 6,
+        "objective": 843.794770872564,
+        "time": 0.03172269999049604
+      },
+      {
+        "iteration": 28,
+        "objective": 808.7247862338621,
+        "time": 0.06037659995490685
+      },
+      {
+        "iteration": 29,
+        "objective": 785.4960421825226,
+        "time": 0.06867739994777367
+      },
+      {
+        "iteration": 37,
+        "objective": 693.2339910897837,
+        "time": 0.08783639996545389
+      },
+      {
+        "iteration": 44,
+        "objective": 692.0887010042684,
+        "time": 0.10124079999513924
+      },
+      {
+        "iteration": 80,
+        "objective": 644.2930221530255,
+        "time": 0.1492244999972172
+      },
+      {
+        "iteration": 204,
+        "objective": 634.5680221530256,
+        "time": 1.5991937999497168
+      },
+      {
+        "iteration": 1098,
+        "objective": 631.2556702352136,
+        "time": 3.877396099967882
+      }
+    ],
+    "optimized_cutoffs": true,
+    "initial_incumbent_cost": null,
+    "decoder_scope": "earliest_DAG_events_plus_explicit_waits_and_latest_departure_before_first_service",
+    "time_budget": 300,
+    "iteration_budget": 1000000000,
+    "budget_strategy": "recycle",
+    "stop_reason": "TIME_LIMIT",
+    "rounds": 1,
+    "restart_semantics": "incumbent_restart_not_state_continuation",
+    "seed_derivation": "first=seed; revisit=(seed+104729*(visit-1)+1009*K)%2147483647",
+    "history_scope": "selected_batch_count_only",
+    "anytime_scope": "global_all_counts",
+    "anytime_granularity": "audited_candidate_return",
+    "batch_count_candidates": [
+      1,
+      2,
+      3
+    ],
+    "selected_count_proven_optimal": false,
+    "proof_aggregation": null,
+    "proof_scope": null,
+    "audit_failure_count": 0,
+    "certificate_error_count": 0,
+    "calendar_evaluations": 2304
+  },
+  "strategy": "flexible_batch_cost_v1",
+  "model_module": "models.routing.model_8.alns",
+  "batch_mode": "flexible_cycle",
+  "order_batch_assignment": {
+    "C0_order": "b1",
+    "C1_order": "b1",
+    "C2_order": "b1",
+    "C3_order": "b1",
+    "C4_order": "b1",
+    "C5_order": "b1",
+    "C6_order": "b1"
+  },
+  "container_pool_size": 12,
+  "delivery_batch_activation": {
+    "b1": true
+  },
+  "delivery_batch_count": 1,
+  "candidate_schedule": [
+    {
+      "id": "b1",
+      "start": 28800,
+      "cutoff": 52200,
+      "end": 75600
+    }
+  ],
+  "batch_cutoffs": {
+    "b1": 65130
+  },
+  "cutoff_mode": "optimized",
+  "shared_cutoff": false,
+  "cutoff_bounds": {
+    "b1": [
+      28860,
+      75540
+    ]
+  },
+  "economic_profile_hash": "be2f3a634eda252bdea329e0dc57a6b9be96ef3f4060d20243b98c874d1b0584",
+  "evidence_hash": null,
+  "total_distance": 319.2156702352137,
+  "cost": {
+    "total": 631.2556702352136,
+    "components": {
+      "container_pool": 120.0,
+      "e1_distance": 114.88454801718143,
+      "e1_work": 64.12333333333333,
+      "e1_vehicles": 10,
+      "e1_trips": 1,
+      "e2_distance": 204.33112221803228,
+      "e2_work": 97.91666666666667,
+      "e2_vehicles": 10,
+      "e2_trips": 3,
+      "cleaning": 2.4000000000000004,
+      "tracking": 1.2000000000000002,
+      "container_wear": 2.4
+    },
+    "currency": "synthetic_units",
+    "initial_pool_investment": 120,
+    "cost_basis": "disjoint_distance_time_fixed",
+    "source_type": "synthetic_mechanism",
+    "price_basis": "Artificial unit prices, no claim of market calibration",
+    "evaluation_period": "one 780-minute cycle",
+    "work_time_basis": "occupied_route_minutes",
+    "economic_profile_hash": "be2f3a634eda252bdea329e0dc57a6b9be96ef3f4060d20243b98c874d1b0584",
+    "evidence_hash": null,
+    "limitation": "Occupied route time excludes inter-trip idle payroll; investment is separate."
+  },
+  "cost_components": {
+    "container_pool": 120.0,
+    "e1_distance": 114.88454801718143,
+    "e1_work": 64.12333333333333,
+    "e1_vehicles": 10,
+    "e1_trips": 1,
+    "e2_distance": 204.33112221803228,
+    "e2_work": 97.91666666666667,
+    "e2_vehicles": 10,
+    "e2_trips": 3,
+    "cleaning": 2.4000000000000004,
+    "tracking": 1.2000000000000002,
+    "container_wear": 2.4
+  },
+  "cutoff_snapshots": [
+    {
+      "satellite_id": "S0",
+      "batch_id": "b1",
+      "cutoff": 65130,
+      "quantity": 5,
+      "eligible_events": [
+        "e2_S0_0_0"
+      ],
+      "pickup_trip": "e1_b1_1",
+      "pickup_time": 66376
+    },
+    {
+      "satellite_id": "S1",
+      "batch_id": "b1",
+      "cutoff": 65130,
+      "quantity": 7,
+      "eligible_events": [
+        "e2_S1_0_0",
+        "e2_S1_0_1"
+      ],
+      "pickup_trip": "e1_b1_1",
+      "pickup_time": 65130
+    }
+  ],
+  "depot_releases": [
+    {
+      "trip_id": "e1_b1_1",
+      "quantity": 12,
+      "unload_complete": 67274,
+      "clean_ready": 68174
+    }
+  ],
+  "recovery_rounds": [
+    {
+      "satellite_id": "S0",
+      "batch_id": "b1",
+      "cutoff": 65130,
+      "quantity": 5,
+      "eligible_events": [
+        "e2_S0_0_0"
+      ],
+      "pickup_trip": "e1_b1_1",
+      "pickup_time": 66376
+    },
+    {
+      "satellite_id": "S1",
+      "batch_id": "b1",
+      "cutoff": 65130,
+      "quantity": 7,
+      "eligible_events": [
+        "e2_S1_0_0",
+        "e2_S1_0_1"
+      ],
+      "pickup_trip": "e1_b1_1",
+      "pickup_time": 65130
+    }
+  ],
+  "audit": {
+    "valid": true,
+    "errors": [],
+    "objective": 631.2556702352136,
+    "distances": {
+      "e1": 114.88454801718143,
+      "e2": 204.33112221803228
+    },
+    "cutoff_snapshots": [
+      {
+        "satellite_id": "S0",
+        "batch_id": "b1",
+        "cutoff": 65130,
+        "quantity": 5,
+        "eligible_events": [
+          "e2_S0_0_0"
+        ],
+        "pickup_trip": "e1_b1_1",
+        "pickup_time": 66376
+      },
+      {
+        "satellite_id": "S1",
+        "batch_id": "b1",
+        "cutoff": 65130,
+        "quantity": 7,
+        "eligible_events": [
+          "e2_S1_0_0",
+          "e2_S1_0_1"
+        ],
+        "pickup_trip": "e1_b1_1",
+        "pickup_time": 65130
+      }
+    ],
+    "depot_releases": [
+      {
+        "trip_id": "e1_b1_1",
+        "quantity": 12,
+        "unload_complete": 67274,
+        "clean_ready": 68174
+      }
+    ],
+    "clean_stock": [
+      {
+        "batch_id": "b1",
+        "time": 28800,
+        "available": 12,
+        "demand": 12,
+        "after": 0
+      }
+    ],
+    "minimum_pool_for_schedule": 12,
+    "container_ledger": [
+      {
+        "time": 28800,
+        "from": "clean",
+        "to": "forward",
+        "quantity": 12,
+        "source": "issue:b1",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 12,
+          "customer": 0,
+          "e2_empty": 0,
+          "e1_empty": 0,
+          "dirty": 0,
+          "sat:S0": 0,
+          "sat:S1": 0
+        }
+      },
+      {
+        "time": 34080,
+        "from": "forward",
+        "to": "customer",
+        "quantity": 1,
+        "source": "C6_order:d",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 11,
+          "customer": 1,
+          "e2_empty": 0,
+          "e1_empty": 0,
+          "dirty": 0,
+          "sat:S0": 0,
+          "sat:S1": 0
+        }
+      },
+      {
+        "time": 35760,
+        "from": "forward",
+        "to": "customer",
+        "quantity": 2,
+        "source": "C1_order:d",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 9,
+          "customer": 3,
+          "e2_empty": 0,
+          "e1_empty": 0,
+          "dirty": 0,
+          "sat:S0": 0,
+          "sat:S1": 0
+        }
+      },
+      {
+        "time": 38100,
+        "from": "customer",
+        "to": "e2_empty",
+        "quantity": 1,
+        "source": "C6_order:p",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 9,
+          "customer": 2,
+          "e2_empty": 1,
+          "e1_empty": 0,
+          "dirty": 0,
+          "sat:S0": 0,
+          "sat:S1": 0
+        }
+      },
+      {
+        "time": 38880,
+        "from": "customer",
+        "to": "e2_empty",
+        "quantity": 2,
+        "source": "C1_order:p",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 9,
+          "customer": 0,
+          "e2_empty": 3,
+          "e1_empty": 0,
+          "dirty": 0,
+          "sat:S0": 0,
+          "sat:S1": 0
+        }
+      },
+      {
+        "time": 42060,
+        "from": "forward",
+        "to": "customer",
+        "quantity": 2,
+        "source": "C0_order:d",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 7,
+          "customer": 2,
+          "e2_empty": 3,
+          "e1_empty": 0,
+          "dirty": 0,
+          "sat:S0": 0,
+          "sat:S1": 0
+        }
+      },
+      {
+        "time": 47280,
+        "from": "customer",
+        "to": "e2_empty",
+        "quantity": 2,
+        "source": "C0_order:p",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 7,
+          "customer": 0,
+          "e2_empty": 5,
+          "e1_empty": 0,
+          "dirty": 0,
+          "sat:S0": 0,
+          "sat:S1": 0
+        }
+      },
+      {
+        "time": 47959,
+        "from": "e2_empty",
+        "to": "sat:S1",
+        "quantity": 3,
+        "source": "e2_S1_0_0",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 7,
+          "customer": 0,
+          "e2_empty": 2,
+          "e1_empty": 0,
+          "dirty": 0,
+          "sat:S0": 0,
+          "sat:S1": 3
+        }
+      },
+      {
+        "time": 48660,
+        "from": "forward",
+        "to": "customer",
+        "quantity": 2,
+        "source": "C2_order:d",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 5,
+          "customer": 2,
+          "e2_empty": 2,
+          "e1_empty": 0,
+          "dirty": 0,
+          "sat:S0": 0,
+          "sat:S1": 3
+        }
+      },
+      {
+        "time": 51180,
+        "from": "customer",
+        "to": "e2_empty",
+        "quantity": 2,
+        "source": "C2_order:p",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 5,
+          "customer": 0,
+          "e2_empty": 4,
+          "e1_empty": 0,
+          "dirty": 0,
+          "sat:S0": 0,
+          "sat:S1": 3
+        }
+      },
+      {
+        "time": 52680,
+        "from": "forward",
+        "to": "customer",
+        "quantity": 2,
+        "source": "C5_order:d",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 3,
+          "customer": 2,
+          "e2_empty": 4,
+          "e1_empty": 0,
+          "dirty": 0,
+          "sat:S0": 0,
+          "sat:S1": 3
+        }
+      },
+      {
+        "time": 57900,
+        "from": "customer",
+        "to": "e2_empty",
+        "quantity": 2,
+        "source": "C5_order:p",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 3,
+          "customer": 0,
+          "e2_empty": 6,
+          "e1_empty": 0,
+          "dirty": 0,
+          "sat:S0": 0,
+          "sat:S1": 3
+        }
+      },
+      {
+        "time": 60780,
+        "from": "forward",
+        "to": "customer",
+        "quantity": 1,
+        "source": "C4_order:d",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 2,
+          "customer": 1,
+          "e2_empty": 6,
+          "e1_empty": 0,
+          "dirty": 0,
+          "sat:S0": 0,
+          "sat:S1": 3
+        }
+      },
+      {
+        "time": 60780,
+        "from": "forward",
+        "to": "customer",
+        "quantity": 2,
+        "source": "C3_order:d",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 0,
+          "customer": 3,
+          "e2_empty": 6,
+          "e1_empty": 0,
+          "dirty": 0,
+          "sat:S0": 0,
+          "sat:S1": 3
+        }
+      },
+      {
+        "time": 62700,
+        "from": "customer",
+        "to": "e2_empty",
+        "quantity": 2,
+        "source": "C3_order:p",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 0,
+          "customer": 1,
+          "e2_empty": 8,
+          "e1_empty": 0,
+          "dirty": 0,
+          "sat:S0": 0,
+          "sat:S1": 3
+        }
+      },
+      {
+        "time": 63637,
+        "from": "e2_empty",
+        "to": "sat:S1",
+        "quantity": 4,
+        "source": "e2_S1_0_1",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 0,
+          "customer": 1,
+          "e2_empty": 4,
+          "e1_empty": 0,
+          "dirty": 0,
+          "sat:S0": 0,
+          "sat:S1": 7
+        }
+      },
+      {
+        "time": 64800,
+        "from": "customer",
+        "to": "e2_empty",
+        "quantity": 1,
+        "source": "C4_order:p",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 0,
+          "customer": 0,
+          "e2_empty": 5,
+          "e1_empty": 0,
+          "dirty": 0,
+          "sat:S0": 0,
+          "sat:S1": 7
+        }
+      },
+      {
+        "time": 65130,
+        "from": "sat:S1",
+        "to": "e1_empty",
+        "quantity": 7,
+        "source": "e1_b1_1",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 0,
+          "customer": 0,
+          "e2_empty": 5,
+          "e1_empty": 7,
+          "dirty": 0,
+          "sat:S0": 0,
+          "sat:S1": 0
+        }
+      },
+      {
+        "time": 65130,
+        "from": "e2_empty",
+        "to": "sat:S0",
+        "quantity": 5,
+        "source": "e2_S0_0_0",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 0,
+          "customer": 0,
+          "e2_empty": 0,
+          "e1_empty": 7,
+          "dirty": 0,
+          "sat:S0": 5,
+          "sat:S1": 0
+        }
+      },
+      {
+        "time": 66376,
+        "from": "sat:S0",
+        "to": "e1_empty",
+        "quantity": 5,
+        "source": "e1_b1_1",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 0,
+          "customer": 0,
+          "e2_empty": 0,
+          "e1_empty": 12,
+          "dirty": 0,
+          "sat:S0": 0,
+          "sat:S1": 0
+        }
+      },
+      {
+        "time": 67274,
+        "from": "e1_empty",
+        "to": "dirty",
+        "quantity": 12,
+        "source": "e1_b1_1",
+        "cycle": 1,
+        "states": {
+          "clean": 0,
+          "forward": 0,
+          "customer": 0,
+          "e2_empty": 0,
+          "e1_empty": 0,
+          "dirty": 12,
+          "sat:S0": 0,
+          "sat:S1": 0
+        }
+      },
+      {
+        "time": 68174,
+        "from": "dirty",
+        "to": "clean",
+        "quantity": 12,
+        "source": "e1_b1_1",
+        "cycle": 1,
+        "states": {
+          "clean": 12,
+          "forward": 0,
+          "customer": 0,
+          "e2_empty": 0,
+          "e1_empty": 0,
+          "dirty": 0,
+          "sat:S0": 0,
+          "sat:S1": 0
+        }
+      }
+    ],
+    "terminal_state": {
+      "clean": 12,
+      "forward": 0,
+      "customer": 0,
+      "e2_empty": 0,
+      "e1_empty": 0,
+      "dirty": 0,
+      "sat:S0": 0,
+      "sat:S1": 0
+    },
+    "periodic_replay": {
+      "valid": true,
+      "cycles": 2,
+      "terminal_state": {
+        "clean": 12,
+        "forward": 0,
+        "customer": 0,
+        "e2_empty": 0,
+        "e1_empty": 0,
+        "dirty": 0,
+        "sat:S0": 0,
+        "sat:S1": 0
+      }
+    },
+    "satellite_peak_inventory": {
+      "S0": 5,
+      "S1": 7
+    },
+    "container_balance": {
+      "issued": 12,
+      "e2_unloaded": 12,
+      "returned_to_depot": 12,
+      "pool": 12
+    },
+    "time_metrics": {
+      "waiting_ticks": {
+        "e1": 34126,
+        "e2": 43855
+      },
+      "working_ticks": {
+        "e1": 38474,
+        "e2": 58750
+      },
+      "working_minutes": {
+        "e1": 641.2333333333333,
+        "e2": 979.1666666666666
+      }
+    },
+    "e1_vehicle_count": 1,
+    "e2_vehicle_count": 2,
+    "e1_trip_count": 1,
+    "e2_trip_count": 3,
+    "total_distance": 319.2156702352137,
+    "cost": {
+      "total": 631.2556702352136,
+      "components": {
+        "container_pool": 120.0,
+        "e1_distance": 114.88454801718143,
+        "e1_work": 64.12333333333333,
+        "e1_vehicles": 10,
+        "e1_trips": 1,
+        "e2_distance": 204.33112221803228,
+        "e2_work": 97.91666666666667,
+        "e2_vehicles": 10,
+        "e2_trips": 3,
+        "cleaning": 2.4000000000000004,
+        "tracking": 1.2000000000000002,
+        "container_wear": 2.4
+      },
+      "currency": "synthetic_units",
+      "initial_pool_investment": 120,
+      "cost_basis": "disjoint_distance_time_fixed",
+      "source_type": "synthetic_mechanism",
+      "price_basis": "Artificial unit prices, no claim of market calibration",
+      "evaluation_period": "one 780-minute cycle",
+      "work_time_basis": "occupied_route_minutes",
+      "economic_profile_hash": "be2f3a634eda252bdea329e0dc57a6b9be96ef3f4060d20243b98c874d1b0584",
+      "evidence_hash": null,
+      "limitation": "Occupied route time excludes inter-trip idle payroll; investment is separate."
+    },
+    "order_batch_assignment": {
+      "C0_order": "b1",
+      "C1_order": "b1",
+      "C2_order": "b1",
+      "C3_order": "b1",
+      "C4_order": "b1",
+      "C5_order": "b1",
+      "C6_order": "b1"
+    },
+    "container_pool_size": 12,
+    "cycle_batch_count": 1,
+    "batch_durations_ticks": [
+      46800
+    ]
+  },
+  "solver_module": "models.routing.model_8.alns.solver",
+  "schedule_mode": "flexible_cycle",
+  "calendar_config": {
+    "model": 8,
+    "schedule_mode": "flexible_cycle",
+    "batch_count_candidates": [
+      1,
+      2,
+      3
+    ],
+    "minimum_phase_ticks": 60,
+    "cycle_start": 28800,
+    "cycle_end": 75600,
+    "time_tick_seconds": 1
+  },
+  "cycle_batch_count": 1,
+  "batch_boundaries": [
+    28800,
+    75600
+  ],
+  "batch_durations_ticks": [
+    46800
+  ],
+  "cutoff_offsets_ticks": {
+    "b1": 36330
+  },
+  "cutoff_ratios": {
+    "b1": 0.7762820512820513
+  },
+  "actual_recovery_round_count": 2,
+  "count_search": [
+    {
+      "batch_count": 1,
+      "status": "FEASIBLE",
+      "objective": 631.2556702352136,
+      "valid": true,
+      "proven_optimal": false,
+      "proven_infeasible": false,
+      "best_bound": null,
+      "budget": 99.99955586666086,
+      "runtime": 90.28995000000577,
+      "construction_time": 0.0012949000229127705,
+      "iterations": 21835,
+      "iteration_budget": 333333333,
+      "visits": [
+        {
+          "batch_count": 1,
+          "visit": 1,
+          "round": 1,
+          "seed": 42,
+          "budget": 99.99955586666086,
+          "iteration_budget": 333333333,
+          "iterations": 21835,
+          "started": 0.001333200023509562,
+          "returned": 90.26945020002313,
+          "finished": 90.28999630000908,
+          "construction_time": 0.0012949000229127705,
+          "solve_wall_time": 90.26811699999962,
+          "audit_time": 0.02053809998324141,
+          "runtime": 90.20960949995788,
+          "status": "FEASIBLE",
+          "valid": true,
+          "objective": 631.2556702352136,
+          "best_bound": null,
+          "proven_optimal": false,
+          "proven_infeasible": false,
+          "restart": "cold",
+          "local_history": [
+            {
+              "iteration": 0,
+              "objective": 867.5353740195156,
+              "time": 0.014705399982631207
+            },
+            {
+              "iteration": 6,
+              "objective": 843.794770872564,
+              "time": 0.03172269999049604
+            },
+            {
+              "iteration": 28,
+              "objective": 808.7247862338621,
+              "time": 0.06037659995490685
+            },
+            {
+              "iteration": 29,
+              "objective": 785.4960421825226,
+              "time": 0.06867739994777367
+            },
+            {
+              "iteration": 37,
+              "objective": 693.2339910897837,
+              "time": 0.08783639996545389
+            },
+            {
+              "iteration": 44,
+              "objective": 692.0887010042684,
+              "time": 0.10124079999513924
+            },
+            {
+              "iteration": 80,
+              "objective": 644.2930221530255,
+              "time": 0.1492244999972172
+            },
+            {
+              "iteration": 204,
+              "objective": 634.5680221530256,
+              "time": 1.5991937999497168
+            },
+            {
+              "iteration": 1098,
+              "objective": 631.2556702352136,
+              "time": 3.877396099967882
+            }
+          ],
+          "evaluations": 10467,
+          "cache_hits": 18793,
+          "operator_attempts": {
+            "destroy_random_batch": 575,
+            "destroy_related_batch": 544,
+            "close_batch": 508,
+            "split_batch": 510,
+            "destroy_routes": 4080,
+            "relocate": 835,
+            "pair": 905,
+            "split_merge": 722,
+            "vehicle": 3675,
+            "wait": 2978,
+            "e1_delivery": 1389,
+            "e1_pickup": 2793,
+            "reverse": 543,
+            "shift_cutoff": 1012,
+            "align_cutoff": 766
+          },
+          "operator_improvements": {
+            "destroy_random_batch": 0,
+            "destroy_related_batch": 0,
+            "close_batch": 0,
+            "split_batch": 0,
+            "destroy_routes": 5,
+            "relocate": 0,
+            "pair": 0,
+            "split_merge": 0,
+            "vehicle": 0,
+            "wait": 0,
+            "e1_delivery": 1,
+            "e1_pickup": 1,
+            "reverse": 0,
+            "shift_cutoff": 1,
+            "align_cutoff": 0
+          },
+          "cutoff_polish_calls": 1,
+          "cutoff_polish_improvements": 0,
+          "cutoff_polish_evaluations": 14,
+          "cutoff_polish_runtime": 0.18391890003113076,
+          "cutoff_polish_budget": 9.999955586666086
+        }
+      ],
+      "audit_failed": false,
+      "certificate_errors": [],
+      "last_status": "FEASIBLE",
+      "container_pool_size": 12,
+      "evaluations": 10467,
+      "cache_hits": 18793,
+      "calendar_evaluations": 0,
+      "cutoff_polish_calls": 1,
+      "cutoff_polish_improvements": 0,
+      "cutoff_polish_evaluations": 14,
+      "cutoff_polish_runtime": 0.18391890003113076,
+      "cutoff_polish_budget": 9.999955586666086,
+      "operator_attempts": {
+        "destroy_random_batch": 575,
+        "destroy_related_batch": 544,
+        "close_batch": 508,
+        "split_batch": 510,
+        "destroy_routes": 4080,
+        "relocate": 835,
+        "pair": 905,
+        "split_merge": 722,
+        "vehicle": 3675,
+        "wait": 2978,
+        "e1_delivery": 1389,
+        "e1_pickup": 2793,
+        "reverse": 543,
+        "shift_cutoff": 1012,
+        "align_cutoff": 766
+      },
+      "operator_improvements": {
+        "destroy_random_batch": 0,
+        "destroy_related_batch": 0,
+        "close_batch": 0,
+        "split_batch": 0,
+        "destroy_routes": 5,
+        "relocate": 0,
+        "pair": 0,
+        "split_merge": 0,
+        "vehicle": 0,
+        "wait": 0,
+        "e1_delivery": 1,
+        "e1_pickup": 1,
+        "reverse": 0,
+        "shift_cutoff": 1,
+        "align_cutoff": 0
+      }
+    },
+    {
+      "batch_count": 2,
+      "status": "FEASIBLE",
+      "objective": 631.2556702352136,
+      "valid": true,
+      "proven_optimal": false,
+      "proven_infeasible": false,
+      "best_bound": null,
+      "budget": 104.82415984998806,
+      "runtime": 104.87406609999016,
+      "construction_time": 0.024316600000020117,
+      "iterations": 7243,
+      "iteration_budget": 499989082,
+      "visits": [
+        {
+          "batch_count": 2,
+          "visit": 1,
+          "round": 1,
+          "seed": 42,
+          "budget": 104.82415984998806,
+          "iteration_budget": 499989082,
+          "iterations": 7243,
+          "started": 90.35179220000282,
+          "returned": 195.20003569999244,
+          "finished": 195.20155230001546,
+          "construction_time": 0.024316600000020117,
+          "solve_wall_time": 104.84824349998962,
+          "audit_time": 0.0015060000005178154,
+          "runtime": 104.82501530001173,
+          "status": "FEASIBLE",
+          "valid": true,
+          "objective": 631.2556702352136,
+          "best_bound": null,
+          "proven_optimal": false,
+          "proven_infeasible": false,
+          "restart": "cold",
+          "local_history": [
+            {
+              "iteration": 0,
+              "objective": 963.7745220069269,
+              "time": 0.1740348000312224,
+              "source": "calendar_construction"
+            },
+            {
+              "iteration": 0,
+              "objective": 962.3178553402602,
+              "time": 0.9168570000329055,
+              "source": "calendar_construction"
+            },
+            {
+              "iteration": 7,
+              "objective": 933.3205098223507,
+              "time": 1.7342940000235103,
+              "source": "e1_pickup"
+            },
+            {
+              "iteration": 21,
+              "objective": 867.5420406861823,
+              "time": 1.8100208000396378,
+              "source": "align_cutoff"
+            },
+            {
+              "iteration": 27,
+              "objective": 835.1479706171762,
+              "time": 1.8926611000206321,
+              "source": "destroy_routes"
+            },
+            {
+              "iteration": 33,
+              "objective": 801.766406748662,
+              "time": 1.9089980000280775,
+              "source": "destroy_routes"
+            },
+            {
+              "iteration": 50,
+              "objective": 778.5376626973225,
+              "time": 2.0154197000083514,
+              "source": "destroy_routes"
+            },
+            {
+              "iteration": 84,
+              "objective": 753.0387393416117,
+              "time": 2.228535500005819,
+              "source": "destroy_routes"
+            },
+            {
+              "iteration": 118,
+              "objective": 709.1370790748474,
+              "time": 2.3972941000247374,
+              "source": "e1_delivery"
+            },
+            {
+              "iteration": 184,
+              "objective": 699.1370790748474,
+              "time": 2.6628673000377603,
+              "source": "e1_delivery"
+            },
+            {
+              "iteration": 1525,
+              "objective": 697.1390358270294,
+              "time": 27.614416200027335,
+              "source": "wait"
+            },
+            {
+              "iteration": 2412,
+              "objective": 696.9700172425509,
+              "time": 46.51578230003361,
+              "source": "pair"
+            },
+            {
+              "iteration": 2430,
+              "objective": 695.8247271570356,
+              "time": 46.6394702999969,
+              "source": "destroy_routes"
+            },
+            {
+              "iteration": 2811,
+              "objective": 692.498060490369,
+              "time": 53.92834430001676,
+              "source": "wait"
+            },
+            {
+              "iteration": 4643,
+              "objective": 689.2630157531232,
+              "time": 85.8086975000333,
+              "source": "shift_cutoff"
+            },
+            {
+              "iteration": 4789,
+              "objective": 632.249003568547,
+              "time": 86.99345980002545,
+              "source": "e1_delivery"
+            },
+            {
+              "iteration": 6147,
+              "objective": 632.059003568547,
+              "time": 97.95641430001706,
+              "source": "align_cutoff"
+            },
+            {
+              "iteration": 6412,
+              "objective": 631.2556702352136,
+              "time": 98.73911580001004,
+              "source": "align_cutoff"
+            }
+          ],
+          "proof_scope": null,
+          "evaluations": 11958,
+          "cache_hits": 2972,
+          "calendar_evaluations": 1169,
+          "operator_attempts": {
+            "shift_boundary": 689,
+            "align_boundary": 578,
+            "redistribute_lengths": 545,
+            "destroy_random_batch": 90,
+            "destroy_related_batch": 99,
+            "close_batch": 101,
+            "split_batch": 122,
+            "destroy_routes": 746,
+            "relocate": 138,
+            "pair": 167,
+            "split_merge": 120,
+            "vehicle": 690,
+            "wait": 624,
+            "e1_delivery": 790,
+            "e1_pickup": 820,
+            "reverse": 123,
+            "shift_cutoff": 461,
+            "align_cutoff": 340
+          },
+          "operator_improvements": {
+            "shift_boundary": 0,
+            "align_boundary": 0,
+            "redistribute_lengths": 0,
+            "destroy_random_batch": 0,
+            "destroy_related_batch": 0,
+            "close_batch": 0,
+            "split_batch": 0,
+            "destroy_routes": 5,
+            "relocate": 0,
+            "pair": 1,
+            "split_merge": 0,
+            "vehicle": 0,
+            "wait": 2,
+            "e1_delivery": 3,
+            "e1_pickup": 1,
+            "reverse": 0,
+            "shift_cutoff": 1,
+            "align_cutoff": 3
+          }
+        }
+      ],
+      "audit_failed": false,
+      "certificate_errors": [],
+      "last_status": "FEASIBLE",
+      "container_pool_size": 12,
+      "evaluations": 11958,
+      "cache_hits": 2972,
+      "calendar_evaluations": 1169,
+      "cutoff_polish_calls": 0,
+      "cutoff_polish_improvements": 0,
+      "cutoff_polish_evaluations": 0,
+      "cutoff_polish_runtime": 0,
+      "cutoff_polish_budget": 0,
+      "operator_attempts": {
+        "shift_boundary": 689,
+        "align_boundary": 578,
+        "redistribute_lengths": 545,
+        "destroy_random_batch": 90,
+        "destroy_related_batch": 99,
+        "close_batch": 101,
+        "split_batch": 122,
+        "destroy_routes": 746,
+        "relocate": 138,
+        "pair": 167,
+        "split_merge": 120,
+        "vehicle": 690,
+        "wait": 624,
+        "e1_delivery": 790,
+        "e1_pickup": 820,
+        "reverse": 123,
+        "shift_cutoff": 461,
+        "align_cutoff": 340
+      },
+      "operator_improvements": {
+        "shift_boundary": 0,
+        "align_boundary": 0,
+        "redistribute_lengths": 0,
+        "destroy_random_batch": 0,
+        "destroy_related_batch": 0,
+        "close_batch": 0,
+        "split_batch": 0,
+        "destroy_routes": 5,
+        "relocate": 0,
+        "pair": 1,
+        "split_merge": 0,
+        "vehicle": 0,
+        "wait": 2,
+        "e1_delivery": 3,
+        "e1_pickup": 1,
+        "reverse": 0,
+        "shift_cutoff": 1,
+        "align_cutoff": 3
+      }
+    },
+    {
+      "batch_count": 3,
+      "status": "FEASIBLE",
+      "objective": 693.3280604903689,
+      "valid": true,
+      "proven_optimal": false,
+      "proven_infeasible": false,
+      "best_bound": null,
+      "budget": 104.79398089996539,
+      "runtime": 104.88522590009961,
+      "construction_time": 0.0015963000478222966,
+      "iterations": 5120,
+      "iteration_budget": 999970922,
+      "visits": [
+        {
+          "batch_count": 3,
+          "visit": 1,
+          "round": 1,
+          "seed": 42,
+          "budget": 104.79398089996539,
+          "iteration_budget": 999970922,
+          "iterations": 5120,
+          "started": 195.20602019998478,
+          "returned": 300.0186011000187,
+          "finished": 300.08977349998895,
+          "construction_time": 0.0015963000478222966,
+          "solve_wall_time": 104.81258090003394,
+          "audit_time": 0.07104870001785457,
+          "runtime": 104.80153100000462,
+          "status": "FEASIBLE",
+          "valid": true,
+          "objective": 693.3280604903689,
+          "best_bound": null,
+          "proven_optimal": false,
+          "proven_infeasible": false,
+          "restart": "cold",
+          "local_history": [
+            {
+              "iteration": 0,
+              "objective": 1111.2970033276715,
+              "time": 0.02601709996815771,
+              "source": "calendar_construction"
+            },
+            {
+              "iteration": 0,
+              "objective": 1106.8470033276717,
+              "time": 0.04097829997772351,
+              "source": "calendar_construction"
+            },
+            {
+              "iteration": 0,
+              "objective": 1103.9570033276716,
+              "time": 0.08242239995161071,
+              "source": "calendar_construction"
+            },
+            {
+              "iteration": 0,
+              "objective": 1103.9536699943383,
+              "time": 0.12333579995902255,
+              "source": "calendar_construction"
+            },
+            {
+              "iteration": 0,
+              "objective": 1103.9520033276715,
+              "time": 0.21852659998694435,
+              "source": "calendar_construction"
+            },
+            {
+              "iteration": 0,
+              "objective": 1102.355336661005,
+              "time": 0.40878349996637553,
+              "source": "calendar_construction"
+            },
+            {
+              "iteration": 16,
+              "objective": 1093.728578928749,
+              "time": 3.73237619997235,
+              "source": "destroy_random_batch"
+            },
+            {
+              "iteration": 18,
+              "objective": 1091.9802455954155,
+              "time": 3.750728499959223,
+              "source": "split_batch"
+            },
+            {
+              "iteration": 47,
+              "objective": 1076.6131827701136,
+              "time": 4.65759119996801,
+              "source": "destroy_routes"
+            },
+            {
+              "iteration": 50,
+              "objective": 1053.384438718774,
+              "time": 4.664156499959063,
+              "source": "destroy_routes"
+            },
+            {
+              "iteration": 63,
+              "objective": 1033.2379015123026,
+              "time": 4.774867500003893,
+              "source": "destroy_routes"
+            },
+            {
+              "iteration": 66,
+              "objective": 1032.0926114267875,
+              "time": 4.795993499981705,
+              "source": "destroy_routes"
+            },
+            {
+              "iteration": 108,
+              "objective": 996.9380114565573,
+              "time": 5.173277499969117,
+              "source": "e1_delivery"
+            },
+            {
+              "iteration": 111,
+              "objective": 982.6380114565573,
+              "time": 5.185233899974264,
+              "source": "destroy_routes"
+            },
+            {
+              "iteration": 160,
+              "objective": 977.9830114565573,
+              "time": 5.552830600005109,
+              "source": "shift_cutoff"
+            },
+            {
+              "iteration": 181,
+              "objective": 974.1663447898907,
+              "time": 5.780772399972193,
+              "source": "shift_cutoff"
+            },
+            {
+              "iteration": 185,
+              "objective": 972.5602659088775,
+              "time": 5.8481387999490835,
+              "source": "e1_delivery"
+            },
+            {
+              "iteration": 195,
+              "objective": 925.3462537243013,
+              "time": 5.936750599998049,
+              "source": "e1_delivery"
+            },
+            {
+              "iteration": 291,
+              "objective": 921.6279203909681,
+              "time": 8.925878699985333,
+              "source": "e1_delivery"
+            },
+            {
+              "iteration": 328,
+              "objective": 918.6056659386478,
+              "time": 9.517180799972266,
+              "source": "shift_cutoff"
+            },
+            {
+              "iteration": 348,
+              "objective": 916.9995870576347,
+              "time": 9.620037299988326,
+              "source": "e1_delivery"
+            },
+            {
+              "iteration": 401,
+              "objective": 891.500663701924,
+              "time": 9.89162429998396,
+              "source": "destroy_routes"
+            },
+            {
+              "iteration": 441,
+              "objective": 888.4239970352575,
+              "time": 10.427544999984093,
+              "source": "e1_pickup"
+            },
+            {
+              "iteration": 586,
+              "objective": 885.4743347195641,
+              "time": 13.458753999962937,
+              "source": "destroy_routes"
+            },
+            {
+              "iteration": 589,
+              "objective": 838.460322534988,
+              "time": 13.464669199951459,
+              "source": "e1_pickup"
+            },
+            {
+              "iteration": 591,
+              "objective": 779.5798353107633,
+              "time": 13.471387900004629,
+              "source": "destroy_routes"
+            },
+            {
+              "iteration": 599,
+              "objective": 756.3510912594236,
+              "time": 13.494405899953563,
+              "source": "destroy_routes"
+            },
+            {
+              "iteration": 603,
+              "objective": 709.1370790748474,
+              "time": 13.499927999975625,
+              "source": "e1_delivery"
+            },
+            {
+              "iteration": 676,
+              "objective": 699.1370790748474,
+              "time": 14.961482999962755,
+              "source": "e1_pickup"
+            },
+            {
+              "iteration": 1187,
+              "objective": 695.8247271570356,
+              "time": 21.50027089996729,
+              "source": "destroy_routes"
+            },
+            {
+              "iteration": 1609,
+              "objective": 694.7197271570355,
+              "time": 28.486837399948854,
+              "source": "wait"
+            },
+            {
+              "iteration": 2498,
+              "objective": 694.4547271570357,
+              "time": 41.506418899982236,
+              "source": "wait"
+            },
+            {
+              "iteration": 2531,
+              "objective": 693.7097271570356,
+              "time": 41.657598999969196,
+              "source": "wait"
+            },
+            {
+              "iteration": 2612,
+              "objective": 693.3297271570357,
+              "time": 44.38834219996352,
+              "source": "wait"
+            },
+            {
+              "iteration": 5076,
+              "objective": 693.3280604903689,
+              "time": 103.79470899997978,
+              "source": "wait"
+            }
+          ],
+          "proof_scope": null,
+          "evaluations": 10879,
+          "cache_hits": 1914,
+          "calendar_evaluations": 1135,
+          "operator_attempts": {
+            "shift_boundary": 508,
+            "align_boundary": 513,
+            "redistribute_lengths": 181,
+            "destroy_random_batch": 87,
+            "destroy_related_batch": 70,
+            "close_batch": 96,
+            "split_batch": 78,
+            "destroy_routes": 505,
+            "relocate": 90,
+            "pair": 132,
+            "split_merge": 123,
+            "vehicle": 400,
+            "wait": 575,
+            "e1_delivery": 565,
+            "e1_pickup": 589,
+            "reverse": 77,
+            "shift_cutoff": 321,
+            "align_cutoff": 210
+          },
+          "operator_improvements": {
+            "shift_boundary": 0,
+            "align_boundary": 0,
+            "redistribute_lengths": 0,
+            "destroy_random_batch": 1,
+            "destroy_related_batch": 0,
+            "close_batch": 0,
+            "split_batch": 1,
+            "destroy_routes": 10,
+            "relocate": 0,
+            "pair": 0,
+            "split_merge": 0,
+            "vehicle": 0,
+            "wait": 5,
+            "e1_delivery": 6,
+            "e1_pickup": 3,
+            "reverse": 0,
+            "shift_cutoff": 3,
+            "align_cutoff": 0
+          }
+        }
+      ],
+      "audit_failed": false,
+      "certificate_errors": [],
+      "last_status": "FEASIBLE",
+      "container_pool_size": 12,
+      "evaluations": 10879,
+      "cache_hits": 1914,
+      "calendar_evaluations": 1135,
+      "cutoff_polish_calls": 0,
+      "cutoff_polish_improvements": 0,
+      "cutoff_polish_evaluations": 0,
+      "cutoff_polish_runtime": 0,
+      "cutoff_polish_budget": 0,
+      "operator_attempts": {
+        "shift_boundary": 508,
+        "align_boundary": 513,
+        "redistribute_lengths": 181,
+        "destroy_random_batch": 87,
+        "destroy_related_batch": 70,
+        "close_batch": 96,
+        "split_batch": 78,
+        "destroy_routes": 505,
+        "relocate": 90,
+        "pair": 132,
+        "split_merge": 123,
+        "vehicle": 400,
+        "wait": 575,
+        "e1_delivery": 565,
+        "e1_pickup": 589,
+        "reverse": 77,
+        "shift_cutoff": 321,
+        "align_cutoff": 210
+      },
+      "operator_improvements": {
+        "shift_boundary": 0,
+        "align_boundary": 0,
+        "redistribute_lengths": 0,
+        "destroy_random_batch": 1,
+        "destroy_related_batch": 0,
+        "close_batch": 0,
+        "split_batch": 1,
+        "destroy_routes": 10,
+        "relocate": 0,
+        "pair": 0,
+        "split_merge": 0,
+        "vehicle": 0,
+        "wait": 5,
+        "e1_delivery": 6,
+        "e1_pickup": 3,
+        "reverse": 0,
+        "shift_cutoff": 3,
+        "align_cutoff": 0
+      }
+    }
+  ],
+  "count_search_visits": [
+    {
+      "batch_count": 1,
+      "visit": 1,
+      "round": 1,
+      "seed": 42,
+      "budget": 99.99955586666086,
+      "iteration_budget": 333333333,
+      "iterations": 21835,
+      "started": 0.001333200023509562,
+      "returned": 90.26945020002313,
+      "finished": 90.28999630000908,
+      "construction_time": 0.0012949000229127705,
+      "solve_wall_time": 90.26811699999962,
+      "audit_time": 0.02053809998324141,
+      "runtime": 90.20960949995788,
+      "status": "FEASIBLE",
+      "valid": true,
+      "objective": 631.2556702352136,
+      "best_bound": null,
+      "proven_optimal": false,
+      "proven_infeasible": false,
+      "restart": "cold",
+      "local_history": [
+        {
+          "iteration": 0,
+          "objective": 867.5353740195156,
+          "time": 0.014705399982631207
+        },
+        {
+          "iteration": 6,
+          "objective": 843.794770872564,
+          "time": 0.03172269999049604
+        },
+        {
+          "iteration": 28,
+          "objective": 808.7247862338621,
+          "time": 0.06037659995490685
+        },
+        {
+          "iteration": 29,
+          "objective": 785.4960421825226,
+          "time": 0.06867739994777367
+        },
+        {
+          "iteration": 37,
+          "objective": 693.2339910897837,
+          "time": 0.08783639996545389
+        },
+        {
+          "iteration": 44,
+          "objective": 692.0887010042684,
+          "time": 0.10124079999513924
+        },
+        {
+          "iteration": 80,
+          "objective": 644.2930221530255,
+          "time": 0.1492244999972172
+        },
+        {
+          "iteration": 204,
+          "objective": 634.5680221530256,
+          "time": 1.5991937999497168
+        },
+        {
+          "iteration": 1098,
+          "objective": 631.2556702352136,
+          "time": 3.877396099967882
+        }
+      ],
+      "evaluations": 10467,
+      "cache_hits": 18793,
+      "operator_attempts": {
+        "destroy_random_batch": 575,
+        "destroy_related_batch": 544,
+        "close_batch": 508,
+        "split_batch": 510,
+        "destroy_routes": 4080,
+        "relocate": 835,
+        "pair": 905,
+        "split_merge": 722,
+        "vehicle": 3675,
+        "wait": 2978,
+        "e1_delivery": 1389,
+        "e1_pickup": 2793,
+        "reverse": 543,
+        "shift_cutoff": 1012,
+        "align_cutoff": 766
+      },
+      "operator_improvements": {
+        "destroy_random_batch": 0,
+        "destroy_related_batch": 0,
+        "close_batch": 0,
+        "split_batch": 0,
+        "destroy_routes": 5,
+        "relocate": 0,
+        "pair": 0,
+        "split_merge": 0,
+        "vehicle": 0,
+        "wait": 0,
+        "e1_delivery": 1,
+        "e1_pickup": 1,
+        "reverse": 0,
+        "shift_cutoff": 1,
+        "align_cutoff": 0
+      },
+      "cutoff_polish_calls": 1,
+      "cutoff_polish_improvements": 0,
+      "cutoff_polish_evaluations": 14,
+      "cutoff_polish_runtime": 0.18391890003113076,
+      "cutoff_polish_budget": 9.999955586666086
+    },
+    {
+      "batch_count": 2,
+      "visit": 1,
+      "round": 1,
+      "seed": 42,
+      "budget": 104.82415984998806,
+      "iteration_budget": 499989082,
+      "iterations": 7243,
+      "started": 90.35179220000282,
+      "returned": 195.20003569999244,
+      "finished": 195.20155230001546,
+      "construction_time": 0.024316600000020117,
+      "solve_wall_time": 104.84824349998962,
+      "audit_time": 0.0015060000005178154,
+      "runtime": 104.82501530001173,
+      "status": "FEASIBLE",
+      "valid": true,
+      "objective": 631.2556702352136,
+      "best_bound": null,
+      "proven_optimal": false,
+      "proven_infeasible": false,
+      "restart": "cold",
+      "local_history": [
+        {
+          "iteration": 0,
+          "objective": 963.7745220069269,
+          "time": 0.1740348000312224,
+          "source": "calendar_construction"
+        },
+        {
+          "iteration": 0,
+          "objective": 962.3178553402602,
+          "time": 0.9168570000329055,
+          "source": "calendar_construction"
+        },
+        {
+          "iteration": 7,
+          "objective": 933.3205098223507,
+          "time": 1.7342940000235103,
+          "source": "e1_pickup"
+        },
+        {
+          "iteration": 21,
+          "objective": 867.5420406861823,
+          "time": 1.8100208000396378,
+          "source": "align_cutoff"
+        },
+        {
+          "iteration": 27,
+          "objective": 835.1479706171762,
+          "time": 1.8926611000206321,
+          "source": "destroy_routes"
+        },
+        {
+          "iteration": 33,
+          "objective": 801.766406748662,
+          "time": 1.9089980000280775,
+          "source": "destroy_routes"
+        },
+        {
+          "iteration": 50,
+          "objective": 778.5376626973225,
+          "time": 2.0154197000083514,
+          "source": "destroy_routes"
+        },
+        {
+          "iteration": 84,
+          "objective": 753.0387393416117,
+          "time": 2.228535500005819,
+          "source": "destroy_routes"
+        },
+        {
+          "iteration": 118,
+          "objective": 709.1370790748474,
+          "time": 2.3972941000247374,
+          "source": "e1_delivery"
+        },
+        {
+          "iteration": 184,
+          "objective": 699.1370790748474,
+          "time": 2.6628673000377603,
+          "source": "e1_delivery"
+        },
+        {
+          "iteration": 1525,
+          "objective": 697.1390358270294,
+          "time": 27.614416200027335,
+          "source": "wait"
+        },
+        {
+          "iteration": 2412,
+          "objective": 696.9700172425509,
+          "time": 46.51578230003361,
+          "source": "pair"
+        },
+        {
+          "iteration": 2430,
+          "objective": 695.8247271570356,
+          "time": 46.6394702999969,
+          "source": "destroy_routes"
+        },
+        {
+          "iteration": 2811,
+          "objective": 692.498060490369,
+          "time": 53.92834430001676,
+          "source": "wait"
+        },
+        {
+          "iteration": 4643,
+          "objective": 689.2630157531232,
+          "time": 85.8086975000333,
+          "source": "shift_cutoff"
+        },
+        {
+          "iteration": 4789,
+          "objective": 632.249003568547,
+          "time": 86.99345980002545,
+          "source": "e1_delivery"
+        },
+        {
+          "iteration": 6147,
+          "objective": 632.059003568547,
+          "time": 97.95641430001706,
+          "source": "align_cutoff"
+        },
+        {
+          "iteration": 6412,
+          "objective": 631.2556702352136,
+          "time": 98.73911580001004,
+          "source": "align_cutoff"
+        }
+      ],
+      "proof_scope": null,
+      "evaluations": 11958,
+      "cache_hits": 2972,
+      "calendar_evaluations": 1169,
+      "operator_attempts": {
+        "shift_boundary": 689,
+        "align_boundary": 578,
+        "redistribute_lengths": 545,
+        "destroy_random_batch": 90,
+        "destroy_related_batch": 99,
+        "close_batch": 101,
+        "split_batch": 122,
+        "destroy_routes": 746,
+        "relocate": 138,
+        "pair": 167,
+        "split_merge": 120,
+        "vehicle": 690,
+        "wait": 624,
+        "e1_delivery": 790,
+        "e1_pickup": 820,
+        "reverse": 123,
+        "shift_cutoff": 461,
+        "align_cutoff": 340
+      },
+      "operator_improvements": {
+        "shift_boundary": 0,
+        "align_boundary": 0,
+        "redistribute_lengths": 0,
+        "destroy_random_batch": 0,
+        "destroy_related_batch": 0,
+        "close_batch": 0,
+        "split_batch": 0,
+        "destroy_routes": 5,
+        "relocate": 0,
+        "pair": 1,
+        "split_merge": 0,
+        "vehicle": 0,
+        "wait": 2,
+        "e1_delivery": 3,
+        "e1_pickup": 1,
+        "reverse": 0,
+        "shift_cutoff": 1,
+        "align_cutoff": 3
+      }
+    },
+    {
+      "batch_count": 3,
+      "visit": 1,
+      "round": 1,
+      "seed": 42,
+      "budget": 104.79398089996539,
+      "iteration_budget": 999970922,
+      "iterations": 5120,
+      "started": 195.20602019998478,
+      "returned": 300.0186011000187,
+      "finished": 300.08977349998895,
+      "construction_time": 0.0015963000478222966,
+      "solve_wall_time": 104.81258090003394,
+      "audit_time": 0.07104870001785457,
+      "runtime": 104.80153100000462,
+      "status": "FEASIBLE",
+      "valid": true,
+      "objective": 693.3280604903689,
+      "best_bound": null,
+      "proven_optimal": false,
+      "proven_infeasible": false,
+      "restart": "cold",
+      "local_history": [
+        {
+          "iteration": 0,
+          "objective": 1111.2970033276715,
+          "time": 0.02601709996815771,
+          "source": "calendar_construction"
+        },
+        {
+          "iteration": 0,
+          "objective": 1106.8470033276717,
+          "time": 0.04097829997772351,
+          "source": "calendar_construction"
+        },
+        {
+          "iteration": 0,
+          "objective": 1103.9570033276716,
+          "time": 0.08242239995161071,
+          "source": "calendar_construction"
+        },
+        {
+          "iteration": 0,
+          "objective": 1103.9536699943383,
+          "time": 0.12333579995902255,
+          "source": "calendar_construction"
+        },
+        {
+          "iteration": 0,
+          "objective": 1103.9520033276715,
+          "time": 0.21852659998694435,
+          "source": "calendar_construction"
+        },
+        {
+          "iteration": 0,
+          "objective": 1102.355336661005,
+          "time": 0.40878349996637553,
+          "source": "calendar_construction"
+        },
+        {
+          "iteration": 16,
+          "objective": 1093.728578928749,
+          "time": 3.73237619997235,
+          "source": "destroy_random_batch"
+        },
+        {
+          "iteration": 18,
+          "objective": 1091.9802455954155,
+          "time": 3.750728499959223,
+          "source": "split_batch"
+        },
+        {
+          "iteration": 47,
+          "objective": 1076.6131827701136,
+          "time": 4.65759119996801,
+          "source": "destroy_routes"
+        },
+        {
+          "iteration": 50,
+          "objective": 1053.384438718774,
+          "time": 4.664156499959063,
+          "source": "destroy_routes"
+        },
+        {
+          "iteration": 63,
+          "objective": 1033.2379015123026,
+          "time": 4.774867500003893,
+          "source": "destroy_routes"
+        },
+        {
+          "iteration": 66,
+          "objective": 1032.0926114267875,
+          "time": 4.795993499981705,
+          "source": "destroy_routes"
+        },
+        {
+          "iteration": 108,
+          "objective": 996.9380114565573,
+          "time": 5.173277499969117,
+          "source": "e1_delivery"
+        },
+        {
+          "iteration": 111,
+          "objective": 982.6380114565573,
+          "time": 5.185233899974264,
+          "source": "destroy_routes"
+        },
+        {
+          "iteration": 160,
+          "objective": 977.9830114565573,
+          "time": 5.552830600005109,
+          "source": "shift_cutoff"
+        },
+        {
+          "iteration": 181,
+          "objective": 974.1663447898907,
+          "time": 5.780772399972193,
+          "source": "shift_cutoff"
+        },
+        {
+          "iteration": 185,
+          "objective": 972.5602659088775,
+          "time": 5.8481387999490835,
+          "source": "e1_delivery"
+        },
+        {
+          "iteration": 195,
+          "objective": 925.3462537243013,
+          "time": 5.936750599998049,
+          "source": "e1_delivery"
+        },
+        {
+          "iteration": 291,
+          "objective": 921.6279203909681,
+          "time": 8.925878699985333,
+          "source": "e1_delivery"
+        },
+        {
+          "iteration": 328,
+          "objective": 918.6056659386478,
+          "time": 9.517180799972266,
+          "source": "shift_cutoff"
+        },
+        {
+          "iteration": 348,
+          "objective": 916.9995870576347,
+          "time": 9.620037299988326,
+          "source": "e1_delivery"
+        },
+        {
+          "iteration": 401,
+          "objective": 891.500663701924,
+          "time": 9.89162429998396,
+          "source": "destroy_routes"
+        },
+        {
+          "iteration": 441,
+          "objective": 888.4239970352575,
+          "time": 10.427544999984093,
+          "source": "e1_pickup"
+        },
+        {
+          "iteration": 586,
+          "objective": 885.4743347195641,
+          "time": 13.458753999962937,
+          "source": "destroy_routes"
+        },
+        {
+          "iteration": 589,
+          "objective": 838.460322534988,
+          "time": 13.464669199951459,
+          "source": "e1_pickup"
+        },
+        {
+          "iteration": 591,
+          "objective": 779.5798353107633,
+          "time": 13.471387900004629,
+          "source": "destroy_routes"
+        },
+        {
+          "iteration": 599,
+          "objective": 756.3510912594236,
+          "time": 13.494405899953563,
+          "source": "destroy_routes"
+        },
+        {
+          "iteration": 603,
+          "objective": 709.1370790748474,
+          "time": 13.499927999975625,
+          "source": "e1_delivery"
+        },
+        {
+          "iteration": 676,
+          "objective": 699.1370790748474,
+          "time": 14.961482999962755,
+          "source": "e1_pickup"
+        },
+        {
+          "iteration": 1187,
+          "objective": 695.8247271570356,
+          "time": 21.50027089996729,
+          "source": "destroy_routes"
+        },
+        {
+          "iteration": 1609,
+          "objective": 694.7197271570355,
+          "time": 28.486837399948854,
+          "source": "wait"
+        },
+        {
+          "iteration": 2498,
+          "objective": 694.4547271570357,
+          "time": 41.506418899982236,
+          "source": "wait"
+        },
+        {
+          "iteration": 2531,
+          "objective": 693.7097271570356,
+          "time": 41.657598999969196,
+          "source": "wait"
+        },
+        {
+          "iteration": 2612,
+          "objective": 693.3297271570357,
+          "time": 44.38834219996352,
+          "source": "wait"
+        },
+        {
+          "iteration": 5076,
+          "objective": 693.3280604903689,
+          "time": 103.79470899997978,
+          "source": "wait"
+        }
+      ],
+      "proof_scope": null,
+      "evaluations": 10879,
+      "cache_hits": 1914,
+      "calendar_evaluations": 1135,
+      "operator_attempts": {
+        "shift_boundary": 508,
+        "align_boundary": 513,
+        "redistribute_lengths": 181,
+        "destroy_random_batch": 87,
+        "destroy_related_batch": 70,
+        "close_batch": 96,
+        "split_batch": 78,
+        "destroy_routes": 505,
+        "relocate": 90,
+        "pair": 132,
+        "split_merge": 123,
+        "vehicle": 400,
+        "wait": 575,
+        "e1_delivery": 565,
+        "e1_pickup": 589,
+        "reverse": 77,
+        "shift_cutoff": 321,
+        "align_cutoff": 210
+      },
+      "operator_improvements": {
+        "shift_boundary": 0,
+        "align_boundary": 0,
+        "redistribute_lengths": 0,
+        "destroy_random_batch": 1,
+        "destroy_related_batch": 0,
+        "close_batch": 0,
+        "split_batch": 1,
+        "destroy_routes": 10,
+        "relocate": 0,
+        "pair": 0,
+        "split_merge": 0,
+        "vehicle": 0,
+        "wait": 5,
+        "e1_delivery": 6,
+        "e1_pickup": 3,
+        "reverse": 0,
+        "shift_cutoff": 3,
+        "align_cutoff": 0
+      }
+    }
+  ],
+  "anytime": [
+    {
+      "elapsed": 0.0,
+      "objective": null,
+      "batch_count": null,
+      "source": "call_start"
+    },
+    {
+      "elapsed": 90.32694330002414,
+      "objective": 631.2556702352136,
+      "batch_count": 1,
+      "visited_count": 1,
+      "visit": 1,
+      "source": "audited_candidate_return"
+    },
+    {
+      "elapsed": 195.2043982000323,
+      "objective": 631.2556702352136,
+      "batch_count": 1,
+      "visited_count": 2,
+      "visit": 1,
+      "source": "audited_candidate_return"
+    },
+    {
+      "elapsed": 300.10310230002506,
+      "objective": 631.2556702352136,
+      "batch_count": 1,
+      "visited_count": 3,
+      "visit": 1,
+      "source": "audited_candidate_return"
+    }
+  ]
+}

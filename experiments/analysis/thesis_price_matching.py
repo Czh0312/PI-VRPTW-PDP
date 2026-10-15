@@ -56,3 +56,18 @@ def validate_price_design(study, rows):
                 factor=factor, pool_rate=rate, case_sha256=driver.sha(path),
                 baseline_id=points[1.]['id'], matched=True))
     return evidence
+
+
+def validate_price_results(study, rows):
+    jobs = driver.read(Path(study)/'manifest.json')['jobs']
+    registered = {r['id']: r for r in jobs}
+    if len(rows) != len(registered) or {r['id'] for r in rows} != set(registered):
+        raise ValueError('Result rows do not match registered jobs')
+    for row in rows:
+        job = registered[row['id']]
+        for field in ('base_case', 'model', 'seed', 'price_factor', 'case_path',
+                      'counts', 'method', 'budget', 'version'):
+            if row[field] != job[field]:
+                raise ValueError(f'Result metadata differs from registration: {field}')
+    # row.iterations is the observed iteration count, not the registered cap.
+    return validate_price_design(study, jobs)

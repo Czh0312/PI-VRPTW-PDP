@@ -2,7 +2,7 @@ from copy import deepcopy
 
 import pytest
 
-from experiments.analysis.thesis_price_matching import validate_price_design
+from experiments.analysis.thesis_price_matching import validate_price_design, validate_price_results
 from experiments.runs.run_thesis_completion import write
 
 
@@ -59,3 +59,15 @@ def test_missing_baseline_or_duplicate_fails(tmp_path):
         validate_price_design(tmp_path, [r for r in rows if r['price_factor'] != 1.])
     with pytest.raises(ValueError, match='Duplicate'):
         validate_price_design(tmp_path, rows+[deepcopy(rows[0])])
+
+
+def test_actual_iterations_can_differ_but_registered_budget_cannot(tmp_path):
+    rows = design(tmp_path)
+    write(tmp_path/'manifest.json', dict(jobs=rows))
+    observed = deepcopy(rows)
+    for i, row in enumerate(observed):
+        row['iterations'] = 100+i
+    assert len(validate_price_results(tmp_path, observed)) == 3
+    observed[0]['budget'] = 60
+    with pytest.raises(ValueError, match='metadata'):
+        validate_price_results(tmp_path, observed)
