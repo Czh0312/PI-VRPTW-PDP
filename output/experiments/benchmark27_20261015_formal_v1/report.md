@@ -1,6 +1,6 @@
 # 正式27例八模型实验
 
-状态：IN_PROGRESS；0/1296 次有终态，0 次独立双周期审计可行，0 次已证最优。
+状态：COMPLETED；1296/1296 次有终态，1235 次独立双周期审计可行，71 次已证最优。
 
 数据修订 2；清单 SHA-256：`6a33b3c9f5766221af321841bfb66f2eb5a1cce963884055542151c072539e3a`。
 源码提交 `c1d04cee90a501d98ffedec2d7f7383e930d8d95`；实际执行字节见 source_current.zip 和 manifest.json。
@@ -10,54 +10,54 @@
 
 | 规模 | 模型 | 方法 | 可行/计划 | 最优 | 原生目标均值（仅可行） |
 | --- | ---: | --- | ---: | ---: | ---: |
-| large | M1 | alns | 0/45 | 0 | — |
-| large | M1 | exact | 0/9 | 0 | — |
-| large | M2 | alns | 0/45 | 0 | — |
-| large | M2 | exact | 0/9 | 0 | — |
-| large | M3 | alns | 0/45 | 0 | — |
-| large | M3 | exact | 0/9 | 0 | — |
-| large | M4 | alns | 0/45 | 0 | — |
-| large | M4 | exact | 0/9 | 0 | — |
-| large | M5 | alns | 0/45 | 0 | — |
-| large | M5 | exact | 0/9 | 0 | — |
-| large | M6 | alns | 0/45 | 0 | — |
+| large | M1 | alns | 45/45 | 0 | 990.5194 |
+| large | M1 | exact | 8/9 | 0 | 1117.6684 |
+| large | M2 | alns | 45/45 | 0 | 953.9849 |
+| large | M2 | exact | 9/9 | 0 | 1489.9480 |
+| large | M3 | alns | 45/45 | 0 | 1204.9054 |
+| large | M3 | exact | 6/9 | 0 | 1403.8158 |
+| large | M4 | alns | 45/45 | 0 | 1190.5075 |
+| large | M4 | exact | 9/9 | 0 | 1632.4179 |
+| large | M5 | alns | 45/45 | 0 | 2071.8196 |
+| large | M5 | exact | 9/9 | 0 | 2693.8563 |
+| large | M6 | alns | 45/45 | 0 | 3048.1228 |
 | large | M6 | exact | 0/9 | 0 | — |
-| large | M7 | alns | 0/45 | 0 | — |
+| large | M7 | alns | 45/45 | 0 | 3070.2854 |
 | large | M7 | exact | 0/9 | 0 | — |
-| large | M8 | alns | 0/45 | 0 | — |
+| large | M8 | alns | 44/45 | 0 | 4224.9193 |
 | large | M8 | exact | 0/9 | 0 | — |
-| medium | M1 | alns | 0/45 | 0 | — |
-| medium | M1 | exact | 0/9 | 0 | — |
-| medium | M2 | alns | 0/45 | 0 | — |
-| medium | M2 | exact | 0/9 | 0 | — |
-| medium | M3 | alns | 0/45 | 0 | — |
-| medium | M3 | exact | 0/9 | 0 | — |
-| medium | M4 | alns | 0/45 | 0 | — |
-| medium | M4 | exact | 0/9 | 0 | — |
-| medium | M5 | alns | 0/45 | 0 | — |
-| medium | M5 | exact | 0/9 | 0 | — |
-| medium | M6 | alns | 0/45 | 0 | — |
+| medium | M1 | alns | 45/45 | 0 | 501.5913 |
+| medium | M1 | exact | 9/9 | 4 | 501.6277 |
+| medium | M2 | alns | 45/45 | 0 | 483.0550 |
+| medium | M2 | exact | 9/9 | 3 | 482.4036 |
+| medium | M3 | alns | 45/45 | 0 | 571.3897 |
+| medium | M3 | exact | 9/9 | 4 | 579.1877 |
+| medium | M4 | alns | 45/45 | 0 | 549.2375 |
+| medium | M4 | exact | 9/9 | 1 | 603.3232 |
+| medium | M5 | alns | 45/45 | 0 | 1118.4325 |
+| medium | M5 | exact | 9/9 | 2 | 1098.7250 |
+| medium | M6 | alns | 45/45 | 0 | 1174.9278 |
 | medium | M6 | exact | 0/9 | 0 | — |
-| medium | M7 | alns | 0/45 | 0 | — |
+| medium | M7 | alns | 45/45 | 0 | 1154.9644 |
 | medium | M7 | exact | 0/9 | 0 | — |
-| medium | M8 | alns | 0/45 | 0 | — |
+| medium | M8 | alns | 45/45 | 0 | 1524.6439 |
 | medium | M8 | exact | 0/9 | 0 | — |
-| small | M1 | alns | 0/45 | 0 | — |
-| small | M1 | exact | 0/9 | 0 | — |
-| small | M2 | alns | 0/45 | 0 | — |
-| small | M2 | exact | 0/9 | 0 | — |
-| small | M3 | alns | 0/45 | 0 | — |
-| small | M3 | exact | 0/9 | 0 | — |
-| small | M4 | alns | 0/45 | 0 | — |
-| small | M4 | exact | 0/9 | 0 | — |
-| small | M5 | alns | 0/45 | 0 | — |
-| small | M5 | exact | 0/9 | 0 | — |
-| small | M6 | alns | 0/45 | 0 | — |
-| small | M6 | exact | 0/9 | 0 | — |
-| small | M7 | alns | 0/45 | 0 | — |
-| small | M7 | exact | 0/9 | 0 | — |
-| small | M8 | alns | 0/45 | 0 | — |
-| small | M8 | exact | 0/9 | 0 | — |
+| small | M1 | alns | 45/45 | 0 | 308.2176 |
+| small | M1 | exact | 9/9 | 9 | 308.1784 |
+| small | M2 | alns | 45/45 | 0 | 284.5460 |
+| small | M2 | exact | 9/9 | 9 | 254.6827 |
+| small | M3 | alns | 45/45 | 0 | 313.4257 |
+| small | M3 | exact | 9/9 | 9 | 313.2689 |
+| small | M4 | alns | 45/45 | 0 | 287.8591 |
+| small | M4 | exact | 9/9 | 8 | 273.3226 |
+| small | M5 | alns | 45/45 | 0 | 595.2843 |
+| small | M5 | exact | 9/9 | 9 | 593.8268 |
+| small | M6 | alns | 45/45 | 0 | 608.4098 |
+| small | M6 | exact | 9/9 | 6 | 584.4591 |
+| small | M7 | alns | 45/45 | 0 | 609.4057 |
+| small | M7 | exact | 9/9 | 6 | 583.7163 |
+| small | M8 | alns | 45/45 | 0 | 617.8690 |
+| small | M8 | exact | 7/9 | 1 | 570.1110 |
 
 逐种子、逐例均值/最好/最差/标准差、同源块均值及块平衡均值、模型配对、精确参照误差见 tables/。
 均值仅对可行结果计算；可行率以全部计划调用为分母。各规模分别报告，种子不计为独立算例。
@@ -67,5 +67,5 @@ M5/M6目标和批次作业规则均不同，其差值不能单独归因为增加
 27例来自14个来源块，中大规模含嵌套；不作独立同分布总体推断。可行性见证未作为算法初始解。
 完整输入、环境、命令、K域、时间精度、上下界和原始日志随实验保存。
 
-验收状态：待完成或待复核。
+验收状态：通过。
 执行/审计异常：0；最优参照矛盾：0。
