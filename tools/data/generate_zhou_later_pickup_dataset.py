@@ -27,7 +27,7 @@ from typing import Iterable
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SOURCE = ROOT / "reference" / "zhou_2E_VRPTWSPD_input"
-DEFAULT_OUTPUT = ROOT / "data" / "zhou_later_pickup"
+DEFAULT_OUTPUT = ROOT / 'output/generated_datasets/zhou_later_pickup'
 FLEET_CONFIG = json.loads(
     (ROOT / "config" / "routing" / "validation" / "zhou_small.json").read_text(encoding="utf-8")
 )

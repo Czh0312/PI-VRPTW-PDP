@@ -9,9 +9,15 @@ from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 LEGACY_CONFIG_ROOT = PROJECT_ROOT / 'archive/config/20261007_before_classification'
+LEGACY_DATA_ROOT = PROJECT_ROOT / 'archive/datasets/legacy_20261015/data'
 
 
 def resolve_project_path(path: str | Path) -> Path:
+    """Resolve current inputs first, then archived config/data references.
+
+    Historical JSON and provenance keep their original names and hashes. Only
+    existing archived inputs are redirected; new output paths stay untouched.
+    """
     candidate = Path(path)
     candidate = candidate if candidate.is_absolute() else PROJECT_ROOT / candidate
     if not candidate.exists():
@@ -22,6 +28,14 @@ def resolve_project_path(path: str | Path) -> Path:
         else:
             archived = LEGACY_CONFIG_ROOT / relative
             if archived.is_file():
+                return archived
+        try:
+            relative = candidate.resolve().relative_to(PROJECT_ROOT / 'data')
+        except ValueError:
+            pass
+        else:
+            archived = LEGACY_DATA_ROOT / relative
+            if archived.exists():
                 return archived
     return candidate
 

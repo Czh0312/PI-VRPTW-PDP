@@ -27,6 +27,11 @@ def solve_exact(problem, time_limit=60, seed=42, verbose=False):
                               proof_scope='empty_necessary_order_batch_domain',orders=missing,
                               runtime=time.perf_counter()-begun)
         return result
+    if len(problem.batch_map) > len(problem.orders):
+        result['info'].update(status='INFEASIBLE', proven_infeasible=True,
+                              proof_scope='nonempty_batch_assignment_impossible',
+                              runtime=time.perf_counter()-begun)
+        return result
     try:
         m,ctx=build_model(problem,verbose=verbose,deadline=begun+time_limit)
     except TimeoutError:

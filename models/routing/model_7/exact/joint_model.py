@@ -1,7 +1,8 @@
 """Complete joint order-batch, pool and two-echelon cost MILP.
 
-No fixed-batch distance cuts are used. Route-indexed arcs retain a simple
-auditable reference formulation, including pure recovery on inactive slots.
+No fixed-batch distance cuts are used. Each batch has positive delivery and
+recovery quantities; individual vehicles may still make delivery-only or
+pickup-only trips within that productive batch.
 """
 from __future__ import annotations
 

@@ -25,6 +25,7 @@ from models.routing.model_7.alns.neighborhoods import (
 
 
 from models.routing.model_7.alns.construction import (
+    cover_delivery_batches,
     _seed_from_result,
     _initial_cutoff_profiles,
     _best_construction,
@@ -114,6 +115,16 @@ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_resul
                 for oid, bs in problem.legal_batches.items()
             }
         )
+    seeds = [covered for assignment in seeds
+             if (covered := cover_delivery_batches(problem, assignment)) is not None]
+    if not seeds:
+        result = joint_empty_result(problem, "alns")
+        result["info"].update(
+            status="INFEASIBLE", proven_infeasible=True,
+            proof_scope="nonempty_batch_assignment_impossible",
+            runtime=time.perf_counter() - begun, iterations=0,
+        )
+        return result
     current = None
     best = None
     best_state = None
@@ -139,7 +150,7 @@ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_resul
         )
     profiles = _initial_cutoff_profiles(problem)
     starts = [(assignment, profiles[0]) for assignment in seeds]
-    starts += [(original, profile) for profile in profiles[1:]]
+    starts += [(seeds[0], profile) for profile in profiles[1:]]
     visited_starts = set()
     for assignment, cutoffs in starts:
         if current is not None and time.perf_counter() >= search_deadline:
@@ -161,7 +172,6 @@ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_resul
     operators = [
         "destroy_random_batch",
         "destroy_related_batch",
-        "close_batch",
         "split_batch",
         "destroy_routes",
         "relocate",

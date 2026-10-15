@@ -8,7 +8,7 @@ from __future__ import annotations
 from models.routing.model_8.alns.parameters import ALNSParameters
 from models.routing.model_8.alns.search_control import SearchControl
 
-from models.routing.model_8.alns.construction import initial_calendars
+from models.routing.model_8.alns.construction import initial_calendars, cover_delivery_batches
 
 from models.routing.model_8.alns.neighborhoods import move_boundaries, boundary_events
 
@@ -49,6 +49,14 @@ def solve_variable_count(variable, *, max_time, max_iterations, seed, initial_re
             initial_result=initial_result,
         )
     begun = time.perf_counter()
+    if k > len(parent.orders):
+        result = joint_empty_result(variable, "alns")
+        result["info"].update(
+            status="INFEASIBLE", proven_infeasible=True,
+            proof_scope="nonempty_batch_assignment_impossible",
+            runtime=time.perf_counter() - begun, iterations=0,
+        )
+        return result
     parameters = ALNSParameters(max_time, max_iterations, seed)
     control = SearchControl(parameters, begun, time.perf_counter)
     deadline = begun + max_time
@@ -86,6 +94,9 @@ def solve_variable_count(variable, *, max_time, max_iterations, seed, initial_re
             oid: assignment[oid] if assignment is not None and assignment[oid] in bs else bs[-1]
             for oid, bs in child.legal_batches.items()
         }
+        proposed = cover_delivery_batches(child, proposed)
+        if proposed is None:
+            return penalty * 10, None, None, None
         cuts = profile or (state.get("cutoffs") if state is not None else child.default_cutoffs)
         cuts = {bid: min(hi, max(lo, cuts[bid])) for bid, (lo, hi) in child.cutoff_bounds.items()}
         chosen = None
@@ -173,7 +184,6 @@ def solve_variable_count(variable, *, max_time, max_iterations, seed, initial_re
     route_ops = [
         "destroy_random_batch",
         "destroy_related_batch",
-        "close_batch",
         "split_batch",
         "destroy_routes",
         "relocate",

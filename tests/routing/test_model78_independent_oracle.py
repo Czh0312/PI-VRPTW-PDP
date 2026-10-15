@@ -57,6 +57,10 @@ def one_order_oracle(problem, number):
     rates = problem.cost_profile.config
     best = math.inf
     for count in (1, 2):
+        # Orders are indivisible; every actual batch must deliver at least
+        # one order. One order cannot support a second productive round.
+        if count > len(problem.orders):
+            continue
         domains = [(a, z)] if count == 1 else [(a, t, z) for t in
                    ([a+(z-a)//2] if number in (6, 7) else range(a+2, z-1))]
         for bounds in domains:

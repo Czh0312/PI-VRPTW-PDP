@@ -19,7 +19,7 @@ from tools.data.static_batch_dataset import verify_artifacts
 
 VERSION = 'model5_model6_shared_v1'
 DEFAULT_SOURCE = 'data/model6/uniform_v2_20261005/manifest.json'
-DEFAULT_OUTPUT = 'data/model5_model6/shared_v1_20261005'
+DEFAULT_OUTPUT = 'output/generated_datasets/model5_model6/shared_v1_20261005'
 DEFAULT_DESIGN = 'config/datasets/model5_model6_shared_v1.json'
 SHARED_KEYS = ('data','orders','routing_config','operating_policy','distance_matrix','duration_matrix','economic_config')
 CASE_KEYS = ('m5_case','m6_case','m6_fixed_policy_case')

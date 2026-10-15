@@ -35,8 +35,8 @@ def register(out):
     if out.exists() and any(out.iterdir()):
         raise ValueError('Refusing to overwrite an existing assessment')
     out.mkdir(parents=True, exist_ok=True)
-    from tools.configuration.loader import load_routing_case
-    manifest_path = ROOT/'data/model6/uniform_v2_20261005/manifest.json'
+    from tools.configuration.loader import load_routing_case, resolve_project_path
+    manifest_path = resolve_project_path(ROOT/'data/model6/uniform_v2_20261005/manifest.json')
     rows = read(manifest_path)['cases']
     groups = {}
     for row in sorted(rows, key=lambda r: r['name']):
@@ -57,9 +57,7 @@ def register(out):
         for key in ('data', 'orders', 'routing_config', 'operating_policy', 'distance_matrix',
                     'duration_matrix', 'economic_config', 'dataset_metadata', 'algorithm_config'):
             if isinstance(config.get(key), str):
-                origin = Path(config[key])
-                if not origin.is_absolute():
-                    origin = ROOT/origin
+                origin = resolve_project_path(config[key])
                 digest = sha(origin)
                 dest = out/'inputs'/(digest+origin.suffix)
                 dest.parent.mkdir(exist_ok=True)

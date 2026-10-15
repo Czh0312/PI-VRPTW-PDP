@@ -131,7 +131,7 @@ def prepare(out, args):
         purpose='Cost scenarios on feasible routes; not an algorithm performance study',
         pool_policy='N=Q in every reusable configuration; no restricted-pool frontier'))
     write(out/'manifest.json', dict(started_at=now(), dataset_version=dataset['dataset_version'],
-        dataset_manifest_sha256=digest(ROOT/'data/manifest.json'), parameters=parameters,
+        dataset_manifest_sha256=digest(resolve_project_path(ROOT/'data/manifest.json')), parameters=parameters,
         lade_family_count=21, lade_configuration_count=63, lade_route_jobs=len(jobs),
         zhou_b1_source='output/experiments/m1_m4_comparison_20261004/full',
         zhou_m5_source='output/experiments/m5_comparison_20261004/full',

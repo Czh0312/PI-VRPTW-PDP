@@ -11,8 +11,8 @@ import pandas as pd
 
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_SOURCE = ROOT / "data" / "real_case" / "raw" / "r3pack" / "D3.5_R3PACK_Dataset.xlsx"
-DEFAULT_OUTPUT = ROOT / "data" / "real_case" / "reports" / "r3pack_parameter_audit.json"
+DEFAULT_SOURCE = ROOT / 'archive/datasets/legacy_20261015/data/real_case/raw' / "r3pack" / "D3.5_R3PACK_Dataset.xlsx"
+DEFAULT_OUTPUT = ROOT / 'output/inspections/real_case' / "r3pack_parameter_audit.json"
 
 
 def numeric_summary(

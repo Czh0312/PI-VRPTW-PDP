@@ -22,9 +22,9 @@ if str(ROOT) not in sys.path:
 
 VERSION = 'static_batch_suite_v2'
 from tools.data.design_static_scenarios import design_orders, select_territories
-from tools.configuration.loader import LEGACY_CONFIG_ROOT, resolve_project_path
+from tools.configuration.loader import LEGACY_CONFIG_ROOT, LEGACY_DATA_ROOT, resolve_project_path
 
-DEFAULT_OUTPUT = ROOT/'data'
+DEFAULT_OUTPUT = ROOT/'output/generated_datasets/static_batch_suite'
 ZHOU_PROFILE = 'zhou_10_per_customer_count_v4'
 ZHOU_CUSTOMERS_BY_SIZE = {'small': (7, 10, 12), 'medium': (20, 30), 'large': (50, 100)}
 # Frozen before regeneration; never select on solver objective/status/runtime.
@@ -40,7 +40,7 @@ NETWORK_FIELDS = ['node_id', 'node_type', 'x', 'y', 'delivery_demand', 'service_
 
 
 def read_csv(path):
-    with Path(path).open(encoding='utf-8-sig', newline='') as handle:
+    with resolve_project_path(path).open(encoding='utf-8-sig', newline='') as handle:
         return list(csv.DictReader(handle))
 
 
@@ -49,6 +49,8 @@ def reference(path):
     # V2's provenance names are part of its byte-identical published dataset.
     if path.is_relative_to(LEGACY_CONFIG_ROOT):
         return (Path('config') / path.relative_to(LEGACY_CONFIG_ROOT)).as_posix()
+    if path.is_relative_to(LEGACY_DATA_ROOT):
+        return (Path('data') / path.relative_to(LEGACY_DATA_ROOT)).as_posix()
     try:
         return path.relative_to(ROOT).as_posix()
     except ValueError:
@@ -56,7 +58,7 @@ def reference(path):
 
 
 def digest(path):
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    return hashlib.sha256(resolve_project_path(path).read_bytes()).hexdigest()
 
 
 def stable_key(family, identifier):
@@ -273,7 +275,7 @@ def build_suite(output=DEFAULT_OUTPUT, source_root=ROOT):
 
     # Real-based families retain observed AOI/day counts, locations and the
     # already saved asymmetric road matrices; no additional road API requests.
-    real = source_root/'data/real_case/processed/lade_hz_0823_0829_30aoi'
+    real = resolve_project_path(source_root/'data/real_case/processed/lade_hz_0823_0829_30aoi')
     geography = read_csv(real/'nodes_geographic.csv')
     ranking = sorted((r for r in geography if r['node_type'] == 'c'),
                      key=lambda r: (-float(r['weekly_orders']), r['node_id']))

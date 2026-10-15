@@ -13,7 +13,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from tools.configuration.loader import PROJECT_ROOT
+from tools.configuration.loader import PROJECT_ROOT, resolve_project_path
 
 
 def write(path, value):
@@ -38,7 +38,7 @@ def build_suite(destination):
         for variant in range(2):
             name = f'{structure}_{variant}'
             source_name = 'two_satellites' if structure == 'ordinary' and variant else 'reuse_high_pool'
-            source = PROJECT_ROOT/'data/model6/mechanism_v1'/source_name
+            source = resolve_project_path(PROJECT_ROOT/'data/model6/mechanism_v1'/source_name)
             orders = json.loads((source/'orders.json').read_text(encoding='utf-8'))
             policy = json.loads((source/'policy.json').read_text(encoding='utf-8'))
             economics = json.loads((source/'economic.json').read_text(encoding='utf-8'))

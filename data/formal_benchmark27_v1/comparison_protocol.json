@@ -1,0 +1,60 @@
+{
+  "dataset_revision": 2,
+  "experimental_unit": "27 matched base cases; 14 original source blocks; seeds are repeated runs",
+  "primary_cost_policy": "Keep the same synthetic economic profile across all 27 bases and all eight model projections",
+  "container_pool_cost_per_period": 5,
+  "pool_charge_definition": "5 * N per 780-minute cycle; N is physical reusable stock, not demand Q or purchase price",
+  "economic_fields_used_in_joint_cost": [
+    "container_pool_cost_per_period",
+    "e1_distance_cost_per_km",
+    "e2_distance_cost_per_km",
+    "e1_work_cost_per_minute",
+    "e2_work_cost_per_minute",
+    "e1_vehicle_cost_per_cycle",
+    "e2_vehicle_cost_per_cycle",
+    "e1_trip_cost",
+    "e2_trip_cost",
+    "cleaning_cost_per_return",
+    "tracking_cost_per_use",
+    "container_price",
+    "container_lifetime_uses"
+  ],
+  "cost_sensitivity": "Use explicit run-time overrides on the same base inputs; retain all attempts and mark synthetic uncalibrated rates. Do not create duplicate base datasets or silently change the primary profile.",
+  "metrics": [
+    "independently audited feasibility",
+    "distance in benchmark coordinate units",
+    "comparable cost for reusable models only",
+    "N",
+    "Q",
+    "K",
+    "vehicles",
+    "trips",
+    "bound and proof scope",
+    "wall time",
+    "visited and unvisited K candidates"
+  ],
+  "native_objectives": {
+    "1-5": "distance",
+    "6-8": "cost"
+  },
+  "objective_control": "A common cost recalculation is not a fixed-policy cost optimization control. Do not attribute M5/M6 differences solely to additional decisions without that control.",
+  "reporting": "Report each size separately, pair by base case, retain source_block for block-balanced summaries; never treat all runs as independent cases.",
+  "feasibility_denominator": "All planned runs, including timeouts, heuristic no-solution and audit failures",
+  "witness_policy": "216 independently replayed schedules certify feasibility; they are not optimal and are not loaded automatically by benchmark solvers.",
+  "k_domain_policy": "Start with the common positive-integer domain. Remove only input-proven impossible counts; each exclusion is recorded and recomputed.",
+  "scope_limits": [
+    "One synthetic appointment and economic regime; not a representative empirical population",
+    "E1 capacity is deliberately loose; not an E1 scarcity benchmark",
+    "All orders released at cycle start; not a late-release stress benchmark",
+    "Most fixed assignments are already nearest-satellite assignments",
+    "A low-cost single-batch optimum is an admissible finding; do not tune prices to guarantee M8 wins",
+    "M5 fixes dispatch slots but does not require positive recovery in each slot; M6-M8 require productive delivery and recovery. Without harmonizing this rule, M5 is not automatically a strict subset control for M6."
+  ],
+  "formal_experiment_status": "Feasibility validation and bounded diagnostics completed; final multi-seed performance study not completed",
+  "separate_purchase_and_wear_accounting": {
+    "pool_charge": "5*N per cycle",
+    "wear_in_objective": "Q*container_price/container_lifetime_uses = 0.2*Q",
+    "initial_investment_reported_separately": "N*container_price = 10*N; not added again to objective",
+    "implication": "With fixed demand Q, the wear term is constant across reusable model solutions; reducing N primarily saves the per-cycle pool charge."
+  }
+}

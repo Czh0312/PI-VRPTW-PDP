@@ -55,16 +55,18 @@ def test_cutoff_equality_and_one_tick_late_change_recovery_round(exact_available
 
 def test_e2_can_recover_during_second_phase_and_wait_for_next_round(exact_available):
     base=joint_fixture()
-    orders=[replace(base.orders[0],delivery_window=(0,20),pickup_window=(45,45),allowed_batch_ids=('b1',))]
+    orders=[replace(base.orders[0],delivery_window=(0,20),pickup_window=(45,45),allowed_batch_ids=('b1',)),
+            replace(base.orders[1],allowed_batch_ids=('b2',)),
+            replace(base.orders[0],id='early',delivery_window=(0,20),pickup_window=(10,10),
+                    allowed_batch_ids=('b1',))]
     p=JointBatchInstance(base.network,orders,base.operating_policy,
         dict(optimize_cutoffs=True,cutoff_bounds_minutes={'b1':[30,40],'b2':[80,100]}),synthetic_profile())
     r=solve_exact(p,time_limit=10)
     assert r['info']['proven_optimal'] and r['audit']['valid']
-    trip=next(t for t in r['e2_trips'] if any(e['kind']=='p' for e in t['events']))
+    trip=next(t for t in r['e2_trips'] if any(e['kind']=='p' and e['order_id']=='o1' for e in t['events']))
     assert r['batch_cutoffs']['b1']<trip['return_complete']<p.batch_map['b1'].end
-    assert [s['quantity'] for s in r['recovery_rounds']]==[0,1]
-    assert not r['delivery_batch_activation']['b2']
-    assert any(t['batch_id']=='b2' and all(e['kind']=='p' for e in t['events']) for t in r['e1_trips'])
+    assert [s['quantity'] for s in r['recovery_rounds']]==[1,2]
+    assert all(r['delivery_batch_activation'].values())
 
 
 def test_exact_variable_optimum_matches_exhaustive_fixed_cutoffs(exact_available):

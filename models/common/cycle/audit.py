@@ -110,6 +110,8 @@ def _audit(problem, result, repeat):
     if result.get('batches') != expected_batches:
         error('BATCH_CALENDAR_MISMATCH')
     for b in p.batches:
+        if getattr(problem, 'require_productive_batches', False) and not problem.batch_demands[b.id]:
+            error('EMPTY_BATCH_DELIVERY', batch=b.id)
         transfer(loading_starts[b.id], 'clean', 'forward', problem.batch_demands[b.id], f'issue:{b.id}')
 
     e1_d, e1_p = defaultdict(list), defaultdict(list)
@@ -323,6 +325,10 @@ def _audit(problem, result, repeat):
                                   pickup_trip=actual[0][2] if len(actual) == 1 else None,
                                   pickup_time=actual[0][1] if len(actual) == 1 else None))
             previous_cutoff = b.cutoff
+    if getattr(problem, 'require_productive_batches', False):
+        for b in p.batches:
+            if not sum(row[0] for s in problem.satellites for row in e1_p[s, b.id]):
+                error('EMPTY_BATCH_RECOVERY', batch=b.id)
     for r in returns:
         if r['quantity'] and r['time'] > p.batches[-1].cutoff:
             error('TERMINAL_OUTSTANDING', trip=r['trip_id'], time=r['time'])

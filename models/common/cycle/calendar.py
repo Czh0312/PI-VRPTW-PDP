@@ -172,7 +172,8 @@ def attach_calendar_decisions(problem, result, count, boundaries):
                   batch_boundaries=list(boundaries), batch_durations_ticks=durations,
                   cutoff_offsets_ticks=offsets,
                   cutoff_ratios={f'b{i+1}': offsets[f'b{i+1}']/d for i, d in enumerate(durations)},
-                  actual_recovery_round_count=sum(row['quantity'] > 0 for row in result['recovery_rounds']))
+                  actual_recovery_round_count=len({row['batch_id'] for row in result['recovery_rounds']
+                                                   if row['quantity'] > 0}))
     return result
 
 
@@ -193,7 +194,8 @@ def audit_calendar_solution(problem, result, repeat=True):
                 for b in child.operating_policy.batches):
             raise ValueError('Calendar cutoff ratio mismatch')
         physical = audit_joint_solution(child, {**result, 'model': 6, 'strategy': STRATEGY}, repeat)
-        recovery_count = sum(row['quantity'] > 0 for row in physical.get('cutoff_snapshots', []))
+        recovery_count = len({row['batch_id'] for row in physical.get('cutoff_snapshots', [])
+                              if row['quantity'] > 0})
         if result.get('actual_recovery_round_count') != recovery_count:
             physical['errors'].append(dict(code='CALENDAR_RECOVERY_COUNT_MISMATCH'))
             physical['valid'] = False

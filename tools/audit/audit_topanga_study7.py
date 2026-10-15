@@ -10,8 +10,8 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.append(str(ROOT / 'output/tmp/topanga_python_deps'))
 import pyreadstat
 
-RAW = ROOT / 'data/real_case/raw/topanga_study7'
-OUT = ROOT / 'data/real_case/reports/topanga_study7'
+RAW = ROOT / 'archive/datasets/legacy_20261015/data/real_case/raw/topanga_study7'
+OUT = ROOT / 'output/inspections/real_case/topanga_study7'
 OUT.mkdir(parents=True, exist_ok=True)
 df, meta = pyreadstat.read_sav(str(RAW / 'Study 7 - Loops data.sav'))
 seconds = (df.CLOSED_AT - df.OPENED_AT).dt.total_seconds()

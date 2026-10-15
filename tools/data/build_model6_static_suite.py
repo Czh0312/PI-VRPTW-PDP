@@ -132,7 +132,7 @@ def build_suite(destination,source_manifest='data/manifest.json',families=None,b
 
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output',default='data/model6/static_v2_lade_20261004')
+    parser.add_argument('--output',default='output/generated_datasets/model6/static_v2_lade_20261004')
     parser.add_argument('--source-manifest',default='data/manifest.json')
     parser.add_argument('--families',nargs='+')
     parser.add_argument('--batch-count',type=int,choices=[2,3],default=3)

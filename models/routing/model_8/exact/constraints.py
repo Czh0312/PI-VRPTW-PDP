@@ -76,6 +76,7 @@ def add_order_batch_constraints(
                 )
     for b in parameters.policy.batches:
         members = [v for (oid, bid), v in y.items() if bid == b.id]
+        variables.model.addConstr(z[b.id] == 1, name=f"batch_delivery_active_{b.id}")
         for v in members:
             variables.model.addConstr(v <= z[b.id])
         variables.model.addConstr(z[b.id] <= gp.quicksum(members))
@@ -548,6 +549,12 @@ def add_second_echelon_constraints(
 def add_task_and_return_coverage_constraints(parameters, variables):
     """Cover each task once and balance first-echelon empty-container returns."""
     import gurobipy as gp
+
+    for b in parameters.policy.batches:
+        variables.model.addConstr(
+            gp.quicksum(variables.expected_returns[s, b.id] for s in parameters.problem.satellites) >= 1,
+            name=f"batch_recovery_positive_{b.id}",
+        )
 
     for o in parameters.problem.orders:
         for kind in ("d", "p"):

@@ -27,7 +27,7 @@ def _write(path,value):
 
 
 def build_suite(destination=None):
-    root=Path(destination) if destination else PROJECT_ROOT/'data/model6/mechanism_v1'
+    root=Path(destination) if destination else PROJECT_ROOT/'output/generated_datasets/model6/mechanism_v1'
     if root.exists() and any(root.iterdir()):
         raise ValueError(f'Refusing to overwrite nonempty suite directory: {root}')
     root.mkdir(parents=True,exist_ok=True)

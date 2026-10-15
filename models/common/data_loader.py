@@ -1,9 +1,11 @@
 # models/common/data_loader.py
 # -*- coding: utf-8 -*-
 import csv
+from pathlib import Path
 from typing import Dict, Tuple
 
 from models.common.domain.node import Customer, Depot, Node, Satellite
+from tools.configuration.loader import resolve_project_path
 
 
 def _float_field(row: Dict[str, str], key: str, default: float) -> float:
@@ -20,7 +22,10 @@ def parse_dataset(filepath: str) -> Tuple[Dict[str, Node], Dict]:
     """
     nodes: Dict[str, Node] = {}
 
-    with open(filepath, mode="r", encoding="utf-8-sig") as f:
+    source = Path(filepath)
+    if not source.exists():
+        source = resolve_project_path(source)
+    with source.open(mode="r", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         for row in reader:
             if not row.get("node_id"):

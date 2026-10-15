@@ -15,6 +15,7 @@ STRATEGY = 'joint_batch_cost_v1'
 
 class JointBatchInstance(MultiBatchInstance):
     joint_batch = True
+    require_productive_batches = True
 
     def __init__(self, network, orders, policy, options, economic_config, *, _physical_source=None):
         super().__init__(network, orders, policy, model=6, _physical_source=_physical_source)
@@ -173,6 +174,9 @@ class JointBatchInstance(MultiBatchInstance):
         orders = [replace(o, batch=assignment[o.id]) for o in self.orders]
         fixed = MultiBatchInstance(self.network, orders, p, model=3 if len(p.batches)==1 else 5,
                                    _physical_source=self)
+        # Calendar slots in M6–M8 are actual delivery/recovery rounds. Keep
+        # that business rule when projecting onto the physical decoder.
+        fixed.require_productive_batches = self.require_productive_batches
         if self.optimize_loading:
             fixed.batch_loading_starts = loading
         return fixed

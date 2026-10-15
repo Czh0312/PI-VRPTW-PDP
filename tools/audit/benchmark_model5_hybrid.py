@@ -52,7 +52,7 @@ def main():
         from models.common.cycle import load_instance
         plan = json.loads(args.plan.read_text())
         output.mkdir(parents=True, exist_ok=False)
-        dataset = json.loads((ROOT/'data/manifest.json').read_text())
+        dataset = json.loads(resolve_project_path(ROOT/'data/manifest.json').read_text())
         jobs = []
         for family in plan['families']:
             row = next(f for f in dataset['families'] if f['family_id'] == family)

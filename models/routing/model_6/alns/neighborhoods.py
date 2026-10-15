@@ -316,10 +316,7 @@ def _batch_move(problem, evaluator, assignment, rng, operator, deadline, cutoffs
 
     proposed = dict(assignment)
     ids = list(proposed)
-    if operator == "close_batch":
-        chosen = rng.choice(sorted(set(proposed.values())))
-        ids = [oid for oid in ids if proposed[oid] == chosen]
-    elif operator == "split_batch":
+    if operator == "split_batch":
         chosen = rng.choice(sorted(set(proposed.values())))
         members = [oid for oid in ids if proposed[oid] == chosen]
         ids = rng.sample(members, max(1, len(members) // 2))
@@ -339,6 +336,7 @@ def _batch_move(problem, evaluator, assignment, rng, operator, deadline, cutoffs
     for oid in ids:
         if time.perf_counter() >= deadline:
             break
+        singleton = sum(bid == proposed[oid] for bid in proposed.values()) == 1
         choices = [b for b in problem.legal_batches[oid] if b != proposed[oid]]
         if not choices:
             continue
@@ -348,6 +346,14 @@ def _batch_move(problem, evaluator, assignment, rng, operator, deadline, cutoffs
             if time.perf_counter() >= deadline:
                 break
             trial = {**proposed, oid: bid}
+            if singleton:
+                # Exchange orders when moving the last one would empty its
+                # batch. This keeps fixed-K assignments searchable at K=|O|.
+                partners = [other for other, current in proposed.items()
+                            if current == bid and proposed[oid] in problem.legal_batches[other]]
+                if not partners:
+                    continue
+                trial[rng.choice(partners)] = proposed[oid]
             construction = _best_construction(
                 problem, evaluator, trial, rng, deadline, cutoffs=cutoffs
             )

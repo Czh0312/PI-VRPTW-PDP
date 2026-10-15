@@ -41,8 +41,8 @@ M1/M3、M2/M4 分别用于固定/自由分仓的包装对照；M1/M2、M3/M4 用
 # 单批四模型与条件经济分析（示例费用）
 .venv/bin/python main.py compare-single-batch --time 1 --exact-time 10
 
-# 只列出数据，不启动求解
-.venv/bin/python main.py compare --dataset-manifest data/manifest.json --batch-counts 1 --list-only
+# 正式27例配对数据：检查输入，不启动求解
+.venv/bin/python -m tools.audit.audit_formal_benchmark27
 
 # 已审计方案的费用核算
 .venv/bin/python main.py cost --route-result /path/to/result.json --economic-config config/cost/synthetic/multibatch_synthetic.json
@@ -66,7 +66,7 @@ make test
 | `models/cost/` | 成本、生命周期与经济对照 |
 | `config/` | 按车辆、容器、运行规则、成本、求解器、数据生成、实验组合分类的参数 |
 | `tools/configuration/` | 配置读取和路径解析的 Python 代码 |
-| `data/` | 数据集、配对清单、原始来源和派生记录 |
+| `data/` | 正式27例数据集、八模型配对配置和入口说明 |
 | `experiments/` | 批量运行与结果分析的程序；生成文件写入 `output/` |
 | `tools/` | 数据构造、审计、恢复与公用绘图（`tools/reporting/`） |
 | `tests/` | 路由、费用和数据回归测试 |
@@ -77,7 +77,9 @@ make test
 
 ## 数据与研究记录
 
-现行基础数据为 `static_batch_suite_v2`。`data/single_batch/` 与 `data/multi_batch/` 按 `small/medium/large` 管理，共同网络和资源在 `data/shared/`；`data/manifest.json` 索引 93 组 B1/B2/B3 配对。M6–M8 的适配数据、当前配置及来源见[数据说明](data/README.md)与[配置说明](config/README.md)。
+其他电脑的拉取、安装与运行步骤见 [正式数据远程运行说明](docs/benchmark27_remote_run.md)。
+
+现行统一主实验使用 [formal_benchmark27_v1](data/formal_benchmark27_v1/README.md)：27个基础算例，按 `model_1`～`model_8` 分目录，各模型的小／中／大规模各9例，共216份配置。同编号算例共享需求与物理输入，各模型固定或优化的参数随算例保存。此前 `static_batch_suite_v2` 的93组B1/B2/B3配对、专项版本及来源数据集中放在[历史数据归档](archive/datasets/README.md)，通过兼容加载器用于旧测试和复现。旧生成脚本默认写入 `output/generated_datasets/`。
 
 费用包含合成情景和有来源说明的参考参数，各自适用范围见[费用复核](docs/cost_calibration_review_20261006.md)。真实配送基础不等于完整真实闭环数据，已保存方案重计价也不等于按新目标重新求解。
 

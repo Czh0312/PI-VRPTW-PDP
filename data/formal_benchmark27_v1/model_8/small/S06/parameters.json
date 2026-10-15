@@ -1,0 +1,76 @@
+{
+  "model": 8,
+  "base_case_id": "S06",
+  "source_family": "zhou_Set1_10-2-2",
+  "demand_container_uses": 17,
+  "objective": "cost",
+  "fixed_parameters": {
+    "packaging": "reusable",
+    "cycle_start": 480,
+    "cycle_end": 1260,
+    "customer_satellite_assignment": {
+      "C0": "S1",
+      "C1": "S1",
+      "C2": "S1",
+      "C3": "S0",
+      "C4": "S0",
+      "C5": "S1",
+      "C6": "S1",
+      "C7": "S0",
+      "C8": "S1",
+      "C9": "S0"
+    },
+    "schedule_mode": "flexible_cycle"
+  },
+  "optimized_decisions": [
+    "routes",
+    "vehicle_assignment",
+    "service_times",
+    "batch_count",
+    "order_batch_assignment",
+    "container_pool_size",
+    "independent_batch_cutoffs",
+    "batch_lengths"
+  ],
+  "inactive_components": [],
+  "decision_bounds": {
+    "schedule_mode": "flexible_cycle",
+    "batch_count_candidates": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10
+    ],
+    "min_phase_minutes": 1,
+    "pool_min": 1,
+    "pool_max": 17
+  },
+  "reference_only": {
+    "customer_satellite_assignment": {
+      "C0": "S1",
+      "C1": "S1",
+      "C2": "S1",
+      "C3": "S0",
+      "C4": "S0",
+      "C5": "S1",
+      "C6": "S1",
+      "C7": "S0",
+      "C8": "S1",
+      "C9": "S0"
+    },
+    "container_pool_size": 17
+  },
+  "notes": [
+    "The model number activates packaging and free-assignment semantics in the solver.",
+    "For M6-M8, policy.container_pool_size is a reference; pool_min/pool_max define the decision.",
+    "For M2/M4, satellite_id is the initial/reference assignment and is not fixed.",
+    "Shared economic coefficients do not change the native distance objective of M1-M5.",
+    "M5 fixes dispatch slots but does not enforce positive recovery in each slot; M6-M8 do. An ablation attributing differences only to released decisions must harmonize this rule."
+  ]
+}

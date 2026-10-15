@@ -17,7 +17,7 @@ FAMILIES = (
 )
 PROFILE = 'config/cost/scenarios/truck_tricycle_pool25_truck0p5_clean02_v1.json'
 DESTINATION = 'config/experiments/pool25_truck0p5_allK_20261007'
-ORDER_DESTINATION = 'data/experiment_inputs/pool25_truck0p5_allK_20261007'
+ORDER_DESTINATION = 'output/generated_datasets/experiment_inputs/pool25_truck0p5_allK_20261007'
 MODES = {6: 'uniform_cycle', 7: 'uniform_independent_cutoffs', 8: 'flexible_cycle'}
 
 
@@ -36,7 +36,7 @@ def build_suite(destination=DESTINATION, orders_output=None):
     root = resolve_project_path(destination).resolve()
     if orders_output is None:
         orders_output = (ORDER_DESTINATION if root == PROJECT_ROOT/DESTINATION else
-                         PROJECT_ROOT/'data/experiment_inputs'/root.name if root.is_relative_to(PROJECT_ROOT/'config') else
+                         PROJECT_ROOT/'output/generated_datasets/experiment_inputs'/root.name if root.is_relative_to(PROJECT_ROOT/'config') else
                          root.parent/(root.name+'_data'))
     orders_root = resolve_project_path(orders_output).resolve()
     if orders_root.is_relative_to(PROJECT_ROOT/'config'):

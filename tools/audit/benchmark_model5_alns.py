@@ -32,7 +32,7 @@ def hashes(folder):
 
 def register(out, plan=None):
     from tools.configuration.loader import load_routing_case, resolve_project_path
-    dataset = json.loads((ROOT/'data/manifest.json').read_text())
+    dataset = json.loads(resolve_project_path(ROOT/'data/manifest.json').read_text())
     plan = plan or {}
     families = plan.get('families', {'zhou_Set2_100-5-1b_subset50': 'development',
                 'zhou_Set2_100-5-1b': 'development',
@@ -83,7 +83,7 @@ def register(out, plan=None):
         total_solver_seconds_per_phase=sum(j['budget'] for j in jobs),
         created=time.strftime('%Y-%m-%dT%H:%M:%S'), python=sys.version,
         platform=platform.platform(), input_sha256=hashes(frozen),
-        dataset_manifest_sha256=hashlib.sha256((ROOT/'data/manifest.json').read_bytes()).hexdigest()))
+        dataset_manifest_sha256=hashlib.sha256(resolve_project_path(ROOT/'data/manifest.json').read_bytes()).hexdigest()))
 
 
 def worker(job, destination):

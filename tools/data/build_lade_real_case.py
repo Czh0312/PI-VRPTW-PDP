@@ -20,9 +20,9 @@ import pandas as pd
 
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_SOURCE = ROOT / "data" / "real_case" / "raw" / "lade_d" / "delivery_hz.parquet"
+DEFAULT_SOURCE = ROOT / 'archive/datasets/legacy_20261015/data/real_case/raw' / "lade_d" / "delivery_hz.parquet"
 DEFAULT_OUTPUT = (
-    ROOT / "data" / "real_case" / "processed" / "lade_hz_0823_0829_30aoi"
+    ROOT / 'output/generated_datasets/real_case/processed' / "lade_hz_0823_0829_30aoi"
 )
 
 # Publicly documented coordinate near the old cargo centre at Hangzhou

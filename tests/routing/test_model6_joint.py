@@ -57,17 +57,17 @@ def exact_available():
         pytest.skip(str(exc))
 
 
-def test_hand_arithmetic_and_consolidation(exact_available):
+def test_hand_arithmetic_for_two_productive_batches(exact_available):
     p=joint_fixture()
     result=solve_exact(p,time_limit=10)
     assert result['audit']['valid'] and result['info']['proven_optimal']
-    # 14 distance + 5.1 occupied-time + 15 physical vehicles + 2 trips
-    # + 10 pool + .6 cleaning/tracking + .4 wear, investment separate.
-    assert result['info']['objective']==pytest.approx(47.1)
-    assert result['total_distance']==14
-    assert result['container_pool_size']==2 and result['delivery_batch_count']==1
-    assert result['cost']['initial_pool_investment']==20
-    assert result['audit']['e1_vehicle_count']==1 and result['audit']['e1_trip_count']==1
+    # 26 distance + 10 occupied-time + 15 physical vehicles + 4 trips
+    # + 5 pool + .6 cleaning/tracking + .4 wear, investment separate.
+    assert result['info']['objective']==pytest.approx(61)
+    assert result['total_distance']==26
+    assert result['container_pool_size']==1 and result['delivery_batch_count']==2
+    assert result['cost']['initial_pool_investment']==10
+    assert result['audit']['e1_vehicle_count']==1 and result['audit']['e1_trip_count']==2
 
 
 def test_high_pool_charge_selects_two_batches_and_one_physical_box(exact_available):
@@ -88,6 +88,9 @@ def test_joint_optimum_matches_all_fixed_partitions(exact_available):
     for bids in itertools.product(('b1','b2'),repeat=2):
         fixed=joint_fixture(pool_rate=30,fixed_assignment=dict(zip(('o1','o2'),bids)))
         r=solve_exact(fixed,time_limit=10)
+        if len(set(bids)) < 2:
+            assert r['info']['proven_infeasible']
+            continue
         assert r['info']['proven_optimal'] and r['audit']['valid']
         values.append(r['info']['objective'])
     assert full['info']['objective']==pytest.approx(min(values))
@@ -131,20 +134,18 @@ def test_nonzero_preparation_unloading_and_half_minute_ticks(exact_available):
     assert h['audit']['valid'] and h['info']['objective']>=r['info']['objective']-1e-7
 
 
-def test_inactive_delivery_slot_retains_pure_collection(exact_available):
+def test_inactive_delivery_slot_is_not_an_actual_batch(exact_available):
     p=joint_fixture(late=True)
     r=solve_exact(p,time_limit=10)
-    assert r['info']['proven_optimal'] and r['audit']['valid']
-    assert r['delivery_batch_activation']=={'b1':True,'b2':False}
-    pickup=[t for t in r['e1_trips'] if t['batch_id']=='b2']
-    assert len(pickup)==1 and all(e['kind']=='p' for e in pickup[0]['events'])
-    assert r['cost_components']['e1_trips']==2
-    changed=deepcopy(r); changed['e1_trips'].remove(pickup[0])
-    assert not audit_solution(p,changed)['valid']
+    assert r['info']['proven_infeasible'] and r['info']['objective'] is None
+    heuristic=solve_alns(p,max_time=.1,max_iterations=20)
+    assert heuristic['info']['proven_infeasible']
 
 
 def test_cost_search_delays_pickup_departure_without_changing_return_obligations(exact_available):
-    p=joint_fixture(late=True)
+    source=joint_fixture(zero=True,fixed_assignment={'o1':'b1','o2':'b2'})
+    orders=[replace(source.orders[0],delivery_window=(0,5),pickup_window=(35,35)),source.orders[1]]
+    p=JointBatchInstance(source.network,orders,source.operating_policy,source.options,source.cost_profile.config)
     exact=solve_exact(p,time_limit=10)
     heuristic=solve_alns(p,max_time=1,max_iterations=1000,seed=42)
     assert heuristic['audit']['valid'] and heuristic['info']['objective']==pytest.approx(exact['info']['objective'])
@@ -256,7 +257,7 @@ def test_frozen_comparison_runs_matched_cost_ablation_and_all_seeds(tmp_path,exa
     rows=json.loads((out/'rows.json').read_text())
     assert len(rows)==9 and all(r['valid'] for r in rows)
     exact=next(r for r in rows if r['treatment']=='M6_joint' and r['solver']=='exact')
-    assert exact['proven_optimal'] and exact['cost']==pytest.approx(47.1)
+    assert exact['proven_optimal'] and exact['cost']==pytest.approx(61)
     assert {r['treatment'] for r in rows}=={'M5_distance','M6_fixed','M6_pool_only','M6_batch_only','M6_joint'}
     for row in rows:
         if row['treatment']=='M6_joint' and row['solver']=='alns':
@@ -273,13 +274,13 @@ def test_frozen_comparison_runs_matched_cost_ablation_and_all_seeds(tmp_path,exa
     resources=summarize(out)
     assert resources['valid_runs']==9 and not resources['no_incumbent_runs']
     proof=resources['cases'][0]['resource_certificate']
-    assert not proof['pool_minimum_proven']
+    assert proof['pool_minimum_proven']
     from tools.configuration.loader import load_routing_case
     from models.common.cycle import load_instance
     from experiments.analysis.summarize_model6_resources import resource_certificate
     p=load_instance(*load_routing_case(out/'cases/0_M6_joint.json',use_pool_config=False))
     direct=resource_certificate(p,json.loads((out/exact['run']/'result.json').read_text()))
-    assert direct['cost_optimal_proven'] and not direct['pool_minimum_proven']
+    assert direct['cost_optimal_proven'] and direct['pool_minimum_proven']
 
 
 def test_evidence_snapshot_is_shared_and_hashes_describe_rewritten_profile(tmp_path):
@@ -362,6 +363,9 @@ def test_resource_minima_can_be_certified_without_cost_optimality():
     from experiments.analysis.summarize_model6_resources import resource_certificate
     low=joint_fixture()
     low_result=solve_alns(low,max_time=.2,max_iterations=100,seed=42)
+    # A feasible plan with an unused spare box need not attain the pool bound.
+    from models.common.cycle.joint import lift_result
+    low_result=lift_result(low,low_result,low_result['order_batch_assignment'],low.total,'alns')
     assert not resource_certificate(low,low_result)['pool_minimum_proven']
     high=joint_fixture(pool_rate=30)
     r=solve_alns(high,max_time=.2,max_iterations=100,seed=42)

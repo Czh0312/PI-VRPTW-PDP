@@ -12,7 +12,7 @@ from tools.data.static_batch_dataset import check_pairing, load_manifest
 
 
 ROOT = Path(__file__).resolve().parents[2]
-MANIFEST = ROOT/'data/manifest.json'
+MANIFEST = resolve_project_path(ROOT/'data/manifest.json')
 
 
 class StaticBatchDatasetTests(unittest.TestCase):
@@ -35,7 +35,7 @@ class StaticBatchDatasetTests(unittest.TestCase):
             self.assertEqual(record['group'], mode)
             self.assertEqual(record['comparison_models'], [1, 2, 3, 4] if mode == 'single_batch' else [5])
             self.assertEqual(cfg['model'], 3 if mode == 'single_batch' else 5)
-            directory = ROOT/'data'/mode/record['size']/record['family_id']
+            directory = resolve_project_path(ROOT/'data'/mode/record['size']/record['family_id'])
             if record['batch_count'] > 1:
                 directory = directory/f"b{record['batch_count']}"
             self.assertEqual(resolve_project_path(record['case_path']), directory/'case.json')

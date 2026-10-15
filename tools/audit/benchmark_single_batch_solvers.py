@@ -62,9 +62,9 @@ def main(argv=None):
         families = ['mechanism_forced_late', 'mechanism_cutoff_choice',
                     'zhou_Set1_7-2-1', 'zhou_Set1_7-2-1b', 'lade_0823_10aoi',
                     'zhou_Set2_100-5-1b_subset50', 'lade_0823_30aoi']
-        dataset = json.loads((ROOT/'data/manifest.json').read_text())
-        cases = {f['family_id']: f['cases']['b1'] for f in dataset['families']}
         from tools.configuration.loader import load_routing_case, resolve_project_path
+        dataset = json.loads(resolve_project_path(ROOT/'data/manifest.json').read_text())
+        cases = {f['family_id']: f['cases']['b1'] for f in dataset['families']}
         frozen = args.output.resolve()/'benchmark_inputs'
         frozen.mkdir()
         for family in families:

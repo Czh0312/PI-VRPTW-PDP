@@ -20,7 +20,7 @@ from tools.data.static_batch_dataset import load_manifest, verify_artifacts
 
 VERSION = 'model6_uniform_suite_v2'
 DEFAULT_DESIGN = 'config/datasets/model6_uniform_v2.json'
-DEFAULT_OUTPUT = 'data/model6/uniform_v2_20261005'
+DEFAULT_OUTPUT = 'output/generated_datasets/model6/uniform_v2_20261005'
 ARMS = ('joint', 'fixed_k', 'fixed_cutoff', 'fixed_assignment', 'full_pool')
 
 

@@ -4,7 +4,7 @@ from dataclasses import replace
 import json
 import random
 import pytest
-from tools.configuration.loader import load_routing_case
+from tools.configuration.loader import load_routing_case, resolve_project_path
 from models.common.domain.node import Depot, Satellite, Customer
 from models.common.domain.instance import ProblemInstance
 from models.common.task_builder import build_tasks_for_model
@@ -256,7 +256,7 @@ def test_order_identity_and_balanced_counts(tmp_path):
     cfg, fleet = load_routing_case('config/experiments/examples/multibatch_demo.json')
     p = load_instance(cfg, fleet)
     assert len(p.orders) == 4 and len({o.customer for o in p.orders}) == 2
-    with open(cfg['orders']) as f:
+    with resolve_project_path(cfg['orders']).open() as f:
         data = json.load(f)
     data[0]['pickup_container_count'] = 0
     path = tmp_path/'orders.json'
@@ -467,7 +467,7 @@ def test_invalid_order_row_and_duplicate_normalized_node(tmp_path):
     with pytest.raises(ValueError, match='object'):
         load_orders(orders, MultiBatchPolicy.from_config(fleet['operating_policy']))
     from pathlib import Path
-    lines = Path(cfg['data']).read_text().splitlines()
+    lines = resolve_project_path(cfg['data']).read_text().splitlines()
     node = tmp_path/'nodes.csv'
     duplicate = lines[1].split(',')
     duplicate[0] = ' '+duplicate[0]+' '

@@ -10,7 +10,7 @@ from copy import deepcopy
 from pathlib import Path
 
 from experiments.runs.run_thesis_completion import read, write
-from tools.configuration.loader import PROJECT_ROOT, load_routing_case
+from tools.configuration.loader import PROJECT_ROOT, load_routing_case, resolve_project_path
 from models.common.cycle.instance import load_instance
 
 SEEDS = list(range(42, 47))
@@ -42,7 +42,7 @@ def job(phase, case, path, model, method, budget, seed=42, version='current', **
 
 
 def case_copy(source, target, model, *, counts=(1, 2, 3), loading=False):
-    cfg = read(PROJECT_ROOT/source)
+    cfg = read(resolve_project_path(PROJECT_ROOT/source))
     for key, value in list(cfg.items()):
         prefix = '/Users/chenzeheng/Desktop/2E-VRPTW-PDD/'
         if isinstance(value, str) and value.startswith(prefix):
@@ -137,7 +137,7 @@ def build(destination):
     references = []
     for size, records in [('small', small), ('medium_large', medium)]:
         for name, source, family in records:
-            config = read(PROJECT_ROOT/source)
+            config = read(resolve_project_path(PROJECT_ROOT/source))
             config['joint_batch_options'] = {}
             target = out/'cases'/f'e2reference_{name}.json'
             write(target, config)

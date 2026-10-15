@@ -285,6 +285,45 @@ def initial_state(problem, rng, randomized=False):
     return state
 
 
+def cover_delivery_batches(problem, assignment):
+    """Assign a distinct eligible order to every batch, preserving preferences.
+
+    Augmenting paths can move an earlier representative to another order, so
+    restricted domains cannot strand a batch merely because of greedy choices.
+    Remaining orders retain their proposed batches. No route feasibility or
+    optimality is inferred from this necessary assignment condition.
+    """
+    proposed = dict(assignment)
+    batches = tuple(problem.batch_map)
+    if len(batches) > len(proposed):
+        return None
+    candidates = {
+        bid: sorted(
+            (oid for oid, choices in problem.legal_batches.items() if bid in choices),
+            key=lambda oid: (proposed[oid] != bid, len(problem.legal_batches[oid]), oid),
+        )
+        for bid in batches
+    }
+    representatives = {}
+
+    def augment(bid, seen):
+        for oid in candidates[bid]:
+            if oid in seen:
+                continue
+            seen.add(oid)
+            previous = representatives.get(oid)
+            if previous is None or augment(previous, seen):
+                representatives[oid] = bid
+                return True
+        return False
+
+    for bid in sorted(batches, key=lambda b: (len(candidates[b]), b)):
+        if not augment(bid, set()):
+            return None
+    proposed.update(representatives)
+    return proposed
+
+
 def _best_construction(
     problem, evaluator, assignment, rng, deadline, *, randomized=False, cutoffs=None
 ):

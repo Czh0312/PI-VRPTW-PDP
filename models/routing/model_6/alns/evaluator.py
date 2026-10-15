@@ -123,6 +123,10 @@ def evaluate(problem, state, *, _memo=None, _prepared=None):
     violations, goods_ready = [], {}
     if problem._availability_codes:
         return 1e12, result, list(problem._availability_codes)
+    if getattr(problem, "require_productive_batches", False):
+        violations.extend(
+            "EMPTY_BATCH_DELIVERY" for b in p.batches if not problem.batch_demands[b.id]
+        )
     # E1 deliveries do not depend on reverse flow; delivery times are explicit.
     for b in p.batches:
         seen = []
@@ -268,6 +272,10 @@ def evaluate(problem, state, *, _memo=None, _prepared=None):
                 return_complete=u,
                 events=events,
             )
+        )
+    if getattr(problem, "require_productive_batches", False):
+        violations.extend(
+            "EMPTY_BATCH_RECOVERY" for b in p.batches if not sum(quantities[b.id].values())
         )
     result["e1_trips"], e1_issues, releases = (
         _memo.returns(state, quantities)
