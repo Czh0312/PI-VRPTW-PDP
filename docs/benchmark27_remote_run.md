@@ -1,6 +1,10 @@
 # 正式数据在其他电脑上的运行方法
 
-仓库：`git@gitlab.com:pi-vrptw/PI-VRPTW_PDP.git`，分支：`main`。主数据为 `data/formal_benchmark27_v1/` 修订2，八模型各有小、中、大规模，每档九例。同编号跨模型配对，正式输入无需下载旧原始数据或解压历史结果。
+仓库：`git@gitlab.com:pi-vrptw/PI-VRPTW_PDP.git`，分支：`main`。主数据为 `data/formal_benchmark27_v1/` 修订3，八模型各有小、中、大规模，每档九例。同编号跨模型配对，正式输入无需下载旧原始数据或解压历史结果。
+
+2026-10-16费用口径已更新为 `0.1*D1 + 0.05*D2 + 5*N + 0.02*Q`：箱子按配置数量一次计费；每箱次清洗与追踪合计0.01，磨损0.01；工时、车辆启用和趟次收费均为0。定义在 `config/experiments/benchmark27_v1/economic.json`，全部27份共享费用快照一致。磨损使用显式 `container_wear_cost_per_use=0.01`，不再由购置价除以寿命计算；`initial_pool_investment=5*N` 只另列展示同一笔购置金额，不再次加入总目标。
+
+修订2的冻结实验保存了旧费用与旧源码，继续其 `driver.py run` 会沿用旧目标。**本次重跑必须从拉取后的当前入口重新 `prepare` 到一个全新的目录**，例如下文的 `benchmark27_revision3_formal`。M1–M5仍优化原生距离目标，M6–M8及循环模型共同费用评价采用新参数。
 
 ## 拉取和安装
 
@@ -36,7 +40,7 @@ python3 -m venv .venv
 .venv/bin/python -m tools.audit.certify_formal_benchmark27 --verify
 ```
 
-应得到216份配置通过输入检查、1,092个文件哈希通过，以及216份可行性见证重放通过。正式清单的 SHA-256 是 `6a33b3c9f5766221af321841bfb66f2eb5a1cce963884055542151c072539e3a`。
+应得到216份配置通过输入检查、1,092个文件哈希通过，以及216份可行性见证重放通过。当前 `manifest.json` 的 `dataset_revision` 应为3；准备实验时会自动记录清单和全部冻结输入的SHA-256。
 
 下面是两条运行入口示例，预算仅用于检查环境，不能直接作为已确定的论文实验方案。每次使用新的输出目录：
 
@@ -51,7 +55,7 @@ python3 -m venv .venv
 
 运行前冻结提交号、完整命令、种子列表、时间与迭代预算、求解器线程数、机器CPU/内存和并发数；保存 `python --version` 与 `python -m pip freeze`。单次公开入口会保存结果、输入、源码快照、日志与审计信息。不同机器的运行时间不能直接混作算法速度比较；分配任务时避免让某个模型只在某一台机器上运行。
 
-正式结果单独保存在新的 `output/experiments/` 目录，保留全部首次尝试及失败状态。当前 `output/inspections/` 是数据检查和短时试跑记录；正式多种子性能对比尚未完成。`tools.audit.review_formal_benchmark27` 是诊断驱动，不代表已经冻结的论文主实验方案。
+正式结果单独保存在新的 `output/experiments/` 目录，保留全部首次尝试及失败状态。修订2正式结果在 `output/experiments/benchmark27_20261015_formal_v1/`，使用旧费用；`output/inspections/` 保存数据检查和短时试跑记录。修订3需要重新优化，旧方案按新价格重算不能替代新实验。`tools.audit.review_formal_benchmark27` 是诊断驱动。
 
 M1–M5原生目标是距离，M6–M8原生目标是成本，不能直接把两种目标值相减计算改进率。统一评价、同源分组及模型语义边界见 [正式对比协议](../data/formal_benchmark27_v1/comparison_protocol.json) 和 [设计说明](benchmark27_design_20261015.md)。
 
@@ -62,11 +66,11 @@ M1–M5原生目标是距离，M6–M8原生目标是成本，不能直接把两
 先用一个基础算例对八模型做短测，记录实测外层开销，再将正式批跑冻结到新的目录：
 
 ```sh
-.venv/bin/python -m experiments.runs.run_formal_benchmark27 prepare --output output/experiments/benchmark27_new_smoke --study-kind smoke --bases S01 --exact-seconds 3 --alns-seconds 3 --seeds 42 --overhead-basis "Initial environment smoke"
-.venv/bin/python output/experiments/benchmark27_new_smoke/driver.py run --output output/experiments/benchmark27_new_smoke
-.venv/bin/python -m experiments.runs.run_formal_benchmark27 prepare --output output/experiments/benchmark27_new_formal --overhead-basis "Measured process overhead from the completed smoke study"
-.venv/bin/python output/experiments/benchmark27_new_formal/driver.py run --output output/experiments/benchmark27_new_formal
-.venv/bin/python output/experiments/benchmark27_new_formal/driver.py pack --output output/experiments/benchmark27_new_formal
+.venv/bin/python -m experiments.runs.run_formal_benchmark27 prepare --output output/experiments/benchmark27_revision3_smoke --study-kind smoke --bases S01 --exact-seconds 3 --alns-seconds 3 --seeds 42 --overhead-basis "Initial environment smoke"
+.venv/bin/python output/experiments/benchmark27_revision3_smoke/driver.py run --output output/experiments/benchmark27_revision3_smoke
+.venv/bin/python -m experiments.runs.run_formal_benchmark27 prepare --output output/experiments/benchmark27_revision3_formal --overhead-basis "Measured process overhead from the completed smoke study"
+.venv/bin/python output/experiments/benchmark27_revision3_formal/driver.py run --output output/experiments/benchmark27_revision3_formal
+.venv/bin/python output/experiments/benchmark27_revision3_formal/driver.py pack --output output/experiments/benchmark27_revision3_formal
 ```
 
 重复 `run` 先验证源码和输入哈希，再跳过已有完整记录；`--retry-failed` 将执行错误另存为新attempt，首次失败仍保留。`STOP` 文件在当前活动调用结束后停止队列。`status` 只读取进度；`analyze` 验证完整记录并重建报告。发布前检查 `stage_gate.json`：执行/审计异常、与可行性见证相矛盾的不可行证明、与已证最优参照相矛盾的ALNS解均需要复核。完成不要求所有调用可行或最优。

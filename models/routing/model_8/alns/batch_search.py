@@ -1,8 +1,9 @@
 """Independent model-local K scheduler with shared budgets and certificates.
 
-Unresolved counts receive equal shares in configured order each round. Revisits
-restart from physical incumbents, not saved ALNS states. Keep this implementation
-local to each numbered model and algorithm; do not import another solver.
+The adaptive policy scouts small counts, explores the remaining domain, then
+refines the best audited count. The recycle/single-pass policies retain equal
+shares for comparisons. Revisits restart from physical incumbents, not saved
+ALNS states. No candidate is removed by heuristic ranking.
 """
 from __future__ import annotations
 
@@ -60,8 +61,10 @@ def solve_counts(problem, *, solve_candidate, method, budget, seed, max_iteratio
         raise ValueError('Solver time budget must be finite and positive')
     if isinstance(max_iterations, bool) or not isinstance(max_iterations, int) or max_iterations < 0:
         raise ValueError('ALNS iteration budget must be a nonnegative integer')
-    if budget_strategy not in ('single_pass', 'recycle'):
-        raise ValueError('Expected single_pass or recycle budget strategy')
+    if budget_strategy not in ('single_pass', 'recycle', 'adaptive'):
+        raise ValueError('Expected single_pass, recycle or adaptive budget strategy')
+    if budget_strategy == 'adaptive' and method != 'alns':
+        raise ValueError('Adaptive count allocation requires ALNS')
     begun = time.perf_counter()
     deadline = begun + budget
     counts = tuple(problem.batch_count_candidates)
@@ -109,10 +112,32 @@ def solve_counts(problem, *, solve_candidate, method, budget, seed, max_iteratio
                 if not row['visits']:
                     row['status'] = 'NOT_RUN_ITERATION_LIMIT'
             break
+        phase_deadline = deadline
+        phase = 'recycle'
+        weights = None
+        if budget_strategy == 'adaptive' and len(counts) > 3 and max_iterations > 0:
+            if round_number == 0:
+                phase = 'scout'
+                active = sorted(active, key=lambda r: r['batch_count'])[:3]
+                phase_deadline = begun + .5 * budget
+                weights = [4., 1., 1.][:len(active)]
+            elif round_number == 1:
+                phase = 'explore'
+                active = [r for r in active if not r['visits']]
+                phase_deadline = begun + .75 * budget
+            else:
+                phase = 'refine'
+                feasible = [r for r in active if r['valid']]
+                active = ([min(feasible, key=lambda r: r['objective'])] if feasible else
+                          sorted(active, key=lambda r: (len(r['visits']), r['batch_count']))[:3])
         round_number += 1
+        # Construction/auditing may exhaust a phase. Advance to the next one
+        # without borrowing its reserved time or dropping unvisited K rows.
+        if not active or time.perf_counter() >= phase_deadline:
+            continue
         round_start = time.perf_counter()
         for index, row in enumerate(active):
-            if time.perf_counter() >= deadline:
+            if time.perf_counter() >= phase_deadline:
                 break
             if method == 'alns' and max_iterations > 0 and remaining_iterations <= 0:
                 break
@@ -121,7 +146,9 @@ def solve_counts(problem, *, solve_candidate, method, budget, seed, max_iteratio
             child = problem.for_count(count)
             construction_time = time.perf_counter()-construction_start
             row['construction_time'] += construction_time
-            allocation = max(0., (deadline-time.perf_counter())/(len(active)-index))
+            share = (weights[index]/sum(weights[index:]) if weights else
+                     1./(len(active)-index))
+            allocation = max(0., (phase_deadline-time.perf_counter())*share)
             if allocation <= 0:
                 break
             visit_number = len(row['visits']) + 1
@@ -137,7 +164,7 @@ def solve_counts(problem, *, solve_candidate, method, budget, seed, max_iteratio
                                            status='FEASIBLE', proven_optimal=False,
                                            proven_infeasible=False, best_bound=None)
             # Copying a large incumbent is part of the outer budget as well.
-            allocation = max(0., (deadline-time.perf_counter())/(len(active)-index))
+            allocation = max(0., (phase_deadline-time.perf_counter())*share)
             if allocation <= 0:
                 break
             started = time.perf_counter()
@@ -163,7 +190,7 @@ def solve_counts(problem, *, solve_candidate, method, budget, seed, max_iteratio
             failed = info.get('status') == 'AUDIT_FAILED' or (info.get('objective') is not None and not valid)
             row['audit_failed'] = row['audit_failed'] or failed
             cost = info.get('objective') if valid else None
-            visit = dict(batch_count=count, visit=visit_number, round=round_number, seed=child_seed,
+            visit = dict(batch_count=count, visit=visit_number, round=round_number, phase=phase, seed=child_seed,
                          budget=allocation, iteration_budget=iterations, iterations=used,
                          started=started-begun, returned=returned-begun,
                          finished=time.perf_counter()-begun, construction_time=construction_time,

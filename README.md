@@ -81,6 +81,8 @@ make test
 
 现行统一主实验使用 [formal_benchmark27_v1](data/formal_benchmark27_v1/README.md)：27个基础算例，按 `model_1`～`model_8` 分目录，各模型的小／中／大规模各9例，共216份配置。同编号算例共享需求与物理输入，各模型固定或优化的参数随算例保存。此前 `static_batch_suite_v2` 的93组B1/B2/B3配对、专项版本及来源数据集中放在[历史数据归档](archive/datasets/README.md)，通过兼容加载器用于旧测试和复现。旧生成脚本默认写入 `output/generated_datasets/`。
 
+当前修订3费用为 `0.1*D1 + 0.05*D2 + 5*N + 0.02*Q`，其中清洗与追踪合计0.01/箱次、磨损0.01/箱次，工时、启用与趟次费用均为0。参数源见[基础费用配置](config/experiments/benchmark27_v1/economic.json)。M1–M5仍优化原生距离目标，M6–M8及循环模型共同费用评价使用新参数。异机重跑应重新prepare到新目录，旧冻结实验继续使用其原费用。
+
 费用包含合成情景和有来源说明的参考参数，各自适用范围见[费用复核](docs/cost_calibration_review_20261006.md)。真实配送基础不等于完整真实闭环数据，已保存方案重计价也不等于按新目标重新求解。
 
 当前计划与说明见[文档导航](docs/README.md)，已结束的逐轮开发记录见[历史归档](archive/docs/README.md)。正式报告随对应实验保存在 `output/`；复现方法见[开发指南](docs/development.md)。

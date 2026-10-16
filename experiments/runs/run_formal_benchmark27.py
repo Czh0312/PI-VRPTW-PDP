@@ -105,7 +105,8 @@ def prepare(args):
         platform=platform.platform(), machine=platform.machine(), processor=platform.processor(),
         hostname=socket.gethostname(), logical_cpus=os.cpu_count(), workers=args.workers,
         exact_threads=1, numerical_library_threads=1,
-        dependencies={name: metadata.version(name) for name in ('numpy', 'scipy', 'pandas', 'pytest')})
+        dependencies={name: metadata.version(name) for name in
+            ('gurobipy', 'matplotlib', 'numpy', 'pandas', 'pyarrow', 'openpyxl', 'pytest')})
     try:
         import psutil
         environment.update(physical_cpus=psutil.cpu_count(logical=False),

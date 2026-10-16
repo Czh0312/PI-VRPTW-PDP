@@ -9,6 +9,7 @@ from models.common.cycle.precheck import check_necessary_conditions
 from models.common.cycle.state import empty_result
 from models.routing.model_4.alns.construction import repair_assignment_state
 from models.routing.model_4.alns.single_batch_cache import SingleBatchCache
+from models.routing.model_4.alns.assignment_moves import consolidation_candidates
 
 
 class AssignmentSearch:
@@ -25,6 +26,8 @@ class AssignmentSearch:
         self.active_problem = None
         self.travel_bounds = None
         self.tried_nearest = False
+        self.coordinated = consolidation_candidates(problem, input_assignment(problem))
+        self.coordinated_attempts = 0
         self.attempts = self.projections = self.accepted = self.improvements = 0
         self.evicted_hits = self.evicted_misses = 0
 
@@ -49,6 +52,15 @@ class AssignmentSearch:
         if not self.tried_nearest:
             self.tried_nearest = True
             candidate = dict(self.nearest)
+        coordinated = False
+        while candidate == current and self.coordinated:
+            candidate = self.coordinated.pop(0)
+            coordinated = candidate != current
+        if candidate == current and self.attempts and self.attempts % 8 == 0:
+            choices = consolidation_candidates(self.problem, current)
+            if choices:
+                candidate = self.rng.choice(choices)
+                coordinated = True
         if candidate == current:
             if len(self.customers) > 1 and self.rng.random() < .25:
                 a, b = self.rng.sample(self.customers, 2)
@@ -65,6 +77,7 @@ class AssignmentSearch:
         if candidate == current or time.perf_counter() >= deadline:
             return None
         self.attempts += 1
+        self.coordinated_attempts += int(coordinated)
         proposed_problem, cache = self.context(candidate)
         if not check_necessary_conditions(proposed_problem, self.travel_bounds)['passed']:
             return None
@@ -90,7 +103,8 @@ class AssignmentSearch:
             proof_scope=None, algorithm='joint_customer_assignment_route_alns',
             assignment_attempts=self.attempts, assignment_route_projections=self.projections,
             assignment_accepted=self.accepted, assignment_improvements=self.improvements,
-            assignment_budget_policy='continuous_search_assignment_every_32_iterations',
+            assignment_coordinated_attempts=self.coordinated_attempts,
+            assignment_budget_policy='continuous_search_coordinated_assignment_every_32_iterations',
             evaluation_cache_hits=self.evicted_hits+sum(c.hits for _, c in self.contexts.values()),
             evaluation_cache_misses=self.evicted_misses+sum(c.misses for _, c in self.contexts.values()))
         return result

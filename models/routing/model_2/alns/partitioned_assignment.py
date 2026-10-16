@@ -9,6 +9,7 @@ from models.common.cycle.state import empty_result
 from models.common.cycle.precheck import travel_lower_bounds
 from models.routing.model_2.alns.construction import reassigned_state
 from models.routing.model_2.alns.single_batch_cache import SingleBatchCache
+from models.routing.model_2.alns.assignment_moves import consolidation_candidates
 
 
 def solve_alns(problem, max_time=10, max_iterations=5000, seed=42):
@@ -20,6 +21,12 @@ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42):
     current = input_assignment(problem)
     customers = sorted(current)
     nearest = {c: min(problem.satellites, key=lambda s: problem.distance(s, c)) for c in customers}
+    starts, seen_starts = [], set()
+    for assignment in [dict(current), nearest] + consolidation_candidates(problem, current):
+        key = tuple(sorted(assignment.items()))
+        if key not in seen_starts:
+            seen_starts.add(key)
+            starts.append(assignment)
     best, best_cost, attempts, iterations = None, math.inf, 0, 0
     incumbents, reused, projected = OrderedDict(), 0, 0
     first_feasible = last_improvement = None
@@ -31,10 +38,11 @@ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42):
     while time.perf_counter()-start < max_time:
         if attempts and (iterations >= max_iterations or not customers):
             break
-        if attempts == 0:
-            candidate = dict(current)
-        elif attempts == 1:
-            candidate = nearest
+        if attempts < len(starts):
+            candidate = dict(starts[attempts])
+        elif attempts % 4 == 0:
+            coordinated = consolidation_candidates(problem, current)
+            candidate = rng.choice(coordinated) if coordinated else dict(current)
         elif attempts % 3 == 0 and best is not None:
             # Periodically deepen the incumbent partition instead of spending
             # the whole budget on many shallow, cold assignment attempts.
@@ -108,6 +116,6 @@ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42):
                           initial_objective=initial_objective, incumbent_history=history,
                           operator_statistics_scope='all_partition_subsolves',
                           history_scope='best_at_completed_partition_subsolve',
-                          assignment_budget_policy='uniform_5pct_partition_visits')
+                          assignment_budget_policy='coordinated_starts_5pct_partition_visits')
     result['info'].update(operator_totals, **descent_totals)
     return result

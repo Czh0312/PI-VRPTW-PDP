@@ -11,6 +11,7 @@
 | [state.py](state.py) | 搜索状态复制、缓存键与已有方案转换 |
 | [search_control.py](search_control.py) | 算子选择、冷却、接受及权重更新 |
 | [assignment.py](assignment.py) | 纯配送分仓搜索与迁仓算子 |
+| [assignment_moves.py](assignment_moves.py) | 整仓关闭与多顾客协调迁仓候选，仍须物理可行性核验 |
 | [construction.py](construction.py) | 初解、时间表构造、分仓修复及联合热启动 |
 | [cycle_cache.py](cycle_cache.py) | 单次求解内的一级回运解码缓存 |
 | [evaluator.py](evaluator.py) | 完整路线、时间和库存评价及候选缓存 |

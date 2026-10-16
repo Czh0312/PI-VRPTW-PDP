@@ -22,4 +22,6 @@
 | [single_batch_timing.py](single_batch_timing.py) | 数组化时序约束传播 |
 | [solver.py](solver.py) | 本模型公开求解入口及编号校验 |
 
+`assignment_moves.py` 提供整仓关闭与多顾客协调迁仓候选；所有候选仍经现有解码和独立审计。
+
 `__init__.py` 导出当前算法入口。基础数据与审计的依赖边界见[模型导航](../../README.md)。

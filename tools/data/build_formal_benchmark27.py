@@ -104,6 +104,12 @@ def build_suite(output=DEFAULT_OUTPUT, selection=DEFAULT_SELECTION):
     out, source = resolve_project_path(output).resolve(), resolve_project_path(selection)
     design = read(source)
     records = design['cases']
+    economic_profile = None
+    if design.get('economic_profile'):
+        profile_path = resolve_project_path(design['economic_profile'])
+        if digest(profile_path) != design['economic_profile_sha256']:
+            raise ValueError('Declared economic profile changed')
+        economic_profile = load_json(profile_path)
     if len(records) != 27 or Counter(r['size'] for r in records) != dict.fromkeys(SIZES, 9):
         raise ValueError('Selection must contain exactly nine cases in each size')
     if len({r['id'] for r in records}) != 27:
@@ -118,7 +124,8 @@ def build_suite(output=DEFAULT_OUTPUT, selection=DEFAULT_SELECTION):
     out.mkdir(parents=True, exist_ok=True)
     write_json(out/'selection.json', design)
     write_json(out/'comparison_protocol.json', design['review_protocol'])
-    manifest = dict(dataset_version=VERSION, dataset_revision=2, base_case_count=27, model_config_count=216,
+    manifest = dict(dataset_version=VERSION, dataset_revision=design['review_protocol']['dataset_revision'],
+                    base_case_count=27, model_config_count=216,
                     models=list(range(1, 9)), sizes=dict.fromkeys(SIZES, 9),
                     source_block_count=len({r['source_block'] for r in records}),
                     generator=reference(Path(__file__)), generator_sha256=digest(__file__),
@@ -131,6 +138,9 @@ def build_suite(output=DEFAULT_OUTPUT, selection=DEFAULT_SELECTION):
                         'Synthetic appointments and economic coefficients, not measured operating costs.',
                         'Input validation does not certify route feasibility or optimality.',
                         'M6/M7 refine equal-partition clocks when necessary; M8 uses the original integer clock.'])
+    if economic_profile is not None:
+        manifest['economic_profile_source'] = design['economic_profile']
+        manifest['economic_profile_sha256'] = design['economic_profile_sha256']
     for record in records:
         shared = out/'shared'/record['size']/record['id']
         shared.mkdir(parents=True)
@@ -144,6 +154,8 @@ def build_suite(output=DEFAULT_OUTPUT, selection=DEFAULT_SELECTION):
                 target.write_bytes(origin.read_bytes())
             else:
                 value = load_json(origin)
+                if key == 'economic_config' and economic_profile is not None:
+                    value = deepcopy(economic_profile)
                 if any(k in value for k in ('evidence_file', 'operating_policy')):
                     raise ValueError(f'Unexpected external dependency in {key}: {origin}')
                 write_json(target, value)
@@ -166,6 +178,8 @@ def build_suite(output=DEFAULT_OUTPUT, selection=DEFAULT_SELECTION):
                           source_block=record['source_block'], customer_count=record['customer_count'],
                           total_container_uses=record['total_container_uses'], variant=record['variant'],
                           source_files=files, source_sha256=record['reference_sha256'],
+                          economic_profile_override=(dict(path=design['economic_profile'],
+                              sha256=design['economic_profile_sha256']) if economic_profile is not None else None),
                           reference_calendar_adaptation=calendar,
                           selection_rule=design['selection_rule'])
         write_json(shared/'provenance.json', provenance)
@@ -268,6 +282,8 @@ M1–M4固定单批，M3/M4固定N=Q。M5固定三批、等长日历、70%共同
 修订2将全部27例的共同参考分界从75%统一改为70%（每批182分钟配送阶段、78分钟回库阶段）；单批模型同步使用相同末次分界19:42。原M03/M5经精确求解判为不可行，根因涉及末批回库与清洗时间不足；原L09/M5也未找到可行解。修订保留需求、坐标、车队、费用、送取窗、周期终点和订单参考分批。修改不是最优分界标定，不根据模型的相对收益挑选案例。原始来源哈希和日历变更原因保存在各例provenance中。
 
 修订2保留原始K=1…390的数学域，配置仅排除经证明不可能的K：每个非空配送批次至少需要一个订单；M6/M7的首批还必须足够长，容纳最早可能的实际回库。每例 shared/batch_count_certificate.json 给出逐订单乐观回库下界、公式、假设和保留范围。M6/M7保留3–5个候选，M8保留7–100个候选。这是可行域等价的预处理，不是人为限定K或按求解结果选数；不改变订单、车辆、费用或任何可行解。
+
+修订3按2026-10-16用户确定的费用更新全部27例：一级距离0.1，二级距离0.05，箱子购置5/箱（按配置数量计一次），清洗与追踪合计0.01/箱次，磨损0.01/箱次。目标为0.1D1+0.05D2+5N+0.02Q；工时、车辆启用和趟次费用均为0。追踪不再单独收费，磨损采用显式按次系数，不再由箱价除以寿命推算。共同费用来源及哈希见selection和各例provenance；物理输入与K域沿用修订2。旧实验仍保留原费用输入，重新实验必须prepare到新目录。
 
 M1–M5原生目标为距离，M6–M8为成本。共同费用文件供一致评价，不意味着改变了原生目标。费用为合成单位；单用包装经济评价需要相应的一次性包装价格，不能直接套用循环箱池费用。
 

@@ -51,6 +51,15 @@ class JointCostProfile:
         self.lifetime = config.get('container_lifetime_uses')
         if self.lifetime is not None:
             self.lifetime = integer(self.lifetime, 'container_lifetime_uses', 1)
+        # A separately specified wear fee is independent of purchase-price
+        # depreciation. Older profiles retain their price/lifetime formula.
+        self.wear_cost_per_use = (self.rates['container_price']/self.lifetime
+                                  if self.lifetime else 0.0)
+        if 'container_wear_cost_per_use' in config:
+            if self.lifetime is not None:
+                raise ValueError('Choose explicit wear cost or price/lifetime depreciation, not both')
+            self.wear_cost_per_use = nonnegative(config['container_wear_cost_per_use'],
+                                                 'container_wear_cost_per_use')
         if config['source_type'] == 'synthetic_mechanism':
             if config['currency'] != 'synthetic_units':
                 raise ValueError('Synthetic mechanism prices must use synthetic_units')
@@ -63,7 +72,7 @@ class JointCostProfile:
             raise ValueError('Invalid rental_includes')
         if included and config['pool_cost_basis'] != 'rental':
             raise ValueError('rental_includes requires rental pool cost basis')
-        if 'wear' in included and self.lifetime is not None:
+        if 'wear' in included and (self.lifetime is not None or self.wear_cost_per_use):
             raise ValueError('Rental-included wear cannot be depreciated again')
         for item, key in (('cleaning', 'cleaning_cost_per_return'), ('tracking', 'tracking_cost_per_use')):
             if item in included and self.rates[key]:
@@ -78,10 +87,16 @@ class JointCostProfile:
                 raise ValueError('Calibrated profile requires a ready evidence register')
             entries = self.evidence.get('parameter_register', {})
             checked = RATE_FIELDS + (('container_lifetime_uses',) if self.lifetime is not None else ())
+            units = dict(CALIBRATED_UNITS)
+            values = dict(self.rates, container_lifetime_uses=self.lifetime)
+            if 'container_wear_cost_per_use' in config:
+                checked += ('container_wear_cost_per_use',)
+                units['container_wear_cost_per_use'] = 'CNY/container_issue'
+                values['container_wear_cost_per_use'] = self.wear_cost_per_use
             for key in checked:
                 record = entries.get(key, {})
-                value = self.lifetime if key == 'container_lifetime_uses' else self.rates[key]
-                if (record.get('calibrated_value') != value or record.get('unit') != CALIBRATED_UNITS[key]
+                value = values[key]
+                if (record.get('calibrated_value') != value or record.get('unit') != units[key]
                         or record.get('applicability') not in ('matched_empirical', 'matched_public_reference', 'explicit_exclusion')
                         or (record['applicability'] != 'explicit_exclusion' and not record.get('sources'))):
                     raise ValueError(f'Uncalibrated or mismatched evidence coefficient: {key}')
@@ -101,7 +116,7 @@ class JointCostProfile:
     def constant_cost(self, total):
         values = dict(cleaning=total*self.rates['cleaning_cost_per_return'],
                       tracking=total*self.rates['tracking_cost_per_use'])
-        values['container_wear'] = total*self.rates['container_price']/self.lifetime if self.lifetime else 0.0
+        values['container_wear'] = total*self.wear_cost_per_use
         return values
 
     def evaluate(self, physical_audit, pool):
@@ -116,7 +131,7 @@ class JointCostProfile:
         balance = physical_audit['container_balance']
         parts['cleaning'] = balance['returned_to_depot']*self.rates['cleaning_cost_per_return']
         parts['tracking'] = balance['issued']*self.rates['tracking_cost_per_use']
-        parts['container_wear'] = balance['issued']*self.rates['container_price']/self.lifetime if self.lifetime else 0.0
+        parts['container_wear'] = balance['issued']*self.wear_cost_per_use
         return dict(total=sum(parts.values()), components=parts, currency=self.config['currency'],
                     initial_pool_investment=(pool*self.rates['container_price']
                         if self.config['pool_cost_basis']!='rental' else 0.0),

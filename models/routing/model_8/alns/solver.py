@@ -3,7 +3,8 @@ from models.common.cycle.scope import validate_problem
 from models.routing.model_8.alns.calendar_search import solve_counts
 
 
-def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_result=None):
+def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_result=None,
+               budget_strategy="adaptive"):
     validate_problem(problem, 8)
     return solve_counts(
         problem,
@@ -12,4 +13,5 @@ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_resul
         seed=seed,
         max_iterations=max_iterations,
         initial_result=initial_result,
+        budget_strategy=budget_strategy,
     )

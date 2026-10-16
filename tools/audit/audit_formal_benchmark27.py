@@ -57,6 +57,10 @@ def audit_dataset(dataset):
     results = []
     for base in manifest['base_cases']:
         common = root/'shared'/base['size']/base['id']
+        if manifest.get('economic_profile_sha256'):
+            require(hashlib.sha256((common/'economic.json').read_bytes()).hexdigest()
+                    == manifest['economic_profile_sha256'],
+                    f'Economic profile differs from declared coefficients: {base["id"]}')
         orders = read(common/'reference_orders.json')
         policy = read(common/'reference_policy.json')
         ref_policy = MultiBatchPolicy.from_config(policy)

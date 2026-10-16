@@ -79,7 +79,10 @@ def test_route_duration_lower_bound_strengthens_lp_and_preserves_exact_optimum(e
         model.dispose()
     result=solve_exact(p,time_limit=5)
     assert result['audit']['valid'] and result['info']['proven_optimal']
-    assert result['info']['objective']==pytest.approx(47.1)
+    # Both declared batches must deliver and recover containers. For this
+    # legacy synthetic profile: 26 distance + 10 work + 15 vehicles + 4 trips
+    # + 5 pool + .6 cleaning/tracking + .4 wear = 61.
+    assert result['info']['objective']==pytest.approx(61)
 
 
 def test_uniform_operator_statistics_cover_all_counts():

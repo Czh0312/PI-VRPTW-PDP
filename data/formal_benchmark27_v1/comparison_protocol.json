@@ -1,25 +1,17 @@
 {
-  "dataset_revision": 2,
+  "dataset_revision": 3,
   "experimental_unit": "27 matched base cases; 14 original source blocks; seeds are repeated runs",
-  "primary_cost_policy": "Keep the same synthetic economic profile across all 27 bases and all eight model projections",
+  "primary_cost_policy": "User-defined basic coefficients confirmed 2026-10-16, shared across all 27 bases and eight projections",
   "container_pool_cost_per_period": 5,
-  "pool_charge_definition": "5 * N per 780-minute cycle; N is physical reusable stock, not demand Q or purchase price",
+  "pool_charge_definition": "One-time synthetic acquisition cost 5*N for the configured stock; reusing a box does not buy it again",
   "economic_fields_used_in_joint_cost": [
     "container_pool_cost_per_period",
     "e1_distance_cost_per_km",
     "e2_distance_cost_per_km",
-    "e1_work_cost_per_minute",
-    "e2_work_cost_per_minute",
-    "e1_vehicle_cost_per_cycle",
-    "e2_vehicle_cost_per_cycle",
-    "e1_trip_cost",
-    "e2_trip_cost",
     "cleaning_cost_per_return",
-    "tracking_cost_per_use",
-    "container_price",
-    "container_lifetime_uses"
+    "container_wear_cost_per_use"
   ],
-  "cost_sensitivity": "Use explicit run-time overrides on the same base inputs; retain all attempts and mark synthetic uncalibrated rates. Do not create duplicate base datasets or silently change the primary profile.",
+  "cost_sensitivity": "Freeze any coefficient variants explicitly in new studies; retain original attempts and inputs. Revision 3 is an explicit user-authorized primary-profile change.",
   "metrics": [
     "independently audited feasibility",
     "distance in benchmark coordinate units",
@@ -50,11 +42,22 @@
     "A low-cost single-batch optimum is an admissible finding; do not tune prices to guarantee M8 wins",
     "M5 fixes dispatch slots but does not require positive recovery in each slot; M6-M8 require productive delivery and recovery. Without harmonizing this rule, M5 is not automatically a strict subset control for M6."
   ],
-  "formal_experiment_status": "Feasibility validation and bounded diagnostics completed; final multi-seed performance study not completed",
+  "formal_experiment_status": "Revision-2 formal results are historical. Revision-3 costs require a new prepared study and fresh optimization.",
   "separate_purchase_and_wear_accounting": {
-    "pool_charge": "5*N per cycle",
-    "wear_in_objective": "Q*container_price/container_lifetime_uses = 0.2*Q",
-    "initial_investment_reported_separately": "N*container_price = 10*N; not added again to objective",
-    "implication": "With fixed demand Q, the wear term is constant across reusable model solutions; reducing N primarily saves the per-cycle pool charge."
-  }
+    "pool_charge": "5*N one-time acquisition cost within the optimization",
+    "wear_in_objective": "0.01*Q explicit per-use wear; independent of purchase price, no lifetime depreciation",
+    "cleaning_and_tracking": "One combined fee 0.01*Q, stored as cleaning; tracking coefficient is zero",
+    "initial_investment_reported_separately": "5*N informational purchase metric; same purchase charge, not added a second time",
+    "implication": "For fixed demand and complete recovery, per-use fees sum to constant 0.02*Q; stock and weighted distances drive the decision."
+  },
+  "objective_formula": "0.1*D1 + 0.05*D2 + 5*N + 0.01*Q cleaning/traceability + 0.01*Q wear",
+  "zero_cost_fields": [
+    "e1_work_cost_per_minute",
+    "e2_work_cost_per_minute",
+    "e1_vehicle_cost_per_cycle",
+    "e2_vehicle_cost_per_cycle",
+    "e1_trip_cost",
+    "e2_trip_cost",
+    "tracking_cost_per_use"
+  ]
 }

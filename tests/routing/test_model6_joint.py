@@ -70,6 +70,50 @@ def test_hand_arithmetic_for_two_productive_batches(exact_available):
     assert result['audit']['e1_vehicle_count']==1 and result['audit']['e1_trip_count']==2
 
 
+@pytest.mark.parametrize('method', ['exact', 'alns'])
+def test_basic_cost_coefficients_match_solver_and_independent_replay(method, exact_available):
+    from tools.configuration.loader import load_json
+    base = joint_fixture()
+    profile = load_json('config/experiments/benchmark27_v1/economic.json')
+    problem = JointBatchInstance(base.network, base.orders, base.operating_policy, {}, profile)
+    result = (solve_exact(problem, time_limit=5) if method == 'exact' else
+              solve_alns(problem, max_time=.5, max_iterations=100))
+    audited = audit_solution(problem, result)
+    assert audited['valid'] and audited['periodic_replay']['valid']
+    expected = (.1*audited['distances']['e1'] + .05*audited['distances']['e2']
+                + 5*result['container_pool_size'] + .02*problem.total)
+    assert result['info']['objective'] == pytest.approx(expected)
+    assert result['cost_components']['cleaning'] == pytest.approx(.01*problem.total)
+    assert result['cost_components']['tracking'] == 0
+    assert result['cost_components']['container_wear'] == pytest.approx(.01*problem.total)
+    for layer in ('e1', 'e2'):
+        for kind in ('work', 'vehicles', 'trips'):
+            assert result['cost_components'][layer+'_'+kind] == 0
+    assert result['cost']['initial_pool_investment'] == 5*result['container_pool_size']
+
+
+@pytest.mark.parametrize('value', [-.01, None, float('nan'), float('inf')])
+def test_explicit_per_use_wear_requires_a_finite_nonnegative_rate(value):
+    config = synthetic_profile()
+    config.update(container_lifetime_uses=None, container_wear_cost_per_use=value)
+    with pytest.raises(ValueError):
+        JointCostProfile(config)
+
+
+def test_explicit_wear_is_independent_of_purchase_price_and_cannot_duplicate_depreciation():
+    config = synthetic_profile()
+    config.update(container_lifetime_uses=None, container_wear_cost_per_use=.01)
+    assert JointCostProfile(config).constant_cost(7)['container_wear'] == pytest.approx(.07)
+    config['container_price'] = 500
+    assert JointCostProfile(config).constant_cost(7)['container_wear'] == pytest.approx(.07)
+    config['container_lifetime_uses'] = 50
+    with pytest.raises(ValueError, match='not both'):
+        JointCostProfile(config)
+    config.update(container_lifetime_uses=None, pool_cost_basis='rental', rental_includes=['wear'])
+    with pytest.raises(ValueError, match='wear'):
+        JointCostProfile(config)
+
+
 def test_high_pool_charge_selects_two_batches_and_one_physical_box(exact_available):
     p=joint_fixture(pool_rate=30)
     r=solve_exact(p,time_limit=10)

@@ -32,7 +32,7 @@ def test_complete_suite_loads_with_the_declared_model_domains(tmp_path):
         build_suite(root)
 
 
-@pytest.mark.parametrize('mutation', ['demand', 'pool', 'batch_binding', 'k_domain'])
+@pytest.mark.parametrize('mutation', ['demand', 'pool', 'batch_binding', 'k_domain', 'economic'])
 def test_semantic_drift_rejected_even_with_updated_file_hash(tmp_path, mutation):
     root = build_suite(tmp_path/'dataset').parent
     if mutation == 'demand':
@@ -52,11 +52,16 @@ def test_semantic_drift_rejected_even_with_updated_file_hash(tmp_path, mutation)
         for order in value:
             order['allowed_batch_ids'] = [order['delivery_batch_id']]
         expected = 'requires every order to allow all source batches'
-    else:
+    elif mutation == 'k_domain':
         path = root/'model_6/small/S01/case.json'
         value = json.loads(path.read_text())
         value['joint_batch_options']['batch_count_candidates'] = [1,2]
         expected = 'Uncertified K truncation'
+    else:
+        path = root/'shared/small/S01/economic.json'
+        value = json.loads(path.read_text())
+        value['e1_work_cost_per_minute'] = 0.1
+        expected = 'Economic profile differs'
     rewrite_registered_file(root, path, value)
     with pytest.raises(ValueError, match=expected):
         audit_dataset(root)
