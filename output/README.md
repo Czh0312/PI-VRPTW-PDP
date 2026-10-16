@@ -9,6 +9,7 @@
 
 | 研究内容 | 报告入口 | 原始目录 |
 | --- | --- | --- |
+| 修订3成本参数、八模型精确/五种子ALNS重跑 | [运行报告与结果](experiments/benchmark27_20261016_cost_update_v1/report.md) | `experiments/benchmark27_20261016_cost_update_v1/` |
 | 正式27例八模型、精确/五种子ALNS重跑 | [实时报告与最终结果](experiments/benchmark27_20261015_formal_v1/report.md) | `experiments/benchmark27_20261015_formal_v1/` |
 | M1–M4 精确 / ALNS 全规模对比 | [实验说明](experiments/m1_m4_comparison_20261004/m1_m4_solver_comparison_20261004.md) | `experiments/m1_m4_comparison_20261004/` |
 | M5 精确 / ALNS 全规模补测 | [实验说明](experiments/m5_comparison_20261004/m5_solver_comparison_20261004.md) | `experiments/m5_comparison_20261004/` |
