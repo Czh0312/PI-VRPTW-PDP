@@ -11,10 +11,10 @@ import pytest
 from models.common.cycle import MultiBatchInstance
 from models.common.cycle.audit import audit_solution
 from models.common.cycle.state import empty_result
-from models.routing.model_1.exact.single_batch_columns import DeliveryMaster, solve_with_route_bound
-from models.routing.model_1.exact.single_batch_pool_master import DeliveryPoolMaster
-from models.routing.model_1.exact.single_batch_route_pool import route_pool_incumbent
-from models.routing.model_1.exact.single_batch_schedule_start import canonical_delivery_start
+from models.routing.model_1.exact.accelerators.single_batch.columns import DeliveryMaster, solve_with_route_bound
+from models.routing.model_1.exact.accelerators.single_batch.pool_master import DeliveryPoolMaster
+from models.routing.model_1.exact.accelerators.single_batch.route_pool import route_pool_incumbent
+from models.routing.model_1.exact.accelerators.single_batch.schedule_start import canonical_delivery_start
 from tests.routing.test_single_batch_route_pool import full_pool, physical_case
 from tests.routing.test_single_batch_solver_audit import tiny_problem, enumerate_tiny
 
@@ -181,7 +181,7 @@ def test_expired_normalization_budget_keeps_input_untouched():
 
 
 def test_expiry_after_dependency_graph_returns_no_partial_start(monkeypatch):
-    from models.routing.model_1.exact import single_batch_schedule_start as schedule
+    from models.routing.model_1.exact.accelerators.single_batch import schedule_start as schedule
     p,initial=delayed_three_trip_start()
     before=deepcopy(initial)
     now=[0.0]
@@ -247,9 +247,9 @@ def test_canonical_hybrid_preserves_complete_original_proof(model):
 @pytest.mark.parametrize('enabled',[False,True])
 @pytest.mark.parametrize('normalization_cost',[0,4,20])
 def test_normalization_shares_total_deadline_and_preserves_start_on_expiry(monkeypatch, enabled, normalization_cost):
-    from models.routing.model_1.exact import single_batch_columns as cg
-    from models.routing.model_1.exact import single_batch_schedule_start as schedule
-    from models.routing.model_1.exact import engine as solver
+    from models.routing.model_1.exact.accelerators.single_batch import columns as cg
+    from models.routing.model_1.exact.accelerators.single_batch import schedule_start as schedule
+    from models.routing.model_1.exact.search import engine as solver
     p, initial=delayed_three_trip_start()
     normalized,_=canonical_delivery_start(p,initial)
     now,seen=[0.0],{}

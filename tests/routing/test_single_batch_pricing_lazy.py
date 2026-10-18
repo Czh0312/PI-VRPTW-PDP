@@ -8,9 +8,9 @@ import time
 import pytest
 
 from models.common.cycle import MultiBatchInstance
-from models.routing.model_1.exact.single_batch_delivery_pricer import DeliveryMipPricer
-from models.routing.model_1.exact.single_batch_pricing_schedule import infeasible_time_path
-from models.routing.model_1.exact.single_batch_columns import root_route_bound, solve_with_route_bound
+from models.routing.model_1.exact.accelerators.single_batch.delivery_pricer import DeliveryMipPricer
+from models.routing.model_1.exact.accelerators.single_batch.pricing_schedule import infeasible_time_path
+from models.routing.model_1.exact.accelerators.single_batch.columns import root_route_bound, solve_with_route_bound
 from models.common.cycle.audit import audit_solution
 from tests.routing.test_single_batch_columns import contexts, independently_enumerated_trips
 from tests.routing.test_single_batch_solver_audit import tiny_problem, enumerate_tiny
@@ -169,7 +169,7 @@ def test_zero_remaining_lazy_pricing_budget_does_not_claim_completion(early):
 
 def test_callback_errors_fail_closed_without_returning_a_pricing_certificate(monkeypatch):
     pytest.importorskip('gurobipy')
-    from models.routing.model_1.exact import single_batch_pricing_schedule as schedule
+    from models.routing.model_1.exact.accelerators.single_batch import pricing_schedule as schedule
     def broken(*args):
         raise ValueError('deliberate separation failure')
     monkeypatch.setattr(schedule,'infeasible_time_path',broken)

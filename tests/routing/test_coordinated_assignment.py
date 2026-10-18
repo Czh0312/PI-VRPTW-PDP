@@ -37,7 +37,7 @@ def test_coordinated_proposals_close_sites_without_mutating_input(number):
     p = consolidation_problem(number)
     current = input_assignment(p)
     saved = deepcopy(current)
-    moves = import_module(f'models.routing.model_{number}.alns.assignment_moves')
+    moves = import_module(f'models.routing.model_{number}.alns.search.assignment_moves')
     candidates = moves.consolidation_candidates(p, current)
     assert current == saved
     assert {tuple(sorted(c.items())) for c in candidates} == {

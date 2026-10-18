@@ -10,10 +10,10 @@ import pytest
 
 from models.common.cycle import MultiBatchInstance
 from models.common.cycle.audit import audit_solution
-from models.routing.model_5.exact import multibatch_logic_benders as lbbd
-from models.routing.model_5.exact.multibatch_joint_inventory import build_joint_inventory, set_joint_projection
-from models.routing.model_5.exact.multibatch_physical_cuts import add_physical_cut, project_physical_costs
-from models.routing.model_5.exact.engine import solve_exact
+from models.routing.model_5.exact.accelerators.multibatch import logic_benders as lbbd
+from models.routing.model_5.exact.accelerators.multibatch.joint_inventory import build_joint_inventory, set_joint_projection
+from models.routing.model_5.exact.accelerators.multibatch.physical_cuts import add_physical_cut, project_physical_costs
+from models.routing.model_5.exact.search.engine import solve_exact
 from tests.routing.test_multibatch_cycle import fixture,hand_solution
 from tests.routing.test_multibatch_departure_loads import nonmetric_problem
 from tests.routing.test_multibatch_joint_inventory import domains

@@ -10,9 +10,9 @@ import pytest
 from models.common.cycle import MultiBatchInstance
 from models.common.cycle.audit import audit_solution
 from models.common.cycle.precheck import travel_lower_bounds
-from models.routing.model_1.exact.domains import assignment_domains
-from models.routing.model_1.exact.single_batch_columns import DeliveryMaster, corrected_master_bound, e1_delivery_tours, root_route_bound, solve_with_route_bound
-from models.routing.model_1.exact.single_batch_route_pricing import delivery_context, evaluate_delivery_column, price_delivery_routes
+from models.routing.model_1.exact.accelerators.domains import assignment_domains
+from models.routing.model_1.exact.accelerators.single_batch.columns import DeliveryMaster, corrected_master_bound, e1_delivery_tours, root_route_bound, solve_with_route_bound
+from models.routing.model_1.exact.accelerators.single_batch.route_pricing import delivery_context, evaluate_delivery_column, price_delivery_routes
 from tests.routing.test_single_batch_solver_audit import tiny_problem, enumerate_tiny
 from tests.routing.test_single_batch_comparison import problem as one_customer
 
@@ -196,8 +196,8 @@ def test_hybrid_retains_complete_integer_solver_and_audit(model):
 
 
 def test_root_only_timeout_keeps_audited_start_without_transferring_old_proof(monkeypatch):
-    from models.routing.model_1.exact import single_batch_columns as module
-    from models.routing.model_1.exact.engine import solve_exact
+    from models.routing.model_1.exact.accelerators.single_batch import columns as module
+    from models.routing.model_1.exact.search.engine import solve_exact
     p = tiny_problem(2, 1)
     initial = solve_exact(p, time_limit=2)
     assert initial['info']['proven_optimal']
@@ -217,7 +217,7 @@ def test_root_only_timeout_keeps_audited_start_without_transferring_old_proof(mo
 @pytest.mark.parametrize('phase_one', [False, True])
 def test_mip_pricer_matches_independent_route_enumeration(seed, phase_one):
     pytest.importorskip('gurobipy')
-    from models.routing.model_1.exact.single_batch_delivery_pricer import DeliveryMipPricer
+    from models.routing.model_1.exact.accelerators.single_batch.delivery_pricer import DeliveryMipPricer
     p = tiny_problem(2, seed)
     _, _, by_site = contexts(p)
     for context in by_site.values():
@@ -249,7 +249,7 @@ def test_mip_and_label_root_prototypes_match_the_same_relaxation(seed):
 
 def test_wrong_instance_certificate_cannot_add_a_distance_floor():
     gp = pytest.importorskip('gurobipy')
-    from models.routing.model_1.exact.single_batch_columns import apply_route_bound
+    from models.routing.model_1.exact.accelerators.single_batch.columns import apply_route_bound
     p = tiny_problem(2, 1)
     r = root_route_bound(p, time_limit=2)
     model = gp.Model()
@@ -271,7 +271,7 @@ def test_fixed_orders_with_conflicting_customer_owners_are_explicitly_unsupporte
 
 def test_mip_pricer_timeout_retains_an_analytic_bound_and_no_completion_claim():
     pytest.importorskip('gurobipy')
-    from models.routing.model_1.exact.single_batch_delivery_pricer import DeliveryMipPricer
+    from models.routing.model_1.exact.accelerators.single_batch.delivery_pricer import DeliveryMipPricer
     p = tiny_problem(2, 1)
     _, _, by_site = contexts(p)
     context = next(iter(by_site.values()))
@@ -287,8 +287,8 @@ def test_mip_pricer_timeout_retains_an_analytic_bound_and_no_completion_claim():
 
 
 def test_root_timeout_never_imports_fixed_partition_warm_start_bound(monkeypatch):
-    from models.routing.model_1.exact import single_batch_columns as module
-    from models.routing.model_1.exact.engine import solve_exact
+    from models.routing.model_1.exact.accelerators.single_batch import columns as module
+    from models.routing.model_1.exact.search.engine import solve_exact
     from models.common.cycle.assignment import assigned_problem, lift_result
     p = one_customer(2)
     assignment = {'C': 'S'}
@@ -308,7 +308,7 @@ def test_root_timeout_never_imports_fixed_partition_warm_start_bound(monkeypatch
 @pytest.mark.parametrize('seed', range(6))
 @pytest.mark.parametrize('phase_one', [False, True])
 def test_task_count_correction_bounds_every_independently_enumerated_column(seed, phase_one):
-    from models.routing.model_1.exact.single_batch_columns import short_route_catalog, task_price_floor
+    from models.routing.model_1.exact.accelerators.single_batch.columns import short_route_catalog, task_price_floor
     p = tiny_problem(2, seed)
     _, _, by_site = contexts(p)
     for context in by_site.values():
@@ -323,7 +323,7 @@ def test_task_count_correction_bounds_every_independently_enumerated_column(seed
 
 
 def test_short_route_certificate_enumeration_follows_its_deadline():
-    from models.routing.model_1.exact.single_batch_columns import short_route_catalog
+    from models.routing.model_1.exact.accelerators.single_batch.columns import short_route_catalog
     p = tiny_problem(2, 1)
     _, _, by_site = contexts(p)
     with pytest.raises(TimeoutError, match='Short-route'):

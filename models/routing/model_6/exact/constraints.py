@@ -131,8 +131,17 @@ def add_route_constraints(
         if layer == "e2"
         else variables.create_route_times(parameters.horizon, label, nodes)
     )
-    lw = variables.create_route_weight(cap_w, label, nodes)
-    lv = variables.create_route_volume(cap_v, label, nodes)
+    if layer == "e2" and parameters.compact_e2:
+        # Each task is visited exactly once, so its post-service load is a
+        # physical task state, independent of the chosen vehicle/trip slot.
+        if base not in variables.task_load_weight:
+            variables.task_load_weight[base] = variables.create_route_weight(cap_w, f"e2_{base}_task", nodes)
+            variables.task_load_volume[base] = variables.create_route_volume(cap_v, f"e2_{base}_task", nodes)
+        lw = variables.task_load_weight[base]
+        lv = variables.task_load_volume[base]
+    else:
+        lw = variables.create_route_weight(cap_w, label, nodes)
+        lv = variables.create_route_volume(cap_v, label, nodes)
     rank = variables.create_route_rank(label, nodes) if layer == "e1" else None
     arcs = [(-1, j) for j in range(len(nodes))] + [(i, -2) for i in range(len(nodes))]
     for i, left in enumerate(nodes):
@@ -155,7 +164,16 @@ def add_route_constraints(
             ):
                 continue
             arcs.append((i, j))
-    x = variables.create_route_arcs(arcs, label)
+    # Internal route copies inherit integrality from the binary physical edge
+    # and the unique binary visit of its tail. They need not be branch variables.
+    x = variables.create_route_arcs(arcs, label, continuous_internal=layer == "e2" and parameters.compact_e2)
+    incoming = {i: [] for i in range(len(nodes))}
+    outgoing = {i: [] for i in range(len(nodes))}
+    for a, b in arcs:
+        if b >= 0:
+            incoming[b].append(x[a, b])
+        if a >= 0:
+            outgoing[a].append(x[a, b])
     variables.model.addConstr(start <= parameters.horizon * used)
     variables.model.addConstr(end <= parameters.horizon * used)
     variables.model.addConstr(start >= parameters.policy.cycle_start * used)
@@ -174,11 +192,12 @@ def add_route_constraints(
     variables.model.addConstr(initial_w <= cap_w * used)
     variables.model.addConstr(initial_v <= cap_v * used)
     for i, n in enumerate(nodes):
-        variables.model.addConstr(gp.quicksum(x[a, b] for a, b in arcs if b == i) == visit[i])
-        variables.model.addConstr(gp.quicksum(x[a, b] for a, b in arcs if a == i) == visit[i])
+        variables.model.addConstr(gp.quicksum(incoming[i]) == visit[i])
+        variables.model.addConstr(gp.quicksum(outgoing[i]) == visit[i])
         variables.model.addConstr(visit[i] <= used)
-        variables.model.addConstr((visit[i] == 1) >> (times[i] >= n["window"][0]))
-        variables.model.addConstr((visit[i] == 1) >> (times[i] <= n["window"][1]))
+        if layer == "e1" or not parameters.compact_e2:
+            variables.model.addConstr((visit[i] == 1) >> (times[i] >= n["window"][0]))
+            variables.model.addConstr((visit[i] == 1) >> (times[i] <= n["window"][1]))
         if layer == "e1":
             variables.model.addConstr(times[i] <= parameters.horizon * visit[i])
             variables.model.addConstr(n["quantity"] <= parameters.total_containers * visit[i])
@@ -235,6 +254,24 @@ def add_route_constraints(
                     + unload
                 )
             )
+        elif layer == "e2" and parameters.compact_e2:
+            # Task coverage implies sum of these route copies is binary.
+            # One indicator per physical adjacency replaces one per trip.
+            key = (base, a, b)
+            if key not in variables.aggregate_arcs:
+                edge = variables.create_only_pick()
+                variables.global_arcs[key] = edge
+                variables.aggregate_arcs[key] = []
+                variables.model.addConstr((edge == 1) >> (
+                    times[b] >= times[a] + nodes[a]["service"]
+                    + parameters.problem.travel(left, right)))
+                sign = -1 if nodes[b]["kind"] == "d" else 1
+                variables.model.addConstr((edge == 1) >> (lw[b] == lw[a] + sign * nodes[b]["w"]))
+                variables.model.addConstr((edge == 1) >> (lv[b] == lv[a] + sign * nodes[b]["v"]))
+                before = variables.task_steps[nodes[a]["order"].id, nodes[a]["kind"]]
+                after = variables.task_steps[nodes[b]["order"].id, nodes[b]["kind"]]
+                variables.model.addConstr((edge == 1) >> (after >= before + 1))
+            variables.aggregate_arcs[key].append(x[a, b])
         else:
             variables.model.addConstr(
                 (x[a, b] == 1)
@@ -502,28 +539,47 @@ def add_second_echelon_constraints(
                         )
                     )
                     variables.model.addConstr((r["used"] == 1) >> (ss >= previous["step_end"] + 1))
-                for b in parameters.policy.batches:
-                    conjunctions = []
-                    for i, n in enumerate(nodes):
-                        if n["kind"] != "d" or (n["order"].id, b.id) not in variables.assignments:
-                            continue
-                        a = variables.create_only_pick()
-                        variables.model.addConstr(a <= r["visit"][i])
-                        variables.model.addConstr(a <= variables.assignments[n["order"].id, b.id])
+                if parameters.compact_e2:
+                    deliveries = [r["visit"][i] for i, n in enumerate(nodes) if n["kind"] == "d"]
+                    variables.model.addConstr(loaded <= gp.quicksum(deliveries))
+                    for b in parameters.policy.batches:
+                        for i, n in enumerate(nodes):
+                            if n["kind"] != "d" or (n["order"].id, b.id) not in variables.assignments:
+                                continue
+                            variables.model.addConstr(
+                                selects[b.id] >= r["visit"][i] + variables.assignments[n["order"].id, b.id] - 1
+                            )
                         variables.model.addConstr(
-                            a >= r["visit"][i] + variables.assignments[n["order"].id, b.id] - 1
+                            (selects[b.id] == 1)
+                            >> (
+                                r["start"]
+                                >= variables.supply_times[s, b.id]
+                                + parameters.policy.e2_dispatch_prep_time
+                            )
                         )
-                        variables.model.addConstr(a <= selects[b.id])
-                        conjunctions.append(a)
-                    variables.model.addConstr(selects[b.id] <= gp.quicksum(conjunctions))
-                    variables.model.addConstr(
-                        (selects[b.id] == 1)
-                        >> (
-                            r["start"]
-                            >= variables.supply_times[s, b.id]
-                            + parameters.policy.e2_dispatch_prep_time
+                else:
+                    for b in parameters.policy.batches:
+                        conjunctions = []
+                        for i, n in enumerate(nodes):
+                            if n["kind"] != "d" or (n["order"].id, b.id) not in variables.assignments:
+                                continue
+                            a = variables.create_only_pick()
+                            variables.model.addConstr(a <= r["visit"][i])
+                            variables.model.addConstr(a <= variables.assignments[n["order"].id, b.id])
+                            variables.model.addConstr(
+                                a >= r["visit"][i] + variables.assignments[n["order"].id, b.id] - 1
+                            )
+                            variables.model.addConstr(a <= selects[b.id])
+                            conjunctions.append(a)
+                        variables.model.addConstr(selects[b.id] <= gp.quicksum(conjunctions))
+                        variables.model.addConstr(
+                            (selects[b.id] == 1)
+                            >> (
+                                r["start"]
+                                >= variables.supply_times[s, b.id]
+                                + parameters.policy.e2_dispatch_prep_time
+                            )
                         )
-                    )
                 for i, n in enumerate(nodes):
                     if n["kind"] == "p":
                         variables.model.addConstr(
@@ -531,6 +587,8 @@ def add_second_echelon_constraints(
                             >> (variables.pickup_returns[n["order"].id] == r["end"])
                         )
                 for (a, b), x in r["x"].items():
+                    if parameters.compact_e2 and a >= 0 and b >= 0:
+                        continue  # Shared task adjacency already enforces causality.
                     left = (
                         ss
                         if a == -1
@@ -544,6 +602,8 @@ def add_second_echelon_constraints(
                     variables.model.addConstr((x == 1) >> (right >= left + 1))
                 variables.routes["e2"].append(r)
                 previous = r
+    for key, copies in variables.aggregate_arcs.items():
+        variables.model.addConstr(variables.global_arcs[key] == gp.quicksum(copies))
 
 
 def add_task_and_return_coverage_constraints(parameters, variables):

@@ -1,6 +1,6 @@
 """M7 adaptive search; no exact solver imports."""
 from models.common.cycle.scope import validate_problem
-from models.routing.model_7.alns.calendar_search import solve_counts
+from models.routing.model_7.alns.search.batch_search import solve_counts as aggregate
 
 
 def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_result=None):
@@ -15,3 +15,8 @@ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_resul
         max_iterations=max_iterations,
         initial_result=initial_result,
     )
+
+
+def solve_counts(problem, **kwargs):
+    from models.routing.model_7.alns.search.fixed_count import solve_alns as solve
+    return aggregate(problem, solve_candidate=solve, **kwargs)

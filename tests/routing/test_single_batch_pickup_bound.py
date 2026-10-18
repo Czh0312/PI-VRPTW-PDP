@@ -10,10 +10,10 @@ import pytest
 
 from models.common.cycle import MultiBatchInstance
 from models.common.cycle.audit import audit_solution
-from models.routing.model_4.exact.single_batch_pickup_bound import pickup_contexts, e1_component_floor, project_original_schedule, root_pickup_route_bound
-from models.routing.model_4.exact.single_batch_columns import problem_fingerprint
-from models.routing.model_4.exact.pickup_route_pricing import RoutePricer
-from models.routing.model_4.exact.engine import solve_exact
+from models.routing.model_4.exact.accelerators.single_batch.pickup_bound import pickup_contexts, e1_component_floor, project_original_schedule, root_pickup_route_bound
+from models.routing.model_4.exact.accelerators.single_batch.columns import problem_fingerprint
+from models.routing.model_4.exact.accelerators.pickup_route_pricing import RoutePricer
+from models.routing.model_4.exact.search.engine import solve_exact
 from tests.routing.test_multibatch_route_cg import enumerate_trips
 from tests.routing.test_single_batch_solver_audit import tiny_problem,enumerate_tiny
 
@@ -108,7 +108,7 @@ def test_original_integer_schedule_projects_all_tasks_and_raw_arcs(model,seed):
 
 def test_cross_trip_physical_vehicle_schedule_projects_without_becoming_an_integer_proof():
     from tests.routing.test_single_batch_primal import split_problem
-    from models.routing.model_4.exact.initial_solution import construct_incumbent
+    from models.routing.model_4.exact.initialization import construct_incumbent
     p = split_problem();start = construct_incumbent(p,time.perf_counter()+1)
     assert start and audit_solution(p,start)['valid']
     _,contexts,_ = pickup_contexts(p)

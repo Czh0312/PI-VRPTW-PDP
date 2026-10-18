@@ -9,9 +9,9 @@ import pytest
 
 from models.common.cycle import MultiBatchInstance
 from models.common.cycle.audit import audit_solution
-from models.routing.model_5.exact.multibatch_joint_inventory import build_joint_inventory, set_joint_projection, solve_joint_inventory, joint_route_inventory_certificate
-from models.routing.model_5.exact.multibatch_route_timing import enumerate_timed_route_universe
-from models.routing.model_5.exact.pickup_route_pricing import route_context
+from models.routing.model_5.exact.accelerators.multibatch.joint_inventory import build_joint_inventory, set_joint_projection, solve_joint_inventory, joint_route_inventory_certificate
+from models.routing.model_5.exact.accelerators.multibatch.route_timing import enumerate_timed_route_universe
+from models.routing.model_5.exact.accelerators.pickup_route_pricing import route_context
 from tests.routing.test_multibatch_route_timing import independent_windows, tradeoff_problem
 from tests.routing.test_multibatch_route_cg import enumerate_trips
 from tests.routing.test_multibatch_departure_loads import nonmetric_problem
@@ -102,7 +102,7 @@ def test_service_extrema_match_all_paths_and_independent_forced_time_search(seed
 @pytest.mark.parametrize('seed', range(6))
 def test_known_full_optimum_projects_to_service_model_and_bounds_are_safe(seed):
     gp = pytest.importorskip('gurobipy')
-    from models.routing.model_5.exact.engine import solve_exact
+    from models.routing.model_5.exact.search.engine import solve_exact
     problem = nonmetric_problem(seed)
     initial = solve_exact(problem, time_limit=5)
     assert initial['info']['proven_optimal'] and audit_solution(problem, initial)['valid']
@@ -193,7 +193,7 @@ def congestion_problem():
 
 def test_compulsory_intervals_raise_bound_when_cheap_long_trips_need_two_vehicles():
     gp = pytest.importorskip('gurobipy')
-    from models.routing.model_5.exact.engine import solve_exact
+    from models.routing.model_5.exact.search.engine import solve_exact
     problem = congestion_problem()
     initial = solve_exact(problem,time_limit=5)
     assert initial['info']['proven_optimal'] and initial['info']['objective'] == pytest.approx(10)

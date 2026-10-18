@@ -51,7 +51,7 @@ def worker(job, output):
     from tools.configuration.loader import load_routing_case
     from models.common.cycle import load_instance
     from models.common.cycle.audit import audit_solution
-    from models.routing.model_5.exact import engine as solver
+    from models.routing.model_5.exact.search import engine as solver
     problem = load_instance(*load_routing_case(job['case']))
     initial = json.loads(Path(job['initial_result']).read_text()) if job.get('initial_result') else None
     begun = time.perf_counter()
@@ -59,7 +59,7 @@ def worker(job, output):
         if not job['warm_start']:
             stack.enter_context(patch.object(solver, 'construct_incumbent', return_value=None))
         if job.get('primal_improve') is False:
-            from models.routing.model_5.exact import multibatch_primal
+            from models.routing.model_5.exact.accelerators.multibatch import primal as multibatch_primal
             original_primal = multibatch_primal.construct_multibatch_incumbent
             stack.enter_context(patch.object(multibatch_primal, 'construct_multibatch_incumbent',
                 side_effect=lambda *a, **kw: original_primal(*a, **kw, improve=False)))

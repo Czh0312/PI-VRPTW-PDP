@@ -8,7 +8,7 @@ import pytest
 
 from models.common.cycle import MultiBatchInstance
 from models.common.cycle.audit import audit_solution
-from models.routing.model_3.exact.single_batch_formulation import build_model
+from models.routing.model_3.exact.formulations.single_batch import build_model
 from tests.routing.test_single_batch_solver_audit import tiny_problem, enumerate_tiny
 from tests.routing.test_single_batch_primal import split_problem
 
@@ -19,7 +19,7 @@ from tests.routing.test_single_batch_primal import split_problem
 @pytest.mark.parametrize('mode', ['identity', 'internal', 'all', 'complete'])
 def test_linear_profiles_match_independent_enumeration(model, seed, compressed, mode):
     pytest.importorskip('gurobipy')
-    from models.routing.model_3.exact import engine as solver
+    from models.routing.model_3.exact.search import engine as solver
     p = tiny_problem(model, seed)
     expected = enumerate_tiny(p)
     with patch.object(solver, 'build_model', side_effect=lambda *a, **kw: build_model(
@@ -33,7 +33,7 @@ def test_linear_profiles_match_independent_enumeration(model, seed, compressed, 
 @pytest.mark.parametrize('zero_resource', ['container_weight', 'container_volume'])
 def test_linear_loads_preserve_zero_container_dimensions(zero_resource):
     pytest.importorskip('gurobipy')
-    from models.routing.model_3.exact import engine as solver
+    from models.routing.model_3.exact.search import engine as solver
     p = tiny_problem(4, 2)
     setattr(p.fleet, zero_resource, 0)
     p = MultiBatchInstance(p.network, p.orders, p.operating_policy, model=4)
@@ -49,8 +49,8 @@ def test_linear_loads_preserve_zero_container_dimensions(zero_resource):
 @pytest.mark.parametrize('factored', [False, True])
 def test_split_trip_start_extends_with_inactive_copies_and_all_profiles(mode, factored):
     gp = pytest.importorskip('gurobipy')
-    from models.routing.model_3.exact.initial_solution import construct_incumbent
-    from models.routing.model_3.exact.engine import _set_start
+    from models.routing.model_3.exact.initialization import construct_incumbent
+    from models.routing.model_3.exact.search.engine import _set_start
     p = split_problem()
     p.fleet.e2_per_sat_count = 2
     start = construct_incumbent(p, time.perf_counter()+1)
@@ -73,7 +73,7 @@ def test_split_trip_start_extends_with_inactive_copies_and_all_profiles(mode, fa
 
 def test_unused_site_windows_do_not_bound_task_times_of_another_site():
     pytest.importorskip('gurobipy')
-    from models.routing.model_3.exact import engine as solver
+    from models.routing.model_3.exact.search import engine as solver
     from tests.routing.test_single_batch_comparison import problem
     p = problem(4, window=(0, 5), duplicate=True, pool=2)
     with patch.object(solver, 'build_model', side_effect=lambda *a, **kw: build_model(
@@ -105,8 +105,8 @@ def test_linear_links_reduce_general_constraints_without_adding_variables():
 def test_free_assignment_start_extends_with_all_other_site_copies_disabled(model, site):
     gp = pytest.importorskip('gurobipy')
     from models.common.cycle.assignment import assigned_problem, lift_result
-    from models.routing.model_3.exact.initial_solution import construct_incumbent
-    from models.routing.model_3.exact.engine import _set_start
+    from models.routing.model_3.exact.initialization import construct_incumbent
+    from models.routing.model_3.exact.search.engine import _set_start
     p = tiny_problem(model, 1)
     assignment = {o.customer: site for o in p.orders}
     start = construct_incumbent(assigned_problem(p, assignment), time.perf_counter()+1)

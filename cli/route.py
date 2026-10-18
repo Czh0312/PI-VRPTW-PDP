@@ -32,7 +32,7 @@ def main(argv=None):
                          help='M6 优化两窗截点，保持候选批次起止与顾客窗口不变')
     cutoffs.add_argument('--fixed-cutoffs',dest='optimize_cutoffs',action='store_false',default=None,
                          help='M6 使用原固定截点，作为对照')
-    parser.add_argument('--initial-joint-result',help='M6–M8 ALNS 同模型已有可行解 JSON；审计后保留')
+    parser.add_argument('--initial-joint-result',help='M6–M8 同模型已有可行解 JSON；审计后用于 ALNS 初解或精确求解 MIP start')
     parser.add_argument("--solver", choices=("alns", "exact"))
     parser.add_argument("--exact-time", type=float)
     parser.add_argument("--time", type=float)

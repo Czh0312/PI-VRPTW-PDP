@@ -10,21 +10,21 @@ M1–M8 的精确模型按数学职责组织。每个模型独立拥有下列文
 | `constraints.py` | 业务约束 | 分仓／分批、路径、容量、时间、车辆串行、回收量、清洁库存 |
 | `objective.py` | 目标函数 | M1–M5 的距离表达；M6–M8 的箱池、距离、工时、趟次及车辆费用 |
 | `model.py` | 公开建模入口 | 模型编号校验，以及完整模型或固定 K 子问题的选择 |
-| `solver.py`、`engine.py` 等 | 精确求解流程 | 时间预算、初解、Gurobi 调用、结果提取、独立审计和证明汇总 |
-| `strengthening.py` 等 | 模型增强 | 安全界、删弧、有效不等式、可选上下界证书 |
+| `solver.py`、`search/engine.py` 等 | 精确求解流程 | 时间预算、初解、Gurobi 调用、结果提取、独立审计和证明汇总 |
+| `accelerators/strengthening.py` 等 | 模型增强 | 安全界、删弧、有效不等式、可选上下界证书 |
 
 ## 模型组装位置
 
 | 模型 | 完整模型组装文件 |
 | --- | --- |
-| M1 | [single_batch_formulation.py](../models/routing/model_1/exact/single_batch_formulation.py) |
-| M2 | [single_batch_formulation.py](../models/routing/model_2/exact/single_batch_formulation.py) |
-| M3 | [single_batch_formulation.py](../models/routing/model_3/exact/single_batch_formulation.py) |
-| M4 | [single_batch_formulation.py](../models/routing/model_4/exact/single_batch_formulation.py) |
-| M5 | [formulation.py](../models/routing/model_5/exact/formulation.py)；B=1 专门化在本模型的 `single_batch_formulation.py` |
+| M1 | [formulations/single_batch.py](../models/routing/model_1/exact/formulations/single_batch.py) |
+| M2 | [formulations/single_batch.py](../models/routing/model_2/exact/formulations/single_batch.py) |
+| M3 | [formulations/single_batch.py](../models/routing/model_3/exact/formulations/single_batch.py) |
+| M4 | [formulations/single_batch.py](../models/routing/model_4/exact/formulations/single_batch.py) |
+| M5 | [formulations/full.py](../models/routing/model_5/exact/formulations/full.py)；B=1 专门化在本模型的 `formulations/single_batch.py` |
 | M6 | [model.py](../models/routing/model_6/exact/model.py) |
-| M7 | [joint_model.py](../models/routing/model_7/exact/joint_model.py) |
-| M8 | [joint_model.py](../models/routing/model_8/exact/joint_model.py) |
+| M7 | [formulations/fixed_count.py](../models/routing/model_7/exact/formulations/fixed_count.py) |
+| M8 | [formulations/fixed_count.py](../models/routing/model_8/exact/formulations/fixed_count.py) |
 
 组装过程准备参数、创建一个 Gurobi 模型与 `ModelVariables`，按业务顺序调用约束组，
 最后设置目标函数。主流程的变量创建表达位于 `variables.py` 内，辅助变量按其所需约束分阶段创建，

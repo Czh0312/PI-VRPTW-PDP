@@ -20,8 +20,8 @@ if (OUT/'source_snapshot/configuration/loader.py').is_file():
 else:
     from tools.configuration.loader import load_routing_case
 from models.common.cycle import load_instance
-from models.routing.model_5.exact.multibatch_bounds import distance_certificate
-from models.routing.model_5.exact.pickup_route_pricing import route_context
+from models.routing.model_5.exact.accelerators.multibatch.bounds import distance_certificate
+from models.routing.model_5.exact.accelerators.pickup_route_pricing import route_context
 
 
 def read(path):

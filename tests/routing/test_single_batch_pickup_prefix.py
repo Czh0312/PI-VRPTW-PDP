@@ -12,7 +12,7 @@ from models.routing.service import solve_routing
 from models.routing.model_4.alns.construction import chronological_state
 from models.routing.model_4.alns.evaluator import evaluate
 from models.routing.model_4.alns.neighborhoods import _route_score, repair_orders
-from models.routing.model_4.alns.single_batch_scoring import SingleBatchRouteScorer
+from models.routing.model_4.alns.accelerators.single_batch_scoring import SingleBatchRouteScorer
 from tests.routing.test_single_batch_solver_audit import tiny_problem
 
 
@@ -111,7 +111,8 @@ def test_custom_scorer_keeps_original_call_path(subclass):
 
 @pytest.mark.parametrize('model', [1, 2, 3, 4])
 def test_public_activation_is_only_m3_fixed_recovery(monkeypatch, model):
-    from models.routing.model_4.alns import single_batch
+    from importlib import import_module
+    single_batch = import_module(f'models.routing.model_{model}.alns.search.single_batch')
     original = single_batch.destroy_repair
     flags = []
     def wrapped(*args, **kwargs):

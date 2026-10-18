@@ -14,7 +14,7 @@ from tools.configuration.loader import load_routing_case, resolve_project_path
 from experiments.analysis.summarize_static_multibatch import pool_evidence, paired_comparisons
 from experiments.runs.run_multibatch_cycle import main as run_study, run_worker
 from models.common.cycle import MultiBatchInstance, load_instance
-from models.routing.model_5.alns.engine import solve_alns
+from models.routing.model_5.alns.search.engine import solve_alns
 from models.common.cycle.audit import audit_solution
 from models.routing.model_5.alns.construction import chronological_state
 from models.routing.model_5.alns.evaluator import evaluate, initial_state
@@ -80,7 +80,7 @@ def test_exact_precheck_needs_no_gurobi(monkeypatch):
             raise AssertionError('An analytic rejection must not load Gurobi')
         return original(name, *args, **kwargs)
     monkeypatch.setattr(builtins, '__import__', guarded)
-    from models.routing.model_5.exact.engine import solve_exact
+    from models.routing.model_5.exact.search.engine import solve_exact
     result = solve_exact(fixture(pool=1, count=2))
     assert result['info']['proven_infeasible']
     assert not result['info']['proven_optimal']

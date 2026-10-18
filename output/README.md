@@ -9,6 +9,7 @@
 
 | 研究内容 | 报告入口 | 原始目录 |
 | --- | --- | --- |
+| M6–M8 有限时间求解改进（选例诊断） | [成对结果与限制](inspections/solver_improvement_20261017/report.md) | `inspections/solver_improvement_20261017/` |
 | 修订3成本参数、八模型精确/五种子ALNS重跑 | [运行报告与结果](experiments/benchmark27_20261016_cost_update_v1/report.md) | `experiments/benchmark27_20261016_cost_update_v1/` |
 | 正式27例八模型、精确/五种子ALNS重跑 | [实时报告与最终结果](experiments/benchmark27_20261015_formal_v1/report.md) | `experiments/benchmark27_20261015_formal_v1/` |
 | M1–M4 精确 / ALNS 全规模对比 | [实验说明](experiments/m1_m4_comparison_20261004/m1_m4_solver_comparison_20261004.md) | `experiments/m1_m4_comparison_20261004/` |
@@ -34,3 +35,5 @@ Excel 交付文件已归入对应实验：[M1–M4 模型对比](experiments/m1_
 [经济可行性重新核算](economic_recalculation_20261005/经济可行性重新核算.xlsx)。
 一次性调试和预览使用系统临时目录，不另建 `outputs/` 或按聊天编号存放成果。
 2026-09-29 清理前的旧模型结果保存在 `archive/cleanup_20260929/before_cleanup.tar.gz`；后续显式历史基线运行使用 `output/baselines/`。
+
+- [精确求解模型压缩验证](inspections/exact_compaction_20261017/report.md)：M6–M8 的等价模型压缩、初值策略及同预算结果；历史试跑与最终验证分别保存。

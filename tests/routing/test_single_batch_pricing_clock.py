@@ -10,8 +10,8 @@ import pytest
 
 from models.common.cycle import MultiBatchInstance
 from models.common.cycle.audit import audit_solution
-from models.routing.model_1.exact.single_batch_columns import root_route_bound, solve_with_route_bound
-from models.routing.model_1.exact.single_batch_delivery_pricer import DeliveryMipPricer
+from models.routing.model_1.exact.accelerators.single_batch.columns import root_route_bound, solve_with_route_bound
+from models.routing.model_1.exact.accelerators.single_batch.delivery_pricer import DeliveryMipPricer
 from tests.routing.test_single_batch_columns import contexts, independently_enumerated_trips
 from tests.routing.test_single_batch_dual_cuts import check_all_partitions
 from tests.routing.test_single_batch_solver_audit import tiny_problem, enumerate_tiny

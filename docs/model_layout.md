@@ -2,6 +2,7 @@
 
 现行结构是 `models/routing/model_1/` 至 `model_8/`，每个目录独立拥有 `alns/` 和 `exact/`。
 逐文件用途见[模型导航](../models/routing/README.md)。
+统一目录结构、阅读入口和内部路径迁移见[求解代码目录指南](solver_directory_guide.md)。
 
 精确模型按参数、变量、约束、目标函数和组装职责拆分。各文件的阅读顺序、
 约束组及参数／变量类用法见[精确模型结构](exact_model_layout.md)。

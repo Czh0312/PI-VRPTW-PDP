@@ -134,10 +134,12 @@ class ModelVariables:
 
         return self.model.addVars(len(nodes), ub=max(1, len(nodes)), name=label + "_rank")
 
-    def create_route_arcs(self, arcs, label):
+    def create_route_arcs(self, arcs, label, *, continuous_internal=False):
         from gurobipy import GRB
 
-        return self.model.addVars(arcs, vtype=GRB.BINARY, name=label + "_arc")
+        types = {(a, b): GRB.CONTINUOUS if continuous_internal and a >= 0 and b >= 0
+                 else GRB.BINARY for a, b in arcs}
+        return self.model.addVars(arcs, lb=0, ub=1, vtype=types, name=label + "_arc")
 
     def create_quantity(self, Q, b, k, kind, s):
         from gurobipy import GRB

@@ -9,7 +9,7 @@ import pytest
 
 from models.common.cycle import MultiBatchInstance
 from models.common.cycle.audit import audit_solution
-from models.routing.model_5.exact.multibatch_bounds import distance_certificate, _tour_bound
+from models.routing.model_5.exact.accelerators.multibatch.bounds import distance_certificate, _tour_bound
 from tests.routing.test_multibatch_cycle import fixture, hand_solution
 from tests.routing.test_multibatch_departure_loads import nonmetric_problem
 
@@ -17,7 +17,7 @@ from tests.routing.test_multibatch_departure_loads import nonmetric_problem
 @pytest.mark.parametrize('seed', [0, 1, 2, 3, 4, 5])
 def test_bound_never_exceeds_nonmetric_full_model_optimum(seed):
     pytest.importorskip('gurobipy')
-    from models.routing.model_5.exact.engine import solve_exact
+    from models.routing.model_5.exact.search.engine import solve_exact
     problem = nonmetric_problem(seed)
     result = solve_exact(problem, time_limit=5)
     assert result['info']['proven_optimal'] and audit_solution(problem, result)['valid']
@@ -117,7 +117,7 @@ def test_large_tour_fallback_zero_distances_and_budget():
 
 def test_build_timeout_preserves_audited_start_with_independent_bound():
     pytest.importorskip('gurobipy')
-    from models.routing.model_5.exact import engine as solver
+    from models.routing.model_5.exact.search import engine as solver
     problem = fixture(pool=2)
     initial = hand_solution(problem)
     initial['info']['objective'] = audit_solution(problem, initial)['objective']
@@ -134,7 +134,7 @@ def test_build_timeout_preserves_audited_start_with_independent_bound():
 
 def test_certificate_disabled_control_and_full_model_proof_scope():
     pytest.importorskip('gurobipy')
-    from models.routing.model_5.exact.engine import solve_exact
+    from models.routing.model_5.exact.search.engine import solve_exact
     problem = fixture(pool=2)
     result = solve_exact(problem, time_limit=2, use_distance_certificate=False)
     assert result['distance_certificate']['scope'] == 'disabled'

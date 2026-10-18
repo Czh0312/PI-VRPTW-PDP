@@ -14,8 +14,8 @@ from tests.routing.test_single_batch_solver_audit import tiny_problem
 @pytest.mark.parametrize('seed', [0, 1, 2, 4, 5])
 def test_shared_and_indexed_m5_have_same_optimum_on_directed_nonmetric_instances(monkeypatch, seed):
     pytest.importorskip('gurobipy')
-    from models.routing.model_5.exact import engine as solver
-    from models.routing.model_5.exact.formulation import build_model
+    from models.routing.model_5.exact.search import engine as solver
+    from models.routing.model_5.exact.formulations.full import build_model
     base = tiny_problem(3, seed)
     policy = MultiBatchPolicy.from_config(dict(policy_version='multi_batch_cutoff_v1', cycle_start=0,
         cycle_end=125, batches=[dict(id='b1', delivery_duration=30, return_duration=30),
@@ -41,8 +41,8 @@ def test_shared_and_indexed_m5_have_same_optimum_on_directed_nonmetric_instances
 
 def test_shared_m5_accepts_pickups_from_an_earlier_batch_on_later_delivery_trip():
     gp = pytest.importorskip('gurobipy')
-    from models.routing.model_5.exact.formulation import build_model
-    from models.routing.model_5.exact.engine import _set_start
+    from models.routing.model_5.exact.formulations.full import build_model
+    from models.routing.model_5.exact.search.engine import _set_start
     base = fixture(pool=2)
     problem = MultiBatchInstance(base.network,
         [replace(base.orders[0], pickup_window=(72, 78)), base.orders[1]], base.operating_policy)
@@ -85,7 +85,7 @@ def test_m5_time_bounds_keep_delivery_after_its_own_cutoff_legal():
     # Only E1 unloading must meet each batch's cutoff in M5. An E2 delivery
     # may occur later if the order window and final recovery permit it.
     pytest.importorskip('gurobipy')
-    from models.routing.model_5.exact.engine import solve_exact
+    from models.routing.model_5.exact.search.engine import solve_exact
     base = fixture(pool=2)
     problem = MultiBatchInstance(base.network,
         [replace(base.orders[0], delivery_window=(35, 40), pickup_window=(36, 45)), base.orders[1]],
@@ -98,7 +98,7 @@ def test_m5_time_bounds_keep_delivery_after_its_own_cutoff_legal():
 
 def test_m5_bounds_use_relaxed_paths_when_direct_satellite_arcs_are_long():
     pytest.importorskip('gurobipy')
-    from models.routing.model_5.exact.engine import solve_exact
+    from models.routing.model_5.exact.search.engine import solve_exact
     base = tiny_problem(3, 2)
     policy = replace(fixture(pool=4).operating_policy, e2_max_trips_per_vehicle=2)
     orders = [replace(o, id=f'{o.id}_{b.id}', satellite='S', batch=b.id,

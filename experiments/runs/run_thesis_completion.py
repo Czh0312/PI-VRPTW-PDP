@@ -166,7 +166,7 @@ def prepare(args):
             relative = path.relative_to(out/'sources/recycle')
             if not (out/'sources/original'/relative).is_file():
                 solver_changes.append(relative.as_posix())
-        allowed = {f'models/routing/model_{n}/{m}/batch_search.py' for n in (6, 7, 8) for m in ('alns', 'exact')}
+        allowed = {f'models/routing/model_{n}/{m}/search/batch_search.py' for n in (6, 7, 8) for m in ('alns', 'exact')}
         if set(solver_changes) != allowed:
             raise ValueError(f'Budget-only comparison includes unexpected solver changes: {solver_changes}')
     # The coordinator and worker themselves are frozen, including for old solvers.
@@ -388,6 +388,26 @@ The same observer wraps both source versions and its time counts in the call.
     return observed
 
 
+def solver_component(model, method, name):
+    """Locate an internal component in either a frozen or organized source tree.
+
+    Detect the loaded package layout, so old experiment snapshots remain usable.
+    Missing dependencies inside a component must still propagate as errors.
+    """
+    package = f'models.routing.model_{model}.{method}'
+    base = import_module(package)
+    if (Path(base.__file__).parent/'search').is_dir():
+        name = {
+            'partitioned_assignment': 'search.partitioned_assignment',
+            'single_batch': 'search.single_batch',
+            'joint_solver': 'search.fixed_count',
+            'search': 'search.calendar',
+            'batch_search': 'search.batch_search',
+            'calendar_search': 'solver',
+        }.get(name, name)
+    return import_module(package+'.'+name)
+
+
 @contextmanager
 def diagnostic_observer(model, enabled, begun):
     """Optional E1c observation of frozen ALNS implementations, inside budget.
@@ -403,8 +423,8 @@ def diagnostic_observer(model, enabled, begun):
     if enabled and model == 2:
         data.update(assignment_proposals=[], assignment_subsolves=[], projection_attempts=0, projection_successes=0,
                     projection_seconds=0.)
-        partition = import_module('models.routing.model_2.alns.partitioned_assignment')
-        inner = import_module('models.routing.model_2.alns.single_batch')
+        partition = solver_component(2, 'alns', 'partitioned_assignment')
+        inner = solver_component(2, 'alns', 'single_batch')
         old_assign, old_project, old_solve = partition.assigned_problem, partition.reassigned_state, inner.solve_alns
         def assign(problem, assignment):
             result = old_assign(problem, assignment)
@@ -452,9 +472,9 @@ def diagnostic_observer(model, enabled, begun):
             return value
         originals.append((cls, '__call__', original))
         cls.__call__ = evaluate
-        modules = [f'models.routing.model_{model}.alns.'+('solver' if model == 6 else 'joint_solver')]
+        modules = [solver_component(model, 'alns', 'solver' if model == 6 else 'joint_solver')]
         if model == 8:
-            modules.append('models.routing.model_8.alns.search')
+            modules.append(solver_component(8, 'alns', 'search'))
         def construction_wrapper(function):
             def observed(*args, **kwargs):
                 start = time.perf_counter()
@@ -464,8 +484,7 @@ def diagnostic_observer(model, enabled, begun):
                 data['construction_successes'] += int(value[2] is not None)
                 return value
             return observed
-        for name in modules:
-            target = import_module(name)
+        for target in modules:
             old = target._best_construction
             originals.append((target, '_best_construction', old))
             target._best_construction = construction_wrapper(old)
@@ -497,13 +516,13 @@ def worker(args):
     scheduler = None
     calendar_entry = None
     if has_counts:
-        scheduler = import_module(f'models.routing.model_{job["model"]}.{job["method"]}.batch_search')
+        scheduler = solver_component(job['model'], job['method'], 'batch_search')
         name = 'solve_uniform' if job['model'] == 6 else 'solve_counts'
         original = getattr(scheduler, name)
         observed = observe_counts(original, trace, observed_history, started)
         setattr(scheduler, name, observed)
         if job['model'] != 6:
-            calendar_entry = import_module(f'models.routing.model_{job["model"]}.{job["method"]}.calendar_search')
+            calendar_entry = solver_component(job['model'], job['method'], 'calendar_search')
             calendar_entry.aggregate = observed
     try:
         with diagnostic_observer(job['model'], job.get('diagnostics', False) and job['method'] == 'alns', started) as diagnostics:

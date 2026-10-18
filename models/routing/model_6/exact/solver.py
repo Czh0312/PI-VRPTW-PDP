@@ -1,4 +1,4 @@
-"""Solve and extract the full joint MILP; no ALNS imports or starts."""
+"""Solve and extract the full joint MILP with audited physical MIP starts."""
 from __future__ import annotations
 
 import math
@@ -8,19 +8,27 @@ from models.common.cycle.scope import validate_problem
 from models.routing.model_6.exact.model import build_model
 from models.common.cycle.joint import joint_empty_result, lift_result
 from models.common.cycle.state import empty_result
+from models.routing.model_6.exact.initialization import audited_start, install_start, retain_incumbent
+from models.routing.model_6.exact.initialization import install_assignment_guidance
 
 
-def solve_exact(problem, time_limit=60, seed=42, verbose=False):
+def solve_exact(problem, time_limit=60, seed=42, verbose=False, initial_result=None, budget_strategy='adaptive'):
     validate_problem(problem, 6)
     if problem.optimize_loading:
         raise ValueError('Optimized loading requires the M7 extended exact entry')
     if isinstance(time_limit,bool) or not math.isfinite(time_limit) or time_limit<=0:
         raise ValueError('time_limit must be finite and positive')
     if getattr(problem, 'uniform_cycle', False):
-        from models.routing.model_6.exact.batch_search import solve_uniform
-        return solve_uniform(problem, solve_candidate=solve_exact, method='exact', budget=time_limit, seed=seed, verbose=verbose)
+        from models.routing.model_6.exact.search.batch_search import solve_uniform
+        return solve_uniform(problem, solve_candidate=solve_exact, method='exact', budget=time_limit,
+                             seed=seed, verbose=verbose, initial_result=initial_result,
+                             budget_strategy=budget_strategy, analytical_bounds=True)
     begun=time.perf_counter()
+    incumbent=audited_start(problem, initial_result)
     result=joint_empty_result(problem,'exact')
+    from models.common.cycle.pool_bound import necessary_cost_lower_bound
+    analytical_bound=necessary_cost_lower_bound(problem)
+    result['info']['best_bound']=analytical_bound
     missing=[oid for oid,batches in problem.legal_batches.items() if not batches]
     if missing:
         result['info'].update(status='INFEASIBLE',proven_infeasible=True,
@@ -36,17 +44,20 @@ def solve_exact(problem, time_limit=60, seed=42, verbose=False):
         m,ctx=build_model(problem,verbose=verbose,deadline=begun+time_limit)
     except TimeoutError:
         result['info'].update(status='TIME_LIMIT_BUILD',runtime=time.perf_counter()-begun)
-        return result
+        return retain_incumbent(result, incumbent, problem, time.perf_counter()-begun)
     try:
         import gurobipy as gp
         from gurobipy import GRB
+        start_variables, hint_variables = ((install_start(m, ctx, incumbent), 0)
+            if incumbent is not None else install_assignment_guidance(problem, m, ctx))
         m.Params.TimeLimit=max(0,time_limit-(time.perf_counter()-begun))
         m.Params.Seed=int(seed)
+        m.Params.MIPFocus=2 if incumbent is not None else 1
         m.optimize()
         status={GRB.OPTIMAL:'OPTIMAL',GRB.INFEASIBLE:'INFEASIBLE',GRB.TIME_LIMIT:'TIME_LIMIT',
                 GRB.INTERRUPTED:'INTERRUPTED',GRB.INF_OR_UNBD:'INF_OR_UNBD'}.get(m.Status,str(m.Status))
         info=dict(status=status,proven_optimal=m.Status==GRB.OPTIMAL,proven_infeasible=m.Status==GRB.INFEASIBLE,
-                  objective=None,best_bound=float(m.ObjBound) if math.isfinite(m.ObjBound) else None,
+                  objective=None,best_bound=max(analytical_bound,float(m.ObjBound)) if math.isfinite(m.ObjBound) else analytical_bound,
                   mip_gap=None,runtime=time.perf_counter()-begun,build_time=time.perf_counter()-begun-m.Runtime,
                   variables=m.NumVars,constraints=m.NumConstrs+m.NumGenConstrs,node_count=m.NodeCount,
                   sol_count=m.SolCount,proof_scope=('full_joint_batch_pool_shared_cutoff_cost_integer_time_MILP'
@@ -56,10 +67,13 @@ def solve_exact(problem, time_limit=60, seed=42, verbose=False):
                   time_tick_seconds=problem.operating_policy.time_tick_seconds,
                   time_tick_subdivision=problem.operating_policy.time_tick_subdivision,
                   e2_max_trips_per_vehicle=problem.operating_policy.e2_max_trips_per_vehicle)
+        info.update(compact_e2=ctx["parameters"].compact_e2, binary_variables=m.NumBinVars,
+                    mip_start_variables=start_variables, assignment_hint_variables=hint_variables,
+                    mip_start_supplied=incumbent is not None)
         result['info']=info
         if not m.SolCount:
             info['proven_optimal']=False
-            return result
+            return retain_incumbent(result, incumbent, problem, time.perf_counter()-begun)
 
         def integral(v):
             value=v if isinstance(v,int) else v.getValue() if isinstance(v,gp.LinExpr) else v.X
@@ -116,6 +130,6 @@ def solve_exact(problem, time_limit=60, seed=42, verbose=False):
             info['optimized_cutoffs']=problem.optimize_cutoffs
         else:
             info.update(status='AUDIT_FAILED',proven_optimal=False)
-        return result
+        return retain_incumbent(result, incumbent, problem, time.perf_counter()-begun)
     finally:
         m.dispose()

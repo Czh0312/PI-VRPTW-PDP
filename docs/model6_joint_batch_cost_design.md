@@ -155,9 +155,9 @@ k_N 必须来自与评价期匹配、且排除其他重复费用的池规模成�
 models/routing/model_6/
   exact/model.py           完整联合 MILP
   exact/solver.py          精确求解、解提取与目标核对
-  exact/batch_search.py    精确求解的 K 搜索预算与证明汇总
+  exact/search/batch_search.py    精确求解的 K 搜索预算与证明汇总
   alns/solver.py           联合分批、路线、调度与成本 ALNS
-  alns/batch_search.py     ALNS 的 K 搜索预算与结果汇总
+  alns/search/batch_search.py     ALNS 的 K 搜索预算与结果汇总
 models/common/cycle/
   joint.py                联合业务实例与独立审计
   uniform.py              等长共同分界的实例与审计

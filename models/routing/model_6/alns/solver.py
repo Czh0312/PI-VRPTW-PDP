@@ -69,7 +69,7 @@ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_resul
     ):
         raise ValueError("Invalid ALNS time or iteration budget")
     if getattr(problem, "uniform_cycle", False):
-        from models.routing.model_6.alns.batch_search import solve_uniform
+        from models.routing.model_6.alns.search.batch_search import solve_uniform
 
         return solve_uniform(
             problem,
@@ -87,7 +87,8 @@ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_resul
     # Reserve a bounded share for refining the best cutoff. Putting a
     # multi-evaluation descent in the adaptive operator roulette can starve
     # route/batch exploration while rewarding repeated no-op descents.
-    search_deadline = deadline - 0.1 * max_time if problem.optimize_cutoffs else deadline
+    route_polish_share = .2 if len(problem.orders) <= 16 else 0.
+    search_deadline = deadline - (route_polish_share + (.1 if problem.optimize_cutoffs else 0.))*max_time
     missing = [oid for oid, choices in problem.legal_batches.items() if not choices]
     if missing:
         result = joint_empty_result(problem, "alns")
@@ -119,7 +120,8 @@ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_resul
         oid: max(bs, key=lambda b: problem.batch_index[b])
         for oid, bs in problem.legal_batches.items()
     }
-    seeds = [original, earliest, latest]
+    from models.routing.model_6.alns.accelerators.batch_initialization import balanced_assignments
+    seeds = balanced_assignments(problem) + [original, earliest, latest]
     for b in problem.operating_policy.batches:
         seeds.append(
             {
@@ -267,6 +269,18 @@ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_resul
             weights = control.update_segment(weights, rewards, uses)
             rewards = [0.0] * len(operators)
             uses = [0] * len(operators)
+    route_polish_evaluations = route_polish_improvements = 0
+    if route_polish_share and best is not None:
+        from models.routing.model_6.alns.accelerators.polish import polish_routes
+        route_deadline = deadline - (.1*max_time if problem.optimize_cutoffs else 0.)
+        polished, route_polish_evaluations, route_polish_improvements = polish_routes(
+            evaluator.fixed(best_assignment, best_state.get("cutoffs")), evaluator,
+            best_assignment, best_state, route_deadline)
+        value, candidate, _ = evaluator(best_assignment, polished)
+        if candidate is not None and value < best_cost-1e-8:
+            best, best_cost, best_state = deepcopy(candidate), value, polished
+            history.append(dict(iteration=iterations, objective=value,
+                                time=time.perf_counter()-begun, source="route_polish"))
     polish_calls = polish_improvements = 0
     polish_started = time.perf_counter()
     polish_evaluations = evaluator.misses
@@ -312,6 +326,8 @@ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_resul
         operator_weights=dict(zip(operators, weights)),
         cache_hits=evaluator.hits,
         evaluations=evaluator.misses,
+        route_polish_evaluations=route_polish_evaluations,
+        route_polish_improvements=route_polish_improvements,
         cutoff_polish_calls=polish_calls,
         cutoff_polish_improvements=polish_improvements,
         cutoff_polish_evaluations=polish_evaluations,

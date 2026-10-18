@@ -16,7 +16,7 @@ from models.common.domain.node import Customer, Depot, Satellite
 from models.routing.service import solve_routing
 from models.routing.model_3.alns.evaluator import evaluate, initial_state
 from models.routing.model_3.alns.neighborhoods import EvaluationCache, clone_state, destroy_repair, state_key
-from models.routing.model_3.exact.distance_bounds import distance_lower_bound
+from models.routing.model_3.exact.accelerators.distance_bounds import distance_lower_bound
 
 
 def nonmetric_problem():

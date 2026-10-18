@@ -11,9 +11,9 @@ from models.common.cycle.audit import audit_solution
 from models.common.cycle.state import empty_result
 from models.common.domain.instance import ProblemInstance
 from models.common.domain.node import Customer, Depot, Satellite
-from models.routing.model_1.exact.single_batch_columns import DeliveryMaster, solve_with_route_bound
-from models.routing.model_1.exact.single_batch_pool_master import DeliveryPoolMaster
-from models.routing.model_1.exact.single_batch_route_pool import _physical_slots, route_pool_incumbent
+from models.routing.model_1.exact.accelerators.single_batch.columns import DeliveryMaster, solve_with_route_bound
+from models.routing.model_1.exact.accelerators.single_batch.pool_master import DeliveryPoolMaster
+from models.routing.model_1.exact.accelerators.single_batch.route_pool import _physical_slots, route_pool_incumbent
 from tests.routing.test_single_batch_route_pool import full_pool, raw_trip
 from tests.routing.test_single_batch_solver_audit import tiny_problem
 
@@ -219,7 +219,7 @@ def reversed_equal_start(p):
 @pytest.mark.parametrize('timing',[False,True])
 def test_actual_warm_start_relabels_tied_vehicles_and_preserves_all_times(monkeypatch,compact,timing):
     gp = pytest.importorskip('gurobipy')
-    from models.routing.model_1.exact import single_batch_route_pool as implementation
+    from models.routing.model_1.exact.accelerators.single_batch import route_pool as implementation
     p = four_tasks('directed')
     initial = reversed_equal_start(p)
     before,captured,slots = deepcopy(initial),[],[]

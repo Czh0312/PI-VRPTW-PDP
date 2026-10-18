@@ -1,9 +1,9 @@
 """Iff activation and complete optimal projections under valid group cuts."""
 import itertools,math
 import pytest
-from models.routing.model_5.exact.multibatch_group_cuts import add_group_schedule_cut, project_group_schedule_cut
-from models.routing.model_5.exact.multibatch_group_schedule import conditional_group_schedule
-from models.routing.model_5.exact.multibatch_joint_inventory import build_joint_inventory, set_joint_projection
+from models.routing.model_5.exact.accelerators.multibatch.group_cuts import add_group_schedule_cut, project_group_schedule_cut
+from models.routing.model_5.exact.accelerators.multibatch.group_schedule import conditional_group_schedule
+from models.routing.model_5.exact.accelerators.multibatch.joint_inventory import build_joint_inventory, set_joint_projection
 from tests.routing.test_multibatch_joint_inventory import domains
 from tests.routing.test_multibatch_cover_schedule import covers_of
 from tests.routing.test_multibatch_departure_loads import nonmetric_problem
@@ -38,7 +38,7 @@ def test_total_floor_or_no_good_activates_iff_every_group_matches(flags,infeasib
 @pytest.mark.parametrize('timed',[False,True])
 def test_independent_complete_optimum_projects_to_cut_and_bounds_full_optimum(seed,timed):
     gp=pytest.importorskip('gurobipy')
-    from models.routing.model_5.exact.engine import solve_exact
+    from models.routing.model_5.exact.search.engine import solve_exact
     p=nonmetric_problem(seed);opt=solve_exact(p,time_limit=5);assert opt['info']['proven_optimal']
     cert=conditional_group_schedule(p,covers_of(opt),time_limit=3)['certificate']
     assert cert['conditional_optimal']

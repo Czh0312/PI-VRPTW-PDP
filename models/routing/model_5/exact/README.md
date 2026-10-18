@@ -6,71 +6,102 @@
 再看组装文件和 `solver.py`。参数类复用公共业务实例，变量类管理同一个 Gurobi 模型。
 完整导航见[精确模型结构](../../../../docs/exact_model_layout.md)。
 
+顶层只保留入口与核心定义；`search/` 管理搜索流程，`formulations/` 组装数学模型，`accelerators/` 收纳加速与辅助组件（有需要时才设置子目录）。
+日常调用使用本目录的 `solve_exact`；内部模块路径不作为稳定公共接口。
+统一阅读方法与迁移说明见[目录指南](../../../../docs/solver_directory_guide.md)。
+
+## 入口与核心定义
+
 | 文件 | 用途 |
 | --- | --- |
-| [parameters.py](parameters.py) | 已知参数、安全派生界及参数数据类 |
-| [variables.py](variables.py) | 决策变量定义与 `ModelVariables` 分组管理 |
 | [constraints.py](constraints.py) | 按业务含义组织的约束组 |
-| [objective.py](objective.py) | 距离或完整成本目标函数 |
-| [bounds.py](bounds.py) | 有编号校验的下界证书入口 |
-| [distance_bounds.py](distance_bounds.py) | 必访节点的保守距离下界 |
-| [domains.py](domains.py) | 客户可选仓点与安全时间域 |
-| [engine.py](engine.py) | 本模型内部的求解主过程 |
-| [formulation.py](formulation.py) | 建模分流及多批次完整 MILP 组装 |
-| [initial_solution.py](initial_solution.py) | 确定性可行初解分流 |
+| [initialization.py](initialization.py) | 确定性可行初解分流 |
 | [model.py](model.py) | 有编号校验的 MILP 建模入口 |
-| [multibatch_bounds.py](multibatch_bounds.py) | M5 距离下界证书 |
-| [multibatch_capacity_cuts.py](multibatch_capacity_cuts.py) | 配送容量取整割 |
-| [multibatch_capacity_dual_repair.py](multibatch_capacity_dual_repair.py) | 容量、计数、任务价格的完整域对偶修复 |
-| [multibatch_conditional_inventory.py](multibatch_conditional_inventory.py) | 供货条件下的二级成本界 |
-| [multibatch_count_dual_repair.py](multibatch_count_dual_repair.py) | 配送计数约束的对偶修复 |
-| [multibatch_cover_pool.py](multibatch_cover_pool.py) | 保持完整任务覆盖的可行解路线池 |
-| [multibatch_cover_schedule.py](multibatch_cover_schedule.py) | 固定完整二级路径后的物理车辆排程 |
-| [multibatch_cuts.py](multibatch_cuts.py) | 完整送取任务对子集容量割 |
-| [multibatch_e1_inventory.py](multibatch_e1_inventory.py) | 一级路线与库存松弛下界 |
-| [multibatch_e1_polish.py](multibatch_e1_polish.py) | 固定二级序列后改进一级路线 |
-| [multibatch_e1_routes.py](multibatch_e1_routes.py) | 小规模一级路线完整枚举 |
-| [multibatch_group_cuts.py](multibatch_group_cuts.py) | 任务组条件约束 |
-| [multibatch_group_schedule.py](multibatch_group_schedule.py) | 固定任务组的物理排程 |
-| [multibatch_hybrid.py](multibatch_hybrid.py) | 显式混合实验入口：初始搜索、路线池改进和下界证书 |
-| [multibatch_hybrid_primal.py](multibatch_hybrid_primal.py) | 同次求解内收集可行路线候选 |
-| [multibatch_inventory_guard.py](multibatch_inventory_guard.py) | 库存松弛下界的独立核验 |
-| [multibatch_joint_inventory.py](multibatch_joint_inventory.py) | 完整二级覆盖与一级供货／清洁库存联合松弛 |
-| [multibatch_logic_benders.py](multibatch_logic_benders.py) | 可续跑的条件物理站点分离 |
-| [multibatch_physical_ceiling.py](multibatch_physical_ceiling.py) | 目标上限可行性检查得到的条件下界 |
-| [multibatch_physical_cuts.py](multibatch_physical_cuts.py) | 联合松弛中的条件物理成本割 |
-| [multibatch_physical_site.py](multibatch_physical_site.py) | 保留物理车队日历的站点条件下界 |
-| [multibatch_pricing_polish.py](multibatch_pricing_polish.py) | 细化现有完整域对偶证书 |
-| [multibatch_primal.py](multibatch_primal.py) | 独立于 ALNS 的 M5 确定性初解 |
-| [multibatch_route_cg.py](multibatch_route_cg.py) | 完整域路线覆盖列生成下界 |
-| [multibatch_route_enumeration.py](multibatch_route_enumeration.py) | 小规模二级基本路线完整枚举 |
-| [multibatch_route_integer_cover.py](multibatch_route_integer_cover.py) | 完整路线域上的整数覆盖下界 |
-| [multibatch_route_pool.py](multibatch_route_pool.py) | 受限路线池上的可行解改进 |
-| [multibatch_route_timing.py](multibatch_route_timing.py) | 二级成本与最迟发车的完整前沿 |
-| [multibatch_subset_rows.py](multibatch_subset_rows.py) | 完整带时刻路线域的子集约束 |
-| [multibatch_task_pairs.py](multibatch_task_pairs.py) | 任务同路线的整数性增强 |
-| [multibatch_vehicle_retime.py](multibatch_vehicle_retime.py) | 固定路径重分配物理车辆并重新排程 |
-| [pickup_route_pricing.py](pickup_route_pricing.py) | 本模型内部的送取任务路线定价与插入列 |
-| [primal.py](primal.py) | 有编号校验的可行解改进与混合求解入口 |
-| [single_batch_columns.py](single_batch_columns.py) | 单批次路线列生成下界 |
-| [single_batch_cuts.py](single_batch_cuts.py) | 单批次容量割 |
-| [single_batch_delivery_pricer.py](single_batch_delivery_pricer.py) | 纯配送路线的 MILP 定价 |
-| [single_batch_dual_cuts.py](single_batch_dual_cuts.py) | 配送定价证书转距离约束 |
-| [single_batch_e1_bound.py](single_batch_e1_bound.py) | M3 一级路线覆盖松弛下界 |
-| [single_batch_formulation.py](single_batch_formulation.py) | 单批次 MILP 的参数、变量、约束及目标组装 |
-| [single_batch_label_bound.py](single_batch_label_bound.py) | 标签定价的后续路径下界 |
-| [single_batch_physical_bounds.py](single_batch_physical_bounds.py) | M3 原物理站点的可选成本下界 |
-| [single_batch_pickup_bound.py](single_batch_pickup_bound.py) | 送取混合任务的路线覆盖下界 |
-| [single_batch_pool_master.py](single_batch_pool_master.py) | 路线池整数主问题 |
-| [single_batch_pricing_schedule.py](single_batch_pricing_schedule.py) | 配送定价路径的整数时间可行性 |
-| [single_batch_primal.py](single_batch_primal.py) | 送取分趟的插入初解 |
-| [single_batch_route_pool.py](single_batch_route_pool.py) | 从受限路线池构造并审计可行解 |
-| [single_batch_route_pricing.py](single_batch_route_pricing.py) | 纯配送路线标签定价 |
-| [single_batch_schedule_start.py](single_batch_schedule_start.py) | 最早可行日程和车辆编号规范化 |
-| [single_batch_short_cycles.py](single_batch_short_cycles.py) | 单批次 MILP 的二节点子环约束 |
-| [single_batch_site_flow.py](single_batch_site_flow.py) | 自由分仓的仓库流连接 |
-| [single_batch_time_budget.py](single_batch_time_budget.py) | 物理车队的时间预算约束 |
+| [objective.py](objective.py) | 距离或完整成本目标函数 |
+| [parameters.py](parameters.py) | 已知参数、安全派生界及参数数据类 |
 | [solver.py](solver.py) | 本模型公开求解入口及编号校验 |
-| [strengthening.py](strengthening.py) | 单批次安全界、稀疏弧和车辆趟数界 |
+| [variables.py](variables.py) | 决策变量定义与 `ModelVariables` 分组管理 |
+
+## 搜索流程：批次数、分仓与子问题
+
+| 文件 | 用途 |
+| --- | --- |
+| [search/engine.py](search/engine.py) | 本模型内部的求解主过程 |
+
+## 数学模型组装
+
+| 文件 | 用途 |
+| --- | --- |
+| [formulations/full.py](formulations/full.py) | 建模分流及多批次完整 MILP 组装 |
+| [formulations/single_batch.py](formulations/single_batch.py) | 单批次 MILP 的参数、变量、约束及目标组装 |
+
+## 加速与辅助组件
+
+| 文件 | 用途 |
+| --- | --- |
+| [accelerators/bounds.py](accelerators/bounds.py) | 有编号校验的下界证书入口 |
+| [accelerators/distance_bounds.py](accelerators/distance_bounds.py) | 必访节点的保守距离下界 |
+| [accelerators/domains.py](accelerators/domains.py) | 客户可选仓点与安全时间域 |
+| [accelerators/pickup_route_pricing.py](accelerators/pickup_route_pricing.py) | 本模型内部的送取任务路线定价与插入列 |
+| [accelerators/primal.py](accelerators/primal.py) | 有编号校验的可行解改进与混合求解入口 |
+| [accelerators/strengthening.py](accelerators/strengthening.py) | 单批次安全界、稀疏弧和车辆趟数界 |
+
+## 单批次加速组件
+
+| 文件 | 用途 |
+| --- | --- |
+| [accelerators/single_batch/columns.py](accelerators/single_batch/columns.py) | 单批次路线列生成下界 |
+| [accelerators/single_batch/cuts.py](accelerators/single_batch/cuts.py) | 单批次容量割 |
+| [accelerators/single_batch/delivery_pricer.py](accelerators/single_batch/delivery_pricer.py) | 纯配送路线的 MILP 定价 |
+| [accelerators/single_batch/dual_cuts.py](accelerators/single_batch/dual_cuts.py) | 配送定价证书转距离约束 |
+| [accelerators/single_batch/e1_bound.py](accelerators/single_batch/e1_bound.py) | M3 一级路线覆盖松弛下界 |
+| [accelerators/single_batch/label_bound.py](accelerators/single_batch/label_bound.py) | 标签定价的后续路径下界 |
+| [accelerators/single_batch/physical_bounds.py](accelerators/single_batch/physical_bounds.py) | M3 原物理站点的可选成本下界 |
+| [accelerators/single_batch/pickup_bound.py](accelerators/single_batch/pickup_bound.py) | 送取混合任务的路线覆盖下界 |
+| [accelerators/single_batch/pool_master.py](accelerators/single_batch/pool_master.py) | 路线池整数主问题 |
+| [accelerators/single_batch/pricing_schedule.py](accelerators/single_batch/pricing_schedule.py) | 配送定价路径的整数时间可行性 |
+| [accelerators/single_batch/primal.py](accelerators/single_batch/primal.py) | 送取分趟的插入初解 |
+| [accelerators/single_batch/route_pool.py](accelerators/single_batch/route_pool.py) | 从受限路线池构造并审计可行解 |
+| [accelerators/single_batch/route_pricing.py](accelerators/single_batch/route_pricing.py) | 纯配送路线标签定价 |
+| [accelerators/single_batch/schedule_start.py](accelerators/single_batch/schedule_start.py) | 最早可行日程和车辆编号规范化 |
+| [accelerators/single_batch/short_cycles.py](accelerators/single_batch/short_cycles.py) | 单批次 MILP 的二节点子环约束 |
+| [accelerators/single_batch/site_flow.py](accelerators/single_batch/site_flow.py) | 自由分仓的仓库流连接 |
+| [accelerators/single_batch/time_budget.py](accelerators/single_batch/time_budget.py) | 物理车队的时间预算约束 |
+
+## 多批次加速组件
+
+| 文件 | 用途 |
+| --- | --- |
+| [accelerators/multibatch/bounds.py](accelerators/multibatch/bounds.py) | M5 距离下界证书 |
+| [accelerators/multibatch/capacity_cuts.py](accelerators/multibatch/capacity_cuts.py) | 配送容量取整割 |
+| [accelerators/multibatch/capacity_dual_repair.py](accelerators/multibatch/capacity_dual_repair.py) | 容量、计数、任务价格的完整域对偶修复 |
+| [accelerators/multibatch/conditional_inventory.py](accelerators/multibatch/conditional_inventory.py) | 供货条件下的二级成本界 |
+| [accelerators/multibatch/count_dual_repair.py](accelerators/multibatch/count_dual_repair.py) | 配送计数约束的对偶修复 |
+| [accelerators/multibatch/cover_pool.py](accelerators/multibatch/cover_pool.py) | 保持完整任务覆盖的可行解路线池 |
+| [accelerators/multibatch/cover_schedule.py](accelerators/multibatch/cover_schedule.py) | 固定完整二级路径后的物理车辆排程 |
+| [accelerators/multibatch/cuts.py](accelerators/multibatch/cuts.py) | 完整送取任务对子集容量割 |
+| [accelerators/multibatch/e1_inventory.py](accelerators/multibatch/e1_inventory.py) | 一级路线与库存松弛下界 |
+| [accelerators/multibatch/e1_polish.py](accelerators/multibatch/e1_polish.py) | 固定二级序列后改进一级路线 |
+| [accelerators/multibatch/e1_routes.py](accelerators/multibatch/e1_routes.py) | 小规模一级路线完整枚举 |
+| [accelerators/multibatch/group_cuts.py](accelerators/multibatch/group_cuts.py) | 任务组条件约束 |
+| [accelerators/multibatch/group_schedule.py](accelerators/multibatch/group_schedule.py) | 固定任务组的物理排程 |
+| [accelerators/multibatch/hybrid.py](accelerators/multibatch/hybrid.py) | 显式混合实验入口：初始搜索、路线池改进和下界证书 |
+| [accelerators/multibatch/hybrid_primal.py](accelerators/multibatch/hybrid_primal.py) | 同次求解内收集可行路线候选 |
+| [accelerators/multibatch/inventory_guard.py](accelerators/multibatch/inventory_guard.py) | 库存松弛下界的独立核验 |
+| [accelerators/multibatch/joint_inventory.py](accelerators/multibatch/joint_inventory.py) | 完整二级覆盖与一级供货／清洁库存联合松弛 |
+| [accelerators/multibatch/logic_benders.py](accelerators/multibatch/logic_benders.py) | 可续跑的条件物理站点分离 |
+| [accelerators/multibatch/physical_ceiling.py](accelerators/multibatch/physical_ceiling.py) | 目标上限可行性检查得到的条件下界 |
+| [accelerators/multibatch/physical_cuts.py](accelerators/multibatch/physical_cuts.py) | 联合松弛中的条件物理成本割 |
+| [accelerators/multibatch/physical_site.py](accelerators/multibatch/physical_site.py) | 保留物理车队日历的站点条件下界 |
+| [accelerators/multibatch/pricing_polish.py](accelerators/multibatch/pricing_polish.py) | 细化现有完整域对偶证书 |
+| [accelerators/multibatch/primal.py](accelerators/multibatch/primal.py) | 独立于 ALNS 的 M5 确定性初解 |
+| [accelerators/multibatch/route_cg.py](accelerators/multibatch/route_cg.py) | 完整域路线覆盖列生成下界 |
+| [accelerators/multibatch/route_enumeration.py](accelerators/multibatch/route_enumeration.py) | 小规模二级基本路线完整枚举 |
+| [accelerators/multibatch/route_integer_cover.py](accelerators/multibatch/route_integer_cover.py) | 完整路线域上的整数覆盖下界 |
+| [accelerators/multibatch/route_pool.py](accelerators/multibatch/route_pool.py) | 受限路线池上的可行解改进 |
+| [accelerators/multibatch/route_timing.py](accelerators/multibatch/route_timing.py) | 二级成本与最迟发车的完整前沿 |
+| [accelerators/multibatch/subset_rows.py](accelerators/multibatch/subset_rows.py) | 完整带时刻路线域的子集约束 |
+| [accelerators/multibatch/task_pairs.py](accelerators/multibatch/task_pairs.py) | 任务同路线的整数性增强 |
+| [accelerators/multibatch/vehicle_retime.py](accelerators/multibatch/vehicle_retime.py) | 固定路径重分配物理车辆并重新排程 |
 
 `__init__.py` 导出当前算法入口。基础数据与审计的依赖边界见[模型导航](../../README.md)。

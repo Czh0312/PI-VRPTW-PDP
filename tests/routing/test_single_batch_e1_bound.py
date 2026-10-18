@@ -6,9 +6,9 @@ from copy import copy
 
 import pytest
 
-from models.routing.model_3.exact.single_batch_e1_bound import enumerate_e1_routes, e1_route_cover_bound, project_e1_schedule
-from models.routing.model_3.exact.single_batch_pickup_bound import root_pickup_route_bound
-from models.routing.model_3.exact.engine import solve_exact
+from models.routing.model_3.exact.accelerators.single_batch.e1_bound import enumerate_e1_routes, e1_route_cover_bound, project_e1_schedule
+from models.routing.model_3.exact.accelerators.single_batch.pickup_bound import root_pickup_route_bound
+from models.routing.model_3.exact.search.engine import solve_exact
 from tests.routing.test_single_batch_solver_audit import tiny_problem,enumerate_tiny
 
 

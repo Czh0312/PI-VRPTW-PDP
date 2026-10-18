@@ -17,13 +17,13 @@ M1–M8 的 ALNS 各自独立维护以下职责。业务数据、时间规则、
 
 | 模型 | 默认入口与搜索位置 |
 | --- | --- |
-| M1/M3 | `solver.py` → `single_batch.py` |
-| M2 | `solver.py` → `assignment.py` → `single_batch.py`；另有分区搜索入口 |
-| M4 | `solver.py` → `assignment.py` → `single_batch.py` |
-| M5 | `solver.py` → `engine.py`；本模型 B=1 专门化使用 `single_batch.py` |
-| M6 | `solver.py`；均匀周期由 `batch_search.py` 分配 K 搜索预算 |
-| M7 | `solver.py` → `calendar_search.py` → `joint_solver.py`，并汇总 K 搜索结果 |
-| M8 | `solver.py` → `calendar_search.py` → `search.py`；固定日历搜索在 `joint_solver.py` |
+| M1/M3 | `solver.py` → `search/single_batch.py` |
+| M2 | `solver.py` → `search/assignment.py` → `search/single_batch.py`；另有分区搜索入口 |
+| M4 | `solver.py` → `search/assignment.py` → `search/single_batch.py` |
+| M5 | `solver.py` → `search/engine.py`；本模型 B=1 专门化使用 `search/single_batch.py` |
+| M6 | `solver.py`；均匀周期由 `search/batch_search.py` 分配 K 搜索预算 |
+| M7 | `solver.py` → `search/fixed_count.py`，并汇总 K 搜索结果 |
+| M8 | `solver.py` → `search/calendar.py`；固定日历搜索在 `search/fixed_count.py` |
 
 搜索循环主要展示以下过程：
 
@@ -61,7 +61,7 @@ result = solve_alns(problem, max_time=10, max_iterations=5000, seed=42)
 
 `evaluator.initial_state`、`neighborhoods.clone_state/state_key/state_from_result/EvaluationCache`、
 原搜索模块的 `_move`，以及 M6–M8 求解器中原有的联合构造／评价／移动符号继续兼容旧调用。
-新代码可直接从职责所属文件导入。M8 的原 `search.boundary_events/move_boundaries/initial_calendars`
+新代码可直接从职责所属文件导入。M8 的`search.calendar.boundary_events/move_boundaries/initial_calendars`
 也继续可用，实际实现分别归入邻域和构造文件。
 
 每个模型只导入本编号的 ALNS 实现；没有跨模型算法公用目录。ALNS 输出可行方案及搜索诊断，

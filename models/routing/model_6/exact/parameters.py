@@ -14,9 +14,18 @@ class ModelParameters:
     fleet: Any
     horizon: int
     total_containers: int
+    compact_e2: bool
 
 
-def prepare_parameters(problem):
+def prepare_parameters(problem, *, compact_e2=None):
     p, f = problem.operating_policy, problem.fleet
     H, Q = p.cycle_end, problem.total
-    return ModelParameters(problem, p, f, H, Q)
+    if compact_e2 is None:
+        # Compact the formulation once replicated internal arc constraints
+        # dominate construction; keep the established small-model search.
+        copies = 0
+        for site in problem.satellites:
+            tasks = 2 * sum(o.satellite == site for o in problem.orders)
+            copies += tasks * max(0, tasks-1) * min(p.e2_max_trips_per_vehicle, tasks) * f.e2_per_sat_count
+        compact_e2 = copies > 4000
+    return ModelParameters(problem, p, f, H, Q, compact_e2)

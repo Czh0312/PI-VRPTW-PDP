@@ -8,7 +8,7 @@ import pytest
 from tools.configuration.loader import load_routing_case
 from models.common.cycle import MultiBatchInstance, load_instance
 from models.common.cycle.audit import audit_solution
-from models.routing.model_5.exact.initial_solution import construct_incumbent
+from models.routing.model_5.exact.initialization import construct_incumbent
 from tests.routing.test_multibatch_cycle import fixture
 
 
@@ -79,7 +79,7 @@ def test_active_trip_slots_are_preserved_and_deliveries_do_not_mix_batches():
 
 
 def test_deadline_keeps_the_last_fully_audited_seed(monkeypatch):
-    from models.routing.model_5.exact import multibatch_primal
+    from models.routing.model_5.exact.accelerators.multibatch import primal as multibatch_primal
     expired = False
     def audited(*args, **kwargs):
         nonlocal expired
@@ -94,8 +94,8 @@ def test_deadline_keeps_the_last_fully_audited_seed(monkeypatch):
 
 def test_multibatch_seed_is_accepted_by_full_milp_and_survives_build_timeout(monkeypatch):
     gp = pytest.importorskip('gurobipy')
-    from models.routing.model_5.exact import engine as solver
-    from models.routing.model_5.exact.formulation import build_model
+    from models.routing.model_5.exact.search import engine as solver
+    from models.routing.model_5.exact.formulations.full import build_model
     problem = load_instance(*load_routing_case('config/experiments/examples/multibatch_demo.json'))
     result = seed(problem)
     saved = deepcopy(result)

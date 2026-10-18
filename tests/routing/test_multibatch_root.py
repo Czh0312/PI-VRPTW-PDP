@@ -15,8 +15,8 @@ from tests.routing.test_single_batch_solver_audit import tiny_problem
 @pytest.mark.parametrize('seed', [0, 2, 5])
 def test_all_link_and_symmetry_variants_match_on_nonmetric_networks(seed):
     pytest.importorskip('gurobipy')
-    from models.routing.model_5.exact import engine as solver
-    from models.routing.model_5.exact.formulation import build_model
+    from models.routing.model_5.exact.search import engine as solver
+    from models.routing.model_5.exact.formulations.full import build_model
     base = tiny_problem(3, seed)
     policy = fixture(pool=4, e2_max_trips_per_vehicle=3,
                      e2_dispatch_prep_time=1, e2_return_unload_time=1,
@@ -40,8 +40,8 @@ def test_all_link_and_symmetry_variants_match_on_nonmetric_networks(seed):
 @pytest.mark.parametrize('one_vehicle', [False, True])
 def test_zero_travel_split_trips_fit_reduced_slots_after_relabeling(one_vehicle):
     gp = pytest.importorskip('gurobipy')
-    from models.routing.model_5.exact.formulation import build_model
-    from models.routing.model_5.exact.engine import _set_start
+    from models.routing.model_5.exact.formulations.full import build_model
+    from models.routing.model_5.exact.search.engine import _set_start
     problem = fixture(pool=2, zero=True, e2_max_trips_per_vehicle=4)
     problem.fleet.e2_per_sat_count = 2
     result = empty_result(problem, 'manual')
@@ -80,7 +80,7 @@ def test_zero_travel_split_trips_fit_reduced_slots_after_relabeling(one_vehicle)
 
 def test_linear_links_reduce_indicator_expansion_and_slot_copies():
     pytest.importorskip('gurobipy')
-    from models.routing.model_5.exact.formulation import build_model
+    from models.routing.model_5.exact.formulations.full import build_model
     problem = fixture(pool=2, e2_max_trips_per_vehicle=4)
     problem.fleet.e2_per_sat_count = 2
     sizes = []

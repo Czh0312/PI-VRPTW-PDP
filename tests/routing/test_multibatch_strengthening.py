@@ -10,7 +10,7 @@ import pytest
 
 from models.common.cycle import MultiBatchInstance
 from models.common.cycle.audit import audit_solution
-from models.routing.model_5.exact.multibatch_cuts import minimum_trip_count
+from models.routing.model_5.exact.accelerators.multibatch.cuts import minimum_trip_count
 from tests.routing.test_multibatch_cycle import fixture, hand_solution
 from tests.routing.test_single_batch_solver_audit import tiny_problem
 
@@ -43,8 +43,8 @@ def test_capacity_rounding_is_conservative_at_decimal_boundaries():
 @pytest.mark.parametrize('strengthened', [False, True])
 def test_cutoff_compression_preserves_fixed_boundary_schedules(unloaded, strengthened):
     gp = pytest.importorskip('gurobipy')
-    from models.routing.model_5.exact.formulation import build_model
-    from models.routing.model_5.exact.engine import _set_start
+    from models.routing.model_5.exact.formulations.full import build_model
+    from models.routing.model_5.exact.search.engine import _set_start
     problem = fixture(pool=2)
     result = hand_solution(problem, first_unload=unloaded)
     audit = audit_solution(problem, result)
@@ -74,8 +74,8 @@ def test_cutoff_compression_preserves_fixed_boundary_schedules(unloaded, strengt
 @pytest.mark.parametrize('seed', [0, 1, 2, 4, 5])
 def test_new_formulation_matches_previous_on_directed_and_zero_travel_cases(monkeypatch, seed):
     pytest.importorskip('gurobipy')
-    from models.routing.model_5.exact import engine as solver
-    from models.routing.model_5.exact.formulation import build_model
+    from models.routing.model_5.exact.search import engine as solver
+    from models.routing.model_5.exact.formulations.full import build_model
     base = tiny_problem(3, seed)
     policy = replace(fixture(pool=4).operating_policy, e2_max_trips_per_vehicle=2)
     orders = [replace(o, batch='b1' if i == 0 else 'b2',
@@ -95,7 +95,7 @@ def test_new_formulation_matches_previous_on_directed_and_zero_travel_cases(monk
 
 def test_capacity_pruning_keeps_delivery_then_pickup_that_reuses_the_same_space():
     pytest.importorskip('gurobipy')
-    from models.routing.model_5.exact.engine import solve_exact
+    from models.routing.model_5.exact.search.engine import solve_exact
     problem = fixture(pool=1)
     problem.fleet.e2_volume_cap = 1
     result = solve_exact(problem, time_limit=3)
@@ -107,7 +107,7 @@ def test_formulation_fingerprint_does_not_depend_on_python_hash_seed():
     pytest.importorskip('gurobipy')
     script = '''
 from tests.routing.test_multibatch_cycle import fixture
-from models.routing.model_5.exact.formulation import build_model
+from models.routing.model_5.exact.formulations.full import build_model
 model, _ = build_model(fixture())
 print('FINGERPRINT', model.Fingerprint)
 model.dispose()
@@ -123,8 +123,8 @@ model.dispose()
 
 def test_cut_callback_failure_is_explicit_and_keeps_the_audited_seed(monkeypatch):
     pytest.importorskip('gurobipy')
-    from models.routing.model_5.exact.multibatch_cuts import CapacityCutSeparator
-    from models.routing.model_5.exact.engine import solve_exact
+    from models.routing.model_5.exact.accelerators.multibatch.cuts import CapacityCutSeparator
+    from models.routing.model_5.exact.search.engine import solve_exact
     def fail(self, model, where):
         self.error = 'injected callback failure'
         model.terminate()
@@ -140,7 +140,7 @@ def test_cut_callback_failure_is_explicit_and_keeps_the_audited_seed(monkeypatch
 @pytest.mark.parametrize('certificate', [False, True])
 def test_feasible_time_limit_without_gurobi_bound_serializes_gap_honestly(monkeypatch, certificate):
     gp = pytest.importorskip('gurobipy')
-    from models.routing.model_5.exact import engine as solver
+    from models.routing.model_5.exact.search import engine as solver
     original = solver.build_model
     class MissingBound:
         def __init__(self, model):
@@ -163,7 +163,7 @@ def test_feasible_time_limit_without_gurobi_bound_serializes_gap_honestly(monkey
     assert result['info']['gurobi_best_bound'] is None
     assert result['info']['gurobi_mip_gap'] is None
     if certificate:
-        from models.routing.model_5.exact.multibatch_bounds import distance_certificate
+        from models.routing.model_5.exact.accelerators.multibatch.bounds import distance_certificate
         bound = distance_certificate(problem)['bound']
         assert result['info']['best_bound'] == bound
         assert result['info']['best_bound_source'] == 'distance_certificate'

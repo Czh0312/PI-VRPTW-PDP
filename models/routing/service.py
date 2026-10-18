@@ -19,8 +19,8 @@ def solve_routing(*, model, method, problem, e1_tasks=None, e2_tasks_by_sat=None
     method = str(method).lower()
     if method not in {"exact", "alns"}:
         raise ValueError(f"Expected exact or alns, got {method}")
-    if initial_result is not None and (model not in (6, 7, 8) or method!='alns'):
-        raise ValueError('Initial joint solution requires M6–M8 ALNS')
+    if initial_result is not None and model not in (6, 7, 8):
+        raise ValueError('Initial joint solution requires M6–M8')
     if getattr(policy, "multi_batch", False):
         if problem.model_number != model:
             raise ValueError("Requested model does not match the loaded instance")
@@ -32,7 +32,10 @@ def solve_routing(*, model, method, problem, e1_tasks=None, e2_tasks_by_sat=None
         from models.common.cycle.scope import batch_mode_for
         module = import_module(MODEL_SPECS[model].module_path(batch_mode_for(problem), method))
         if method == "exact":
-            return module.solve_exact(problem, time_limit=exact_time if exact_time is not None else 60, seed=seed)
+            kwargs = dict(time_limit=exact_time if exact_time is not None else 60, seed=seed)
+            if initial_result is not None:
+                kwargs['initial_result'] = initial_result
+            return module.solve_exact(problem, **kwargs)
         kwargs=dict(max_time=alns_time,max_iterations=alns_iter,seed=seed)
         if initial_result is not None:
             kwargs['initial_result']=initial_result

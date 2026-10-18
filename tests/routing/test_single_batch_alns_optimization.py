@@ -10,7 +10,7 @@ import pytest
 from models.common.cycle import MultiBatchInstance
 from models.common.cycle.assignment import input_assignment, assigned_problem
 from models.common.cycle.audit import audit_solution
-from models.routing.model_4.alns.assignment import AssignmentSearch, solve_alns
+from models.routing.model_4.alns.search.assignment import AssignmentSearch, solve_alns
 from models.routing.model_3.alns.construction import chronological_state, repair_assignment_state
 from models.routing.model_3.alns.evaluator import evaluate, initial_state
 from models.routing.model_3.alns import neighborhoods
@@ -109,7 +109,7 @@ def test_joint_iteration_limited_search_is_reproducible_and_history_is_monotone(
 
 @pytest.mark.parametrize('model', [1, 3])
 def test_single_batch_descent_improves_directed_warm_route_and_preserves_seed(model, monkeypatch):
-    from models.routing.model_3.alns.single_batch import solve_alns as solve_fixed
+    from models.routing.model_3.alns.search.single_batch import solve_alns as solve_fixed
     base = tiny_problem(model, 1)
     p = assigned_problem(base, {o.customer: 'S' for o in base.orders})
     state = initial_state(p, random.Random(0))
@@ -124,7 +124,7 @@ def test_single_batch_descent_improves_directed_warm_route_and_preserves_seed(mo
     saved = deepcopy(warm)
     # Control construction so this regression exercises incumbent descent,
     # rather than a better packed initial solution replacing the warm route.
-    from models.routing.model_3.alns import single_batch
+    from models.routing.model_3.alns.search import single_batch
     monkeypatch.setattr(single_batch, 'initial_state',
         lambda problem, rng, **kwargs: neighborhoods.state_from_result(problem, warm))
     monkeypatch.setattr(single_batch, '_move', lambda problem, state, rng, op: deepcopy(state))
@@ -141,7 +141,7 @@ def test_single_batch_descent_improves_directed_warm_route_and_preserves_seed(mo
 
 @pytest.mark.parametrize('model', [1, 3])
 def test_single_batch_descent_respects_zero_iterations_and_tiny_budget(model):
-    from models.routing.model_3.alns.single_batch import solve_alns as solve_fixed
+    from models.routing.model_3.alns.search.single_batch import solve_alns as solve_fixed
     p = tiny_problem(model, 2)
     warm = solve_fixed(p, max_time=10, max_iterations=0)
     assert warm['audit']['valid']
@@ -153,7 +153,7 @@ def test_single_batch_descent_respects_zero_iterations_and_tiny_budget(model):
 
 
 def test_descent_site_cache_reindexes_after_route_removal_and_does_not_alias_proposals():
-    from models.routing.model_3.alns.single_batch_descent import SingleBatchDescent
+    from models.routing.model_3.alns.accelerators.single_batch_descent import SingleBatchDescent
     base = tiny_problem(3, 1)
     orders = [replace(o, id=f'{o.id}_{i}', delivery_window=(0, 70), pickup_window=(0, 80))
               for i in range(2) for o in base.orders]
@@ -186,7 +186,7 @@ def test_descent_site_cache_reindexes_after_route_removal_and_does_not_alias_pro
 
 def test_delivery_exchange_crosses_capacity_barrier_with_repeated_customer_orders():
     from models.common.domain.instance import ProblemInstance
-    from models.routing.model_3.alns.single_batch_descent import SingleBatchDescent
+    from models.routing.model_3.alns.accelerators.single_batch_descent import SingleBatchDescent
     base = tiny_problem(1, 1)
     nodes = base.network.nodes
     positions = dict(D=0, S=0, T=0, C0=1, C1=9, C2=2)

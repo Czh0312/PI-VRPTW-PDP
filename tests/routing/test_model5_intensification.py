@@ -11,9 +11,9 @@ from models.common.cycle.audit import audit_solution
 from models.common.domain.instance import ProblemInstance
 from models.common.domain.node import Depot, Satellite, Customer
 from models.routing.model_5.alns.evaluator import evaluate
-from models.routing.model_5.alns.intensification import CycleDescent, task_distance
+from models.routing.model_5.alns.accelerators.intensification import CycleDescent, task_distance
 from models.routing.model_5.alns.neighborhoods import state_key
-from models.routing.model_5.alns.engine import solve_alns
+from models.routing.model_5.alns.search.engine import solve_alns
 
 
 def directed_cycle(seed=3):

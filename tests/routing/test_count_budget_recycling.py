@@ -24,7 +24,7 @@ def candidate(cost=None, *, bound=None, optimal=False, infeasible=False, iterati
 @pytest.fixture(params=[(n, m) for n in (6, 7, 8) for m in ('alns', 'exact')])
 def harness(request, monkeypatch):
     number, method = request.param
-    module = import_module(f'models.routing.model_{number}.{method}.batch_search')
+    module = import_module(f'models.routing.model_{number}.{method}.search.batch_search')
     clock = Clock()
     monkeypatch.setattr(module, 'time', clock)
     monkeypatch.setattr(module, '_audit', lambda p, r: dict(

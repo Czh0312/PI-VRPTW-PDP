@@ -162,7 +162,7 @@ def repair_orders(
     distance = problem.distance
     prefix_enabled = False
     if tasks and fast_scores and len(p.batches) == 1:
-        from models.routing.model_8.alns.single_batch_scoring import SingleBatchRouteScorer
+        from models.routing.model_8.alns.accelerators.single_batch_scoring import SingleBatchRouteScorer
 
         score_route = scorer if scorer is not None else SingleBatchRouteScorer(problem)
         prefix_enabled = cache_pickup_prefix and type(score_route) is SingleBatchRouteScorer

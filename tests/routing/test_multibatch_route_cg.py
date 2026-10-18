@@ -10,8 +10,8 @@ from models.common.cycle import MultiBatchInstance, Order
 from models.common.cycle.audit import audit_solution
 from models.common.domain.instance import ProblemInstance
 from models.common.domain.node import Depot, Satellite, Customer
-from models.routing.model_5.exact.multibatch_route_cg import dual_certificate, route_cover_certificate, site_route_cover
-from models.routing.model_5.exact.pickup_route_pricing import RoutePricer, TripPricingModel, evaluate_column, route_context
+from models.routing.model_5.exact.accelerators.multibatch.route_cg import dual_certificate, route_cover_certificate, site_route_cover
+from models.routing.model_5.exact.accelerators.pickup_route_pricing import RoutePricer, TripPricingModel, evaluate_column, route_context
 from tests.routing.test_multibatch_cycle import fixture, hand_solution
 from tests.routing.test_multibatch_departure_loads import nonmetric_problem
 
@@ -132,7 +132,7 @@ def test_exact_trip_pricing_matches_all_elementary_sequences(seed, phase_one, li
 @pytest.mark.parametrize('seed', range(6))
 def test_column_generation_matches_fully_enumerated_relaxation_and_bounds_integer_m5(seed):
     pytest.importorskip('gurobipy')
-    from models.routing.model_5.exact.engine import solve_exact
+    from models.routing.model_5.exact.search.engine import solve_exact
     problem = nonmetric_problem(seed)
     result = route_cover_certificate(problem, time_limit=5)
     assert result['status'] == 'LP_CONVERGED'
@@ -244,7 +244,7 @@ def test_phase_one_failure_does_not_claim_full_integer_infeasibility():
 def test_unfinished_master_objective_is_never_reported_as_a_bound(monkeypatch):
     pytest.importorskip('gurobipy')
     from types import SimpleNamespace
-    from models.routing.model_5.exact import multibatch_route_cg as cg
+    from models.routing.model_5.exact.accelerators.multibatch import route_cg as cg
     class Unresolved:
         def __init__(self, *args, **kwargs):
             self.model = SimpleNamespace(NumVars=1)

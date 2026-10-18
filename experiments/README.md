@@ -10,6 +10,7 @@
 | 任务 | 运行模块 | 结果 / 说明 |
 | --- | --- | --- |
 | 正式27例八模型、精确与多种子ALNS | `experiments.runs.run_formal_benchmark27` | [冻结、恢复与结果口径](../docs/benchmark27_remote_run.md) |
+| M6–M8 求解改进的同机成对诊断 | `experiments.runs.compare_joint_refinement` | [有限预算验证（选例）](../output/inspections/solver_improvement_20261017/report.md) |
 | 单批四模型机制与经济对照 | `experiments.runs.run_single_batch_comparison` | [四模型说明](../docs/single_batch_comparison.md) |
 | M1–M4 全规模算法比较 | `experiments.runs.run_single_batch_benchmark` | [预算与结果](../output/experiments/m1_m4_comparison_20261004/m1_m4_solver_comparison_20261004.md) |
 | 固定批次与池规模扫描 | `experiments.runs.run_multibatch_cycle` | [使用说明](../docs/static_multibatch_implementation.md) |
@@ -79,3 +80,5 @@ M3/M5/M6/M7/M8 最新成本对比的逐轮专属脚本及复现步骤见[结果�
 ALNS从同一已重新审计的历史可行时间表开始，记录初始化来源、原预算、原文件哈希及重算成本；两组得到相同的新增搜索预算。独立精确求解不调用ALNS或使用这个启发式起点。初始解不继承任何成本最优证明。输出保留所有失败和超时、冻结输入和源码、独立审计、实际两窗长度，并区分成本、箱数、配送批次及M5时间表的最小需要箱数。
 
     .venv/bin/python -m experiments.runs.run_model6_cutoff_comparison --manifest data/model6/cutoff_v1_20261005/manifest.json --initial-study output/model6_comparison/20261004_static_v2_full --exact-time 30 --time 10 --iterations 30000 --seeds 42 43 44 --workers 4 --output /path/to/new/comparison
+
+- [2026-10-17 精确模型压缩与短预算验证](../output/inspections/exact_compaction_20261017/report.md)：同机比较上一版本与按规模选择的等价 MILP 表达，包含建模计时、冷启动可行解、下界和保留的退化试验。

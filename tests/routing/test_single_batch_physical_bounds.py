@@ -8,10 +8,10 @@ import pytest
 
 from models.common.cycle import MultiBatchInstance
 from models.common.cycle.audit import audit_solution
-from models.routing.model_3.exact import single_batch_physical_bounds as physical
-from models.routing.model_3.exact.single_batch_columns import problem_fingerprint
-from models.routing.model_3.exact.single_batch_formulation import build_model
-from models.routing.model_3.exact.engine import _set_start, solve_exact
+from models.routing.model_3.exact.accelerators.single_batch import physical_bounds as physical
+from models.routing.model_3.exact.accelerators.single_batch.columns import problem_fingerprint
+from models.routing.model_3.exact.formulations.single_batch import build_model
+from models.routing.model_3.exact.search.engine import _set_start, solve_exact
 from tests.routing.test_single_batch_solver_audit import tiny_problem, enumerate_tiny
 
 
@@ -148,7 +148,7 @@ def test_original_complete_hybrid_matches_independent_integer_enumeration(seed):
 @pytest.mark.parametrize('compressed', [False, True])
 def test_cross_trip_physical_schedule_projects_without_splitting_vehicles(compressed):
     from tests.routing.test_single_batch_primal import split_problem
-    from models.routing.model_3.exact.initial_solution import construct_incumbent
+    from models.routing.model_3.exact.initialization import construct_incumbent
     import time
     p = split_problem()
     start = construct_incumbent(p, time.perf_counter()+2)

@@ -11,9 +11,9 @@ import pytest
 from models.common.cycle import MultiBatchInstance, Order
 from models.common.domain.instance import ProblemInstance
 from models.common.domain.node import Depot, Satellite, Customer
-from models.routing.model_5.exact.pickup_route_pricing import route_context
-from models.routing.model_5.exact.multibatch_route_timing import enumerate_timed_route_universe
-from models.routing.model_5.exact.multibatch_joint_inventory import build_joint_inventory, set_joint_projection, solve_joint_inventory, joint_route_inventory_certificate
+from models.routing.model_5.exact.accelerators.pickup_route_pricing import route_context
+from models.routing.model_5.exact.accelerators.multibatch.route_timing import enumerate_timed_route_universe
+from models.routing.model_5.exact.accelerators.multibatch.joint_inventory import build_joint_inventory, set_joint_projection, solve_joint_inventory, joint_route_inventory_certificate
 from tests.routing.test_multibatch_cycle import fixture, hand_solution
 from tests.routing.test_multibatch_departure_loads import nonmetric_problem
 from tests.routing.test_multibatch_route_cg import enumerate_trips, detour_problem
@@ -106,7 +106,7 @@ def test_frontiers_match_all_paths_and_independent_forward_binary_search(seed):
 @pytest.mark.parametrize('seed', range(6))
 def test_known_full_optimum_projects_to_complete_timed_joint_model(seed):
     gp = pytest.importorskip('gurobipy')
-    from models.routing.model_5.exact.engine import solve_exact
+    from models.routing.model_5.exact.search.engine import solve_exact
     problem = nonmetric_problem(seed)
     initial = solve_exact(problem, time_limit=5)
     assert initial['info']['proven_optimal'] and initial['audit']['valid']
@@ -205,7 +205,7 @@ def test_public_export_separates_complete_ordinary_and_timing_universes(tmp_path
 
 
 def test_supply_profile_dominance_uses_only_complete_e1_supply_values():
-    from models.routing.model_5.exact.multibatch_route_timing import compress_supply_profiles
+    from models.routing.model_5.exact.accelerators.multibatch.route_timing import compress_supply_profiles
     def row(cost, latest):
         return dict(column=dict(cost=cost), keys=(('a', 'd'),), allowed_cutoffs=(None,), latest_departure=latest)
     rows = [row(3, 19), row(9, 39), row(1, 5)]

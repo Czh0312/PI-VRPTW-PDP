@@ -65,7 +65,7 @@ def test_m3_cli_uses_joint_prices_without_changing_single_batch_route(tmp_path):
     assert cost['total'] == pytest.approx(reference['total'])
     assert cost['economic_profile_hash'] == reference['economic_profile_hash']
     assert cost['components']['e1_trips'] == audit['e1_trip_count']*parameters['e1_trip_cost']
-    assert cost['components']['container_wear'] == problem.total*parameters['container_price']/parameters['container_lifetime_uses']
+    assert cost['components']['container_wear'] == pytest.approx(problem.total*parameters['container_price']/parameters['container_lifetime_uses'])
     assert cost['route_objective_mode'] == 'distance' and not cost['cost_is_optimized']
     assert result == original
     corrupt = deepcopy(result)

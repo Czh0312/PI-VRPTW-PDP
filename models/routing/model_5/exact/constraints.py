@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import time
-from models.routing.model_5.exact.strengthening import trip_slot_limits
+from models.routing.model_5.exact.accelerators.strengthening import trip_slot_limits
 from models.routing.model_5.exact.objective import add_distance_cost, add_distance_term
 
 
@@ -743,7 +743,7 @@ def add_shared_route_constraints(
                     variables.model.addConstr(gp.quicksum(entering[key]) == 1)
                     variables.model.addConstr(gp.quicksum(leaving[key]) == 1)
             if site_flow:
-                from models.routing.model_5.exact.single_batch_site_flow import add_site_flow
+                from models.routing.model_5.exact.accelerators.single_batch.site_flow import add_site_flow
 
                 site_arcs = add_site_flow(
                     variables.model,
@@ -1934,7 +1934,7 @@ def multibatch_add_distance_certificate_constraints(
         check_budget()
         certificate = _distance_certificate
         if certificate is None:
-            from models.routing.model_5.exact.multibatch_bounds import distance_certificate
+            from models.routing.model_5.exact.accelerators.multibatch.bounds import distance_certificate
 
             try:
                 certificate = distance_certificate(parameters.problem, deadline=deadline)

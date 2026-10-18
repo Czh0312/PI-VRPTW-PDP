@@ -4,7 +4,7 @@ import random
 
 import pytest
 
-from models.routing.model_3.alns.single_batch_timing import propagate_times
+from models.routing.model_3.alns.accelerators.single_batch_timing import propagate_times
 
 
 @pytest.mark.parametrize('seed', range(20))
