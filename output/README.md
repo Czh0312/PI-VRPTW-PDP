@@ -3,7 +3,7 @@
 本目录是唯一成果入口，按实验主题保存正式结果、图片、报告和 Excel。
 实验程序在 `experiments/`，实验参数在 `config/experiments/`。
 与结果配套的冻结输入、源码、原始方案和审计用于复现，随对应实验保存。
-当前基础数据为 `static_batch_suite_v2`；历史版本仍按原目录保留。
+当前正式输入为“一客一箱” `formal_benchmark27_one_box_v1`，验证和重跑状态见[阶段记录](inspections/one_box_validation_20261019_v1/report.md)。原 `formal_benchmark27_v1` 及其冻结结果属于“多箱需求情景”。下列既有结果按各自冻结输入保留，不能直接作为新情景结论。
 
 ## 主要入口
 

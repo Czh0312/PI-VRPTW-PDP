@@ -18,6 +18,7 @@ from tools.configuration.loader import PROJECT_ROOT, load_json, resolve_project_
 from models.common.cycle import load_instance
 from models.common.cycle.policy import MultiBatchPolicy
 from tools.data.formal_benchmark27_bounds import productive_count_certificate
+from tools.data.one_box_contract import CONTRACT, validate_orders, preserved_orders_hash, preserved_policy_hash
 
 
 VERSION = 'formal_benchmark27_v1'
@@ -105,6 +106,10 @@ def build_suite(output=DEFAULT_OUTPUT, selection=DEFAULT_SELECTION):
     out, source = resolve_project_path(output).resolve(), resolve_project_path(selection)
     design = read(source)
     records = design['cases']
+    version = design.get('dataset_version', VERSION)
+    one_box = design.get('demand_contract', {}).get('id') == CONTRACT['id']
+    if one_box and design['demand_contract'] != CONTRACT:
+        raise ValueError('Unknown one-box contract')
     economic_profile = None
     if design.get('economic_profile'):
         profile_path = resolve_project_path(design['economic_profile'])
@@ -125,7 +130,7 @@ def build_suite(output=DEFAULT_OUTPUT, selection=DEFAULT_SELECTION):
     out.mkdir(parents=True, exist_ok=True)
     write_json(out/'selection.json', design)
     write_json(out/'comparison_protocol.json', design['review_protocol'])
-    manifest = dict(dataset_version=VERSION, dataset_revision=design['review_protocol']['dataset_revision'],
+    manifest = dict(dataset_version=version, dataset_revision=design['review_protocol']['dataset_revision'],
                     base_case_count=27, model_config_count=216,
                     models=list(range(1, 9)), sizes=dict.fromkeys(SIZES, 9),
                     source_block_count=len({r['source_block'] for r in records}),
@@ -139,6 +144,10 @@ def build_suite(output=DEFAULT_OUTPUT, selection=DEFAULT_SELECTION):
                         'Synthetic appointments and economic coefficients, not measured operating costs.',
                         'Input validation does not certify route feasibility or optimality.',
                         'M6/M7 refine equal-partition clocks when necessary; M8 uses the original integer clock.'])
+    if one_box:
+        manifest.update(demand_contract=CONTRACT, scenario_label='一客一箱',
+                        source_dataset=design['source_dataset'],
+                        source_dataset_manifest_sha256=design['source_dataset_manifest_sha256'])
     if economic_profile is not None:
         manifest['economic_profile_source'] = design['economic_profile']
         manifest['economic_profile_sha256'] = design['economic_profile_sha256']
@@ -163,6 +172,14 @@ def build_suite(output=DEFAULT_OUTPUT, selection=DEFAULT_SELECTION):
             common[key] = reference(target)
         orders = read(resolve_project_path(files['orders']))
         policy = load_json(files['operating_policy'])
+        source_total = sum(o['container_count'] for o in orders)
+        if one_box:
+            for order in orders:
+                order['container_count'] = 1
+            validate_orders(orders, record['customer_count'])
+            if preserved_orders_hash(orders) != record['preserved_orders_sha256']:
+                raise ValueError(f'Non-box order fields changed: {record["id"]}')
+            policy['container_pool_size'] = record['total_container_uses']
         calendar = design['reviewed_reference_calendar']
         length = Decimal(str(policy['cycle_end']-policy['cycle_start']))/calendar['batch_count']
         delivery = length*Decimal(str(calendar['cutoff_ratio']))
@@ -171,6 +188,8 @@ def build_suite(output=DEFAULT_OUTPUT, selection=DEFAULT_SELECTION):
             for i in range(calendar['batch_count'])]
         policy['description'] = 'Reviewed common reference calendar: three equal batches, 70% cutoff; see provenance.'
         MultiBatchPolicy.from_config(policy)
+        if one_box and preserved_policy_hash(policy) != record['preserved_policy_sha256']:
+            raise ValueError(f'Non-pool policy fields changed: {record["id"]}')
         if sum(o['container_count'] for o in orders) != record['total_container_uses']:
             raise ValueError(f'Demand changed: {record["id"]}')
         write_json(shared/'reference_orders.json', orders)
@@ -184,6 +203,14 @@ def build_suite(output=DEFAULT_OUTPUT, selection=DEFAULT_SELECTION):
                           reference_calendar_adaptation=calendar,
                           selection_rule=design['selection_rule'])
         write_json(shared/'provenance.json', provenance)
+        if one_box:
+            provenance.update(demand_contract=CONTRACT, scenario_label='一客一箱',
+                source_scenario_label='多箱需求情景', source_total_container_uses=source_total,
+                source_dataset=design['source_dataset'],
+                source_dataset_manifest_sha256=design['source_dataset_manifest_sha256'],
+                preserved_orders_sha256=record['preserved_orders_sha256'],
+                preserved_policy_sha256=record['preserved_policy_sha256'])
+            write_json(shared/'provenance.json', provenance)
         common['dataset_metadata'] = reference(shared/'provenance.json')
         base = {k: record[k] for k in ('id', 'size', 'customer_count', 'family_id',
                                       'source_block', 'total_container_uses')}
@@ -202,20 +229,24 @@ def build_suite(output=DEFAULT_OUTPUT, selection=DEFAULT_SELECTION):
                 fixed_cfg, fixed_fleet = load_routing_case(base['models']['5'])
                 certificate = productive_count_certificate(load_instance(fixed_cfg, fixed_fleet))
                 write_json(shared/'batch_count_certificate.json', certificate)
+                if one_box and digest(shared/'batch_count_certificate.json') != record['batch_count_certificate_sha256']:
+                    raise ValueError(f'Batch domain changed: {record["id"]}')
             options = (dict(schedule_mode=MODES[model],
                             batch_count_candidates=certificate['candidates_by_model'][str(model)], min_phase_minutes=1,
                             pool_min=1, pool_max=record['total_container_uses']) if model >= 6 else {})
             write_json(folder/'orders.json', model_orders)
             write_json(folder/'policy.json', model_policy)
             contract = parameter_contract(model, record, model_orders, model_policy, options)
+            if one_box:
+                contract['demand_contract'] = CONTRACT
             write_json(folder/'parameters.json', contract)
-            cfg = dict(schema_version=2, case_name=f'{VERSION}_{record["id"]}_M{model}',
+            cfg = dict(schema_version=2, case_name=f'{version}_{record["id"]}_M{model}',
                        model=model, solver='alns', **common,
                        orders=reference(folder/'orders.json'), operating_policy=reference(folder/'policy.json'),
                        container_pool_size=record['total_container_uses'],
                        exact_backend='joint_batch_indexed' if model >= 6 else 'multibatch_indexed',
                        exact_time=300, alns_time=30, alns_iter=10**9, seed=42, save_plots=False,
-                       dataset_version=VERSION, base_case_id=record['id'],
+                       dataset_version=version, base_case_id=record['id'],
                        parameter_contract=reference(folder/'parameters.json'))
             if options:
                 cfg['joint_batch_options'] = options
@@ -303,6 +334,25 @@ M1–M5原生目标为距离，M6–M8为成本。共同费用文件供一致评
 输入核验及必要条件检查不等于全部算例已找到可行解或证明最优；实际状态以独立运行和审计为准。审计报告位于 `output/inspections/formal_benchmark27_v1/`。
 
 发布版的validation目录另保存216份可行调度及独立重放记录。生成器之后运行 `python -m tools.audit.certify_formal_benchmark27` 可建立这些见证，`--verify` 可复核；求解器不会自动把见证当初始解。完整审查记录见 `output/inspections/formal_benchmark27_review_20261015/README.md`，比较与费用口径见本目录comparison_protocol.json。
+'''
+    if one_box:
+        readme = f'''# 正式数据：一客一箱
+
+27个基础算例、216份模型配置；S01为7位顾客、Q=7。
+每客恰好一个订单、一个标准箱，完整保留货物重量。假设每位顾客的需求可由一个标准箱承载，不进行装箱优化。
+配送载重=货物重量+一个箱重；回收载重=一个空箱重；两类任务体积均为一个箱体积。
+
+从 `{design['source_dataset']}` 的已冻结正式输入派生；该旧版及其结果标记为“多箱需求情景”，原文件不修改。
+顾客、坐标、货重、送取窗、分仓、参考订单分批、车队、周期及费用系数全部保留。
+仅更新订单箱数、Q、固定箱池、优化箱池上限及说明和哈希；来源与不变字段哈希见各例provenance.json。
+
+M1–M4固定单批；M3/M4固定N=Q；M5固定原三批日历及N=Q。
+M6–M8优化箱池（1≤N≤Q），参考N=Q不代表最优。批次数定义、最短阶段、原始数学域及输入证明的候选域均沿用旧版；没有加入K≤3限制。
+费用系数仍为0.1D1+0.05D2+5N+0.02Q；箱次项随Q变化。M1–M5原生目标仍为距离。
+
+所有运行输入均在本目录内；216项入口见[case_index.csv](case_index.csv)。
+输入检查、可行见证与算法成功率分别报告。可行见证不作求解器初始解。
+完整规则与阶段验收见[版本说明](../../docs/benchmark27_one_box_20261019.md)。
 '''
     (out/'README.md').write_text(readme, encoding='utf-8')
     manifest['artifact_sha256'] = {p.relative_to(out).as_posix(): digest(p)

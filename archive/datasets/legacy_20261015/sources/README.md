@@ -1,0 +1,5 @@
+# 历史生成源码
+
+`design_static_scenarios.py` 是一客一箱改动前的生成源码（提交f346ee045c38037c334262fe53828b6e25c91878）。按原LF字节保存，SHA-256为1fe395af69c63e66dfc9794b4351f303c7b4910e3537e66916584bbd90c1e79c，与旧静态场景provenance声明一致。
+
+此副本用于历史来源核验；当前生成入口使用 `tools/data/design_static_scenarios.py` 的一客一箱规则。原数据及冻结结果不改写。

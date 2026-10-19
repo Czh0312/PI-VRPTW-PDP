@@ -90,7 +90,7 @@ def design_orders(rows, family, profile, fleet, design, *, road_times=None, lade
                 while remaining and len(selected) < a['max_stops_per_reference_trip']:
                     choices = []
                     for cid, r in remaining.items():
-                        n = int(r['delivery_container_count']) if lade else math.ceil(float(r['delivery_demand'])/design['zhou']['goods_per_container'])
+                        n = int(r['delivery_container_count']) if lade else 1
                         w, v = float(r['delivery_demand'])+n*fleet['container_weight'], n*fleet['container_volume']
                         if load_w+w <= fleet['E2_Qv']+1e-8 and load_v+v <= fleet['E2_Cv']+1e-8:
                             choices.append((travel(position, cid), cid, n, w, v))
@@ -138,6 +138,9 @@ def design_orders(rows, family, profile, fleet, design, *, road_times=None, lade
                         delivery_due=ddue,
                         pickup_ready=max(anchor, math.floor(t['pickup']-a['pickup_early_slack'])), pickup_due=pdue,
                         service_time=service, min_use_time=t['use']))
+    if not lade:
+        from tools.data.one_box_contract import validate_orders
+        validate_orders(orders, sum(r['node_type'] == 'c' for r in rows))
     return orders, cohorts, dict(reference_e2_routes=routes, reference_time_unit='minutes',
                                  reference_purpose='Feasibility construction only; no objective optimization or performance filtering.',
                                  reference_rule='Per-territory hash cohorts; nearest feasible capacity groups; earliest available vehicle; delivery then collection.',

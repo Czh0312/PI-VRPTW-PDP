@@ -82,7 +82,7 @@ make test
 
 其他电脑的拉取、安装与运行步骤见 [正式数据远程运行说明](docs/benchmark27_remote_run.md)。
 
-现行统一主实验使用 [formal_benchmark27_v1](data/formal_benchmark27_v1/README.md)：27个基础算例，按 `model_1`～`model_8` 分目录，各模型的小／中／大规模各9例，共216份配置。同编号算例共享需求与物理输入，各模型固定或优化的参数随算例保存。此前 `static_batch_suite_v2` 的93组B1/B2/B3配对、专项版本及来源数据集中放在[历史数据归档](archive/datasets/README.md)，通过兼容加载器用于旧测试和复现。旧生成脚本默认写入 `output/generated_datasets/`。
+现行统一主实验输入使用 [formal_benchmark27_one_box_v1](data/formal_benchmark27_one_box_v1/README.md)：27个基础算例、216份模型配置，每位顾客一个订单、一个标准箱，完整保留货物重量。假设一位顾客的需求能由一个标准箱承载，不进行装箱优化；配送计货重加箱重，回收计空箱重。原 [formal_benchmark27_v1](data/formal_benchmark27_v1/README.md) 与冻结结果保留，作为“多箱需求情景”。新版本只修正箱数及相关箱池参数，批次数定义和候选域不变，K≤3仍为独立诊断。验证与重跑状态见[版本说明](docs/benchmark27_one_box_20261019.md)。此前静态配对及来源数据保存在[历史数据归档](archive/datasets/README.md)。
 
 当前修订3费用为 `0.1*D1 + 0.05*D2 + 5*N + 0.02*Q`，其中清洗与追踪合计0.01/箱次、磨损0.01/箱次，工时、启用与趟次费用均为0。参数源见[基础费用配置](config/experiments/benchmark27_v1/economic.json)。M1–M5仍优化原生距离目标，M6–M8及循环模型共同费用评价使用新参数。异机重跑应重新prepare到新目录，旧冻结实验继续使用其原费用。
 

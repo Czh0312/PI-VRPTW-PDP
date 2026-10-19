@@ -18,6 +18,7 @@ from models.common.cycle.policy import MultiBatchPolicy
 from models.common.cycle.precheck import check_necessary_conditions
 from tools.data.formal_benchmark27_bounds import productive_count_certificate
 from tools.audit.check_last_recovery import last_recovery_certificate
+from tools.data.one_box_contract import CONTRACT, validate_orders, preserved_orders_hash, preserved_policy_hash
 
 
 def read(path):
@@ -38,6 +39,8 @@ def physical_orders(orders):
 def audit_dataset(dataset):
     root = resolve_project_path(dataset).resolve()
     manifest = read(root/'manifest.json')
+    if manifest['dataset_version'] == 'formal_benchmark27_one_box_v1':
+        require(manifest.get('demand_contract') == CONTRACT, 'Missing one-box dataset contract')
     require(manifest['base_case_count'] == 27 and manifest['model_config_count'] == 216,
             'Expected 27 bases and 216 model configurations')
     require(len(manifest['cases']) == 216 and len(manifest['base_cases']) == 27, 'Incorrect manifest sizes')
@@ -63,6 +66,16 @@ def audit_dataset(dataset):
                     f'Economic profile differs from declared coefficients: {base["id"]}')
         orders = read(common/'reference_orders.json')
         policy = read(common/'reference_policy.json')
+        one_box = manifest.get('demand_contract', {}).get('id') == CONTRACT['id']
+        if one_box:
+            require(manifest['demand_contract'] == CONTRACT, 'Unknown one-box contract')
+            validate_orders(orders, base['customer_count'])
+            require(base['total_container_uses'] == base['customer_count'], 'One-box Q differs from customers')
+            provenance = read(common/'provenance.json')
+            require(preserved_orders_hash(orders) == provenance['preserved_orders_sha256'],
+                    'Non-box order fields changed from frozen source')
+            require(preserved_policy_hash(policy) == provenance['preserved_policy_sha256'],
+                    'Non-pool policy fields changed from frozen source')
         ref_policy = MultiBatchPolicy.from_config(policy)
         certificate = read(common/'batch_count_certificate.json')
         exogenous = physical_orders(orders)
@@ -84,11 +97,23 @@ def audit_dataset(dataset):
                         f'Model-specific physical input: {path}/{key}')
             require(cfg['model'] == model and cfg['base_case_id'] == base['id'], f'Model ID mismatch: {path}')
             model_orders = read(resolve_project_path(cfg['orders']))
+            if one_box:
+                validate_orders(model_orders, base['customer_count'])
             require(physical_orders(model_orders) == exogenous, f'Physical orders differ: {path}')
             actual_policy = read(resolve_project_path(cfg['operating_policy']))
             require({k: v for k, v in actual_policy.items() if k not in ('batches', 'description')}
                     == original_policy, f'Physical policy differs: {path}')
             problem = load_instance(cfg, fleet)
+            if one_box:
+                require({o.customer for o in problem.orders} == {c.id for c in problem.network.customers},
+                        f'One-box customer coverage differs: {path}')
+                for order in problem.orders:
+                    for kind in problem.task_kinds:
+                        _, weight, volume = problem.task(order.id, kind)
+                        expected_weight = problem.fleet.container_weight + (order.goods_weight if kind == 'd' else 0)
+                        require(abs(weight - expected_weight) < 1e-8 and
+                                abs(volume - problem.fleet.container_volume) < 1e-8,
+                                f'One-box physical task load differs: {path}/{order.id}/{kind}')
             last_return = last_recovery_certificate(problem) if model == 5 else None
             require(last_return is None or not last_return['infeasible'],
                     f'Fixed calendar cannot finish last recovery and cleaning: {path}')
@@ -99,6 +124,8 @@ def audit_dataset(dataset):
             require(problem.task_kinds == (('d', 'p') if model >= 3 else ('d',)), f'Wrong task types: {path}')
             require(problem.operating_policy.container_pool_size == problem.total, f'Wrong reference pool: {path}')
             contract = read(resolve_project_path(cfg['parameter_contract']))
+            if one_box:
+                require(contract.get('demand_contract') == CONTRACT, f'Missing one-box parameter contract: {path}')
             require(contract['model'] == model and contract['demand_container_uses'] == problem.total,
                     f'Parameter contract mismatch: {path}')
             optimized, fixed = contract['optimized_decisions'], contract['fixed_parameters']
@@ -180,8 +207,8 @@ def audit_dataset(dataset):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--dataset', default='data/formal_benchmark27_v1')
-    parser.add_argument('--output', default='output/inspections/formal_benchmark27_v1/input_audit.json')
+    parser.add_argument('--dataset', default='data/formal_benchmark27_one_box_v1')
+    parser.add_argument('--output', default='output/inspections/formal_benchmark27_one_box_v1/input_audit.json')
     args = parser.parse_args()
     result = audit_dataset(args.dataset)
     output = resolve_project_path(args.output)

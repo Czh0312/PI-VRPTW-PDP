@@ -425,7 +425,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['prepare','run','worker','status','analyze','pack'])
     parser.add_argument('--output', required=True)
-    parser.add_argument('--dataset', default='data/formal_benchmark27_v1')
+    parser.add_argument('--dataset', default='data/formal_benchmark27_one_box_v1')
     parser.add_argument('--models', nargs='+', type=int, choices=range(1,9), default=list(range(1,9)))
     parser.add_argument('--bases', nargs='+')
     parser.add_argument('--exact-seconds', type=float, default=300)

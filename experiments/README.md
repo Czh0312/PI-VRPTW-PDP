@@ -2,6 +2,7 @@
 
 这里存放实验程序：`runs/` 负责批量运行，`analysis/` 负责分析汇总。
 实验参数位于 `config/experiments/`，生成的结果、图片、报告和 Excel 统一保存到 `output/`。
+正式27例驱动默认使用“一客一箱” `formal_benchmark27_one_box_v1`；旧“多箱需求情景”的冻结目录继续使用其原输入。新情景须在独立目录重新prepare，按[阶段验收](../docs/benchmark27_one_box_20261019.md)推进。
 例如 `experiments/runs/run_single_batch_benchmark.py` 是程序，
 `output/experiments/m1_m4_comparison_20261004/` 是一次实验的成果。
 

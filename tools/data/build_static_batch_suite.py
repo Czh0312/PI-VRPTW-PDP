@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-VERSION = 'static_batch_suite_v2'
+VERSION = 'static_batch_suite_v3_one_box'
 from tools.data.design_static_scenarios import design_orders, select_territories
 from tools.configuration.loader import LEGACY_CONFIG_ROOT, LEGACY_DATA_ROOT, resolve_project_path
 
@@ -62,7 +62,8 @@ def digest(path):
 
 
 def stable_key(family, identifier):
-    return hashlib.sha256(f'{VERSION}:{family}:{identifier}'.encode()).hexdigest()
+    # Spatial subset selection is frozen independently of the demand release.
+    return hashlib.sha256(f'static_batch_suite_v2:{family}:{identifier}'.encode()).hexdigest()
 
 
 def encode_json(value):
@@ -103,7 +104,7 @@ def assigned_batch(cohort, batches):
 def build_suite(output=DEFAULT_OUTPUT, source_root=ROOT):
     output, source_root = Path(output).resolve(), Path(source_root).resolve()
     files, records, families = {}, [], []
-    design_path = source_root/'config/datasets/static_batch_v2.json'
+    design_path = source_root/'config/datasets/static_batch_one_box_v1.json'
     design = json.loads(design_path.read_text())
 
     def put(path, value):

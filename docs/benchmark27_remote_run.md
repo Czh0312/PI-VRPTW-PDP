@@ -1,6 +1,6 @@
 # 正式数据在其他电脑上的运行方法
 
-仓库：`git@gitlab.com:pi-vrptw/PI-VRPTW_PDP.git`，分支：`main`。主数据为 `data/formal_benchmark27_v1/` 修订3，八模型各有小、中、大规模，每档九例。同编号跨模型配对，正式输入无需下载旧原始数据或解压历史结果。
+仓库：`git@gitlab.com:pi-vrptw/PI-VRPTW_PDP.git`，分支：`main`。主数据为 `data/formal_benchmark27_one_box_v1/`（修订4，一客一箱），八模型各有小、中、大规模，每档九例。同编号跨模型配对，正式输入无需下载旧原始数据或解压历史结果。原 `formal_benchmark27_v1` 与冻结结果保留为“多箱需求情景”；新情景必须重新prepare到独立目录。业务规则和验收门槛见[版本说明](benchmark27_one_box_20261019.md)。
 
 2026-10-16费用口径已更新为 `0.1*D1 + 0.05*D2 + 5*N + 0.02*Q`：箱子按配置数量一次计费；每箱次清洗与追踪合计0.01，磨损0.01；工时、车辆启用和趟次收费均为0。定义在 `config/experiments/benchmark27_v1/economic.json`，全部27份共享费用快照一致。磨损使用显式 `container_wear_cost_per_use=0.01`，不再由购置价除以寿命计算；`initial_pool_investment=5*N` 只另列展示同一笔购置金额，不再次加入总目标。
 
@@ -40,16 +40,16 @@ python3 -m venv .venv
 .venv/bin/python -m tools.audit.certify_formal_benchmark27 --verify
 ```
 
-应得到216份配置通过输入检查、1,092个文件哈希通过，以及216份可行性见证重放通过。当前 `manifest.json` 的 `dataset_revision` 应为3；准备实验时会自动记录清单和全部冻结输入的SHA-256。
+应得到216份配置通过输入检查、1,092个文件哈希通过，以及216份可行性见证重放通过。当前 `manifest.json` 的 `dataset_revision` 应为4；准备实验时会自动记录清单和全部冻结输入的SHA-256。
 
 下面是两条运行入口示例，预算仅用于检查环境，不能直接作为已确定的论文实验方案。每次使用新的输出目录：
 
 ```sh
-.venv/bin/python main.py route --case data/formal_benchmark27_v1/model_1/small/S01/case.json --solver alns --time 30 --iterations 1000000000 --seed 42 --output output/experiments/benchmark27_smoke/M1_S01_s42
-.venv/bin/python main.py route --case data/formal_benchmark27_v1/model_8/small/S01/case.json --solver alns --time 30 --iterations 1000000000 --seed 42 --output output/experiments/benchmark27_smoke/M8_S01_s42
+.venv/bin/python main.py route --case data/formal_benchmark27_one_box_v1/model_1/small/S01/case.json --solver alns --time 30 --iterations 1000000000 --seed 42 --output output/experiments/benchmark27_one_box_smoke/M1_S01_s42
+.venv/bin/python main.py route --case data/formal_benchmark27_one_box_v1/model_8/small/S01/case.json --solver alns --time 30 --iterations 1000000000 --seed 42 --output output/experiments/benchmark27_one_box_smoke/M8_S01_s42
 ```
 
-精确求解使用 `--solver exact --exact-time 300`。全部案例路径见 `data/formal_benchmark27_v1/case_index.csv`。各例的 `parameters.json` 标明固定项和优化项；同编号配对时不要额外更改需求、费用或K候选域。
+精确求解使用 `--solver exact --exact-time 300`。全部案例路径见 `data/formal_benchmark27_one_box_v1/case_index.csv`。各例的 `parameters.json` 标明固定项和优化项；同编号配对时不要额外更改需求、费用或K候选域。
 
 ## 正式论文结果的记录口径
 
@@ -57,7 +57,7 @@ python3 -m venv .venv
 
 正式结果单独保存在新的 `output/experiments/` 目录，保留全部首次尝试及失败状态。修订2正式结果在 `output/experiments/benchmark27_20261015_formal_v1/`，使用旧费用；`output/inspections/` 保存数据检查和短时试跑记录。修订3需要重新优化，旧方案按新价格重算不能替代新实验。`tools.audit.review_formal_benchmark27` 是诊断驱动。
 
-M1–M5原生目标是距离，M6–M8原生目标是成本，不能直接把两种目标值相减计算改进率。统一评价、同源分组及模型语义边界见 [正式对比协议](../data/formal_benchmark27_v1/comparison_protocol.json) 和 [设计说明](benchmark27_design_20261015.md)。
+M1–M5原生目标是距离，M6–M8原生目标是成本，不能直接把两种目标值相减计算改进率。统一评价、同源分组及模型语义边界见 [正式对比协议](../data/formal_benchmark27_one_box_v1/comparison_protocol.json) 和 [设计说明](benchmark27_one_box_20261019.md)。
 
 ## 全量冻结实验入口
 

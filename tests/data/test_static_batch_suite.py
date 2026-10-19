@@ -101,7 +101,14 @@ class StaticBatchDatasetTests(unittest.TestCase):
         for family in self.manifest['families']:
             provenance = json.loads(resolve_project_path(family['provenance']).read_text())
             for path, expected in provenance['input_source_sha256'].items():
-                self.assertEqual(digest(resolve_project_path(path)), expected)
+                source = (ROOT/'archive/datasets/legacy_20261015/sources/design_static_scenarios.py'
+                          if path == 'tools/data/design_static_scenarios.py' else resolve_project_path(path))
+                payload = source.read_bytes()
+                # Archived Git text may be checked out with CRLF on Windows.
+                # Accept only that reversible newline conversion, never a
+                # changed value or a rewritten historical hash declaration.
+                self.assertIn(expected, {hashlib.sha256(payload).hexdigest(),
+                    hashlib.sha256(payload.replace(b'\r\n', b'\n')).hexdigest()}, path)
             if family['source_kind'] == 'synthetic_mechanism':
                 continue
             source = next(p for p in provenance['input_source_sha256']
@@ -218,20 +225,21 @@ class StaticBatchDatasetTests(unittest.TestCase):
             self.assertEqual(audit['minimum_pool_for_schedule'], expected[record['case_id']])
 
     def test_generator_is_reproducible_and_preserves_changed_files(self):
-        # A maintained generator has a new source hash. Preserve the old
-        # dataset, and compare regenerated artifacts after rebasing paths.
+        # New Zhou releases use one standard box, while frozen v2 stays intact.
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp).resolve()
             regenerated = build_suite(target)
-            normalized_hashes = {}
-            for relative in self.manifest['artifact_sha256']:
-                payload = (target/relative).read_bytes().replace(str(target).encode(), b'data')
-                self.assertEqual(payload, (MANIFEST.parent/relative).read_bytes(), relative)
-                normalized_hashes[relative] = hashlib.sha256(payload).hexdigest()
-            normalized = json.loads(json.dumps(regenerated).replace(str(target), 'data'))
-            normalized['artifact_sha256'] = normalized_hashes
-            expected = dict(self.manifest, generator_sha256=digest(ROOT/'tools/data/build_static_batch_suite.py'))
-            self.assertEqual(normalized, expected)
+            self.assertEqual(regenerated['design_version'], 'operational_scenarios_v3_one_box')
+            zhou = [r for r in regenerated['cases'] if r['family_id'].startswith('zhou_')]
+            self.assertTrue(zhou)
+            for record in zhou:
+                cfg = json.loads(Path(record['case_path']).read_text())
+                orders = json.loads(Path(cfg['orders']).read_text())
+                self.assertTrue(all(o['container_count'] == 1 for o in orders))
+                self.assertEqual(len(orders), record['customer_count'])
+            # Original artifacts remain verifiable as the separate multi-box scenario.
+            for relative, expected_hash in self.manifest['artifact_sha256'].items():
+                self.assertEqual(digest(MANIFEST.parent/relative), expected_hash)
             self.assertEqual(build_suite(target), regenerated)
             case = target/'single_batch/small/mechanism_forced_late/orders.json'
             case.write_text('user change\n')
