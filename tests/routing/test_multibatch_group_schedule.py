@@ -1,8 +1,8 @@
 """Complete optimal projection, permutation counterexample, budget boundary."""
 import math,time
 import pytest
-from models.routing.model_5.exact.accelerators.multibatch.group_schedule import conditional_group_schedule, enumerate_group_paths
-from models.routing.model_5.exact.accelerators.multibatch.cover_schedule import conditional_cover_schedule
+from models.routing.model_5.exact.bounds.conditional_physical.group_schedule import conditional_group_schedule, enumerate_group_paths
+from models.routing.model_5.exact.primal.cover_schedule import conditional_cover_schedule
 from models.common.cycle.audit import audit_solution
 from tests.routing.test_multibatch_cover_schedule import covers_of
 from tests.routing.test_multibatch_route_pool import three_slot_case
@@ -14,7 +14,7 @@ from tests.routing.test_multibatch_cycle import fixture,hand_solution
 @pytest.mark.parametrize('seed',range(6))
 def test_all_group_permutations_project_independently_optimal_nonmetric_model(seed):
     pytest.importorskip('gurobipy')
-    from models.routing.model_5.exact.search.engine import solve_exact
+    from models.routing.model_5.exact.enhanced_solver import solve_exact
     p=nonmetric_problem(seed);opt=solve_exact(p,time_limit=5);assert opt['info']['proven_optimal']
     groups=covers_of(opt);trial=conditional_group_schedule(p,groups,time_limit=3)
     assert trial['certificate']['conditional_optimal'] and trial['certificate']['permutations_complete']
@@ -37,7 +37,7 @@ def test_fixed_order_cycle_cannot_be_lifted_to_unordered_group_no_good():
 
 def test_independent_quality_optimum_and_cached_fields_irrelevant():
     pytest.importorskip('gurobipy')
-    from models.routing.model_5.exact.search.engine import solve_exact
+    from models.routing.model_5.exact.enhanced_solver import solve_exact
     p=quality_fixture();opt=solve_exact(p,time_limit=5);assert opt['info']['proven_optimal']
     trial=conditional_group_schedule(p,covers_of(opt),time_limit=3)
     assert trial['result']['info']['objective']==pytest.approx(4)

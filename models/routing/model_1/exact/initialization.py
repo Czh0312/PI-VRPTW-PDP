@@ -4,6 +4,7 @@ Only independently audited schedules become incumbents. Failure of this
 restricted construction says nothing about feasibility of the full MILP.
 """
 import time
+from collections import defaultdict
 
 from models.common.cycle.audit import audit_solution
 from models.common.cycle.state import empty_result
@@ -157,8 +158,85 @@ def construct_incumbent(problem, deadline, *, split_trips=True):
                 best = result
     if not split_trips:
         return best
-    from models.routing.model_1.exact.accelerators.single_batch.primal import construct_split_incumbent
+    from models.routing.model_1.exact.primal.construction import construct_split_incumbent
     candidate = construct_split_incumbent(problem, e1, supply, deadline)
     if candidate is not None and (best is None or candidate['info']['objective'] < best['info']['objective']):
         best = candidate
     return best
+
+
+def install_start(problem, model, ctx, result):
+    """Audit, relabel identical vehicles to satisfy symmetry, then load a start."""
+    if result is None or not audit_solution(problem, result)['valid']:
+        return False
+    if ctx.get('assignments'):
+        assignment = result.get('assignment', {})
+        if any((c, s) not in ctx['assignments'] for c, s in assignment.items()):
+            return False
+    scheduled = {}
+    for layer in ('e1', 'e2'):
+        groups = defaultdict(list)
+        for trip in result[layer+'_trips']:
+            groups[trip.get('satellite_id', problem.depot)].append(trip)
+        trips = []
+        for rows in groups.values():
+            counts = defaultdict(int)
+            for trip in rows:
+                counts[trip['vehicle_id']] += 1
+            order = sorted(counts, key=lambda v: (-counts[v], v)) if (
+                layer == 'e2' and ctx.get('trip_count_symmetry')) else sorted(counts)
+            vehicles = {v: i for i, v in enumerate(order)}
+            slots = defaultdict(int)
+            for trip in sorted(rows, key=lambda r: (r['vehicle_id'], r.get('trip_index', 0))):
+                copied = {**trip, 'vehicle_id': vehicles[trip['vehicle_id']]}
+                if layer == 'e2':
+                    copied['trip_index'] = slots[copied['vehicle_id']]
+                    slots[copied['vehicle_id']] += 1
+                trips.append(copied)
+        for trip in trips:
+            matches = [r for r in ctx[layer] if r['vehicle'] == trip['vehicle_id'] and
+                       (r['batch'].id == trip['batch_id'] if layer == 'e1' else
+                        r['satellite'] == trip['satellite_id'] and r['slot'] == trip['trip_index'])]
+            if not matches:
+                return False
+            r = matches[0]
+            order = []
+            for event in trip['events']:
+                index = next((i for i, n in enumerate(r['nodes']) if n['kind'] == event['kind'] and
+                             (n['site'] == event['site_id'] if layer == 'e1' else
+                              n['order'].id == event['order_id'])), None)
+                if index is None:
+                    return False
+                order.append(index)
+            arcs = set(zip([-1]+order, order+[-2]))
+            if not arcs.issubset(r['x']):
+                return False
+            scheduled[r['label']] = trip, order, arcs
+    # Set absent visits and arcs too; a partial start should not ask the solver
+    # to rediscover that every covered task excludes all other route copies.
+    for (customer, site), variable in ctx.get('assignments', {}).items():
+        variable.Start = int(result['assignment'][customer] == site)
+    for variable in ctx.get('global_e2_arcs', {}).values():
+        variable.Start = 0
+    for layer in ('e1', 'e2'):
+        for r in ctx[layer]:
+            entry = scheduled.get(r['label'])
+            trip, order, arcs = entry if entry else (None, [], set())
+            r['used'].Start = int(entry is not None)
+            r['start'].Start = trip['departure'] if trip else 0
+            r['end'].Start = trip['return_complete'] if trip else 0
+            for arc, variable in r['x'].items():
+                if not (r.get('global_internal_arcs') and min(arc) >= 0) or arc in arcs:
+                    variable.Start = int(arc in arcs)
+            for i, variable in r['visit'].items():
+                variable.Start = int(i in order)
+            for resource, variable in zip(('w', 'v'), r.get('departure_loads', ())):
+                variable.Start = sum(r['nodes'][i][resource] for i in order if r['nodes'][i]['kind'] == 'd')
+            for index, event in zip(order, trip['events'] if trip else []):
+                r['times'][index].Start = event['start']
+                quantity = r['nodes'][index]['quantity']
+                if layer == 'e1' and event['kind'] == 'p' and not isinstance(quantity, int):
+                    quantity.Start = event['quantity']
+                if layer == 'e2' and event['kind'] == 'p' and ctx.get('pickup_returns'):
+                    ctx['pickup_returns'][event['order_id']].Start = trip['return_complete']
+    return True

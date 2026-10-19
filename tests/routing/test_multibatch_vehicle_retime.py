@@ -9,8 +9,8 @@ from models.common.cycle import MultiBatchInstance, Order
 from models.common.cycle.audit import audit_solution
 from models.common.cycle.state import empty_result
 from models.common.domain.instance import ProblemInstance
-from models.routing.model_5.exact.accelerators.multibatch.vehicle_retime import build_vehicle_retiming, set_vehicle_projection, reoptimize_vehicle_retiming
-from models.routing.model_5.exact.search.engine import solve_exact
+from models.routing.model_5.exact.primal.vehicle_retime import build_vehicle_retiming, set_vehicle_projection, reoptimize_vehicle_retiming
+from models.routing.model_5.exact.enhanced_solver import solve_exact
 from tests.routing.test_multibatch_cycle import fixture, hand_solution
 from tests.routing.test_multibatch_departure_loads import nonmetric_problem
 

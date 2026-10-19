@@ -38,14 +38,14 @@ def worker(job, destination):
         raise ValueError('Frozen incumbent failed audit')
     started = time.perf_counter()
     if job['variant'] == 'milp':
-        from models.routing.model_5.exact.search.engine import solve_exact
+        from models.routing.model_5.exact.enhanced_solver import solve_exact
         result = solve_exact(problem, time_limit=job['budget'], seed=job['seed'], initial_result=initial,
                              distance_cuts='components', verbose=True)
         lower = result['info']['best_bound']
         payload = dict(result=result, independent_audit=audit_solution(problem, result))
         valid = payload['independent_audit']['valid']
     else:
-        from models.routing.model_5.exact.accelerators.multibatch.route_cg import route_cover_certificate
+        from models.routing.model_5.exact.bounds.route_cover_cg.route_cg import route_cover_certificate
         certificate = route_cover_certificate(problem, time_limit=job['budget'], initial_result=initial,
             seed=job['seed'], pricing_time_limit=job['pricing_time_limit'], verbose=True,
             e1_time_limit=job['e1_time_limit'] if job['variant'] == 'cg-e1' else 0,

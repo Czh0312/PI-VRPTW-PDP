@@ -8,7 +8,7 @@ from models.common.cycle.audit import audit_solution
 from models.common.cycle.state import empty_result
 from models.common.domain.instance import ProblemInstance
 from models.common.domain.node import Depot, Satellite, Customer
-from models.routing.model_5.exact.accelerators.multibatch.route_pool import expanded_trip_slots, reoptimize_route_pool
+from models.routing.model_5.exact.primal.route_pool import expanded_trip_slots, reoptimize_route_pool
 from tests.routing.test_multibatch_cycle import policy_config
 
 
@@ -51,7 +51,7 @@ def test_additional_slots_unlock_known_full_optimum_and_never_report_pool_bound_
     assert len(expanded['e2_trips'])==3 and initial==saved
     a=audit_solution(p,expanded);assert a['valid'] and a['periodic_replay']['valid']
     assert expanded['info']['best_bound'] is None and not expanded['info']['proven_optimal']
-    from models.routing.model_5.exact.search.engine import solve_exact
+    from models.routing.model_5.exact.enhanced_solver import solve_exact
     exact=solve_exact(p,time_limit=3,initial_result=expanded)
     assert exact['info']['proven_optimal'] and exact['info']['objective']==6
     assert (tmp_path/'pass_0/slots.json').exists()
@@ -81,9 +81,9 @@ def test_short_budget_preserves_audited_original_and_invalid_extra_count_is_reje
 
 
 def test_hybrid_forwards_explicit_extra_slots_and_validates_their_count(monkeypatch):
-    from models.routing.model_5.exact.accelerators.multibatch.hybrid import solve_hybrid
+    from models.routing.model_5.hybrid.solver import solve_hybrid
     import models.routing.service as service
-    import models.routing.model_5.exact.accelerators.multibatch.route_pool as pool
+    import models.routing.model_5.exact.primal.route_pool as pool
     p,initial=split_fixture();calls=[]
     monkeypatch.setattr(service,'solve_routing',lambda **kw:deepcopy(initial))
     def reopt(p,result,**kw):

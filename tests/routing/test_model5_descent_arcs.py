@@ -3,9 +3,9 @@ from functools import lru_cache
 import random
 from types import SimpleNamespace
 
-from models.routing.model_5.alns.search import engine as solver
+from models.routing.model_5.alns import search as solver
 from models.routing.model_5.alns.evaluator import evaluate
-from models.routing.model_5.alns.accelerators.intensification import CycleDescent, task_distance
+from models.routing.model_5.alns.intensification import CycleDescent, task_distance
 from models.routing.model_5.alns.neighborhoods import clone_state, state_key
 from tests.routing.test_model5_intensification import directed_cycle
 
@@ -60,7 +60,7 @@ def test_arc_reuse_preserves_search_trajectory_with_controlled_clock(monkeypatch
     # Remove wall-clock cooling/cutoff differences for this equivalence check.
     monkeypatch.setattr(solver.time,'perf_counter',lambda:1000.0)
     trace = []
-    from models.routing.model_5.alns.accelerators.cycle_cache import CycleEvaluator
+    from models.routing.model_5.alns.performance.cycle_cache import CycleEvaluator
     evaluate_original = CycleEvaluator.__call__
     def recording(self,problem,state):
         trace.append(state_key(state))

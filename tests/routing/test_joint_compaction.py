@@ -8,7 +8,7 @@ from tests.routing.test_model6_joint import joint_fixture, exact_available
 
 
 def build(number, problem):
-    name = 'model' if number == 6 else 'formulations.fixed_count'
+    name = 'model' if number == 6 else 'formulation'
     return import_module(f'models.routing.model_{number}.exact.{name}').build_model(problem, compact_e2=True)
 
 
@@ -120,7 +120,7 @@ def test_assignment_guesses_are_soft_hints_not_partial_starts_or_fixes(number, e
 @pytest.mark.parametrize('variant', [0, 3, 6])
 def test_compact_formulation_matches_independent_oracle(number, variant, monkeypatch, exact_available):
     from tests.routing.test_model78_independent_oracle import test_full_milp_matches_independent_one_order_oracle
-    module = import_module(f'models.routing.model_{number}.exact.' + ('solver' if number == 6 else 'search.fixed_count'))
+    module = import_module(f'models.routing.model_{number}.exact.' + 'enhanced_solver')
     original = module.build_model
     monkeypatch.setattr(module, 'build_model', lambda p, **kw: original(p, compact_e2=True, **kw))
     test_full_milp_matches_independent_one_order_oracle(number, variant, exact_available)
@@ -150,7 +150,7 @@ def test_compact_and_expanded_optima_match_with_nonmetric_distance(number, zero_
             options['loading_mode'] = 'optimized'
         problem = CalendarCycleInstance(network, orders, source.operating_policy, options,
                                         source.cost_profile.config, model=number).for_count(2)
-    module = import_module(f'models.routing.model_{number}.exact.' + ('solver' if number == 6 else 'search.fixed_count'))
+    module = import_module(f'models.routing.model_{number}.exact.' + 'enhanced_solver')
     original = module.build_model
     results = []
     for compact in (False, True):

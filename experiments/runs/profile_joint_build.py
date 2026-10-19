@@ -19,8 +19,12 @@ def worker(args):
     size = dict(S='small', M='medium', L='large')[args.case[0]]
     path = ROOT/f'data/formal_benchmark27_v1/model_{args.model}/{size}/{args.case}/case.json'
     problem = load_instance(*load_routing_case(path, use_pool_config=False)).for_count(args.count)
-    organized = (args.source/f'models/routing/model_{args.model}/exact/formulations').is_dir()
-    name = 'model' if args.model == 6 else ('formulations.fixed_count' if organized else 'joint_model')
+    folder = args.source/f'models/routing/model_{args.model}/exact'
+    if (folder/'enhanced_solver.py').is_file():
+        name = 'formulation'
+    else:
+        organized = (folder/'formulations').is_dir()
+        name = 'model' if args.model == 6 else ('formulations.fixed_count' if organized else 'joint_model')
     builder = import_module(f'models.routing.model_{args.model}.exact.{name}').build_model
     begun = time.perf_counter()
     model, ctx = builder(problem, deadline=begun+60)

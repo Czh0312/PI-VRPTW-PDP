@@ -14,7 +14,7 @@ from models.common.cycle.instance import load_orders
 from models.common.cycle.audit import audit_solution
 from models.common.cycle.state import empty_result
 from models.routing.model_5.alns.evaluator import evaluate, initial_state
-from models.routing.model_5.alns.search.engine import solve_alns
+from models.routing.model_5.alns.search import solve_alns
 
 
 def policy_config():
@@ -296,7 +296,7 @@ def exact():
         m.dispose()
     except gp.GurobiError as exc:
         pytest.skip(f'Gurobi unavailable: {exc}')
-    from models.routing.model_5.exact.search.engine import solve_exact
+    from models.routing.model_5.exact.enhanced_solver import solve_exact
     return solve_exact
 
 

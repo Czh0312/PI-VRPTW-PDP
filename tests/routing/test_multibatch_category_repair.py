@@ -5,9 +5,9 @@ import time
 
 import pytest
 
-from models.routing.model_5.exact.accelerators.multibatch.route_cg import repair_category_duals, route_cover_certificate
-from models.routing.model_5.exact.accelerators.pickup_route_pricing import route_context, evaluate_column
-from models.routing.model_5.exact.accelerators.multibatch.route_pool import candidate_pools, reoptimize_route_pool
+from models.routing.model_5.exact.bounds.route_cover_cg.route_cg import repair_category_duals, route_cover_certificate
+from models.routing.model_5.exact.bounds.route_cg.pickup_pricing import route_context, evaluate_column
+from models.routing.model_5.exact.primal.route_pool import candidate_pools, reoptimize_route_pool
 from tests.routing.test_multibatch_route_cg import enumerate_trips, enumerated_lp
 from tests.routing.test_multibatch_departure_loads import nonmetric_problem
 from tests.routing.test_multibatch_joint_exchanges import full_slot_fixture

@@ -7,9 +7,9 @@ import time
 import pytest
 
 from models.common.cycle.audit import audit_solution
-from models.routing.model_3.exact.formulations.full import build_model
-from models.routing.model_3.exact.search.engine import solve_exact, _set_start
-from models.routing.model_3.exact.accelerators.single_batch.e1_bound import enumerate_e1_routes, e1_route_cover_bound, project_e1_schedule, apply_e1_cover_bound, solve_exact_with_e1_cover
+from models.routing.model_3.exact.model import _build_complete_model as build_model
+from models.routing.model_3.exact.enhanced_solver import solve_exact, _set_start
+from models.routing.model_3.exact.bounds.e1 import enumerate_e1_routes, e1_route_cover_bound, project_e1_schedule, apply_e1_cover_bound, solve_exact_with_e1_cover
 from tests.routing.test_single_batch_solver_audit import tiny_problem,enumerate_tiny
 
 

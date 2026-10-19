@@ -166,7 +166,11 @@ def prepare(args):
             relative = path.relative_to(out/'sources/recycle')
             if not (out/'sources/original'/relative).is_file():
                 solver_changes.append(relative.as_posix())
-        allowed = {f'models/routing/model_{n}/{m}/search/batch_search.py' for n in (6, 7, 8) for m in ('alns', 'exact')}
+        allowed = {
+            f'models/routing/model_{n}/{m}/'
+            + 'k_search/scheduler.py'
+            for n in (6, 7, 8) for m in ('alns', 'exact')
+        }
         if set(solver_changes) != allowed:
             raise ValueError(f'Budget-only comparison includes unexpected solver changes: {solver_changes}')
     # The coordinator and worker themselves are frozen, including for old solvers.
@@ -396,7 +400,24 @@ def solver_component(model, method, name):
     """
     package = f'models.routing.model_{model}.{method}'
     base = import_module(package)
-    if (Path(base.__file__).parent/'search').is_dir():
+    folder = Path(base.__file__).parent
+    if method == 'alns' and (folder/'performance').is_dir():
+        name = {
+            'partitioned_assignment': 'assignment.partitioned_search',
+            'single_batch': 'single_batch_search' if model == 5 else 'search',
+            'joint_solver': 'fixed_calendar_search' if model == 8 else 'search',
+            'batch_search': 'k_search.scheduler',
+            'calendar_search': 'solver',
+            'solver': 'search' if model == 6 else 'solver',
+        }.get(name, name)
+    elif method == 'exact' and (folder/'enhanced_solver.py').is_file():
+        name = {
+            'joint_solver': 'enhanced_solver',
+            'batch_search': 'k_search.scheduler',
+            'calendar_search': 'solver',
+            'solver': 'enhanced_solver' if model == 6 else 'solver',
+        }.get(name, name)
+    elif (folder/'search').is_dir():
         name = {
             'partitioned_assignment': 'search.partitioned_assignment',
             'single_batch': 'search.single_batch',

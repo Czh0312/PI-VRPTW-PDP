@@ -85,7 +85,7 @@ def test_one_k_optimum_does_not_prove_all_k(monkeypatch,exact_available):
         empty['info'].update(status='TIME_LIMIT',proven_infeasible=False,best_bound=0.)
         return empty
     monkeypatch.setattr(solver,'solve_exact',partial)
-    from models.routing.model_6.exact.search.batch_search import solve_uniform
+    from models.routing.model_6.exact.k_search.scheduler import solve_uniform
     result=solve_uniform(p,solve_candidate=solver.solve_exact,method='exact',budget=1,seed=42)
     assert result['audit']['valid'] and result['info']['selected_count_proven_optimal']
     assert not result['info']['proven_optimal']
@@ -149,7 +149,7 @@ def test_supplied_uniform_incumbent_is_retained_and_proofs_cleared(monkeypatch,e
         result['info'].update(status='HEURISTIC_NO_SOLUTION',iterations=0,proven_infeasible=False)
         return result
     monkeypatch.setattr(solver,'solve_alns',empty)
-    from models.routing.model_6.alns.search.batch_search import solve_uniform
+    from models.routing.model_6.alns.k_search.scheduler import solve_uniform
     result=solve_uniform(p,solve_candidate=solver.solve_alns,method='alns',budget=.1,max_iterations=2,seed=42,initial_result=initial)
     assert result['audit']['valid'] and result['info']['objective']==initial['info']['objective']
     assert not result['info']['proven_optimal'] and result['info']['best_bound'] is None

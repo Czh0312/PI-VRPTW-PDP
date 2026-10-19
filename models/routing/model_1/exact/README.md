@@ -1,65 +1,48 @@
-# M1 — 精确求解
+# M1 精确求解代码导航
 
-本目录拥有独立实现，不导入其他模型的求解代码。相似文件不自动同步。
+从 `solver.py` 开始：`strategy="milp"` 调用 `milp_solver.py`，默认 `auto` 使用本模型定制流程。
+两条路径共用 `formulation.py` 的数学定义和 `solution.py` 的业务解提取。
 
-先按 `parameters.py` → `variables.py` → `constraints.py` → `objective.py` 阅读数学定义，
-再看组装文件和 `solver.py`。参数类复用公共业务实例，变量类管理同一个 Gurobi 模型。
-完整导航见[精确模型结构](../../../../docs/exact_model_layout.md)。
+## 职责边界
 
-顶层只保留入口与核心定义；`search/` 管理搜索流程，`formulations/` 组装数学模型，`accelerators/` 收纳加速与辅助组件（有需要时才设置子目录）。
-日常调用使用本目录的 `solve_exact`；内部模块路径不作为稳定公共接口。
-统一阅读方法与迁移说明见[目录指南](../../../../docs/solver_directory_guide.md)。
+- `preprocessing/`：安全时间界、删弧与分仓域。
+- `bounds/`：下界、松弛和定价证书。松弛最优不等于原问题最优。
+- `branch_cut/`：完整 MILP 的有效不等式及容量割；不是独立的完整分支定价算法。
+- `primal/`：构造或改进可行上界，进入求解结果前需独立审计。
 
-## 入口与核心定义
+## 文件导航
 
-| 文件 | 用途 |
+| 文件 | 职责 |
 | --- | --- |
-| [constraints.py](constraints.py) | 按业务含义组织的约束组 |
-| [initialization.py](initialization.py) | 确定性可行初解分流 |
-| [model.py](model.py) | 该编号的 MILP 建模入口 |
-| [objective.py](objective.py) | 距离或完整成本目标函数 |
-| [parameters.py](parameters.py) | 已知参数、安全派生界及参数数据类 |
-| [solver.py](solver.py) | 本模型公开求解入口及编号校验 |
-| [variables.py](variables.py) | 决策变量定义与 `ModelVariables` 分组管理 |
+| [solver.py](solver.py) | 公开求解入口：选择直接 MILP 或定制精确方法 |
+| [model.py](model.py) | 公开建模入口、模型编号校验及建模选项转换 |
+| [formulation.py](formulation.py) | 实际数学模型组装，基线和增强求解共用 |
+| [parameters.py](parameters.py) | 已知参数、运行规则与安全派生界 |
+| [variables.py](variables.py) | 决策变量与变量容器 |
+| [constraints.py](constraints.py) | 完整业务约束入口 |
+| [objective.py](objective.py) | 目标函数与费用表达 |
+| [milp_solver.py](milp_solver.py) | 直接 Gurobi 基线：显式配置、预算和原始证据 |
+| [enhanced_solver.py](enhanced_solver.py) | 定制增强 MILP 的完整求解流程 |
+| [initialization.py](initialization.py) | 初解准备与 MIP Start 编码 |
+| [solution.py](solution.py) | 将决策变量解码成路线和业务方案 |
+| [preprocessing/domains.py](preprocessing/domains.py) | 客户可选仓点与安全时间域 |
+| [preprocessing/strengthening.py](preprocessing/strengthening.py) | 单批次安全界、稀疏弧和车辆趟数界 |
+| [bounds/distance.py](bounds/distance.py) | 必访节点的保守距离下界 |
+| [bounds/route_cg/columns.py](bounds/route_cg/columns.py) | 单批次路线列生成下界 |
+| [bounds/route_cg/delivery_pricer.py](bounds/route_cg/delivery_pricer.py) | 纯配送路线的 MILP 定价 |
+| [bounds/route_cg/label_bound.py](bounds/route_cg/label_bound.py) | 标签定价的后续路径下界 |
+| [bounds/route_cg/pricing_schedule.py](bounds/route_cg/pricing_schedule.py) | 配送定价路径的整数时间可行性 |
+| [bounds/route_cg/route_pricing.py](bounds/route_cg/route_pricing.py) | 纯配送路线标签定价 |
+| [bounds/route_cg/time_budget.py](bounds/route_cg/time_budget.py) | 物理车队的时间预算约束 |
+| [branch_cut/capacity.py](branch_cut/capacity.py) | 单批次容量割 |
+| [branch_cut/dual_cuts.py](branch_cut/dual_cuts.py) | 配送定价证书转距离约束 |
+| [branch_cut/short_cycles.py](branch_cut/short_cycles.py) | 单批次 MILP 的二节点子环约束 |
+| [branch_cut/site_flow.py](branch_cut/site_flow.py) | 自由分仓的仓库流连接 |
+| [primal/construction.py](primal/construction.py) | 送取分趟的插入初解 |
+| [primal/pool_master.py](primal/pool_master.py) | 路线池整数主问题 |
+| [primal/route_pool.py](primal/route_pool.py) | 从受限路线池构造并审计可行解 |
+| [primal/schedule_start.py](primal/schedule_start.py) | 最早可行日程和车辆编号规范化 |
 
-## 搜索流程：批次数、分仓与子问题
+公开包调用保持可用。已移除旧内部目录，不保留空目录或转发文件；直接导入内部模块的外部脚本需要更新路径。
 
-| 文件 | 用途 |
-| --- | --- |
-| [search/engine.py](search/engine.py) | 本模型内部的求解主过程 |
-
-## 数学模型组装
-
-| 文件 | 用途 |
-| --- | --- |
-| [formulations/full.py](formulations/full.py) | 本模型单批次 MILP 建模分流及输入检查 |
-| [formulations/single_batch.py](formulations/single_batch.py) | 单批次 MILP 的参数、变量、约束及目标组装 |
-
-## 加速与辅助组件
-
-| 文件 | 用途 |
-| --- | --- |
-| [accelerators/distance_bounds.py](accelerators/distance_bounds.py) | 必访节点的保守距离下界 |
-| [accelerators/domains.py](accelerators/domains.py) | 客户可选仓点与安全时间域 |
-| [accelerators/strengthening.py](accelerators/strengthening.py) | 单批次安全界、稀疏弧和车辆趟数界 |
-
-## 单批次加速组件
-
-| 文件 | 用途 |
-| --- | --- |
-| [accelerators/single_batch/columns.py](accelerators/single_batch/columns.py) | 单批次路线列生成下界 |
-| [accelerators/single_batch/cuts.py](accelerators/single_batch/cuts.py) | 单批次容量割 |
-| [accelerators/single_batch/delivery_pricer.py](accelerators/single_batch/delivery_pricer.py) | 纯配送路线的 MILP 定价 |
-| [accelerators/single_batch/dual_cuts.py](accelerators/single_batch/dual_cuts.py) | 配送定价证书转距离约束 |
-| [accelerators/single_batch/label_bound.py](accelerators/single_batch/label_bound.py) | 标签定价的后续路径下界 |
-| [accelerators/single_batch/pool_master.py](accelerators/single_batch/pool_master.py) | 路线池整数主问题 |
-| [accelerators/single_batch/pricing_schedule.py](accelerators/single_batch/pricing_schedule.py) | 配送定价路径的整数时间可行性 |
-| [accelerators/single_batch/primal.py](accelerators/single_batch/primal.py) | 送取分趟的插入初解 |
-| [accelerators/single_batch/route_pool.py](accelerators/single_batch/route_pool.py) | 从受限路线池构造并审计可行解 |
-| [accelerators/single_batch/route_pricing.py](accelerators/single_batch/route_pricing.py) | 纯配送路线标签定价 |
-| [accelerators/single_batch/schedule_start.py](accelerators/single_batch/schedule_start.py) | 最早可行日程和车辆编号规范化 |
-| [accelerators/single_batch/short_cycles.py](accelerators/single_batch/short_cycles.py) | 单批次 MILP 的二节点子环约束 |
-| [accelerators/single_batch/site_flow.py](accelerators/single_batch/site_flow.py) | 自由分仓的仓库流连接 |
-| [accelerators/single_batch/time_budget.py](accelerators/single_batch/time_budget.py) | 物理车队的时间预算约束 |
-
-`__init__.py` 导出当前算法入口。基础数据与审计的依赖边界见[模型导航](../../README.md)。
+参见[目录指南](../../../../docs/solver_directory_guide.md)、[Gurobi 对照说明](../../../../docs/exact_milp_comparison.md)。

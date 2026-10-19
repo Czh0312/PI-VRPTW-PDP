@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from models.routing.model_5.exact.accelerators.multibatch.conditional_inventory import refine_conditional_bound, select_supply_conjunctions
+from models.routing.model_5.exact.bounds.inventory.conditional_inventory import refine_conditional_bound, select_supply_conjunctions
 from tests.routing.test_multibatch_cycle import fixture, hand_solution
 
 
@@ -24,9 +24,9 @@ def test_selector_requires_two_nontrivial_batches_and_ranks_actual_master_delays
 
 
 def test_automatic_refinement_prices_joint_context_before_singles_with_shared_deadline(monkeypatch):
-    import models.routing.model_5.exact.accelerators.multibatch.conditional_inventory as inventory
-    import models.routing.model_5.exact.accelerators.multibatch.route_cg as cg
-    from models.routing.model_5.exact.accelerators.pickup_route_pricing import route_context, evaluate_column
+    import models.routing.model_5.exact.bounds.inventory.conditional_inventory as inventory
+    import models.routing.model_5.exact.bounds.route_cover_cg.route_cg as cg
+    from models.routing.model_5.exact.bounds.route_cg.pickup_pricing import route_context, evaluate_column
     p=fixture(pool=2);initial=hand_solution(p)
     context=route_context(p,'S')
     columns=[evaluate_column(p,context,[(e['order_id'],e['kind']) for e in t['events']]) for t in initial['e2_trips']]
@@ -52,11 +52,11 @@ def test_automatic_refinement_prices_joint_context_before_singles_with_shared_de
 
 
 def test_public_options_reach_all_primal_passes_and_conditional_selection(monkeypatch):
-    from models.routing.model_5.exact.accelerators.multibatch.hybrid import solve_hybrid
+    from models.routing.model_5.hybrid.solver import solve_hybrid
     import models.routing.service as service
-    import models.routing.model_5.exact.accelerators.multibatch.route_pool as pool
-    import models.routing.model_5.exact.accelerators.multibatch.route_cg as cg
-    import models.routing.model_5.exact.accelerators.multibatch.conditional_inventory as inventory
+    import models.routing.model_5.exact.primal.route_pool as pool
+    import models.routing.model_5.exact.bounds.route_cover_cg.route_cg as cg
+    import models.routing.model_5.exact.bounds.inventory.conditional_inventory as inventory
     p=fixture(pool=2);initial=hand_solution(p);primals=[];conditions=[]
     monkeypatch.setattr(service,'solve_routing',lambda **kw:deepcopy(initial))
     def primal(p,result,**kw):
@@ -78,7 +78,7 @@ def test_public_options_reach_all_primal_passes_and_conditional_selection(monkey
 
 @pytest.mark.parametrize('value',[-1,True,.5])
 def test_invalid_automatic_counts_are_rejected_before_solving(value):
-    from models.routing.model_5.exact.accelerators.multibatch.hybrid import solve_hybrid
+    from models.routing.model_5.hybrid.solver import solve_hybrid
     p=fixture(pool=2)
     with pytest.raises(ValueError):solve_hybrid(p,max_supply_conjunctions=value)
     with pytest.raises(ValueError):solve_hybrid(p,route_pool_max_columns=value)
@@ -86,5 +86,5 @@ def test_invalid_automatic_counts_are_rejected_before_solving(value):
 
 
 def test_zero_pool_column_limit_is_rejected():
-    from models.routing.model_5.exact.accelerators.multibatch.hybrid import solve_hybrid
+    from models.routing.model_5.hybrid.solver import solve_hybrid
     with pytest.raises(ValueError):solve_hybrid(fixture(pool=2),route_pool_max_columns=0)

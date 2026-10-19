@@ -1,15 +1,45 @@
-"""M7 MILP solves all configured K with a shared total time budget."""
+"""M7 public entry: explicit algorithm selection and stable result identity."""
+import time
+
 from models.common.cycle.scope import validate_problem
-from models.routing.model_7.exact.search.batch_search import solve_counts as aggregate
+from models.common.solver_config import MilpOptions, record_strategy, validate_budget
+
+from models.routing.model_7.exact.k_search.scheduler import solve_counts as aggregate
 
 
-def solve_exact(problem, time_limit=60, seed=42, verbose=False, initial_result=None, budget_strategy='adaptive'):
+def solve_exact(problem, time_limit=60, seed=42, verbose=False, initial_result=None,
+                budget_strategy='adaptive', *, strategy='auto', milp_options=None):
+    begun = time.perf_counter()
     validate_problem(problem, 7)
-    return solve_counts(problem, method='exact', budget=time_limit, seed=seed,
-                        verbose=verbose, initial_result=initial_result,
-                        budget_strategy=budget_strategy, analytical_bounds=True)
+    if strategy not in ('auto', 'milp'):
+        raise ValueError('Unsupported M7 exact strategy: '+str(strategy))
+    if strategy != 'milp' and milp_options is not None:
+        raise ValueError('milp_options requires strategy="milp"')
+    if strategy == 'milp':
+        validate_budget(time_limit, seed)
+        if initial_result is not None:
+            raise ValueError('Direct MILP baseline does not accept an external initial solution')
+        options = MilpOptions.resolve(milp_options)
+        from models.routing.model_7.exact.milp_solver import solve_milp
+        def candidate(child, **kwargs):
+            return solve_milp(child, milp_options=options, **kwargs)
+        result = aggregate(problem, solve_candidate=candidate, method='exact', budget=time_limit,
+                           seed=seed, verbose=verbose, budget_strategy='single_pass', analytical_bounds=False)
+        # The complete candidate ledger is retained even when the budget expires.
+        if 'count_search' in result:
+            result['info']['solver_config'] = options.metadata(time_limit, seed)
+            result['info']['solver_config']['retained_model_bounds'] = 'necessary_pool_and_total_cost_rows'
+        result['info']['solver_config']['k_search'] = 'single_pass_no_external_bounds' if 'count_search' in result else None
+    else:
+        result = solve_counts(problem, method='exact', budget=time_limit, seed=seed,
+                              verbose=verbose, initial_result=initial_result,
+                              budget_strategy=budget_strategy, analytical_bounds=True)
+    result['solver_module'] = __name__
+    result['info']['runtime'] = time.perf_counter()-begun
+    return record_strategy(result, strategy, time_limit=time_limit, seed=seed)
 
 
 def solve_counts(problem, **kwargs):
-    from models.routing.model_7.exact.search.fixed_count import solve_exact as solve
+    """Existing research hook; candidate bounds are aggregated by the local scheduler."""
+    from models.routing.model_7.exact.enhanced_solver import solve_exact as solve
     return aggregate(problem, solve_candidate=solve, **kwargs)

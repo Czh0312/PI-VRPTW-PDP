@@ -62,8 +62,9 @@ def verify(folder, before='before', after='after'):
     if (folder/'budget_extension.json').exists():
         assert dict(before=budget_extension(summaries[before]),after=budget_extension(summaries[after])) == json.loads(
             (folder/'budget_extension.json').read_text()), 'Cross-budget statistics changed'
-    current_paths = [f'models/routing/model_5/alns/{"engine" if name == "solver" else name}.py' for name in
-                     ('solver','evaluator','cycle_cache','intensification','neighborhoods','construction')]
+    current_paths = [f'models/routing/model_5/alns/{name}.py' for name in
+                     ('search','evaluator','performance/cycle_cache','intensification',
+                      'neighborhoods','construction')]
     current_paths += [f'models/common/cycle/{name}.py' for name in
                       ('instance','policy','audit','precheck','state')]
     current_paths += ['models/routing/model_5/alns/solver.py']

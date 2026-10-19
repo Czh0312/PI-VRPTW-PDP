@@ -1,7 +1,7 @@
 """Supply conjunctions activate only when all necessary batch conditions hold."""
 import random
 import pytest
-from models.routing.model_5.exact.accelerators.multibatch.conditional_inventory import build_conditional_inventory, conditional_context, conditional_supply_context, set_conditional_projection
+from models.routing.model_5.exact.bounds.inventory.conditional_inventory import build_conditional_inventory, conditional_context, conditional_supply_context, set_conditional_projection
 from tests.routing.test_multibatch_cycle import fixture,hand_solution
 
 
@@ -13,7 +13,7 @@ def test_two_supply_conditions_are_and_not_or_and_project_the_complete_schedule(
     try:
         # The hand solution supplies at 10/70. Fix its E1 topology/quantities,
         # then let the exact conjunction determine the minimum theta.
-        from models.routing.model_5.exact.accelerators.multibatch.e1_routes import set_route_projection
+        from models.routing.model_5.exact.bounds.inventory.e1_routes import set_route_projection
         set_route_projection(p,ctx,initial,fix=True)
         model.optimize();assert model.Status==gp.GRB.OPTIMAL
         assert model.getVarByName('conditional_all_late_0').X==int(active)
@@ -49,7 +49,7 @@ def test_conjunction_floor_is_maximum_with_single_conditions_not_an_additional_c
 @pytest.mark.parametrize('phase_one',[False,True])
 def test_conjunctive_full_domain_pricing_matches_independent_elementary_trip_enumeration(phase_one):
     pytest.importorskip('gurobipy')
-    from models.routing.model_5.exact.accelerators.pickup_route_pricing import RoutePricer
+    from models.routing.model_5.exact.bounds.route_cg.pickup_pricing import RoutePricer
     from tests.routing.test_multibatch_route_cg import enumerate_trips
     p=fixture(pool=2)
     supplies=[dict(batch='b1',threshold=12),dict(batch='b2',threshold=73)]

@@ -8,10 +8,10 @@ import pytest
 
 from models.common.cycle import MultiBatchInstance
 from models.common.cycle.audit import audit_solution
-from models.routing.model_3.exact.accelerators.single_batch import physical_bounds as physical
-from models.routing.model_3.exact.accelerators.single_batch.columns import problem_fingerprint
-from models.routing.model_3.exact.formulations.single_batch import build_model
-from models.routing.model_3.exact.search.engine import _set_start, solve_exact
+from models.routing.model_3.exact.bounds import physical as physical
+from models.routing.model_3.exact.bounds.route_cg.columns import problem_fingerprint
+from models.routing.model_3.exact.formulation import build_model
+from models.routing.model_3.exact.enhanced_solver import _set_start, solve_exact
 from tests.routing.test_single_batch_solver_audit import tiny_problem, enumerate_tiny
 
 

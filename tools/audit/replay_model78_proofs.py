@@ -18,9 +18,11 @@ def main(root):
     records = []
     for number in (7, 8):
         if independent:
-            organized = (source/f'models/routing/model_{number}/exact/search').is_dir()
-            entry = 'solver' if organized else 'calendar_search'
-            child = 'search.fixed_count' if organized else 'joint_solver'
+            folder = source/f'models/routing/model_{number}/exact'
+            current = (folder/'enhanced_solver.py').is_file()
+            organized = (folder/'search').is_dir()
+            entry = 'solver' if current or organized else 'calendar_search'
+            child = 'enhanced_solver' if current else ('search.fixed_count' if organized else 'joint_solver')
             solve_counts = import_module(f'models.routing.model_{number}.exact.{entry}').solve_counts
             solver = import_module(f'models.routing.model_{number}.exact.{child}')
         else:

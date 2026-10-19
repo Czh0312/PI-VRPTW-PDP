@@ -93,8 +93,8 @@ def test_request_cannot_silently_switch_model():
 
 def test_unclosed_assignment_never_becomes_global_certificate(monkeypatch):
     from types import SimpleNamespace
-    from models.routing.model_2.exact.search import assignment
-    from models.routing.model_2.exact.search import engine as exact_solver
+    from models.routing.model_2.exact.assignment_search import dispatcher as assignment
+    from models.routing.model_2.exact import enhanced_solver as exact_solver
     now, examples = [0.0], {}
     def unclosed(fixed, **_):
         key = tuple(o.satellite for o in fixed.orders)

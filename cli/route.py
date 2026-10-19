@@ -35,6 +35,11 @@ def main(argv=None):
     parser.add_argument('--initial-joint-result',help='M6–M8 同模型已有可行解 JSON；审计后用于 ALNS 初解或精确求解 MIP start')
     parser.add_argument("--solver", choices=("alns", "exact"))
     parser.add_argument("--exact-time", type=float)
+    parser.add_argument("--exact-strategy", choices=("auto", "milp", "joint", "domain_tree", "enumeration"),
+                        help="milp: Gurobi直接求解；auto: 现有方法；joint/domain_tree/enumeration: M2/M4")
+    parser.add_argument("--milp-threads", type=int, help="直接MILP基线的线程数，默认1")
+    parser.add_argument("--milp-formulation", choices=("expanded", "compact"),
+                        help="直接MILP基线的等价表达，默认expanded")
     parser.add_argument("--time", type=float)
     parser.add_argument("--iterations", type=int)
     parser.add_argument("--seed", type=int)
@@ -56,10 +61,18 @@ def main(argv=None):
     for argument, key in (("model", "model"), ("solver", "solver"), ("exact_time", "exact_time"),
                           ("time", "alns_time"), ("iterations", "alns_iter"), ("seed", "seed"),
                           ("data", "data"), ("orders", "orders"), ("exact_backend", "exact_backend"),
+                          ("exact_strategy", "exact_strategy"),
                           ("economic_config", "economic_config")):
         value = getattr(args, argument)
         if value is not None:
             config[key] = value
+    milp_options = dict(config.get('milp_options') or {})
+    if args.milp_threads is not None:
+        milp_options['threads'] = args.milp_threads
+    if args.milp_formulation is not None:
+        milp_options['formulation'] = args.milp_formulation
+    if milp_options:
+        config['milp_options'] = milp_options
     if args.fleet_config:
         fleet = {**load_json(args.fleet_config), "operating_policy": fleet["operating_policy"]}
         config["routing_config"] = args.fleet_config

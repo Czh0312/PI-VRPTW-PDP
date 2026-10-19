@@ -3,8 +3,8 @@ import time
 
 import pytest
 
-from models.routing.model_5.exact.accelerators.multibatch.inventory_guard import check_inventory_bound
-from models.routing.model_5.exact.accelerators.multibatch.conditional_inventory import build_conditional_inventory, solve_conditional_inventory
+from models.routing.model_5.exact.bounds.inventory.inventory_guard import check_inventory_bound
+from models.routing.model_5.exact.bounds.inventory.conditional_inventory import build_conditional_inventory, solve_conditional_inventory
 from tests.routing.test_multibatch_cycle import fixture
 
 
@@ -48,7 +48,7 @@ def test_exhausted_replay_cannot_accept_primary_bound():
 
 def test_solve_keeps_previous_floor_when_independent_verification_fails(monkeypatch):
     pytest.importorskip('gurobipy')
-    import models.routing.model_5.exact.accelerators.multibatch.inventory_guard as guard
+    import models.routing.model_5.exact.bounds.inventory.inventory_guard as guard
     def unavailable(model, raw, **kwargs):
         return dict(accepted_raw_bound=None, reported_raw_bound=raw,
                     status='REPLAY_WITNESS_REJECTED', reported_bound_consistent=None)

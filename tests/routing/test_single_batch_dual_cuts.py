@@ -6,9 +6,9 @@ import math
 import pytest
 
 from models.common.cycle.audit import audit_solution
-from models.routing.model_3.exact.accelerators.single_batch.columns import root_route_bound, solve_with_route_bound
-from models.routing.model_3.exact.accelerators.single_batch.dual_cuts import apply_dual_cuts
-from models.routing.model_3.exact.formulations.single_batch import build_model
+from models.routing.model_3.exact.bounds.route_cg.columns import root_route_bound, solve_with_route_bound
+from models.routing.model_3.exact.branch_cut.dual_cuts import apply_dual_cuts
+from models.routing.model_3.exact.formulation import build_model
 from tests.routing.test_single_batch_columns import contexts, independently_enumerated_trips
 from tests.routing.test_single_batch_comparison import problem as one_customer
 from tests.routing.test_single_batch_route_pool import physical_case

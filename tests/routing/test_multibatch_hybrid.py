@@ -10,9 +10,9 @@ from models.common.cycle import MultiBatchInstance, Order
 from models.common.cycle.audit import audit_solution
 from models.common.domain.instance import ProblemInstance
 from models.common.domain.node import Depot, Satellite, Customer
-from models.routing.model_5.exact.accelerators.pickup_route_pricing import RoutePricer, route_context
-from models.routing.model_5.exact.accelerators.multibatch.route_cg import route_cover_certificate, site_route_cover
-from models.routing.model_5.exact.accelerators.multibatch.conditional_inventory import build_conditional_inventory, conditional_context, set_conditional_projection, solve_conditional_inventory
+from models.routing.model_5.exact.bounds.route_cg.pickup_pricing import RoutePricer, route_context
+from models.routing.model_5.exact.bounds.route_cover_cg.route_cg import route_cover_certificate, site_route_cover
+from models.routing.model_5.exact.bounds.inventory.conditional_inventory import build_conditional_inventory, conditional_context, set_conditional_projection, solve_conditional_inventory
 from models.routing.model_5.exact import solve_hybrid
 from tests.routing.test_multibatch_cycle import fixture, hand_solution, policy_config
 from tests.routing.test_multibatch_route_cg import enumerate_trips
@@ -82,7 +82,7 @@ def test_pricing_reuses_leftover_time_only_for_unfinished_categories_and_keeps_b
 
 def test_rounded_capacity_floor_closes_known_fractional_gap_without_claiming_full_optimality():
     pytest.importorskip('gurobipy')
-    from models.routing.model_5.exact.search.engine import solve_exact
+    from models.routing.model_5.exact.enhanced_solver import solve_exact
     problem = capacity_problem()
     full = solve_exact(problem, time_limit=5)
     assert full['info']['proven_optimal'] and full['info']['objective'] == pytest.approx(4)
@@ -110,7 +110,7 @@ def test_invalid_subset_is_rejected_before_model_build_and_integer_cover_is_expl
 @pytest.mark.parametrize('seed', [0, 2, 5])
 def test_conditional_full_domain_floors_project_nonmetric_full_optima(seed):
     gp = pytest.importorskip('gurobipy')
-    from models.routing.model_5.exact.search.engine import solve_exact
+    from models.routing.model_5.exact.enhanced_solver import solve_exact
     p = nonmetric_problem(seed)
     initial = solve_exact(p, time_limit=5)
     assert initial['info']['proven_optimal'] and audit_solution(p, initial)['valid']
@@ -181,9 +181,9 @@ def test_no_cover_budget_preserves_audited_result_and_reports_unmet_target(monke
 
 def test_adaptive_finish_reprices_a_trivial_valid_partial_floor_and_preserves_full_projection(tmp_path):
     pytest.importorskip('gurobipy')
-    from models.routing.model_5.exact.accelerators.multibatch.hybrid import finish_hybrid
-    from models.routing.model_5.exact.accelerators.pickup_route_pricing import evaluate_column
-    from models.routing.model_5.exact.search.engine import solve_exact
+    from models.routing.model_5.hybrid.solver import finish_hybrid
+    from models.routing.model_5.exact.bounds.route_cg.pickup_pricing import evaluate_column
+    from models.routing.model_5.exact.enhanced_solver import solve_exact
     p, initial = fixture(pool=2), hand_solution(fixture(pool=2))
     before = deepcopy(initial)
     context = route_context(p, 'S')
@@ -205,11 +205,11 @@ def test_adaptive_finish_reprices_a_trivial_valid_partial_floor_and_preserves_fu
 
 
 def test_adaptive_shares_time_prioritizes_certification_deficit_and_builds_one_joint_master(monkeypatch):
-    from models.routing.model_5.exact.accelerators.multibatch.hybrid import finish_hybrid
-    import models.routing.model_5.exact.accelerators.multibatch.route_cg as cg
-    import models.routing.model_5.exact.accelerators.pickup_route_pricing as pricing
-    import models.routing.model_5.exact.accelerators.multibatch.conditional_inventory as inventory
-    import models.routing.model_5.exact.accelerators.multibatch.route_pool as pool
+    from models.routing.model_5.hybrid.solver import finish_hybrid
+    import models.routing.model_5.exact.bounds.route_cover_cg.route_cg as cg
+    import models.routing.model_5.exact.bounds.route_cg.pickup_pricing as pricing
+    import models.routing.model_5.exact.bounds.inventory.conditional_inventory as inventory
+    import models.routing.model_5.exact.primal.route_pool as pool
     p, initial = fixture(pool=2), hand_solution(fixture(pool=2))
     rows = [dict(satellite=s, bound=0, lp_converged=False, columns=[],
                  iterations=[dict(phase='distance', master_objective=v)])
@@ -236,10 +236,10 @@ def test_adaptive_shares_time_prioritizes_certification_deficit_and_builds_one_j
 
 
 def test_adaptive_keeps_weaker_run_columns_for_primal_and_warms_from_earlier_subset_run(monkeypatch):
-    from models.routing.model_5.exact.accelerators.multibatch.hybrid import finish_hybrid
-    from models.routing.model_5.exact.accelerators.pickup_route_pricing import evaluate_column
-    import models.routing.model_5.exact.accelerators.multibatch.route_cg as cg
-    import models.routing.model_5.exact.accelerators.multibatch.route_pool as pool
+    from models.routing.model_5.hybrid.solver import finish_hybrid
+    from models.routing.model_5.exact.bounds.route_cg.pickup_pricing import evaluate_column
+    import models.routing.model_5.exact.bounds.route_cover_cg.route_cg as cg
+    import models.routing.model_5.exact.primal.route_pool as pool
     p, initial = fixture(pool=2), hand_solution(fixture(pool=2))
     ctx = route_context(p, 'S')
     a, b = [evaluate_column(p, ctx, [(e['order_id'], e['kind']) for e in t['events']])
@@ -263,7 +263,7 @@ def test_adaptive_keeps_weaker_run_columns_for_primal_and_warms_from_earlier_sub
 
 def test_global_columns_rebuild_costs_unlock_full_slots_and_keep_pool_bound_local():
     pytest.importorskip('gurobipy')
-    from models.routing.model_5.exact.accelerators.multibatch.route_pool import candidate_pools, reoptimize_route_pool
+    from models.routing.model_5.exact.primal.route_pool import candidate_pools, reoptimize_route_pool
     from tests.routing.test_multibatch_joint_exchanges import full_slot_fixture
     p, initial = full_slot_fixture()
     before = deepcopy(initial)

@@ -10,7 +10,7 @@ from tests.routing.test_count_budget_recycling import Clock, candidate
 @pytest.mark.parametrize('number', [6, 7, 8])
 @pytest.mark.parametrize('bounds', [False, True])
 def test_focused_exact_time_keeps_unvisited_counts_and_their_proof_status(number, bounds, monkeypatch):
-    module = import_module(f'models.routing.model_{number}.exact.search.batch_search')
+    module = import_module(f'models.routing.model_{number}.exact.k_search.scheduler')
     clock = Clock()
     monkeypatch.setattr(module, 'time', clock)
     monkeypatch.setattr(module, '_audit', lambda p, r: dict(valid=True, objective=r['info']['objective']))

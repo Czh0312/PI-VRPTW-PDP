@@ -9,7 +9,7 @@ import pytest
 from models.common.cycle import MultiBatchInstance
 from models.routing.model_3.alns.construction import chronological_state
 from models.routing.model_3.alns.neighborhoods import _route_score, repair_orders
-from models.routing.model_3.alns.accelerators.single_batch_scoring import SingleBatchRouteScorer
+from models.routing.model_3.alns.performance.scoring import SingleBatchRouteScorer
 from tests.routing.test_single_batch_solver_audit import tiny_problem
 
 
@@ -65,7 +65,7 @@ def test_retained_scorer_uses_current_goods_vehicle_waits_site_and_mutable_tasks
 
 @pytest.mark.parametrize('model', [1, 3])
 def test_context_reuses_scores_across_repairs_with_changed_schedule(model):
-    from models.routing.model_3.alns.accelerators.single_batch_cache import SingleBatchCache
+    from models.routing.model_3.alns.performance.single_batch_cache import SingleBatchCache
     p, rng = tiny_problem(model, 1), random.Random(5)
     cache = SingleBatchCache(p)
     assert cache._route_scorer is None
@@ -89,8 +89,8 @@ def test_context_reuses_scores_across_repairs_with_changed_schedule(model):
 
 
 def test_new_solve_reprepares_same_problem_after_input_edit(monkeypatch):
-    from models.routing.model_3.alns.search import single_batch
-    from models.routing.model_3.alns.accelerators.single_batch_cache import SingleBatchCache
+    from models.routing.model_3.alns import search as single_batch
+    from models.routing.model_3.alns.performance.single_batch_cache import SingleBatchCache
     contexts = []
     def context(problem):
         cache = SingleBatchCache(problem)
@@ -117,8 +117,8 @@ def test_new_solve_reprepares_same_problem_after_input_edit(monkeypatch):
 
 def test_partition_route_scorers_are_isolated_and_wrong_context_is_rejected():
     from models.common.cycle.assignment import input_assignment
-    from models.routing.model_4.alns.search.assignment import AssignmentSearch
-    from models.routing.model_3.alns.search.single_batch import solve_alns
+    from models.routing.model_4.alns.assignment.continuous_search import AssignmentSearch
+    from models.routing.model_3.alns.search import solve_alns
     p = tiny_problem(4, 1)
     search = AssignmentSearch(p, 42)
     assignment = input_assignment(p)
@@ -137,8 +137,8 @@ def test_partition_route_scorers_are_isolated_and_wrong_context_is_rejected():
 @pytest.mark.parametrize('seed', [1, 3, 4])
 def test_prepared_decoder_matches_reference_for_valid_and_invalid_moves(model, seed):
     from models.routing.model_3.alns.evaluator import evaluate, initial_state
-    from models.routing.model_3.alns.search.single_batch import _move
-    from models.routing.model_3.alns.accelerators.single_batch_cache import SingleBatchEvaluator
+    from models.routing.model_3.alns.search import _move
+    from models.routing.model_3.alns.performance.single_batch_cache import SingleBatchEvaluator
     p = tiny_problem(model, seed)
     rng = random.Random(7)
     state = initial_state(p, rng)
@@ -161,7 +161,7 @@ def test_prepared_decoder_matches_reference_for_valid_and_invalid_moves(model, s
 
 def test_prepared_distances_cover_layer_site_sequence_and_duplicate_visits():
     from models.routing.model_3.alns.evaluator import route_distance
-    from models.routing.model_3.alns.accelerators.single_batch_cache import SingleBatchEvaluator
+    from models.routing.model_3.alns.performance.single_batch_cache import SingleBatchEvaluator
     p = tiny_problem(3, 1)
     memo = SingleBatchEvaluator(p, distance_capacity=2)
     for layer in ('e1', 'e2'):
@@ -186,9 +186,9 @@ def test_prepared_scorer_cannot_cross_problem_instances():
 
 @pytest.mark.parametrize('model', [1, 3])
 def test_single_batch_e1_cache_keeps_full_decoder_results_and_return_ownership(model):
-    from models.routing.model_3.alns.accelerators.cycle_cache import CycleEvaluator
+    from models.routing.model_3.alns.performance.cycle_cache import CycleEvaluator
     from models.routing.model_3.alns.evaluator import evaluate, initial_state
-    from models.routing.model_3.alns.search.single_batch import _move
+    from models.routing.model_3.alns.search import _move
     p = tiny_problem(model, 1)
     rng = random.Random(4)
     state = initial_state(p, rng)

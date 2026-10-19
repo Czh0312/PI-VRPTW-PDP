@@ -2,10 +2,10 @@
 import pytest
 
 from models.common.cycle.audit import audit_solution
-from models.routing.model_5.exact.accelerators.multibatch.physical_site import build_physical_site, physical_site_certificate, project_physical_site, normalize_trip_groups
-from models.routing.model_5.exact.accelerators.multibatch.physical_cuts import add_physical_cut, project_physical_costs
-from models.routing.model_5.exact.accelerators.multibatch.joint_inventory import build_joint_inventory, set_joint_projection
-from models.routing.model_5.exact.search.engine import solve_exact
+from models.routing.model_5.exact.bounds.conditional_physical.physical_site import build_physical_site, physical_site_certificate, project_physical_site, normalize_trip_groups
+from models.routing.model_5.exact.bounds.conditional_physical.physical_cuts import add_physical_cut, project_physical_costs
+from models.routing.model_5.exact.bounds.inventory.joint_inventory import build_joint_inventory, set_joint_projection
+from models.routing.model_5.exact.enhanced_solver import solve_exact
 from tests.routing.test_multibatch_departure_loads import nonmetric_problem
 from tests.routing.test_multibatch_joint_inventory import domains
 from tests.routing.test_multibatch_route_service import congestion_problem

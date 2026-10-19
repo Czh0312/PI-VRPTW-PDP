@@ -6,7 +6,7 @@ def solve_alns(
     problem, max_time=10, max_iterations=5000, seed=42, *, cache_descent_distances=False
 ):
     validate_problem(problem, 5)
-    from models.routing.model_5.alns.search.engine import solve_alns as solve_local
+    from models.routing.model_5.alns.search import solve_alns as solve_local
 
     options = dict(max_time=max_time, max_iterations=max_iterations, seed=seed)
     if cache_descent_distances:

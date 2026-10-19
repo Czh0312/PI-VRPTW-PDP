@@ -8,9 +8,9 @@ import time
 import pytest
 
 from models.common.cycle.audit import audit_solution
-from models.routing.model_3.exact.accelerators.single_batch import composite_proof as composite
-from models.routing.model_3.exact.accelerators.single_batch.columns import problem_fingerprint
-from models.routing.model_3.exact.search.engine import solve_exact
+from models.routing.model_3.exact.bounds import composite_proof as composite
+from models.routing.model_3.exact.bounds.route_cg.columns import problem_fingerprint
+from models.routing.model_3.exact.enhanced_solver import solve_exact
 from tests.routing.test_single_batch_solver_audit import tiny_problem, enumerate_tiny
 from tests.routing.test_single_batch_e1_clocked import independent_routes
 
@@ -83,7 +83,7 @@ def test_zero_cost_complete_component_proof_and_cross_trip_physical_projection()
 
 def test_complete_proof_closes_without_calling_original_kernel(monkeypatch):
     p = tiny_problem(3, 0); initial = solve_exact(p, 2)
-    from models.routing.model_3.exact.search import engine as solver
+    from models.routing.model_3.exact import enhanced_solver as solver
     monkeypatch.setattr(solver, 'solve_exact', lambda *a, **k: pytest.fail('kernel not required'))
     result = composite.solve_exact_with_composite_proof(p, 5, initial_result=initial)
     assert result['info']['component_certificate']['closed']
@@ -126,7 +126,7 @@ def test_missing_or_expired_component_cannot_inherit_initial_proof():
 
 
 def test_fallback_receives_no_floor_hook_and_never_adds_total_bound_twice(monkeypatch):
-    from models.routing.model_3.exact.search import engine as solver
+    from models.routing.model_3.exact import enhanced_solver as solver
     p = tiny_problem(3, 1); initial = solve_exact(p, 2)
     def kernel(problem, budget, seed, verbose, start):
         result = deepcopy(start)

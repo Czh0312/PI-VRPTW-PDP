@@ -8,8 +8,8 @@ import pytest
 from models.common.cycle import MultiBatchInstance
 from models.common.cycle.audit import audit_solution
 from models.routing.model_3.alns.evaluator import evaluate, initial_state
-from models.routing.model_3.alns.search.single_batch import _move
-from models.routing.model_3.alns.accelerators.single_batch_cache import SingleBatchCache, SingleBatchEvaluator
+from models.routing.model_3.alns.search import _move
+from models.routing.model_3.alns.performance.single_batch_cache import SingleBatchCache, SingleBatchEvaluator
 from tests.routing.test_single_batch_solver_audit import tiny_problem
 
 

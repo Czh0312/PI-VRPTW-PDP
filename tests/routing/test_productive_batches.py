@@ -221,6 +221,6 @@ def test_exact_solver_rejects_a_delivery_batch_with_no_possible_return(number, e
     problem = factory(problem.network, problem.orders, problem.operating_policy,
                       problem.options, problem.cost_profile.config, **kwargs)
     child = fixed_child(problem)
-    module = import_module(f'models.routing.model_{number}.exact.' + ('solver' if number == 6 else 'search.fixed_count'))
+    module = import_module(f'models.routing.model_{number}.exact.' + 'enhanced_solver')
     result = module.solve_exact(child, time_limit=5)
     assert result['info']['proven_infeasible'] and result['info']['objective'] is None

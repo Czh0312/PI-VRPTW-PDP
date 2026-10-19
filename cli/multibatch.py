@@ -159,6 +159,7 @@ def run_case(config, fleet, *, case_path=None, output=None):
                                    alns_time=config.get('alns_time', 10), alns_iter=config.get('alns_iter', 5000),
                                    exact_time=config.get('exact_time', 60),
                                    exact_backend=config.get('exact_backend'), seed=config.get('seed', 42),
+                                   exact_strategy=config.get('exact_strategy'), milp_options=config.get('milp_options'),
                                    initial_result=load_json(config['initial_joint_result']) if config.get('initial_joint_result') else None)
         if result['info'].get('objective') is not None:
             result['audit'] = audit_solution(instance, result)

@@ -7,11 +7,11 @@ import time
 
 import pytest
 
-from models.routing.model_1.exact.accelerators.single_batch.columns import DeliveryMaster, e1_delivery_tours, root_route_bound, short_route_catalog, task_price_floor
-from models.routing.model_1.exact.accelerators.single_batch.delivery_pricer import DeliveryMipPricer
-from models.routing.model_1.exact.accelerators.single_batch.route_pricing import price_delivery_routes
-from models.routing.model_1.exact.accelerators.single_batch.time_budget import route_work, time_deadlines, time_windows
-from models.routing.model_1.exact.accelerators.single_batch.route_pool import enrich_route_pool, route_pool_incumbent
+from models.routing.model_1.exact.bounds.route_cg.columns import DeliveryMaster, e1_delivery_tours, root_route_bound, short_route_catalog, task_price_floor
+from models.routing.model_1.exact.bounds.route_cg.delivery_pricer import DeliveryMipPricer
+from models.routing.model_1.exact.bounds.route_cg.route_pricing import price_delivery_routes
+from models.routing.model_1.exact.bounds.route_cg.time_budget import route_work, time_deadlines, time_windows
+from models.routing.model_1.exact.primal.route_pool import enrich_route_pool, route_pool_incumbent
 from models.common.cycle.audit import audit_solution
 from copy import deepcopy
 from tests.routing.test_single_batch_columns import contexts, independently_enumerated_trips

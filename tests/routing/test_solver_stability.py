@@ -76,8 +76,8 @@ def test_travel_bounds_are_scoped_to_solve_and_service_cache_observes_edits():
 @pytest.mark.parametrize('seed', [0, 1, 2, 4])
 def test_shared_event_milp_matches_indexed_reference_with_multiple_vehicles_and_trips(monkeypatch, model, seed):
     pytest.importorskip('gurobipy')
-    from models.routing.model_3.exact.search import engine as solver
-    from models.routing.model_3.exact.formulations.full import build_model
+    from models.routing.model_3.exact import enhanced_solver as solver
+    from models.routing.model_3.exact.model import _build_complete_model as build_model
     base = tiny_problem(model, seed)
     p = MultiBatchInstance(base.network, base.orders,
                            replace(base.operating_policy, e2_max_trips_per_vehicle=2), model=model)
@@ -107,8 +107,8 @@ def test_primal_seed_is_audited_and_failure_is_not_an_infeasibility_proof():
 
 def test_mip_start_relabels_sparse_vehicle_ids_and_keeps_audited_incumbent_on_build_timeout(monkeypatch):
     pytest.importorskip('gurobipy')
-    from models.routing.model_3.exact.search import engine as solver
-    from models.routing.model_3.exact.formulations.full import build_model
+    from models.routing.model_3.exact import enhanced_solver as solver
+    from models.routing.model_3.exact.model import _build_complete_model as build_model
     from models.routing.model_3.exact.initialization import construct_incumbent
     p = tiny_problem(3, 2)
     p.fleet.e1_count = p.fleet.e2_per_sat_count = 3

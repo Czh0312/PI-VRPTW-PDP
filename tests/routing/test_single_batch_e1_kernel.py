@@ -7,9 +7,9 @@ import time
 import pytest
 
 from models.common.cycle.audit import audit_solution
-from models.routing.model_3.exact.formulations.full import build_model
-from models.routing.model_3.exact.search.engine import solve_exact, _set_start
-from models.routing.model_3.exact.accelerators.single_batch.e1_bound import e1_route_cover_bound, apply_e1_cover_bound, solve_exact_with_e1_cover
+from models.routing.model_3.exact.model import _build_complete_model as build_model
+from models.routing.model_3.exact.enhanced_solver import solve_exact, _set_start
+from models.routing.model_3.exact.bounds.e1 import e1_route_cover_bound, apply_e1_cover_bound, solve_exact_with_e1_cover
 from tests.routing.test_single_batch_solver_audit import tiny_problem,enumerate_tiny
 
 
@@ -84,7 +84,7 @@ def test_application_deadline_skips_row_and_preserves_valid_certificate():
 
 
 def test_exhausted_wrapper_budget_retains_original_warm_start_without_old_optimal_flag(monkeypatch):
-    import models.routing.model_3.exact.accelerators.single_batch.e1_bound as module
+    import models.routing.model_3.exact.bounds.e1 as module
     p=tiny_problem(3,1);warm=solve_exact(p,3);c=e1_route_cover_bound(p,1);clock=[0.0]
     def stage(*args,**kwargs):clock[0]=2.0;return deepcopy(c)
     monkeypatch.setattr(module,'time',SimpleNamespace(perf_counter=lambda:clock[0]))

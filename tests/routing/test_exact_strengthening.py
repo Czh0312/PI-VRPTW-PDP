@@ -11,8 +11,8 @@ from models.common.cycle import MultiBatchInstance
 from models.common.cycle.assignment import assigned_problem, input_assignment
 from models.common.cycle.audit import audit_solution
 from models.common.cycle.precheck import travel_lower_bounds
-from models.routing.model_3.exact.accelerators.domains import assignment_domains
-from models.routing.model_3.exact.accelerators.strengthening import joint_arc_estimate, single_batch_bounds
+from models.routing.model_3.exact.preprocessing.domains import assignment_domains
+from models.routing.model_3.exact.preprocessing.strengthening import joint_arc_estimate, single_batch_bounds
 from tests.routing.test_single_batch_solver_audit import tiny_problem, enumerate_tiny
 
 
@@ -20,7 +20,7 @@ from tests.routing.test_single_batch_solver_audit import tiny_problem, enumerate
 @pytest.mark.parametrize('seed', range(6))
 def test_domain_tree_matches_independent_enumeration_with_forced_splits(monkeypatch, model, seed):
     pytest.importorskip('gurobipy')
-    from models.routing.model_4.exact.search import assignment
+    from models.routing.model_4.exact.assignment_search import dispatcher as assignment
     monkeypatch.setattr(assignment, 'JOINT_ARC_LIMIT', 1)
     p = tiny_problem(model, seed)
     optimum = enumerate_tiny(p)
@@ -52,8 +52,8 @@ def test_load_bounds_preserve_optimum_with_a_zero_container_dimension(model, zer
 
 def test_trip_symmetry_relabels_a_valid_start_with_unequal_vehicle_workloads():
     pytest.importorskip('gurobipy')
-    from models.routing.model_3.exact.search.engine import solve_exact, _set_start
-    from models.routing.model_3.exact.formulations.full import build_model
+    from models.routing.model_3.exact.enhanced_solver import solve_exact, _set_start
+    from models.routing.model_3.exact.model import _build_complete_model as build_model
     base = tiny_problem(1, 1)
     p = assigned_problem(base, {o.customer: 'S' for o in base.orders})
     p.operating_policy = replace(p.operating_policy, e2_max_trips_per_vehicle=2)
@@ -83,7 +83,7 @@ def test_trip_symmetry_relabels_a_valid_start_with_unequal_vehicle_workloads():
 
 def test_arc_estimate_matches_materialized_model_after_slot_reduction():
     pytest.importorskip('gurobipy')
-    from models.routing.model_3.exact.formulations.full import build_model
+    from models.routing.model_3.exact.model import _build_complete_model as build_model
     p = tiny_problem(4, 1)
     p.fleet.e2_per_sat_count = 3
     p.operating_policy = replace(p.operating_policy, e2_max_trips_per_vehicle=12)
@@ -99,7 +99,7 @@ def test_arc_estimate_matches_materialized_model_after_slot_reduction():
 
 def test_inactive_satellite_does_not_apply_its_customer_deadline_to_another_assignment():
     pytest.importorskip('gurobipy')
-    from models.routing.model_4.exact.search.assignment import solve_exact
+    from models.routing.model_4.exact.assignment_search.dispatcher import solve_exact
     from tests.routing.test_single_batch_comparison import problem
     p = problem(4, window=(0, 5), duplicate=True, pool=2)
     result = solve_exact(p, time_limit=3, strategy='joint')
@@ -108,9 +108,9 @@ def test_inactive_satellite_does_not_apply_its_customer_deadline_to_another_assi
 
 
 def test_tree_timeout_keeps_every_unresolved_assignment_in_global_bound(monkeypatch):
-    from models.routing.model_4.exact.search import assignment_tree
-    from models.routing.model_4.exact.search import engine as solver
-    from models.routing.model_4.exact.accelerators.distance_bounds import free_assignment_lower_bound
+    from models.routing.model_4.exact.assignment_search import domain_tree as assignment_tree
+    from models.routing.model_4.exact import enhanced_solver as solver
+    from models.routing.model_4.exact.bounds.distance import free_assignment_lower_bound
     from models.routing.model_4.exact.initialization import construct_incumbent
     from models.common.cycle.state import empty_result
     from tests.routing.test_single_batch_comparison import problem
@@ -152,7 +152,7 @@ def test_tree_timeout_keeps_every_unresolved_assignment_in_global_bound(monkeypa
 
 
 def test_forced_capacity_pruning_is_a_necessary_condition_only():
-    from models.routing.model_4.exact.search.assignment_tree import _forced_capacity_conflict
+    from models.routing.model_4.exact.assignment_search.domain_tree import _forced_capacity_conflict
     p = tiny_problem(4, 2)
     p.fleet.e1_volume_cap = 1
     domains = {o.customer: ['S', 'T'] for o in p.orders}
@@ -170,8 +170,8 @@ def test_bounds_use_relaxed_paths_on_nonmetric_data():
 
 
 def test_assignment_seed_is_only_an_audited_upper_bound_and_survives_build_timeout(monkeypatch):
-    from models.routing.model_4.exact.search import assignment
-    from models.routing.model_4.exact.search import engine as solver
+    from models.routing.model_4.exact.assignment_search import dispatcher as assignment
+    from models.routing.model_4.exact import enhanced_solver as solver
     p = tiny_problem(4, 1)
     p.fleet.e2_per_sat_count = 3
     p.operating_policy = replace(p.operating_policy, e2_max_trips_per_vehicle=12)

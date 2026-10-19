@@ -8,9 +8,10 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 CORE = {
-    'exact': {'__init__', 'solver', 'model', 'parameters', 'variables',
-              'constraints', 'objective', 'initialization'},
-    'alns': {'__init__', 'solver', 'parameters', 'state', 'construction',
+    'exact': {'__init__', 'solver', 'model', 'formulation', 'milp_solver', 'solution',
+              'parameters', 'variables', 'constraints', 'objective', 'initialization',
+              'enhanced_solver'},
+    'alns': {'__init__', 'solver', 'search', 'parameters', 'state', 'construction',
              'neighborhoods', 'evaluator', 'search_control'},
 }
 
@@ -49,7 +50,7 @@ print('IMPORTED', count)
 @pytest.mark.parametrize('method', ['exact', 'alns'])
 def test_all_components_are_owned_and_importable(number, method):
     folder = ROOT/f'models/routing/model_{number}/{method}'
-    assert {p.stem for p in folder.glob('*.py')} == CORE[method]
+    assert CORE[method] <= {p.stem for p in folder.glob('*.py')}
     for child in folder.rglob('*.py'):
         assert (child.parent/'__init__.py').is_file()
     completed = subprocess.run(
@@ -60,8 +61,23 @@ def test_all_components_are_owned_and_importable(number, method):
     assert 'IMPORTED' in completed.stdout
 
 
+@pytest.mark.parametrize('number', range(1, 9))
+def test_exact_layout_has_no_retired_directories_or_forwarders(number):
+    folder = ROOT/f'models/routing/model_{number}/exact'
+    for name in ('accelerators', 'formulations', 'search'):
+        assert not (folder/name).exists()
+        assert not (folder/(name+'.py')).exists()
+    if number in (2, 4):
+        assert (folder/'assignment_search/domain_tree.py').is_file()
+    if number >= 6:
+        assert (folder/'k_search/scheduler.py').is_file()
+    if number == 5:
+        assert (folder/'diagnostics/single_batch/formulation.py').is_file()
+        assert (folder.parent/'hybrid/solver.py').is_file()
+
+
 def test_relocated_certificate_fingerprint_still_tracks_rules_and_solver(monkeypatch):
-    module = import_module('models.routing.model_5.exact.accelerators.multibatch.logic_benders')
+    module = import_module('models.routing.model_5.exact.bounds.conditional_physical.logic_benders')
     seen = set()
     changed = set()
 
@@ -73,7 +89,12 @@ def test_relocated_certificate_fingerprint_still_tracks_rules_and_solver(monkeyp
     before = module.source_fingerprint()
     targets = [
         ROOT/'models/routing/model_5/exact/constraints.py',
-        ROOT/'models/routing/model_5/exact/accelerators/multibatch/logic_benders.py',
+        ROOT/'models/routing/model_5/exact/constraint_blocks/inventory.py',
+        ROOT/'models/routing/model_5/exact/formulation.py',
+        ROOT/'models/routing/model_5/exact/solution.py',
+        ROOT/'models/common/solver_config.py',
+        ROOT/'models/routing/model_5/exact/bounds/conditional_physical/logic_benders.py',
+        ROOT/'models/routing/model_5/hybrid/solver.py',
         ROOT/'models/common/cycle/audit.py',
         ROOT/'models/cost/joint_batch.py',
     ]
@@ -110,3 +131,37 @@ def test_experiment_observer_resolves_frozen_and_current_layouts(tmp_path, monke
 
     monkeypatch.setattr(driver, 'import_module', load)
     assert driver.solver_component(8, 'alns', old) is component
+
+
+@pytest.mark.parametrize('number,name,target', [
+    (2, 'partitioned_assignment', 'assignment.partitioned_search'),
+    (2, 'single_batch', 'search'),
+    (5, 'single_batch', 'single_batch_search'),
+    (6, 'solver', 'search'),
+    (7, 'joint_solver', 'search'),
+    (8, 'joint_solver', 'fixed_calendar_search'),
+    (8, 'search', 'search'),
+    (6, 'batch_search', 'k_search.scheduler'),
+    (7, 'batch_search', 'k_search.scheduler'),
+    (8, 'batch_search', 'k_search.scheduler'),
+    (7, 'calendar_search', 'solver'),
+    (8, 'calendar_search', 'solver'),
+])
+def test_experiment_observer_reaches_active_search_components(number, name, target):
+    from experiments.runs import run_thesis_completion as driver
+
+    module = driver.solver_component(number, 'alns', name)
+    assert module is import_module(f'models.routing.model_{number}.alns.{target}')
+
+
+@pytest.mark.parametrize('number', [6, 7, 8])
+@pytest.mark.parametrize('name,target', [
+    ('batch_search', 'k_search.scheduler'),
+    ('joint_solver', 'enhanced_solver'),
+    ('calendar_search', 'solver'),
+])
+def test_experiment_observer_reaches_current_exact_components(number, name, target):
+    from experiments.runs import run_thesis_completion as driver
+
+    assert driver.solver_component(number, 'exact', name) is import_module(
+        f'models.routing.model_{number}.exact.{target}')

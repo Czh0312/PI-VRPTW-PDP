@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from models.routing.model_8.alns.search import batch_search
+from models.routing.model_8.alns.k_search import scheduler as batch_search
 from tests.routing.test_count_budget_recycling import Clock, candidate
 
 

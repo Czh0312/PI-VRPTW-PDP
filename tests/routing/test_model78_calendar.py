@@ -161,7 +161,7 @@ def test_initial_incumbent_is_retained_and_proof_is_cleared(number, exact_availa
 
 @pytest.mark.parametrize('number', [7, 8])
 def test_unresolved_k_never_inherits_another_counts_optimal_proof(number, exact_available, monkeypatch):
-    solver = import_module(f'models.routing.model_{number}.exact.search.fixed_count')
+    solver = import_module(f'models.routing.model_{number}.exact.enhanced_solver')
     p = calendar_fixture(number)
     original = solver.solve_exact
     def partial(child, **kwargs):

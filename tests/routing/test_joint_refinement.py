@@ -72,7 +72,7 @@ def test_fast_all_k_bounds_relax_every_legal_calendar(number):
 @pytest.mark.parametrize('number', [6, 7, 8])
 def test_mip_start_replayed_retained_after_build_timeout_without_proof(number, monkeypatch, exact_available):
     p = joint_fixture() if number == 6 else calendar_fixture(number, counts=(2,)).for_count(2)
-    module = import_module(f'models.routing.model_{number}.exact.'+('solver' if number == 6 else 'search.fixed_count'))
+    module = import_module(f'models.routing.model_{number}.exact.'+'enhanced_solver')
     incumbent = module.solve_exact(p, time_limit=3)
     assert incumbent['audit']['valid']
     saved = deepcopy(incumbent)
@@ -96,7 +96,7 @@ def test_mip_start_replayed_retained_after_build_timeout_without_proof(number, m
 @pytest.mark.parametrize('number', [6, 7, 8])
 def test_mip_start_encoded_and_exact_solution_audited(number, exact_available):
     p = joint_fixture() if number == 6 else calendar_fixture(number, counts=(2,)).for_count(2)
-    module = import_module(f'models.routing.model_{number}.exact.'+('solver' if number == 6 else 'search.fixed_count'))
+    module = import_module(f'models.routing.model_{number}.exact.'+'enhanced_solver')
     first = module.solve_exact(p, time_limit=3)
     result = module.solve_exact(p, time_limit=3, initial_result=first)
     assert result['audit']['valid'] and result['info']['proven_optimal']
@@ -107,7 +107,7 @@ def test_mip_start_encoded_and_exact_solution_audited(number, exact_available):
 @pytest.mark.parametrize('number', [6, 7, 8])
 def test_compound_neighbors_preserve_tasks_and_do_not_mutate_incumbent(number):
     from collections import Counter
-    module = import_module(f'models.routing.model_{number}.alns.accelerators.polish')
+    module = import_module(f'models.routing.model_{number}.alns.polish')
     source = joint_fixture()
     p = source.project({'o1': 'b1', 'o2': 'b2'}, 2)
     state = dict(deliveries={'b1': [['S']], 'b2': [['S']]},

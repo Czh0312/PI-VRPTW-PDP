@@ -5,8 +5,8 @@ from dataclasses import replace
 import pytest
 
 from models.common.cycle.audit import audit_solution
-from models.routing.model_3.exact.search import engine as solver
-from models.routing.model_3.exact.formulations.single_batch import build_model
+from models.routing.model_3.exact import enhanced_solver as solver
+from models.routing.model_3.exact.formulation import build_model
 from tests.routing.test_single_batch_solver_audit import tiny_problem
 from tests.routing.test_single_batch_primal import split_problem
 
@@ -85,9 +85,9 @@ def test_selected_arc_cannot_join_tasks_on_different_physical_routes():
 @pytest.mark.parametrize('threshold', [0, 10**9])
 def test_size_dispatch_and_estimator_use_the_same_arc_representation(monkeypatch, threshold):
     pytest.importorskip('gurobipy')
-    from models.routing.model_3.exact.accelerators import strengthening
-    from models.routing.model_3.exact.formulations import single_batch as single_batch_formulation
-    from models.routing.model_3.exact.accelerators.domains import assignment_domains
+    from models.routing.model_3.exact.preprocessing import strengthening as strengthening
+    from models.routing.model_3.exact import formulation as single_batch_formulation
+    from models.routing.model_3.exact.preprocessing.domains import assignment_domains
     monkeypatch.setattr(strengthening, 'COMPRESS_ROUTE_MIN_INTERNAL_ARCS', threshold)
     monkeypatch.setattr(single_batch_formulation, 'COMPRESS_ROUTE_MIN_INTERNAL_ARCS', threshold)
     p = tiny_problem(4, 1)

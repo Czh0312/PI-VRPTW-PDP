@@ -75,11 +75,11 @@ def validate(job_path,output_dir=None):
         from tools.configuration.loader import load_routing_case
     from models.common.cycle import load_instance
     from models.common.cycle.audit import audit_solution
-    from models.routing.model_5.exact.accelerators.multibatch.logic_benders import _read_model, _write_model, business_fingerprint, source_fingerprint
-    from models.routing.model_5.exact.accelerators.pickup_route_pricing import route_context
-    from models.routing.model_5.exact.accelerators.multibatch.route_timing import enumerate_timed_route_universe
-    from models.routing.model_5.exact.accelerators.multibatch.joint_inventory import build_joint_inventory, set_joint_projection
-    from models.routing.model_5.exact.accelerators.multibatch.physical_cuts import lift_physical_costs, add_physical_cut, project_physical_costs
+    from models.routing.model_5.exact.bounds.conditional_physical.logic_benders import _read_model, _write_model, business_fingerprint, source_fingerprint
+    from models.routing.model_5.exact.bounds.route_cg.pickup_pricing import route_context
+    from models.routing.model_5.exact.bounds.route_cover_cg.route_timing import enumerate_timed_route_universe
+    from models.routing.model_5.exact.bounds.inventory.joint_inventory import build_joint_inventory, set_joint_projection
+    from models.routing.model_5.exact.bounds.conditional_physical.physical_cuts import lift_physical_costs, add_physical_cut, project_physical_costs
     import gurobipy as gp
     p=load_instance(*load_routing_case(job['case']));r=json.loads(Path(job_path).with_name('result.json').read_text())
     destination=Path(output_dir) if output_dir else Path(job_path).parent
@@ -168,7 +168,7 @@ def main():
     jobs=[]
     from tools.configuration.loader import load_routing_case
     from models.common.cycle import load_instance
-    from models.routing.model_5.exact.accelerators.multibatch.logic_benders import business_fingerprint
+    from models.routing.model_5.exact.bounds.conditional_physical.logic_benders import business_fingerprint
     for customers in args.cases:
         original=old/('medium25/'+('0' if customers==20 else '1'))/'inputs'
         destination=out/'inputs'/str(customers)

@@ -1,5 +1,8 @@
 # 精确求解范围
 
+显式 `strategy="milp"` 运行直接 Gurobi 基线；默认 `auto` 保留下述增强流程。
+配置、完整候选域及结果字段见[Gurobi 对照说明](exact_milp_comparison.md)。
+
 模型代码按参数、变量、约束和目标函数组织，组装入口及约束组导航见
 [精确模型结构](exact_model_layout.md)。本页说明精确搜索范围和增强措施。
 
@@ -20,7 +23,7 @@ B=1 专门化将回收量固定为各仓全部订单箱数，直接约束带箱�
 MIP 初始解。详见 [2026-09-30 检查与对照](../archive/docs/single_batch_solver_audit_20260930.md)。
 
 第二轮在 B=1 下进一步共享二级任务的时间/载荷与内部弧传播约束，减少车辆、趟次之间的重复。
-精确法内部的 `primal.py` 独立构造并审计初解，构造失败不证明不可行；建模或求解限时也保留已审计方案。
+精确法内部的 `primal/construction.py` 独立构造并审计初解，构造失败不证明不可行；建模或求解限时也保留已审计方案。
 初解进入 MILP 前会重映射同质车辆编号，以满足对称性约束。算法不依赖 ALNS。
 实验显示可行解覆盖率提高，但较大实例 gap 仍可能很大，详见
 [第二轮优化与稳定性报告](../archive/docs/solver_stability_optimization_20260930.md)。
@@ -148,3 +151,11 @@ M5 的 `service_envelopes=True` 需同时启用时间前沿。服务极值在任
 车辆必占用区间使用全路径最大可行出发时刻，不能用有限供货取整后的上界替代。
 服务、回仓和关键时刻并发约束仍是必要条件，保留完整方案投影，尚未恢复全部车辆串行关系。
 当前收益很小且限时存在退步，默认关闭。见 [服务包络与车辆并发验证](../archive/docs/m5_route_service_20261001.md)。
+
+## 当前实现位置
+
+完整求解在 `enhanced_solver.py`，自由分仓在 `assignment_search/`，跨 K 证明在 `k_search/scheduler.py`。
+安全预处理、下界、主模型割和可行上界分别位于 `preprocessing/`、`bounds/`、`branch_cut/`、`primal/`。
+M5 的列生成、库存和条件物理站点松弛分别在 `bounds/route_cover_cg/`、`bounds/inventory/`、
+`bounds/conditional_physical/`；这些组件单独运行不构成完整原问题的精确算法。
+M5 显式混合流程位于 `model_5/hybrid/solver.py`。逐文件导航见各模型的 `exact/README.md`。

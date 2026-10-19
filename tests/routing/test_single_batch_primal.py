@@ -59,7 +59,7 @@ def test_exhaustion_and_insufficient_slots_never_return_partial_seed():
 
 
 def test_expiry_after_auditing_retains_complete_seed(monkeypatch):
-    from models.routing.model_3.exact.accelerators.single_batch import primal as single_batch_primal
+    from models.routing.model_3.exact.primal import construction as single_batch_primal
     p = split_problem()
     expired = [False]
     def audited(*args):
@@ -75,7 +75,7 @@ def test_expiry_after_auditing_retains_complete_seed(monkeypatch):
 
 def test_split_start_is_extendable_in_milp_and_survives_build_timeout(monkeypatch):
     gp = pytest.importorskip('gurobipy')
-    from models.routing.model_3.exact.search import engine as solver
+    from models.routing.model_3.exact import enhanced_solver as solver
     p = split_problem()
     start = construct_incumbent(p, time.perf_counter()+1)
     saved = deepcopy(start)
@@ -104,9 +104,9 @@ def test_split_start_is_extendable_in_milp_and_survives_build_timeout(monkeypatc
 
 def test_assignment_refinement_preserves_fast_probe_breadth(monkeypatch):
     from models.routing.model_4.exact import initialization as primal
-    from models.routing.model_4.exact.search import assignment
+    from models.routing.model_4.exact.assignment_search import dispatcher as assignment
     from tests.routing.test_single_batch_solver_audit import tiny_problem
-    from models.routing.model_4.exact.accelerators.domains import assignment_domains
+    from models.routing.model_4.exact.preprocessing.domains import assignment_domains
     p = tiny_problem(4, 1)
     check = assignment_domains(p)
     original = primal.construct_incumbent

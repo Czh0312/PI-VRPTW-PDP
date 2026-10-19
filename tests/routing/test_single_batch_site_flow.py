@@ -9,8 +9,8 @@ import pytest
 from models.common.cycle import MultiBatchInstance
 from models.common.cycle.assignment import assigned_problem, lift_result
 from models.common.cycle.audit import audit_solution
-from models.routing.model_3.exact.search import engine as solver
-from models.routing.model_3.exact.formulations.single_batch import build_model
+from models.routing.model_3.exact import enhanced_solver as solver
+from models.routing.model_3.exact.formulation import build_model
 from models.routing.model_3.exact.initialization import construct_incumbent
 from tests.routing.test_single_batch_solver_audit import tiny_problem, enumerate_tiny
 from tests.routing.test_single_batch_primal import split_problem
@@ -157,7 +157,7 @@ def test_site_flow_rejects_fractional_cross_warehouse_edge():
     # This is independent of task time, load and physical route identity.
     m = gp.Model()
     m.Params.OutputFlag = 0
-    from models.routing.model_3.exact.accelerators.single_batch.site_flow import add_site_flow
+    from models.routing.model_3.exact.branch_cut.site_flow import add_site_flow
     left, right = ('o0', 'd'), ('o1', 'd')
     nodes = [dict(order=p.order_map[key[0]], kind=key[1]) for key in (left, right)]
     arc = m.addVar(lb=1, ub=1)

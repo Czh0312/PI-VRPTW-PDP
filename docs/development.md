@@ -34,7 +34,7 @@ python3 -m venv .venv
 | 增加命令参数或调整单次运行输出 | `cli/main.py`、`cli/route.py`、`cli/multibatch.py`、`cli/multibatch_cost.py` |
 | 修改模型编号、分流或输入范围 | `models/routing/catalog.py`、`service.py`、两种算法的 `model_n/` |
 | 修改 M1–M5 求解实现 | 对应 `models/routing/model_n/exact/` 或 `alns/` |
-| 修改 M6–M8 日历搜索及成本内核 | 各模型自己的 `search/batch_search.py`、`model_6/`、`model_7/`、`model_8/` |
+| 修改 M6–M8 日历搜索及成本内核 | 各模型自己的 `k_search/scheduler.py`、`model_6/`、`model_7/`、`model_8/` |
 | 修改业务约束或独立审计 | `models/common/cycle/` |
 | 调整场景参数 / 配置加载逻辑 | `config/` / `tools/configuration/` |
 | 增加批量实验 / 分析 | `experiments/runs/` / `experiments/analysis/` |

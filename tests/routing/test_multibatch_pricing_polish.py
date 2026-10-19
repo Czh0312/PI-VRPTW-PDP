@@ -6,8 +6,8 @@ import time
 
 import pytest
 
-from models.routing.model_5.exact.accelerators.multibatch.pricing_polish import refine_pricing_witness
-from models.routing.model_5.exact.accelerators.pickup_route_pricing import route_context
+from models.routing.model_5.exact.bounds.route_cover_cg.pricing_polish import refine_pricing_witness
+from models.routing.model_5.exact.bounds.route_cg.pickup_pricing import route_context
 from tests.routing.test_multibatch_hybrid import capacity_problem
 from tests.routing.test_multibatch_route_cg import enumerate_trips
 
@@ -47,7 +47,7 @@ def test_fixed_dual_price_matches_full_domain_oracle_with_capacity_constants(see
 
 
 def test_expired_deadline_does_not_build_pricer_or_promote_previous_bound(monkeypatch):
-    import models.routing.model_5.exact.accelerators.pickup_route_pricing as pricing
+    import models.routing.model_5.exact.bounds.route_cg.pickup_pricing as pricing
     p=capacity_problem();ctx=route_context(p,'S')
     old=dict(bound=1000,best_witness=0,iterations=[dict(phase='distance',
         duals=[[list(n['key']),0] for n in ctx['nodes']],fleet_dual=0)])
@@ -73,10 +73,10 @@ def test_unknown_batch_cannot_invent_a_minimum_route_constant():
 
 
 def test_adaptive_fixed_prices_preserve_previous_stronger_floor_and_reference(monkeypatch):
-    from models.routing.model_5.exact.accelerators.multibatch.hybrid import finish_hybrid
+    from models.routing.model_5.hybrid.solver import finish_hybrid
     from tests.routing.test_multibatch_cycle import fixture,hand_solution
-    import models.routing.model_5.exact.accelerators.multibatch.route_pool as pool
-    import models.routing.model_5.exact.accelerators.multibatch.pricing_polish as polish
+    import models.routing.model_5.exact.primal.route_pool as pool
+    import models.routing.model_5.exact.bounds.route_cover_cg.pricing_polish as polish
     p=fixture(pool=2);initial=hand_solution(p)
     row=dict(satellite='S',bound=4,lp_converged=False,columns=[],best_witness=0,
              iterations=[dict(phase='distance',method='integer_pricing',master_objective=4,
@@ -98,7 +98,7 @@ def test_adaptive_fixed_prices_preserve_previous_stronger_floor_and_reference(mo
 
 
 def test_selector_ignores_completed_best_and_uses_last_unfinished_distance_price():
-    from models.routing.model_5.exact.accelerators.multibatch.pricing_polish import select_unfinished_witness
+    from models.routing.model_5.exact.bounds.route_cover_cg.pricing_polish import select_unfinished_witness
     rows=[dict(phase='distance',method='integer_pricing',pricing=dict(optimal=True)),
           dict(phase='distance',method='integer_pricing',pricing=dict(optimal=False,infeasible=False)),
           dict(phase='distance',method='insertion')]
@@ -112,7 +112,7 @@ def test_selector_ignores_completed_best_and_uses_last_unfinished_distance_price
 
 @pytest.mark.parametrize('mode',['missing',None])
 def test_unknown_public_adaptive_mode_is_rejected(mode):
-    from models.routing.model_5.exact.accelerators.multibatch.hybrid import solve_hybrid
+    from models.routing.model_5.hybrid.solver import solve_hybrid
     from tests.routing.test_multibatch_cycle import fixture
     with pytest.raises(ValueError,match='adaptive_pricing_mode'):
         solve_hybrid(fixture(pool=2),adaptive_pricing_mode=mode)

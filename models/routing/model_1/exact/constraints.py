@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import time
-from models.routing.model_1.exact.accelerators.strengthening import trip_slot_limits
+from models.routing.model_1.exact.preprocessing.strengthening import trip_slot_limits
 from models.routing.model_1.exact.objective import add_distance_cost
 
 
@@ -743,7 +743,7 @@ def add_shared_route_constraints(
                     variables.model.addConstr(gp.quicksum(entering[key]) == 1)
                     variables.model.addConstr(gp.quicksum(leaving[key]) == 1)
             if site_flow:
-                from models.routing.model_1.exact.accelerators.single_batch.site_flow import add_site_flow
+                from models.routing.model_1.exact.branch_cut.site_flow import add_site_flow
 
                 site_arcs = add_site_flow(
                     variables.model,

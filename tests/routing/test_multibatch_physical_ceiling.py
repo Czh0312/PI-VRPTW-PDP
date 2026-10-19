@@ -1,8 +1,8 @@
 """A cost ceiling must yield a bound, never a false conditional no-good."""
 import pytest
-from models.routing.model_5.exact.accelerators.multibatch.physical_ceiling import physical_ceiling_certificate
-from models.routing.model_5.exact.accelerators.multibatch.physical_site import physical_site_certificate
-from models.routing.model_5.exact.search.engine import solve_exact
+from models.routing.model_5.exact.bounds.conditional_physical.physical_ceiling import physical_ceiling_certificate
+from models.routing.model_5.exact.bounds.conditional_physical.physical_site import physical_site_certificate
+from models.routing.model_5.exact.enhanced_solver import solve_exact
 from tests.routing.test_multibatch_route_service import congestion_problem
 from tests.routing.test_multibatch_departure_loads import nonmetric_problem
 

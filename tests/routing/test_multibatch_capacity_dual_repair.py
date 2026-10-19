@@ -5,9 +5,9 @@ import time
 
 import pytest
 
-from models.routing.model_5.exact.accelerators.multibatch.capacity_dual_repair import repair_capacity_duals
-from models.routing.model_5.exact.accelerators.multibatch.count_dual_repair import repair_count_duals
-from models.routing.model_5.exact.accelerators.pickup_route_pricing import route_context
+from models.routing.model_5.exact.bounds.route_cover_cg.capacity_dual_repair import repair_capacity_duals
+from models.routing.model_5.exact.bounds.route_cover_cg.count_dual_repair import repair_count_duals
+from models.routing.model_5.exact.bounds.route_cg.pickup_pricing import route_context
 from tests.routing.test_multibatch_hybrid import capacity_problem
 from tests.routing.test_multibatch_route_cg import enumerate_trips
 
@@ -62,7 +62,7 @@ def test_unknown_or_nondelivery_subsets_are_rejected(keys):
 
 def test_actual_column_loop_with_overlap_keeps_complete_oracle_optimum():
     pytest.importorskip('gurobipy')
-    from models.routing.model_5.exact.accelerators.multibatch.route_cg import site_route_cover
+    from models.routing.model_5.exact.bounds.route_cover_cg.route_cg import site_route_cover
     p=capacity_problem();ctx=route_context(p,'S')
     row=site_route_cover(p,ctx,deadline=time.perf_counter()+3,batch_pricing=True,
                          dual_repair=True,delivery_count_cuts=True,capacity_dual_repair=True,
@@ -75,7 +75,7 @@ def test_actual_public_pipeline_with_capacity_repair_preserves_full_audit(monkey
     pytest.importorskip('gurobipy')
     from copy import deepcopy
     import models.routing.service as service
-    from models.routing.model_5.exact.accelerators.multibatch.hybrid import solve_hybrid
+    from models.routing.model_5.hybrid.solver import solve_hybrid
     from models.common.cycle.audit import audit_solution
     from tests.routing.test_multibatch_cycle import fixture,hand_solution
     p=fixture(pool=2);initial=hand_solution(p)

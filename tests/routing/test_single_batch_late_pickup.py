@@ -3,7 +3,7 @@ from copy import deepcopy
 import pytest
 from models.routing.service import solve_routing
 from models.common.cycle.audit import audit_solution
-from models.routing.model_4.alns.search import single_batch
+from models.routing.model_4.alns import search as single_batch
 from models.routing.model_4.alns.evaluator import evaluate
 from tests.routing.test_single_batch_solver_audit import tiny_problem, nonmetric_problem
 

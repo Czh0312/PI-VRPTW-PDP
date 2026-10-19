@@ -6,11 +6,11 @@ import time
 
 import pytest
 
-from models.routing.model_5.alns.accelerators.cycle_cache import CycleEvaluator
+from models.routing.model_5.alns.performance.cycle_cache import CycleEvaluator
 from models.routing.model_5.alns.evaluator import evaluate
-from models.routing.model_5.alns.accelerators.intensification import CycleDescent
+from models.routing.model_5.alns.intensification import CycleDescent
 from models.routing.model_5.alns.neighborhoods import clone_state
-from models.routing.model_5.alns.search.engine import _move
+from models.routing.model_5.alns.search import _move
 from tests.routing.test_model5_intensification import directed_cycle
 from models.common.cycle import MultiBatchInstance
 from models.common.domain.instance import ProblemInstance

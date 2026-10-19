@@ -7,7 +7,7 @@ import pytest
 
 from models.common.cycle.audit import audit_solution
 from models.common.cycle import MultiBatchInstance
-from models.routing.model_5.exact.accelerators.multibatch.e1_polish import reoptimize_e1
+from models.routing.model_5.exact.primal.e1_polish import reoptimize_e1
 from tests.routing.test_multibatch_cycle import fixture, hand_solution
 from tests.routing.test_multibatch_departure_loads import nonmetric_problem
 
@@ -21,7 +21,7 @@ def paths(result):
 @pytest.mark.parametrize('retime', [False, True])
 def test_polishing_preserves_full_feasibility_and_cannot_beat_known_global_optimum(seed, retime):
     pytest.importorskip('gurobipy')
-    from models.routing.model_5.exact.search.engine import solve_exact
+    from models.routing.model_5.exact.enhanced_solver import solve_exact
     p = nonmetric_problem(seed)
     initial = solve_exact(p, time_limit=5)
     assert initial['info']['proven_optimal'] and initial['audit']['valid']
@@ -112,8 +112,8 @@ def test_public_entry_and_milp_budget_include_polishing():
 
 def test_joint_timing_rejects_preparation_on_a_busy_e2_vehicle():
     gp = pytest.importorskip('gurobipy')
-    from models.routing.model_5.exact.accelerators.multibatch.e1_routes import build_e1_routes
-    from models.routing.model_5.exact.accelerators.multibatch.e1_polish import add_e2_timing
+    from models.routing.model_5.exact.bounds.inventory.e1_routes import build_e1_routes
+    from models.routing.model_5.exact.primal.e1_polish import add_e2_timing
     base = fixture(pool=2, e2_dispatch_prep_time=2)
     p = MultiBatchInstance(base.network,
         [replace(base.orders[0], pickup_window=(70, 70)),
@@ -137,8 +137,8 @@ def test_joint_timing_rejects_preparation_on_a_busy_e2_vehicle():
 
 def test_fixed_schedule_uses_earliest_of_all_supply_deadlines():
     pytest.importorskip('gurobipy')
-    from models.routing.model_5.exact.accelerators.multibatch.e1_routes import build_e1_routes
-    from models.routing.model_5.exact.accelerators.multibatch.e1_polish import fix_e2_schedule
+    from models.routing.model_5.exact.bounds.inventory.e1_routes import build_e1_routes
+    from models.routing.model_5.exact.primal.e1_polish import fix_e2_schedule
     base = fixture(pool=3, e2_max_trips_per_vehicle=3)
     p = MultiBatchInstance(base.network,
         [base.orders[0], replace(base.orders[0], id='extra'), base.orders[1]], base.operating_policy)

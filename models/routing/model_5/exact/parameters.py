@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from models.routing.model_5.exact.accelerators.strengthening import single_batch_bounds
+from models.routing.model_5.exact.preprocessing.strengthening import single_batch_bounds
 
 
 @dataclass(frozen=True)
@@ -55,7 +55,7 @@ def prepare_parameters(
         raise ValueError("Unknown single-batch linear link mode")
     windows, site_windows = {}, {}
     if free:
-        from models.routing.model_5.exact.accelerators.domains import assignment_domains
+        from models.routing.model_5.exact.preprocessing.domains import assignment_domains
 
         domain_check = domain_check or assignment_domains(problem, travel_bounds)
         if not domain_check["passed"]:
@@ -173,7 +173,7 @@ def multibatch_prepare_parameters(
     linear_links = compact and linear_e2_links
     windows, site_windows = {}, {}
     if free:
-        from models.routing.model_5.exact.accelerators.domains import assignment_domains
+        from models.routing.model_5.exact.preprocessing.domains import assignment_domains
 
         domain_check = domain_check or assignment_domains(problem, travel_bounds)
         if not domain_check["passed"]:
