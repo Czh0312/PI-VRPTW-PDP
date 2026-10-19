@@ -88,11 +88,6 @@ def build_model(problem, *, verbose=False, deadline=None, compact_e2=None):
         variables.demand_weights = weights
         N = variables.create_container_pool(problem)
         variables.pool = N
-        from models.common.cycle.pool_bound import necessary_pool_lower_bound
-        N.LB = necessary_pool_lower_bound(problem)
-        for batch in p.batches:
-            m.addConstr(N >= gp.quicksum(counts[s, batch.id] for s in problem.satellites),
-                        name=f"pool_batch_load_{batch.id}")
         supplied = add_supply_time_constraints(parameters, variables)
         variables.supply_times = supplied
         task_times = {
@@ -147,9 +142,6 @@ def build_model(problem, *, verbose=False, deadline=None, compact_e2=None):
         physical_vehicles = add_vehicle_activation_constraints(parameters, variables)
         variables.physical_vehicles = physical_vehicles
         parts = set_cost_objective(parameters, variables)
-        from models.common.cycle.pool_bound import necessary_cost_lower_bound
-        m.addConstr(gp.quicksum(parts.values()) >= necessary_cost_lower_bound(problem),
-                    name="necessary_total_cost_bound")
         budget()
         m.update()
         return m, dict(

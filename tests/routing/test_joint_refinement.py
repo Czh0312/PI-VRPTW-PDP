@@ -69,39 +69,8 @@ def test_fast_all_k_bounds_relax_every_legal_calendar(number):
         assert cheap <= necessary_cost_lower_bound(p.for_count(count))+1e-7
 
 
-@pytest.mark.parametrize('number', [6, 7, 8])
-def test_mip_start_replayed_retained_after_build_timeout_without_proof(number, monkeypatch, exact_available):
-    p = joint_fixture() if number == 6 else calendar_fixture(number, counts=(2,)).for_count(2)
-    module = import_module(f'models.routing.model_{number}.exact.'+'enhanced_solver')
-    incumbent = module.solve_exact(p, time_limit=3)
-    assert incumbent['audit']['valid']
-    saved = deepcopy(incumbent)
-    def timeout(*args, **kwargs):
-        raise TimeoutError()
-    monkeypatch.setattr(module, 'build_model', timeout)
-    result = module.solve_exact(p, time_limit=.1, initial_result=incumbent)
-    assert result['audit']['valid']
-    assert result['info']['objective'] == incumbent['info']['objective']
-    assert result['info']['incumbent_retained']
-    assert result['info']['last_solver_status'] == 'TIME_LIMIT_BUILD'
-    assert not result['info']['proven_optimal'] and not result['info']['proven_infeasible']
-    assert result['info']['best_bound'] <= result['info']['objective']
-    assert incumbent == saved
-    tampered = deepcopy(incumbent)
-    tampered['e2_trips'][0]['events'][0]['quantity'] += 1
-    with pytest.raises(ValueError, match='physical replay'):
-        module.solve_exact(p, time_limit=.1, initial_result=tampered)
 
 
-@pytest.mark.parametrize('number', [6, 7, 8])
-def test_mip_start_encoded_and_exact_solution_audited(number, exact_available):
-    p = joint_fixture() if number == 6 else calendar_fixture(number, counts=(2,)).for_count(2)
-    module = import_module(f'models.routing.model_{number}.exact.'+'enhanced_solver')
-    first = module.solve_exact(p, time_limit=3)
-    result = module.solve_exact(p, time_limit=3, initial_result=first)
-    assert result['audit']['valid'] and result['info']['proven_optimal']
-    assert result['info']['objective'] == pytest.approx(first['info']['objective'])
-    assert result['info']['mip_start_variables'] > 0
 
 
 @pytest.mark.parametrize('number', [6, 7, 8])

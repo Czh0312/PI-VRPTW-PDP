@@ -36,13 +36,15 @@ M8 的批次边界为整数刻度变量 x_0,…,x_K，约束 x_0=t0、x_K=t1、x
 
 ## 精确求解
 
-分别通过 `model_7/exact/`、`model_8/exact/` 入口运行。按配置枚举 K，所有 K 共享一次调用的总时间预算。
+2026-10-19 起，M7/M8 默认使用一个包含完整 K 允许域的统一 MILP。
+二元变量选择 K，对应业务块中的路线、箱池、截点和边界同时由 Gurobi 决策。
+M7 保留等长批次和独立截点；M8 保留全部原允许整数边界，不枚举预设日历网格。
+固定 K 业务块只建模、不分别求解；完整模型只调用一次 `optimize()`。
+完整数学表达、常数项处理、时间刻度与等价性证明见[统一批次数 MILP](unified_batch_count_milp.md)。
 
-M7 对每个 K 求解具有 K 个独立截点变量的完整联合 MILP。M8 对每个 K 求解含 K−1 个内部边界变量和 K 个截点变量的完整联合 MILP；批次起止直接参与释放、路线时间和箱池供给约束。M8 不枚举所有长度组合，也不把 ALNS 找到的日历当成精确允许域。
-
-两模型分别拥有 `models/routing/model_7/exact/formulation.py` 和 `models/routing/model_8/exact/formulation.py`，独立维护路线、装载和成本建模。各自的 `enhanced_solver.py` 负责固定 K 子问题；M8 提取边界后重建固定日历，再投影物理方案并计价。模型身份、决策域及最终证明范围由各编号入口和各自的 `k_search/scheduler.py` 管理，不再导入 M6 的求解实现。
-
-所有配置 K 都证明最优或不可行时，可声明整个模型最优。另一个充分条件是：所有未证不可行的 K 均有有限的有效下界，其最小值不低于已独立审计的可行成本；此时尚未结案的 K 也不可能改善当前方案。输出 `proof_aggregation` 区分这两种全局证书，不把被界排除的 K 标成单独最优。未执行的 K、缺失下界及审计失败会阻止按界证明全局最优；未闭合时保留可行上界和各 K 下界。结论只覆盖给定 K 集合和整数时间精度。
+各模型独立维护 `formulation.py` 的业务行和 `solution.py` 的物理解码，共用无搜索逻辑的线性分块装配。
+最优性与下界直接来自完整模型，并通过原业务、成本和两周期审计；不再汇总逐 K 求解状态。
+建模超时不求解不完整候选域。旧精确增强方法与 K 调度已移至研究归档。
 
 ## ALNS
 
@@ -95,7 +97,7 @@ M7/M8 不接受 M6 历史候选日程的 `--fixed-cutoffs`、`--optimize-cutoffs
 
 ## 输出和独立验证
 
-输出保存模型编号、schedule_mode、calendar_config、cycle_batch_count、batch_boundaries、batch_durations_ticks、batch_cutoffs、cutoff_offsets_ticks、cutoff_ratios 和 count_search。周期划分数、实际有配送的批次数、实际空箱回运轮数分开报告。
+输出保存模型编号、schedule_mode、calendar_config、cycle_batch_count、batch_boundaries、batch_durations_ticks、batch_cutoffs、cutoff_offsets_ticks、cutoff_ratios。统一精确结果另保存 info.batch_count_candidates 和 complete_count_domain；ALNS 保留 count_search。周期划分数、实际有配送的批次数、实际空箱回运轮数分开报告。
 
 修正后的有效方案中，这三个数量均等于 K。actual_recovery_round_count 按有正回收量的 batch_id 去重；同一轮取回两个前置仓的箱子仍只计一轮。旧 M7/M8 字段按“前置仓×批次”计数的问题已修正，原始历史文件不改写。独立审计用 EMPTY_BATCH_DELIVERY、EMPTY_BATCH_RECOVERY 拒绝无实际作业的批次，历史方案须重新审计后才能作为新允许域的初解。
 

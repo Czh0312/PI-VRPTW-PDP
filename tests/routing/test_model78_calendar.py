@@ -159,27 +159,6 @@ def test_initial_incumbent_is_retained_and_proof_is_cleared(number, exact_availa
     assert initial == copied
 
 
-@pytest.mark.parametrize('number', [7, 8])
-def test_unresolved_k_never_inherits_another_counts_optimal_proof(number, exact_available, monkeypatch):
-    solver = import_module(f'models.routing.model_{number}.exact.enhanced_solver')
-    p = calendar_fixture(number)
-    original = solver.solve_exact
-    def partial(child, **kwargs):
-        if len(child.operating_policy.batches) == 1:
-            return original(child, **kwargs)
-        result = joint_empty_result(child, 'exact')
-        result['info'].update(status='TIME_LIMIT', best_bound=0.)
-        return result
-    monkeypatch.setattr(solver, 'solve_exact', partial)
-    r = solve_routing(model=number, method='exact', problem=p, exact_time=10)
-    assert r['audit']['valid'] and not r['info']['proven_optimal']
-    from models.common.cycle.pool_bound import necessary_cost_lower_bound
-    expected = min(r['count_search'][0]['objective'],
-                   necessary_cost_lower_bound(p, batch_count=2, relaxed_loading=True))
-    assert not r['info']['proven_infeasible']
-    assert r['info']['best_bound'] == pytest.approx(expected)
-    assert r['info']['best_bound'] < r['info']['objective']
-    assert len(r['count_search']) == 2 and r['count_search'][1]['status'] == 'TIME_LIMIT'
 
 
 def test_m8_accepts_nondivisible_horizon_and_exact_phase_ticks():

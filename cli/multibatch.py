@@ -190,36 +190,42 @@ def run_case(config, fleet, *, case_path=None, output=None):
         if not instance.reusable:
             lines += ['一次性包装的重放检查车辆与配送服务；每个周期重新购入包装，不声明容器闭环。']
         if instance.free_assignment:
-            lines += ['自由分仓按顾客选择，每个顾客的全部订单保持同仓。精确枚举的全局证明状态以 info 为准。']
+            lines += ['自由分仓按顾客选择，每个顾客的全部订单保持同仓。完整模型的全局证明状态以 info 为准。']
         if joint:
             lines += ['', f"启用配送批次数：{result.get('delivery_batch_count')}；总距离：{result.get('total_distance')}。",
                       f"成本来源类型：{instance.cost_profile.config['source_type']}；单位：{instance.cost_profile.config['currency']}。",
-                      '关闭配送批次仍保留回收义务；纯回收趟次显式计费。初始箱体投资单列。',
+                      '每个计入批次数的批次都必须有配送和回运；纯回收趟次显式计费。初始箱体投资单列。',
                       '截点仅决定本轮回运资格；二级车辆在第二阶段仍可配送和回收。', '']
             if result.get('batch_cutoffs'):
                 lines += [f"截点模式：{result.get('cutoff_mode', 'fixed')}。", '',
                           '| 批次 | 开始/分钟 | 回运截点/分钟 | 第一窗/分钟 | 第二窗/分钟 | 结束/分钟 |',
                           '| --- | ---: | ---: | ---: | ---: | ---: |']
+                calendar = (instance.for_count(result['cycle_batch_count']) if getattr(instance, 'uniform_cycle', False)
+                            else instance.selected_problem(result) if getattr(instance, 'calendar_cycle', False) else instance)
+                minutes=calendar.operating_policy.minutes
                 for b in result['batches']:
-                    minutes=instance.operating_policy.minutes
                     lines.append(f"| {b['id']} | {minutes(b['start']):g} | {minutes(b['cutoff']):g} | "
                                  f"{minutes(b['cutoff']-b['start']):g} | {minutes(b['end']-b['cutoff']):g} | {minutes(b['end']):g} |")
                 lines.append('')
             lines.extend(f"- {key}: {value}" for key, value in result.get('cost_components', {}).items())
-            if getattr(instance,'uniform_cycle',False):
-                lines += ['',f"均匀分批搜索范围：{list(instance.batch_count_candidates)}；选定周期批次数：{result.get('cycle_batch_count')}。",
-                          f"每批时长/分钟：{instance.operating_policy.minutes(result['batch_duration_ticks']) if result.get('batch_duration_ticks') is not None else None}；"
-                          f"统一分界比例：{result.get('shared_cutoff_ratio')}；实际空箱回运轮数：{result.get('actual_recovery_round_count')}。",
-                          '所有配置批次数均解决，才能声明整个均匀分批模型的成本最优；单个K最优不足以证明全局最优。',
-                          '', '| K | 状态 | 有效成本 | 箱数 | 该K成本最优已证明 |', '| --- | --- | ---: | ---: | --- |']
-                lines.extend(f"| {r['batch_count']} | {r['status']} | {r['objective']} | {r.get('container_pool_size')} | {r['proven_optimal']} |" for r in result['count_search'])
-            if getattr(instance, 'calendar_cycle', False):
-                lines += ['', f"日历模式：{instance.schedule_mode}；K 搜索范围：{list(instance.batch_count_candidates)}。",
-                          f"逐批长度/ticks：{result.get('batch_durations_ticks')}；逐批分界比例：{result.get('cutoff_ratios')}。",
-                          f"实际空箱回运轮数：{result.get('actual_recovery_round_count')}。",
-                          '所有配置K均证明最优或不可行，才能声明整个模型成本最优。',
-                          '', '| K | 状态 | 有效成本 | 箱数 | 该K成本最优已证明 |', '| --- | --- | ---: | ---: | --- |']
-                lines.extend(f"| {r['batch_count']} | {r['status']} | {r['objective']} | {r.get('container_pool_size')} | {r['proven_optimal']} |" for r in result['count_search'])
+            if getattr(instance, 'uniform_cycle', False) or getattr(instance, 'calendar_cycle', False):
+                lines += ['', f"批次数允许域：{list(instance.batch_count_candidates)}；选定周期批次数：{result.get('cycle_batch_count')}。",
+                          f"实际空箱回运轮数：{result.get('actual_recovery_round_count')}。"]
+                if getattr(instance, 'uniform_cycle', False):
+                    lines += [f"统一分界比例：{result.get('shared_cutoff_ratio')}。"]
+                else:
+                    lines += [f"日历模式：{instance.schedule_mode}；逐批长度/ticks：{result.get('batch_durations_ticks')}；"
+                              f"逐批分界比例：{result.get('cutoff_ratios')}。"]
+                if result['info'].get('exact_strategy') == 'gurobi_unified_milp':
+                    lines += ['批次数、路线、箱池和日历在一个 MILP 中联合优化；一次 Gurobi 求解。',
+                              f"完整候选域已建模：{result['info'].get('complete_count_domain')}；"
+                              f"全局最优已证明：{result['info'].get('proven_optimal')}；"
+                              f"全局下界：{result['info'].get('best_bound')}。"]
+                elif 'count_search' in result:
+                    lines += ['', '| K | 状态 | 有效成本 | 箱数 | 该K成本最优已证明 |',
+                              '| --- | --- | ---: | ---: | --- |']
+                    lines.extend(f"| {r['batch_count']} | {r['status']} | {r['objective']} | {r.get('container_pool_size')} | {r['proven_optimal']} |"
+                                 for r in result['count_search'])
         if audit.get('errors'):
             lines += ['', '审计错误：', '```json', json.dumps(audit['errors'], ensure_ascii=False, indent=2), '```']
         if result.get('precheck', {}).get('errors'):

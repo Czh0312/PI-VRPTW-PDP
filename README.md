@@ -10,9 +10,9 @@
 | 编号 | 研究角色 | 求解方式 |
 | --- | --- | --- |
 | M1 | 一次性包装、固定分仓、纯配送，B=1 | MILP / ALNS |
-| M2 | 一次性包装、自由分仓、纯配送，B=1 | 联合分仓 MILP 或分仓域树 / ALNS |
+| M2 | 一次性包装、自由分仓、纯配送，B=1 | 联合分仓 MILP / ALNS |
 | M3 | 单批次循环包装、固定分仓，B=1 | MILP / ALNS |
-| M4 | 单批次循环包装、自由分仓，B=1 | 联合分仓 MILP 或分仓域树 / ALNS |
+| M4 | 单批次循环包装、自由分仓，B=1 | 联合分仓 MILP / ALNS |
 | M5 | 多批次循环包装、固定分仓，B>1 | MILP / ALNS |
 | M6 | 分批、箱池与路线成本优化：等长批次、共同分界 | MILP / ALNS |
 | M7 | 分批、箱池与路线成本优化：等长批次、逐批独立分界 | MILP / ALNS |
@@ -52,6 +52,9 @@ make test
 ```
 
 精确求解需要 Gurobi 和有效许可证；ALNS 求解入口不加载 Gurobi。
+当前精确入口默认直接 Gurobi，M6–M8 的批次数、日历、路线与箱池在同一个 MILP 中优化，
+旧精确算法已从当前代码移除并存入[研究归档](archive/exact_research_20261019/README.md)。
+不使用外层 K 搜索或定制强化。数学表达见[统一批次数 MILP](docs/unified_batch_count_milp.md)。
 单次输出默认写入 `output/single_runs/`，可用 `--output` 指向新的空目录。
 
 ## 目录职责

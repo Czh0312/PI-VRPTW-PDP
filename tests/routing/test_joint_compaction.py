@@ -95,35 +95,22 @@ def test_zero_duration_subtour_is_excluded_by_shared_causality(number, exact_ava
         model.dispose()
 
 
-@pytest.mark.parametrize('number', [6, 7, 8])
-def test_assignment_guesses_are_soft_hints_not_partial_starts_or_fixes(number, exact_available):
-    problem = joint_fixture()
-    model, ctx = build(number, problem)
-    try:
-        before = [(v.LB, v.UB) for v in ctx['assignments'].values()]
-        hints = import_module(f'models.routing.model_{number}.exact.initialization')
-        count = hints.install_assignment_hints(problem, model, ctx)
-        model.update()
-        assert count == len(ctx['assignments'])
-        assert model.NumStart == 0
-        assert [(v.LB, v.UB) for v in ctx['assignments'].values()] == before
-        assert all(v.VarHintVal in (0, 1) for v in ctx['assignments'].values())
-        model.Params.TimeLimit = 3
-        model.optimize()
-        assert model.Status == 2
-        assert model.ObjVal == pytest.approx(61)
-    finally:
-        model.dispose()
 
 
 @pytest.mark.parametrize('number', [6, 7, 8])
 @pytest.mark.parametrize('variant', [0, 3, 6])
 def test_compact_formulation_matches_independent_oracle(number, variant, monkeypatch, exact_available):
-    from tests.routing.test_model78_independent_oracle import test_full_milp_matches_independent_one_order_oracle
-    module = import_module(f'models.routing.model_{number}.exact.' + 'enhanced_solver')
-    original = module.build_model
-    monkeypatch.setattr(module, 'build_model', lambda p, **kw: original(p, compact_e2=True, **kw))
-    test_full_milp_matches_independent_one_order_oracle(number, variant, exact_available)
+    import math
+    from tests.routing.test_model78_independent_oracle import one_order_problem, one_order_oracle
+    p = one_order_problem(number, variant)
+    expected = one_order_oracle(p, number)
+    result = import_module(f'models.routing.model_{number}.exact').solve_exact(
+        p, time_limit=5, milp_options={'formulation': 'compact'})
+    if math.isinf(expected):
+        assert result['info']['proven_infeasible']
+    else:
+        assert result['info']['proven_optimal'] and result['audit']['valid']
+        assert result['info']['objective'] == pytest.approx(expected)
 
 
 @pytest.mark.parametrize('number', [6, 7, 8])
@@ -150,12 +137,10 @@ def test_compact_and_expanded_optima_match_with_nonmetric_distance(number, zero_
             options['loading_mode'] = 'optimized'
         problem = CalendarCycleInstance(network, orders, source.operating_policy, options,
                                         source.cost_profile.config, model=number).for_count(2)
-    module = import_module(f'models.routing.model_{number}.exact.' + 'enhanced_solver')
-    original = module.build_model
+    module = import_module(f'models.routing.model_{number}.exact.' + 'milp_solver')
     results = []
     for compact in (False, True):
-        monkeypatch.setattr(module, 'build_model', lambda p, **kw: original(p, compact_e2=compact, **kw))
-        result = module.solve_exact(problem, time_limit=5)
+        result = module.solve_milp(problem, time_limit=5, milp_options={'formulation': 'compact' if compact else 'expanded'})
         assert result['info']['proven_optimal'] and result['audit']['valid'], result['info']
         results.append(result['info']['objective'])
     assert results[0] == pytest.approx(results[1])

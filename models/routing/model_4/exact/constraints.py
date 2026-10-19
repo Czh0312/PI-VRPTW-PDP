@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import time
-from models.routing.model_4.exact.preprocessing.strengthening import trip_slot_limits
+from models.routing.model_4.exact.preprocessing.model_bounds import trip_slot_limits
 from models.routing.model_4.exact.objective import add_distance_cost
 
 
@@ -456,7 +456,6 @@ def add_second_echelon_constraints(
     variables,
     *,
     causal_limit,
-    causal_step_bounds,
     e2_nodes,
     linear_boundary,
     linear_schedule,
@@ -509,10 +508,10 @@ def add_second_echelon_constraints(
                 # they have no selected head/tail and their inactive links
                 # use the recomputed endpoint slack below.
                 r["step_start_bounds"] = (
-                    (3 * slot, causal_limit - 2) if causal_step_bounds else (0, causal_limit)
+                    ((0, causal_limit))
                 )
                 r["step_end_bounds"] = (
-                    (3 * slot + 2, causal_limit) if causal_step_bounds else (0, causal_limit)
+                    ((0, causal_limit))
                 )
                 r["step_start"] = variables.create_r_2(r)
                 r["step_end"] = variables.create_r_3(r)
@@ -682,10 +681,8 @@ def add_shared_route_constraints(
     linear_identity,
     linear_internal,
     objective,
-    site_flow,
     step_slack,
     task_step_bounds,
-    tight_route_bounds,
 ):
     """Link shared task arcs and route identities, times, loads and causal steps."""
     import gurobipy as gp
@@ -715,9 +712,7 @@ def add_shared_route_constraints(
                     if (i, -2) in r["x"]:
                         leaving[key].append(r["x"][i, -2])
             identity_bounds = {
-                key: (min(ids), max(ids))
-                if tight_route_bounds
-                else (1, len(variables.routes["e2"]))
+                key: ((1, len(variables.routes["e2"])))
                 for key, ids in available_routes.items()
             }
             for key, (lower, upper) in identity_bounds.items():
@@ -739,22 +734,8 @@ def add_shared_route_constraints(
             for key in variables.task_times:
                 check_budget()
                 variables.model.addConstr(identities[key] == gp.quicksum(memberships[key]))
-                if not site_flow:
-                    variables.model.addConstr(gp.quicksum(entering[key]) == 1)
-                    variables.model.addConstr(gp.quicksum(leaving[key]) == 1)
-            if site_flow:
-                from models.routing.model_4.exact.branch_cut.site_flow import add_site_flow
-
-                site_arcs = add_site_flow(
-                    variables.model,
-                    parameters.problem,
-                    variables.routes["e2"],
-                    e2_nodes,
-                    e2_arc_cache,
-                    variables.global_arcs,
-                    variables.assignments,
-                    check_budget,
-                )
+                variables.model.addConstr(gp.quicksum(entering[key]) == 1)
+                variables.model.addConstr(gp.quicksum(leaving[key]) == 1)
         for (left, right), indexed in variables.shared_arcs.items():
             check_budget()
             if compressed:

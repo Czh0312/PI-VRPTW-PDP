@@ -222,7 +222,7 @@ def multibatch_add_second_echelon_constraints(
                 selects = {b: variables.multibatch_create_r() for b in batches}
                 variables.model.addConstr(
                     gp.quicksum(selects.values())
-                    <= (r["used"] if parameters.strengthen_multibatch else 1)
+                    <= ((1))
                 )
                 # Dispatch preparation for a loaded trip occupies its vehicle.
                 # It starts after both inbound goods and the previous trip are ready.
@@ -260,19 +260,6 @@ def multibatch_add_second_echelon_constraints(
                             + parameters.policy.e2_dispatch_prep_time
                             - latest * (1 - selects[b])
                         )
-                    if parameters.strengthen_multibatch:
-                        for resource, capacity in (
-                            ("w", parameters.fleet.e2_weight_cap),
-                            ("v", parameters.fleet.e2_volume_cap),
-                        ):
-                            variables.model.addConstr(
-                                gp.quicksum(
-                                    n[resource] * r["visit"][i]
-                                    for i, n in enumerate(nodes)
-                                    if n["kind"] == "d" and n["order"].batch == b
-                                )
-                                <= capacity * selects[b]
-                            )
                 for i, n in enumerate(nodes):
                     o = n["order"]
                     if not parameters.share_e2:

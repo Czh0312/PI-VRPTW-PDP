@@ -1,23 +1,18 @@
-"""M2 public entry: explicit algorithm selection and stable result identity."""
+"""M2: direct Gurobi solve of the complete mathematical model."""
 import time
-
 from models.common.cycle.scope import validate_problem, finish_result
 from models.common.solver_config import record_strategy
 
 
-def solve_exact(problem, time_limit=60, seed=42, verbose=False, *, strategy='auto', milp_options=None):
+def solve_exact(problem, time_limit=60, seed=42, verbose=False, *, strategy='milp', milp_options=None):
     begun = time.perf_counter()
     validate_problem(problem, 2)
-    if strategy not in ('auto', 'milp', 'joint', 'domain_tree', 'enumeration'):
-        raise ValueError('Unsupported M2 exact strategy: '+str(strategy))
-    if strategy != 'milp' and milp_options is not None:
-        raise ValueError('milp_options requires strategy="milp"')
-    if strategy == 'milp':
-        from models.routing.model_2.exact.milp_solver import solve_milp as solve_local
-        result = solve_local(problem, time_limit=time_limit, seed=seed, verbose=verbose, milp_options=milp_options)
-    else:
-        from models.routing.model_2.exact.assignment_search.dispatcher import solve_exact as solve_local
-        result = solve_local(problem, time_limit=time_limit, seed=seed, verbose=verbose, strategy=strategy)
-    result = finish_result(problem, result, solver_module=solve_local.__module__)
+    if strategy not in ('milp', 'auto'):
+        raise ValueError('Only direct Gurobi is supported; custom exact strategies were retired')
+    from models.routing.model_2.exact.milp_solver import solve_milp
+    result = solve_milp(problem, time_limit=time_limit, seed=seed, verbose=verbose, milp_options=milp_options)
+    result = finish_result(problem, result, solver_module=solve_milp.__module__)
     result['info']['runtime'] = time.perf_counter()-begun
-    return record_strategy(result, strategy, time_limit=time_limit, seed=seed)
+    record_strategy(result, 'milp', time_limit=time_limit, seed=seed)
+    result['info']['exact_strategy_requested'] = strategy
+    return result

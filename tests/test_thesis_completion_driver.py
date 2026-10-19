@@ -205,3 +205,33 @@ def test_observer_waits_for_outer_audit_and_preserves_solver_inputs():
     assert [c['seed'] for c in called] == [42, 43]
     assert [c['budget'] for c in trace] == [3, 2]
     assert len(trace) == len(history) == 2
+
+
+@pytest.mark.parametrize('number', [6, 7, 8])
+def test_worker_records_unified_milp_without_per_count_diagnostics(tmp_path, monkeypatch, number):
+    """Run the real new solver through the formal worker's evidence pipeline."""
+    import csv
+    from tests.routing.test_unified_batch_milp import instance
+    import tools.configuration.loader as loader
+    import models.common.cycle as cycle
+    p = instance(number)
+    config = {'economic_config': p.cost_profile.config}
+    monkeypatch.setattr(loader, 'load_routing_case', lambda *a, **k: (config, p.fleet))
+    monkeypatch.setattr(cycle, 'load_instance', lambda *a, **k: p)
+    # Keep the temporary source path from escaping this test's interpreter.
+    monkeypatch.setattr(driver.sys, 'path', list(driver.sys.path))
+    job = dict(id=f'unified_m{number}', case='tiny', model=number, method='exact',
+               version='current', seed=42, budget=10, iterations=0, case_path='tiny.json')
+    driver.write(tmp_path/'manifest.json', dict(jobs=[job], source_hashes={}, input_hashes={}))
+    driver.write(tmp_path/'manifest.sha256.json', dict(sha256=driver.sha(tmp_path/'manifest.json')))
+    driver.worker(Namespace(output=str(tmp_path), job=job['id'], attempt=1))
+    path = tmp_path/'runs'/job['id']/'attempt_001'
+    row = driver.read(path/'row.json')
+    assert row['valid'] and row['proven_optimal'] and row['complete_count_domain']
+    assert row['exact_strategy'] == 'gurobi_unified_milp'
+    assert row['candidate_count'] == 2 and row['visits'] == 0
+    assert driver.read(path/'candidate_diagnostics.json') == []
+    history = list(csv.DictReader((path/'anytime.csv').open()))
+    assert len(history) == 2 and history[-1]['source'] == 'confirmed_call_return'
+    assert float(history[-1]['objective']) == pytest.approx(row['objective'])
+    assert int(history[-1]['batch_count']) == row['k']

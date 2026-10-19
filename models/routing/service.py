@@ -22,8 +22,10 @@ def solve_routing(*, model, method, problem, e1_tasks=None, e2_tasks_by_sat=None
         raise ValueError(f"Expected exact or alns, got {method}")
     if method != 'exact' and (exact_strategy is not None or milp_options is not None):
         raise ValueError('Exact strategy/options require method="exact"')
-    if milp_options is not None and exact_strategy != 'milp':
+    if milp_options is not None and exact_strategy not in (None, 'auto', 'milp'):
         raise ValueError('milp_options requires exact_strategy="milp"')
+    if initial_result is not None and method == 'exact':
+        raise ValueError('Direct Gurobi does not accept an external initial solution')
     if initial_result is not None and model not in (6, 7, 8):
         raise ValueError('Initial joint solution requires M6–M8')
     if getattr(policy, "multi_batch", False):
@@ -42,8 +44,6 @@ def solve_routing(*, model, method, problem, e1_tasks=None, e2_tasks_by_sat=None
                 kwargs['strategy'] = exact_strategy
             if milp_options is not None:
                 kwargs['milp_options'] = milp_options
-            if initial_result is not None:
-                kwargs['initial_result'] = initial_result
             return module.solve_exact(problem, **kwargs)
         kwargs=dict(max_time=alns_time,max_iterations=alns_iter,seed=seed)
         if initial_result is not None:

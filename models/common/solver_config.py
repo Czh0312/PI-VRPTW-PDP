@@ -97,31 +97,6 @@ def record_strategy(result, requested, *, time_limit, seed):
     """Keep algorithm identity separate from calendar strategy and solver family."""
     info = result['info']
     info['exact_strategy_requested'] = requested
-    if requested == 'milp':
-        info['exact_strategy'] = 'gurobi_k_enumeration' if 'count_search' in result else 'gurobi_milp'
-        if 'count_search' in result:
-            # A selected child's raw bound is not the bound of the union of K domains.
-            # Raw solver evidence remains available on each visit.
-            info.pop('gurobi_best_bound', None)
-            info['best_bound_source'] = 'all_count_gurobi_bounds' if info.get('best_bound') is not None else None
-            visits = result.get('count_search_visits', [])
-            info['mip_runtime'] = sum(v.get('mip_runtime', 0.) for v in visits)
-            info['mip_runtime_scope'] = 'all_visited_counts'
-            info['build_time'] = sum(v.get('build_time', 0.)+v.get('construction_time', 0.) for v in visits)
-            info['node_count'] = sum(v.get('node_count', 0.) for v in visits)
-            info['model_size_scope'] = 'selected_count'
-    else:
-        info['exact_strategy'] = info.get('assignment_strategy',
-            str(info.get('budget_strategy', 'default'))+'_k_search'
-            if 'count_search' in result else 'default_milp')
-        info.setdefault('solver_config', dict(
-            profile='existing_defaults', time_limit=time_limit, seed=seed, threads=1,
-            formulation='per_model_auto',
-            formulation_features=info.get('formulation_features'),
-            compact_e2=info.get('compact_e2'),
-            mip_start_supplied=info.get('mip_start_supplied'),
-            budget_strategy=info.get('budget_strategy'),
-            per_count_details='count_search_visits' if 'count_search' in result else None,
-        ))
+    info['exact_strategy'] = ('gurobi_unified_milp' if 'complete_count_domain' in info else 'gurobi_milp')
     info.setdefault('solve_request', dict(time_limit=time_limit, seed=seed))
     return result

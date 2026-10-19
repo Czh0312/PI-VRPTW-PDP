@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 
-from models.routing.model_3.exact.preprocessing.strengthening import (
+from models.routing.model_3.exact.preprocessing.model_bounds import (
     route_arcs,
     trip_slot_limits,
     COMPRESS_ROUTE_MIN_INTERNAL_ARCS,
@@ -35,23 +35,17 @@ def build_model(
     travel_bounds=None,
     domain_check=None,
     compress_routes=None,
-    capacity_cuts=None,
     linear_e2_links=None,
     factor_e2_loads=None,
-    site_flow=False,
-    tight_route_bounds=True,
-    short_cycle_cuts=False,
-    causal_step_bounds=False,
 ):
     import gurobipy as gp
 
+
     parameters = prepare_parameters(
-        causal_step_bounds=causal_step_bounds,
         domain_check=domain_check,
         linear_e2_links=linear_e2_links,
         problem=problem,
         share_e2=share_e2,
-        short_cycle_cuts=short_cycle_cuts,
         travel_bounds=travel_bounds,
     )
     p = parameters.policy
@@ -112,12 +106,7 @@ def build_model(
     # Mandatory d -> p precedence also makes d <= L-2 and p >= 2.
     task_step_bounds = {
         (o.id, k): (
-            (
-                2 if k == "p" else 1,
-                causal_limit - 2 if problem.reusable and k == "d" else causal_limit - 1,
-            )
-            if causal_step_bounds
-            else (0, causal_limit)
+            ((0, causal_limit))
         )
         for o in problem.orders
         for k in problem.task_kinds
@@ -130,7 +119,7 @@ def build_model(
 
     def step_slack(left, right):
         nonlocal causal_largest_m
-        slack = max(0, left[1] + 1 - right[0]) if causal_step_bounds else causal_limit + 1
+        slack = (causal_limit + 1)
         causal_largest_m = max(causal_largest_m, slack)
         return slack
 
@@ -185,12 +174,8 @@ def build_model(
     factor_loads = compact and (
         compressed and linear_schedule if factor_e2_loads is None else factor_e2_loads
     )
-    # Warehouse flow strengthens the LP, but its incumbent search regressed
-    # in short solves and at other seeds. Keep it as an explicit diagnostic.
-    site_flow = bool(compressed and free and site_flow)
     site_arcs = {}
     identities = {}
-    tight_route_bounds = bool(compressed and tight_route_bounds)
 
     def route(nodes, base, cap_w, cap_v, unload, label, layer, batch=None):
         nonlocal objective
@@ -226,7 +211,6 @@ def build_model(
         parameters,
         variables,
         causal_limit=causal_limit,
-        causal_step_bounds=causal_step_bounds,
         e2_nodes=e2_nodes,
         linear_boundary=linear_boundary,
         linear_schedule=linear_schedule,
@@ -244,32 +228,9 @@ def build_model(
         linear_identity=linear_identity,
         linear_internal=linear_internal,
         objective=objective,
-        site_flow=site_flow,
         step_slack=step_slack,
         task_step_bounds=task_step_bounds,
-        tight_route_bounds=tight_route_bounds,
     )
-    short_cycle_rows = []
-    if short_cycle_cuts:
-        from models.routing.model_3.exact.branch_cut.short_cycles import add_two_cycle_rows
-
-        short_cycle_rows = add_two_cycle_rows(m, aggregate_arcs, check_budget)
-    capacity_separator = None
-    # Root separation helped the large compressed pickup models. Keep the
-    # indexed formulation and pure-delivery models on their existing path.
-    if capacity_cuts is None:
-        capacity_cuts = "pairs" if compressed and problem.reusable else False
-    if compact and capacity_cuts:
-        from models.routing.model_3.exact.branch_cut.capacity import build_capacity_separator
-
-        capacity_separator = build_capacity_separator(
-            problem,
-            aggregate_arcs,
-            check_budget,
-            families=capacity_cuts if isinstance(capacity_cuts, str) else "all",
-        )
-        if capacity_separator.candidates:
-            m.Params.PreCrush = 1
     add_task_and_return_coverage_constraints(
         parameters,
         variables,
@@ -288,16 +249,13 @@ def build_model(
         global_e2_arcs=global_arcs,
         compressed_e2_routes=compressed,
         indexed_e2_internal_arcs=indexed_internal,
-        capacity_separator=capacity_separator,
         single_batch_linear_links=linear_mode if compact else False,
         factored_e2_loads=factor_loads,
-        e2_site_flow=site_flow,
+        e2_site_flow=False,
         e2_site_arcs=site_arcs,
         e2_route_identities=identities,
-        tight_e2_route_bounds=tight_route_bounds,
-        e2_short_cycle_cuts=short_cycle_cuts,
-        e2_short_cycle_rows=short_cycle_rows,
-        e2_causal_step_bounds=causal_step_bounds,
+        tight_e2_route_bounds=False,
+        e2_causal_step_bounds=False,
         e2_task_steps=order_steps,
         e2_causal_largest_m=causal_largest_m,
         e2_causal_limit=causal_limit,

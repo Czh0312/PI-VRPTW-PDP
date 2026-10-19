@@ -213,7 +213,10 @@ def test_release_is_independent_of_customer_ready_and_empty_domain_is_proven():
     assert all(not bs for bs in blocked.legal_batches.values())
     for solve,kwargs in [(solve_exact,dict(time_limit=1)),(solve_alns,dict(max_time=.1))]:
         r=solve(blocked,**kwargs)
-        assert r['info']['proven_infeasible'] and r['info']['proof_scope']=='empty_necessary_order_batch_domain'
+        assert r['info']['proven_infeasible']
+        expected_scope = ('model_6_fixed_K_joint_cost_integer_time_MILP' if solve is solve_exact
+                          else 'empty_necessary_order_batch_domain')
+        assert r['info']['proof_scope'] == expected_scope
 
 
 @pytest.mark.parametrize('mutation',[

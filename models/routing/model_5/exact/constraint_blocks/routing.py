@@ -106,30 +106,11 @@ def multibatch_add_route_constraints(
         variables.model.addConstr(departure_loads[1] == initial_v)
         initial_w, initial_v = departure_loads
     variables.model.addConstr(
-        initial_w <= cap_w * (used if parameters.strengthen_multibatch else 1)
+        initial_w <= cap_w * ((1))
     )
     variables.model.addConstr(
-        initial_v <= cap_v * (used if parameters.strengthen_multibatch else 1)
+        initial_v <= cap_v * ((1))
     )
-    if parameters.strengthen_multibatch:
-        # At the end of a route every delivery is unloaded, so all of its
-        # pickups must fit simultaneously. Scale both peaks by activation.
-        variables.model.addConstr(
-            gp.quicksum(
-                n["w"] * visit[i] if layer == "e2" else n["w"]
-                for i, n in enumerate(nodes)
-                if n["kind"] == "p"
-            )
-            <= cap_w * used
-        )
-        variables.model.addConstr(
-            gp.quicksum(
-                n["v"] * visit[i] if layer == "e2" else n["v"]
-                for i, n in enumerate(nodes)
-                if n["kind"] == "p"
-            )
-            <= cap_v * used
-        )
     for i, n in enumerate(nodes):
         if i % 64 == 0:
             check_budget()
@@ -171,11 +152,6 @@ def multibatch_add_route_constraints(
         if not (shared and compressed_routes and a >= 0 and b >= 0):
             term = parameters.problem.distance(left, right) * x[a, b]
             objective = add_distance_term(objective, term)
-            if parameters.distance_cut_mode == "components":
-                key = ("E1", batch.id) if layer == "e1" else ("E2", base)
-                if key not in component_costs:
-                    component_costs[key] = gp.LinExpr()
-                component_costs[key] += term
         if a == -1:
             if shared and parameters.linear_e2_links:
                 lower = nodes[b]["window"][0]
@@ -196,11 +172,9 @@ def multibatch_add_route_constraints(
                 (load_v[b], initial_v, nodes[b]["v"], cap_v),
             ):
                 if shared and parameters.linear_e2_links:
-                    lower = amount if parameters.strengthen_multibatch and sign == 1 else 0
+                    lower = (0)
                     upper = (
-                        max(0, capacity - amount)
-                        if parameters.strengthen_multibatch and sign == -1
-                        else capacity
+                        (capacity)
                     )
                     variables.model.addConstr(
                         load
@@ -339,10 +313,6 @@ def multibatch_add_shared_route_constraints(
                     * active
                 )
                 objective = add_distance_term(objective, term)
-                if parameters.distance_cut_mode == "components":
-                    key = "E2", parameters.problem.order_map[left[0]].satellite
-                    component_costs.setdefault(key, gp.LinExpr())
-                    component_costs[key] += term
             else:
                 variables.model.addConstr(active == gp.quicksum(indexed))
             a, b = parameters.problem.order_map[left[0]], parameters.problem.order_map[right[0]]
@@ -369,18 +339,14 @@ def multibatch_add_shared_route_constraints(
                 if parameters.linear_e2_links:
                     left_amount = parameters.problem.task(*left)[resource]
                     lo_left = (
-                        left_amount if parameters.strengthen_multibatch and left[1] == "p" else 0
+                        (0)
                     )
                     hi_left = (
-                        max(0, capacity - left_amount)
-                        if parameters.strengthen_multibatch and left[1] == "d"
-                        else capacity
+                        (capacity)
                     )
-                    lo_right = amount if parameters.strengthen_multibatch and right[1] == "p" else 0
+                    lo_right = (0)
                     hi_right = (
-                        max(0, capacity - amount)
-                        if parameters.strengthen_multibatch and right[1] == "d"
-                        else capacity
+                        (capacity)
                     )
                     lower_slack = max(0, hi_left + sign * amount - lo_right)
                     upper_slack = max(0, hi_right - lo_left - sign * amount)

@@ -80,7 +80,7 @@ def test_exact_precheck_needs_no_gurobi(monkeypatch):
             raise AssertionError('An analytic rejection must not load Gurobi')
         return original(name, *args, **kwargs)
     monkeypatch.setattr(builtins, '__import__', guarded)
-    from models.routing.model_5.exact.enhanced_solver import solve_exact
+    from models.routing.model_5.exact import solve_exact
     result = solve_exact(fixture(pool=1, count=2))
     assert result['info']['proven_infeasible']
     assert not result['info']['proven_optimal']

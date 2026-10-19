@@ -1,20 +1,7 @@
 """M5 constraint entry: business groups on the same Gurobi model.
 
-The single-batch functions are retained for diagnostic compatibility.
-Only strengthening.py adds optional certificate rows.
+Only the complete multi-batch business formulation is retained.
 """
-
-from .constraint_blocks.single_batch import (
-    add_assignment_constraints,
-    add_supply_time_constraints,
-    add_route_constraints,
-    add_first_echelon_constraints,
-    add_supply_coverage_constraints,
-    add_second_echelon_constraints,
-    add_shared_route_constraints,
-    add_task_and_return_coverage_constraints,
-    add_inventory_constraints,
-)
 
 from .constraint_blocks.batching import (
     multibatch_add_availability_constraints,
@@ -40,8 +27,4 @@ from .constraint_blocks.recovery import (
 
 from .constraint_blocks.inventory import (
     multibatch_add_inventory_constraints,
-)
-
-from .constraint_blocks.strengthening import (
-    multibatch_add_distance_certificate_constraints,
 )

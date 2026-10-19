@@ -88,13 +88,17 @@ def verify(out):
         assert math.isclose(row['cost'], cost['total'], abs_tol=1e-6)
         assert cost['economic_profile_hash'] == plan['economic_profile_hash']
         domains = True
-        if job['model'] >= 6:
+        if job['model'] >= 6 and 'count_search' in result:
             counts = result['count_search']
             domains = [c['batch_count'] for c in counts] == list(problem.batch_count_candidates)
             assert domains and len(counts) == 390
             candidates = [c for c in counts if c.get('valid')]
             assert math.isclose(min(c['objective'] for c in candidates), cost['total'], abs_tol=1e-6)
             assert result['info']['time_budget'] == 300
+        elif job['model'] >= 6:
+            domains = result['info']['batch_count_candidates'] == list(problem.batch_count_candidates)
+            assert domains and result['info']['complete_count_domain']
+            assert result['info']['solver_config']['time_limit'] == job['budget']
         write(target/'final_audit.json', audit)
         checks.append(dict(id=job['id'], passed=True, periodic_valid=True,
                            cost_recomputed=cost['total'], count_domain_verified=domains))

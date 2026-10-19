@@ -37,9 +37,7 @@ def solve_milp(problem, time_limit=60, seed=42, verbose=False, *, milp_options=N
         return finish(rejected_result(problem, 'exact', precheck, time.perf_counter()-begun))
     result = empty_result(problem, 'exact')
     result['precheck'] = precheck
-    formulation = dict(compress_routes=options.formulation == 'compact', capacity_cuts=False,
-                       short_cycle_cuts=False, causal_step_bounds=False, site_flow=False,
-                       tight_route_bounds=False)
+    formulation = dict(compress_routes=options.formulation == 'compact')
     config['formulation_options'] = formulation
     try:
         model, ctx = build_model(problem, verbose=verbose, deadline=begun+time_limit,

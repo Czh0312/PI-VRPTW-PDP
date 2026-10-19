@@ -296,8 +296,10 @@ def exact():
         m.dispose()
     except gp.GurobiError as exc:
         pytest.skip(f'Gurobi unavailable: {exc}')
-    from models.routing.model_5.exact.enhanced_solver import solve_exact
-    return solve_exact
+    def direct(problem, **kwargs):
+        from importlib import import_module
+        return import_module(f'models.routing.model_{problem.model_number}.exact').solve_exact(problem, **kwargs)
+    return direct
 
 
 @pytest.mark.parametrize('single,zero,expected', [(False, False, 44), (True, False, 22), (True, True, 0)])

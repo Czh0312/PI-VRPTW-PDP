@@ -36,30 +36,15 @@ def test_baseline_matches_default_optimum_on_the_same_complete_problem(number, f
     assert baseline['info']['solver_config']['custom_callback'] is False
     json.dumps(baseline, allow_nan=False)
     if number >= 6:
-        assert {r['batch_count'] for r in baseline['count_search']} == set(p.batch_count_candidates)
-        assert baseline['info']['budget_strategy'] == 'single_pass'
-        for visit in baseline['count_search_visits']:
-            assert not visit['mip_start_supplied']
-            assert visit['solver_config']['threads'] == 1
-            assert visit['solver_config']['formulation'] == formulation
-            assert visit['solver_config']['time_limit'] == visit['budget']
+        assert baseline['info']['batch_count_candidates'] == list(p.batch_count_candidates)
+        assert baseline['info']['complete_count_domain']
+        assert baseline['info']['exact_strategy'] == 'gurobi_unified_milp'
+        assert baseline['info']['solver_config']['k_search'] is None
+        assert 'count_search' not in baseline and 'count_search_visits' not in baseline
     if number in (2, 4):
         assert baseline['assignment'] == {'C': 'T'}  # Input assignment is S.
 
 
-@pytest.mark.parametrize('number', range(1, 9))
-def test_baseline_does_not_call_default_search_or_install_starts(number, monkeypatch):
-    base = f'models.routing.model_{number}.exact'
-    default = import_module(base+'.enhanced_solver')
-    init = import_module(base+'.initialization')
-    def forbidden(*args, **kwargs):
-        raise AssertionError('Baseline entered custom search or initial solution construction')
-    monkeypatch.setattr(default, 'solve_exact', forbidden)
-    monkeypatch.setattr(init, 'construct_incumbent' if number <= 5 else 'install_start', forbidden)
-    if number >= 6:
-        monkeypatch.setattr(init, 'install_assignment_guidance', forbidden)
-    r = import_module(base).solve_exact(instance(number), time_limit=15, strategy='milp')
-    assert r['audit']['valid']
 
 
 def test_baseline_passes_no_callback_and_leaves_gurobi_builtin_search_enabled(monkeypatch):
@@ -77,14 +62,6 @@ def test_baseline_passes_no_callback_and_leaves_gurobi_builtin_search_enabled(mo
     assert seen and result['audit']['valid']
 
 
-@pytest.mark.parametrize('number', [2, 4])
-@pytest.mark.parametrize('strategy', ['joint', 'domain_tree', 'enumeration'])
-def test_public_assignment_strategies_are_explicit(number, strategy):
-    result = solve_routing(model=number, method='exact', problem=problem(number),
-                           exact_time=10, exact_strategy=strategy)
-    assert result['info']['proven_optimal']
-    assert result['info']['exact_strategy_requested'] == strategy
-    assert result['info']['objective'] == pytest.approx(4)
 
 
 @pytest.mark.parametrize('number', [6, 7, 8])
@@ -104,25 +81,26 @@ def test_direct_baseline_matches_independent_calendar_oracle(number, variant):
 
 
 @pytest.mark.parametrize('number', [6, 7, 8])
-def test_unvisited_counts_cannot_inherit_one_count_optimality(number, monkeypatch):
-    base = f'models.routing.model_{number}.exact'
-    p = uniform_fixture() if number == 6 else calendar_fixture(number)
-    kernel = import_module(base+'.milp_solver')
-    first = kernel.solve_milp(p.for_count(p.batch_count_candidates[0]), time_limit=10)
-    assert first['info']['proven_optimal']
-    scheduler = import_module(base+'.k_search.scheduler')
-    clock = [0.]
-    monkeypatch.setattr(scheduler.time, 'perf_counter', lambda: clock[0])
-    def one_count(*args, **kwargs):
-        clock[0] = 2.
-        return first
-    monkeypatch.setattr(kernel, 'solve_milp', one_count)
-    result = import_module(base).solve_exact(p, time_limit=1, strategy='milp')
-    assert result['audit']['valid']
-    assert not result['info']['proven_optimal']
-    assert result['info']['best_bound'] is None
-    assert len(result['count_search']) == len(p.batch_count_candidates)
-    assert any(not row['visits'] for row in result['count_search'])
+def test_incomplete_unified_build_is_never_optimized_or_certified(number, monkeypatch):
+    import gurobipy as gp
+    import models.common.cycle.unified_milp as unified
+    original = unified.append_block
+    calls = []
+    def incomplete(*args, **kwargs):
+        calls.append(True)
+        if len(calls) == 2:
+            raise TimeoutError('Second K construction interrupted')
+        return original(*args, **kwargs)
+    def forbidden(*args, **kwargs):
+        raise AssertionError('A partial count domain was optimized')
+    monkeypatch.setattr(unified, 'append_block', incomplete)
+    monkeypatch.setattr(gp.Model, 'optimize', forbidden)
+    result = import_module(f'models.routing.model_{number}.exact').solve_exact(instance(number), time_limit=10)
+    assert len(calls) == 2
+    assert result['info']['status'] == 'TIME_LIMIT_BUILD'
+    assert not result['info']['proven_optimal'] and not result['info']['proven_infeasible']
+    assert result['info']['best_bound'] is None and result['info']['objective'] is None
+    assert not result['info']['complete_count_domain']
 
 
 @pytest.mark.parametrize('number', range(1, 9))
@@ -159,8 +137,8 @@ def test_strategy_and_initial_solution_mismatch_is_rejected():
     with pytest.raises(ValueError, match='require method'):
         solve_routing(model=1, method='alns', problem=problem(1), exact_strategy='milp')
     with pytest.raises(ValueError, match='milp_options requires'):
-        solve_routing(model=1, method='exact', problem=problem(1), milp_options={'threads': 2})
-    with pytest.raises(ValueError, match='external initial solution'):
+        solve_routing(model=1, method='exact', problem=problem(1), exact_strategy='enhanced', milp_options={'threads': 2})
+    with pytest.raises(TypeError, match='initial_result'):
         import_module('models.routing.model_7.exact').solve_exact(calendar_fixture(7),
             strategy='milp', initial_result={})
 
@@ -177,3 +155,17 @@ def test_current_cli_records_direct_baseline_configuration(tmp_path, monkeypatch
     assert result['info']['exact_strategy'] == 'gurobi_milp'
     assert result['info']['solver_config']['formulation'] == 'compact'
     assert result['audit']['valid']
+
+
+@pytest.mark.parametrize('number', range(1, 9))
+@pytest.mark.parametrize('strategy', ['enhanced', 'joint', 'domain_tree', 'enumeration'])
+def test_retired_strategies_are_rejected_before_any_optimization(number, strategy, monkeypatch):
+    import gurobipy as gp
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError('A retired strategy reached Gurobi')
+
+    monkeypatch.setattr(gp.Model, 'optimize', forbidden)
+    with pytest.raises(ValueError, match='Only direct Gurobi'):
+        import_module(f'models.routing.model_{number}.exact').solve_exact(
+            instance(number), strategy=strategy)

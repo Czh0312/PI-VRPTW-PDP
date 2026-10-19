@@ -183,7 +183,7 @@ def worker(out, job_id):
                        delivery_batches=result.get('delivery_batch_count', sum(bool(v) for v in problem.batch_demands.values())))
         else:
             row.update(status='AUDIT_FAILED', proven_optimal=False)
-    if job['model'] >= 6:
+    if job['model'] >= 6 and 'count_search' in result:
         counts = result['count_search']
         assert [c['batch_count'] for c in counts] == list(problem.batch_count_candidates)
         assert result['info']['time_budget'] == job['budget']
@@ -196,6 +196,12 @@ def worker(out, job_id):
                    explored_count=sum(c['status'] != 'NOT_RUN_TIME_LIMIT' for c in counts),
                    unrun_count=sum(c['status'] == 'NOT_RUN_TIME_LIMIT' for c in counts),
                    proved_infeasible_count=sum(c['proven_infeasible'] for c in counts),
+                   automatic_selection_checked=bool(row['valid']))
+    elif job['model'] >= 6:
+        assert info['batch_count_candidates'] == list(problem.batch_count_candidates)
+        assert info['solver_config']['time_limit'] == job['budget']
+        row.update(candidate_count=len(problem.batch_count_candidates),
+                   exact_strategy=info['exact_strategy'], complete_count_domain=info['complete_count_domain'],
                    automatic_selection_checked=bool(row['valid']))
     write(target/'row.json', row)
     write(target/'live_status.json', dict(job_id=job_id, stage='complete', updated_at=now(),

@@ -536,7 +536,9 @@ def worker(args):
     has_counts = getattr(problem, 'uniform_cycle', False) or getattr(problem, 'calendar_cycle', False)
     scheduler = None
     calendar_entry = None
-    if has_counts:
+    unified_exact = (has_counts and job['method'] == 'exact' and getattr(
+        import_module(f'models.routing.model_{job["model"]}.exact.solver'), 'UNIFIED_BATCH_COUNT', False))
+    if has_counts and not unified_exact:
         scheduler = solver_component(job['model'], job['method'], 'batch_search')
         name = 'solve_uniform' if job['model'] == 6 else 'solve_counts'
         original = getattr(scheduler, name)
@@ -556,10 +558,11 @@ def worker(args):
         if calendar_entry is not None:
             calendar_entry.aggregate = original
     solve_wall = time.perf_counter()-started
-    if not has_counts:
+    if not has_counts or unified_exact:
         observed_history.append(dict(elapsed=solve_wall,
             objective=result['info'].get('objective') if result.get('audit', {}).get('valid') else None,
-            batch_count=len(problem.operating_policy.batches), source='confirmed_call_return'))
+            batch_count=result.get('cycle_batch_count', len(problem.operating_policy.batches)),
+            source='confirmed_call_return'))
     write(path/'result.json', result)
     write(path/'candidate_diagnostics.json', trace)
     write(path/'search_diagnostics.json', diagnostics)
@@ -599,6 +602,12 @@ def worker(args):
     row.update(candidate_count=len(rows), visited_count=sum(not r['status'].startswith('NOT_RUN') for r in rows),
                visits=sum(len(r.get('visits', [r])) for r in rows if not r['status'].startswith('NOT_RUN')),
                unresolved_count=sum(not (r['proven_optimal'] or r['proven_infeasible']) for r in rows))
+    if unified_exact:
+        row.update(candidate_count=len(info.get('batch_count_candidates', [])),
+                   visited_count=0, visits=0, unresolved_count=None,
+                   exact_strategy=info.get('exact_strategy'),
+                   complete_count_domain=info.get('complete_count_domain'),
+                   candidate_diagnostics_scope='single_unified_model_no_per_count_solves')
     history = observed_history
     with (path/'anytime.csv').open('w', encoding='utf-8', newline='') as handle:
         fields = ['elapsed', 'objective', 'batch_count', 'visited_count', 'visit', 'source']
@@ -606,7 +615,7 @@ def worker(args):
         writer.writeheader()
         writer.writerows(history)
     row['anytime_scope'] = 'global_all_counts'
-    row['anytime_granularity'] = 'confirmed_next_candidate_or_call_return' if has_counts else 'confirmed_call_return'
+    row['anytime_granularity'] = 'confirmed_next_candidate_or_call_return' if has_counts and not unified_exact else 'confirmed_call_return'
     finite_history = [v for v in history if v.get('objective') is not None]
     row['first_observed_feasible_seconds'] = finite_history[0]['elapsed'] if finite_history else None
     row['first_observed_cost'] = finite_history[0]['objective'] if finite_history else None

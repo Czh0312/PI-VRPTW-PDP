@@ -54,7 +54,8 @@ def test_four_models_audit_and_replay(model, method):
         assert audit['container_balance']['pool'] == 0
     if model in (2, 4) and method == 'exact':
         assert result['assignment'] == {'C': 'T'}
-        assert result['info']['assignments_closed'] == 2
+        assert result['info']['exact_strategy'] == 'gurobi_milp'
+        assert 'assignments_closed' not in result['info']
         assert result['info']['proven_optimal']
         assert result['info']['objective'] == 4
 
@@ -91,32 +92,6 @@ def test_request_cannot_silently_switch_model():
         solve_routing(model=1, method='alns', problem=problem(3))
 
 
-def test_unclosed_assignment_never_becomes_global_certificate(monkeypatch):
-    from types import SimpleNamespace
-    from models.routing.model_2.exact.assignment_search import dispatcher as assignment
-    from models.routing.model_2.exact import enhanced_solver as exact_solver
-    now, examples = [0.0], {}
-    def unclosed(fixed, **_):
-        key = tuple(o.satellite for o in fixed.orders)
-        if key not in examples:
-            examples[key] = solve(fixed)
-        result = deepcopy(examples[key])
-        result['info'].update(status='TIME_LIMIT', proven_optimal=False, best_bound=0)
-        now[0] += .5
-        return result
-    # Exercise revisiting open partitions without spending two wall-clock
-    # seconds repeatedly solving the same fixtures. Keep other clocks real.
-    monkeypatch.setattr(assignment, 'time', SimpleNamespace(perf_counter=lambda: now[0]))
-    monkeypatch.setattr(exact_solver, 'solve_exact', unclosed)
-    result = assignment._solve_enumeration(problem(2), time_limit=2)
-    assert result['audit']['valid']
-    assert result['info']['assignments_visited'] == 2
-    assert not result['info']['proven_optimal'] and not result['info']['proven_infeasible']
-    assert result['info']['status'] == 'TIME_LIMIT'
-    # A valid combinatorial bound may improve zero without closing the timed
-    # out partition. It must still not be promoted to an optimality proof.
-    assert 0 <= result['info']['best_bound'] <= result['info']['objective']
-    assert result['info']['subproblem_solves'] > 2
 
 
 def test_normalization_removes_arbitrary_slack_and_preserves_distance():

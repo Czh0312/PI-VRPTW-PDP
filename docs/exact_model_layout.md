@@ -13,8 +13,12 @@ M1–M8 的精确模型按数学职责组织。每个模型独立拥有下列文
 | `milp_solver.py` | 直接 Gurobi 基线 | 显式配置、完整问题范围和原始求解器证据 |
 | `solution.py` | 业务解提取 | 路线、分仓、分批、箱池及日历，不聚合跨子问题证明 |
 | `model.py` | 公开建模入口 | 模型编号校验，以及完整模型或固定 K 子问题的选择 |
-| `solver.py`、`enhanced_solver.py` 等 | 精确求解流程 | 时间预算、初解、Gurobi 调用、结果提取、独立审计和证明汇总 |
-| `preprocessing/`、`branch_cut/`、`bounds/` | 模型增强 | 安全界、删弧、有效不等式、可选上下界证书 |
+| `solver.py`、`milp_solver.py` | 直接求解 | 时间预算、Gurobi 调用、结果提取和独立审计 |
+| `preprocessing/` | 数学模型变量界 | M1–M4 的合法弧与分仓域，不包含搜索或证书 |
+
+M6–M8 的可变批次数输入现由 `model.py` 返回统一模型，`context` 包含 `selectors`、`batch_count`、`pool` 和 `blocks`。
+每个块的 `context` 保留对应模型的 `parameters`、`variables` 和路线句柄；所有句柄都属于同一个统一模型。
+固定 K 的 `formulation.py` 只提供完整业务块。详见[统一批次数 MILP](unified_batch_count_milp.md)。
 
 ## 模型组装位置
 
@@ -24,15 +28,14 @@ M1–M8 的精确模型按数学职责组织。每个模型独立拥有下列文
 | M2 | [formulation.py](../models/routing/model_2/exact/formulation.py) |
 | M3 | [formulation.py](../models/routing/model_3/exact/formulation.py) |
 | M4 | [formulation.py](../models/routing/model_4/exact/formulation.py) |
-| M5 | [formulation.py](../models/routing/model_5/exact/formulation.py)；B=1 专门化在本模型的 `diagnostics/single_batch/formulation.py` |
+| M5 | [formulation.py](../models/routing/model_5/exact/formulation.py) |
 | M6 | [formulation.py](../models/routing/model_6/exact/formulation.py) |
 | M7 | [formulation.py](../models/routing/model_7/exact/formulation.py) |
 | M8 | [formulation.py](../models/routing/model_8/exact/formulation.py) |
 
 组装过程准备参数、创建一个 Gurobi 模型与 `ModelVariables`，按业务顺序调用约束组，
 最后设置目标函数。主流程的变量创建表达位于 `variables.py` 内，辅助变量按其所需约束分阶段创建，
-所有主模型约束组都写入同一个 Gurobi 模型。可选仓库流诊断及上下界子模型继续由
-各自增强模块维护。这样保留原来的变量与约束构造顺序。
+所有主模型约束组都写入同一个 Gurobi 模型。全部模型句柄都属于当前 Gurobi 模型；旧增强组件已归档。
 
 ## 约束组导航
 
@@ -52,12 +55,11 @@ M1–M8 的精确模型按数学职责组织。每个模型独立拥有下列文
 | `add_inventory_constraints` | 每次领箱时清洁库存充足，且只计已卸回并清洗完成的箱量 |
 | `add_vehicle_activation_constraints` | M6–M8 的物理车辆启用与其全部趟次关联 |
 
-M5 的多批次函数使用 `multibatch_` 前缀，与其 B=1 专门化区分。模型增强和容量割仍由
-各模型原有增强模块负责，组装入口保留其启用条件。
+M5 的多批次函数使用 `multibatch_` 前缀。B=1 使用对应单批次模型。当前没有增强算法或容量割接口。
 
 ## 查看参数和变量
 
-公开 `build_model` 的参数与返回形式继续兼容原有调用。返回字典新增两个对象：
+公开 `build_model` 返回 Gurobi 模型和上下文字典；字典包含两个对象：
 
 ```python
 from models.routing.model_3.exact.model import build_model
@@ -79,8 +81,8 @@ finally:
 `ModelVariables` 管理同一模型的变量及线性表达分组，辅助变量也由它的创建方法定义。
 `context` 中原有的 `e1`、`e2`、`assignments` 等字段继续可用。
 
-这次整理调整的是代码组织。M2/M4 的联合分仓或完整分仓域树、M6–M8 的 K 搜索、
-整数时间刻度、车队趟位上限、成本定义及全局最优性判定都继续沿用原有流程。
+当前默认 M2/M4 直接求解联合分仓 MILP；M6–M8 默认求解完整 K 域的统一 MILP。
+整数时间规则、车队趟位上限及成本定义保持不变，证明直接来自完整模型与独立审计。
 
 ## 公式到实现的维护方式
 
@@ -94,9 +96,8 @@ finally:
 | 两级供货及车辆串行 | `add_first_echelon_constraints` / `add_second_echelon_constraints` | `echelon` 对应函数 | 保留跨级时间与同车连续作业 |
 | 任务覆盖与空箱回运 | `add_task_and_return_coverage_constraints` | `recovery` 对应函数 | 一次性包装不激活回收任务 |
 | 清洁库存 | `add_inventory_constraints` | `inventory.multibatch_add_inventory_constraints` | 多批次只计已回运且清洗完成的箱量 |
-| 外部距离下界行 | 可选证书模块 | `strengthening.multibatch_add_distance_certificate_constraints` | 属于可选强化，不代替库存或任务覆盖 |
 | M6–M8 日历与订单分批 | 各模型 `add_calendar_constraints` / `add_order_batch_constraints` | 不适用 | 共同分界、独立分界及可变批长由本模型参数和变量表达 |
 
-Gurobi 基线仍使用这些数学定义，具体保留与关闭的强化选项见
+Gurobi 直接求解这些数学定义，配置与结果口径见
 [Gurobi 对照说明](exact_milp_comparison.md)。`parameters.py` 不保存时间预算、线程或实验策略；
-这些属于求解配置。`ModelVariables` 与 context 的已有字段保持兼容，提取模块和初解编码共享这些句柄。
+这些属于求解配置。`ModelVariables` 与 context 的已有字段保持兼容，提取模块使用这些句柄。

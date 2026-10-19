@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from models.routing.model_2.exact.preprocessing.strengthening import single_batch_bounds
+from models.routing.model_2.exact.preprocessing.model_bounds import single_batch_bounds
 
 
 @dataclass(frozen=True)
@@ -28,26 +28,16 @@ class ModelParameters:
 
 
 def prepare_parameters(
-    causal_step_bounds,
     domain_check,
     linear_e2_links,
     problem,
     share_e2,
-    short_cycle_cuts,
     travel_bounds,
 ):
     domains = None
     p, f = problem.operating_policy, problem.fleet
     if len(p.batches) != 1:
         raise ValueError("Single-batch formulation requires B=1")
-    if not isinstance(short_cycle_cuts, bool):
-        raise ValueError("Short-cycle cuts must be boolean")
-    if short_cycle_cuts and (problem.model_number not in (1, 2, 3, 4) or not share_e2):
-        raise ValueError("Short-cycle cuts require shared single-batch M1-M4 task arcs")
-    if not isinstance(causal_step_bounds, bool):
-        raise ValueError("Causal step bounds must be boolean")
-    if causal_step_bounds and problem.model_number not in (1, 2, 3, 4):
-        raise ValueError("Causal step bounds require single-batch M1-M4")
     free = problem.free_assignment
     compact = share_e2
     linear_mode = "complete" if linear_e2_links is True else linear_e2_links or False

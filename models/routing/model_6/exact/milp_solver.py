@@ -12,10 +12,10 @@ from models.routing.model_6.exact.formulation import build_model
 
 
 def solve_milp(problem, time_limit=60, seed=42, verbose=False, *, milp_options=None):
-    """Solve one fixed-K projection; the public entry aggregates the entire K domain."""
+    """Solve one fixed-K projection; the public entry builds a single MILP for the entire K domain."""
     validate_problem(problem, 6)  # Internal joint projection, including M7/M8 children.
     if getattr(problem, 'uniform_cycle', False) or getattr(problem, 'calendar_cycle', False):
-        raise ValueError('Use solve_exact(strategy="milp") to search all K')
+        raise ValueError('Use solve_exact(strategy="milp") to optimize all K in one MILP')
     if problem.optimize_loading:
         raise ValueError('Optimized loading requires M7')
     validate_budget(time_limit, seed)
@@ -23,7 +23,7 @@ def solve_milp(problem, time_limit=60, seed=42, verbose=False, *, milp_options=N
     begun = time.perf_counter()
     config = options.metadata(time_limit, seed)
     config['formulation_options'] = dict(compact_e2=options.formulation == 'compact')
-    config['retained_model_bounds'] = 'necessary_pool_and_total_cost_rows'
+    config['retained_model_bounds'] = False
     result = joint_empty_result(problem, 'exact')
 
     def finish(result):

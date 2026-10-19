@@ -21,7 +21,7 @@ def candidate(cost=None, *, bound=None, optimal=False, infeasible=False, iterati
                 audit=dict(valid=cost is not None), reject=reject)
 
 
-@pytest.fixture(params=[(n, m) for n in (6, 7, 8) for m in ('alns', 'exact')])
+@pytest.fixture(params=[(n, m) for n in (6, 7, 8) for m in ('alns',)])
 def harness(request, monkeypatch):
     number, method = request.param
     component = 'k_search.scheduler'

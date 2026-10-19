@@ -52,32 +52,3 @@ def test_event_seed_slots_are_not_consumed_by_duplicate_times():
     p = calendar_fixture(8, counts=(2,)).for_count(2)
     events = boundary_events(p)
     assert events == sorted(set(events))
-
-
-@pytest.mark.parametrize('number', [7, 8])
-@pytest.mark.parametrize('bound_delta, optimal', [(1, True), (-1, False), (None, False)])
-def test_unfinished_count_can_be_excluded_only_by_its_certified_bound(number, bound_delta, optimal, monkeypatch, exact_available):
-    from copy import deepcopy
-    from models.common.cycle.joint import joint_empty_result
-    solver = import_module(f'models.routing.model_{number}.exact.enhanced_solver')
-    p = calendar_fixture(number, counts=(1, 2))
-    incumbent = solver.solve_exact(p.for_count(1), time_limit=5)
-    assert incumbent['info']['proven_optimal'] and incumbent['audit']['valid']
-    cost = incumbent['info']['objective']
-
-    def bounded_solve(child, **kwargs):
-        if len(child.operating_policy.batches) == 1:
-            return deepcopy(incumbent)
-        result = joint_empty_result(child, 'exact')
-        result['info'].update(status='TIME_LIMIT', proven_optimal=False, proven_infeasible=False,
-                              best_bound=None if bound_delta is None else cost+bound_delta)
-        return result
-
-    monkeypatch.setattr(solver, 'solve_exact', bounded_solve)
-    result = solve_routing(model=number, method='exact', problem=p, exact_time=5)
-    assert result['info']['proven_optimal'] is optimal
-    assert result['audit']['valid'] and result['info']['objective'] == cost
-    assert result['count_search'][1]['status'] == 'TIME_LIMIT'
-    assert not result['count_search'][1]['proven_optimal']
-    if optimal:
-        assert result['info']['proof_aggregation'] == 'all_count_bounds_dominate_incumbent'

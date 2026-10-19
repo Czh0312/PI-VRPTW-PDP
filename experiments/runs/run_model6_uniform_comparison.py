@@ -40,7 +40,9 @@ def summarize(out,rows,records):
                            first_minutes=minutes(result['shared_cutoff_offset_ticks']),
                            second_minutes=minutes(result['batch_duration_ticks']-result['shared_cutoff_offset_ticks']),
                            cost=m6['cost'],distance=m6['distance'],method=m6['solver'],
-                           proven_cost_optimal=m6['proven_optimal'],count_search=result['count_search'])
+                           proven_cost_optimal=m6['proven_optimal'],count_search=result.get('count_search'),
+                           exact_strategy=result['info'].get('exact_strategy'),
+                           batch_count_candidates=result['info'].get('batch_count_candidates'))
         cases.append(item)
     payload=dict(material_passport=dict(origin='academic-research-suite/experiment-agent',
                  mode='validate',date=datetime.now().date().isoformat(),status='ANALYZED',version='uniform_cycle_v1'),

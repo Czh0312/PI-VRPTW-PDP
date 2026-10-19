@@ -16,7 +16,6 @@ from models.common.domain.node import Customer, Depot, Satellite
 from models.routing.service import solve_routing
 from models.routing.model_3.alns.evaluator import evaluate, initial_state
 from models.routing.model_3.alns.neighborhoods import EvaluationCache, clone_state, destroy_repair, state_key
-from models.routing.model_3.exact.bounds.distance import distance_lower_bound
 
 
 def nonmetric_problem():
@@ -195,22 +194,6 @@ def enumerate_tiny(problem):
     return best
 
 
-@pytest.mark.parametrize('model', [1, 2, 3, 4])
-@pytest.mark.parametrize('seed', range(6))
-def test_exact_matches_independent_enumeration(model, seed):
-    pytest.importorskip('gurobipy')
-    p = tiny_problem(model, seed)
-    expected = enumerate_tiny(p)
-    result = solve_routing(model=model, method='exact', problem=p, exact_time=8)
-    info = result['info']
-    if math.isinf(expected):
-        assert info['proven_infeasible'], info
-    else:
-        assert result['audit']['valid'], result
-        assert info['proven_optimal'], info
-        assert info['objective'] == pytest.approx(expected)
-        if not p.free_assignment:
-            assert distance_lower_bound(p) <= expected
 
 
 def test_same_seed_iteration_limited_alns_is_reproducible():

@@ -74,22 +74,6 @@ def test_shared_milp_matches_exhaustive_counts_and_offsets(exact_available):
     assert full['info']['objective']==pytest.approx(min(objectives))
 
 
-def test_one_k_optimum_does_not_prove_all_k(monkeypatch,exact_available):
-    p=uniform_fixture()
-    known=solve_exact(p.for_count(1),time_limit=3)
-    from models.routing.model_6.exact import solver
-    def partial(child,**kwargs):
-        if len(child.batch_map)==1:
-            return deepcopy(known)
-        empty=joint_empty_result(child,'exact')
-        empty['info'].update(status='TIME_LIMIT',proven_infeasible=False,best_bound=0.)
-        return empty
-    monkeypatch.setattr(solver,'solve_exact',partial)
-    from models.routing.model_6.exact.k_search.scheduler import solve_uniform
-    result=solve_uniform(p,solve_candidate=solver.solve_exact,method='exact',budget=1,seed=42)
-    assert result['audit']['valid'] and result['info']['selected_count_proven_optimal']
-    assert not result['info']['proven_optimal']
-    assert result['info']['best_bound']==0
 
 
 @pytest.mark.parametrize('mutation',[

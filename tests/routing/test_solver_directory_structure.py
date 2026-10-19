@@ -1,4 +1,4 @@
-"""Directory ownership, optional imports and relocated certificate invalidation."""
+"""Directory ownership, optional imports and retired algorithm isolation."""
 from importlib import import_module
 from pathlib import Path
 import subprocess
@@ -9,8 +9,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 CORE = {
     'exact': {'__init__', 'solver', 'model', 'formulation', 'milp_solver', 'solution',
-              'parameters', 'variables', 'constraints', 'objective', 'initialization',
-              'enhanced_solver'},
+              'parameters', 'variables', 'constraints', 'objective'},
     'alns': {'__init__', 'solver', 'search', 'parameters', 'state', 'construction',
              'neighborhoods', 'evaluator', 'search_control'},
 }
@@ -67,42 +66,13 @@ def test_exact_layout_has_no_retired_directories_or_forwarders(number):
     for name in ('accelerators', 'formulations', 'search'):
         assert not (folder/name).exists()
         assert not (folder/(name+'.py')).exists()
-    if number in (2, 4):
-        assert (folder/'assignment_search/domain_tree.py').is_file()
-    if number >= 6:
-        assert (folder/'k_search/scheduler.py').is_file()
-    if number == 5:
-        assert (folder/'diagnostics/single_batch/formulation.py').is_file()
-        assert (folder.parent/'hybrid/solver.py').is_file()
+    for name in ('bounds', 'primal', 'branch_cut', 'assignment_search', 'k_search', 'diagnostics',
+                 'enhanced_solver.py', 'initialization.py'):
+        assert not (folder/name).exists()
+    assert not (folder.parent/'hybrid').exists()
 
 
-def test_relocated_certificate_fingerprint_still_tracks_rules_and_solver(monkeypatch):
-    module = import_module('models.routing.model_5.exact.bounds.conditional_physical.logic_benders')
-    seen = set()
-    changed = set()
 
-    def fingerprint(path):
-        seen.add(path)
-        return 'changed' if path in changed else 'original'
-
-    monkeypatch.setattr(module, '_file_hash', fingerprint)
-    before = module.source_fingerprint()
-    targets = [
-        ROOT/'models/routing/model_5/exact/constraints.py',
-        ROOT/'models/routing/model_5/exact/constraint_blocks/inventory.py',
-        ROOT/'models/routing/model_5/exact/formulation.py',
-        ROOT/'models/routing/model_5/exact/solution.py',
-        ROOT/'models/common/solver_config.py',
-        ROOT/'models/routing/model_5/exact/bounds/conditional_physical/logic_benders.py',
-        ROOT/'models/routing/model_5/hybrid/solver.py',
-        ROOT/'models/common/cycle/audit.py',
-        ROOT/'models/cost/joint_batch.py',
-    ]
-    assert set(targets) <= seen
-    for target in targets:
-        changed.add(target)
-        assert module.source_fingerprint() != before
-        changed.clear()
 
 
 @pytest.mark.parametrize('organized', [False, True])
@@ -152,16 +122,3 @@ def test_experiment_observer_reaches_active_search_components(number, name, targ
 
     module = driver.solver_component(number, 'alns', name)
     assert module is import_module(f'models.routing.model_{number}.alns.{target}')
-
-
-@pytest.mark.parametrize('number', [6, 7, 8])
-@pytest.mark.parametrize('name,target', [
-    ('batch_search', 'k_search.scheduler'),
-    ('joint_solver', 'enhanced_solver'),
-    ('calendar_search', 'solver'),
-])
-def test_experiment_observer_reaches_current_exact_components(number, name, target):
-    from experiments.runs import run_thesis_completion as driver
-
-    assert driver.solver_component(number, 'exact', name) is import_module(
-        f'models.routing.model_{number}.exact.{target}')

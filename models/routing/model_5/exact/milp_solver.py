@@ -27,19 +27,12 @@ def solve_milp(problem, time_limit=60, seed=42, verbose=False, *, milp_options=N
 
     travel = travel_lower_bounds(problem)
     domains = None
-    if problem.free_assignment:
-        from models.routing.model_5.exact.preprocessing.domains import assignment_domains, public_domain_check
-        domains = assignment_domains(problem, travel)
-        precheck = public_domain_check(domains)
-    else:
-        precheck = check_necessary_conditions(problem, travel)
+    precheck = check_necessary_conditions(problem, travel)
     if not precheck['passed']:
         return finish(rejected_result(problem, 'exact', precheck, time.perf_counter()-begun))
     result = empty_result(problem, 'exact')
     result['precheck'] = precheck
-    formulation = dict(compress_multibatch_routes=options.formulation == 'compact',
-                       e2_capacity_cuts=False, distance_cuts='none',
-                       strengthen_multibatch=False)
+    formulation = dict(compress_multibatch_routes=options.formulation == 'compact')
     config['formulation_options'] = formulation
     try:
         model, ctx = build_model(problem, verbose=verbose, deadline=begun+time_limit,

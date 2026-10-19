@@ -22,7 +22,6 @@ from models.routing.model_5.exact.constraints import (
     multibatch_add_shared_route_constraints,
     multibatch_add_task_and_return_coverage_constraints,
     multibatch_add_inventory_constraints,
-    multibatch_add_distance_certificate_constraints,
 )
 from models.routing.model_5.exact.objective import set_distance_objective
 
@@ -35,53 +34,22 @@ def build_model(
     share_e2=True,
     travel_bounds=None,
     domain_check=None,
-    strengthen_multibatch=True,
     share_cutoff=True,
-    e2_capacity_cuts=True,
     linear_e2_links=True,
     trip_symmetry=True,
     compress_multibatch_routes=None,
     factor_e2_loads=False,
-    distance_cuts=None,
-    _distance_certificate=None,
-    single_batch_cycle_cuts=False,
-    single_batch_causal_bounds=False,
 ):
-    if not isinstance(single_batch_cycle_cuts, bool):
-        raise ValueError("Short-cycle cuts must be boolean")
-    if not isinstance(single_batch_causal_bounds, bool):
-        raise ValueError("Causal step bounds must be boolean")
-    if (single_batch_cycle_cuts or single_batch_causal_bounds) and len(
-        problem.operating_policy.batches
-    ) != 1:
-        raise ValueError("Short-cycle cuts require B=1")
-    if len(problem.operating_policy.batches) == 1:
-        from models.routing.model_5.exact.diagnostics.single_batch.formulation import (
-            build_model as build_single,
-        )
-
-        cycle_options = dict(short_cycle_cuts=True) if single_batch_cycle_cuts else {}
-        if single_batch_causal_bounds:
-            cycle_options["causal_step_bounds"] = True
-        return build_single(
-            problem,
-            verbose=verbose,
-            deadline=deadline,
-            share_e2=share_e2,
-            travel_bounds=travel_bounds,
-            domain_check=domain_check,
-            **cycle_options,
-        )
+    from models.common.cycle.scope import validate_problem
+    validate_problem(problem, 5)
     import gurobipy as gp
 
     parameters = multibatch_prepare_parameters(
-        distance_cuts=distance_cuts,
         domain_check=domain_check,
         linear_e2_links=linear_e2_links,
         problem=problem,
         share_cutoff=share_cutoff,
         share_e2=share_e2,
-        strengthen_multibatch=strengthen_multibatch,
         travel_bounds=travel_bounds,
     )
     p = parameters.policy
@@ -89,7 +57,6 @@ def build_model(
     single = parameters.single_batch
     free = parameters.free_assignment
     compact = parameters.share_e2
-    strengthen = parameters.strengthen_multibatch
     compact_cutoff = parameters.share_cutoff
     linear_links = parameters.linear_e2_links
     windows = parameters.task_windows
@@ -100,7 +67,6 @@ def build_model(
     outward = parameters.depot_outward
     H = parameters.horizon
     total = parameters.total_containers
-    distance_cut_mode = parameters.distance_cut_mode
     m = gp.Model("multi_batch_cutoff_v1")
     variables = ModelVariables(m)
     m.Params.OutputFlag = int(verbose)
@@ -140,15 +106,6 @@ def build_model(
         {key: variables.multibatch_create_task_load_v(f) for key in order_times} if compact else {}
     )
     variables.task_load_volume = task_load_v
-    if strengthen and compact:
-        for key in order_times:
-            _, weight, volume = problem.task(*key)
-            if key[1] == "d":
-                task_load_w[key].UB = max(0, f.e2_weight_cap - weight)
-                task_load_v[key].UB = max(0, f.e2_volume_cap - volume)
-            else:
-                task_load_w[key].LB = weight
-                task_load_v[key].LB = volume
     shared_arcs, aggregate_arcs, global_arcs, e2_arc_cache = {}, {}, {}, {}
     variables.shared_arcs = shared_arcs
     variables.aggregate_arcs = aggregate_arcs
@@ -216,21 +173,6 @@ def build_model(
                     > right["window"][1]
                 ):
                     continue
-                if strengthen and layer == "e2":
-                    if (
-                        left["kind"] == right["kind"] == "d"
-                        and left["order"].batch != right["order"].batch
-                    ):
-                        continue
-                    # Two deliveries are loaded together; two pickups must
-                    # return together. A pickup before a delivery overlaps its
-                    # load. Delivery-then-pickup does NOT require their sum.
-                    overlap = left["kind"] == right["kind"] or left["kind"] == "p"
-                    if overlap and (
-                        left["w"] + right["w"] > cap_w + 1e-6
-                        or left["v"] + right["v"] > cap_v + 1e-6
-                    ):
-                        continue
                 arcs.append((i, j))
         if layer == "e2":
             e2_arc_cache[base] = arcs
@@ -327,28 +269,12 @@ def build_model(
         compressed_routes=compressed_routes,
         objective=objective,
     )
-    capacity_separator = None
-    if strengthen and compact and e2_capacity_cuts:
-        from models.routing.model_5.exact.branch_cut.capacity import build_capacity_separator
-
-        capacity_separator = build_capacity_separator(problem, aggregate_arcs, check_budget)
-        if capacity_separator.candidates:
-            m.Params.PreCrush = 1
     multibatch_add_task_and_return_coverage_constraints(
         parameters,
         variables,
         check_budget=check_budget,
     )
     multibatch_add_inventory_constraints(parameters, variables)
-    certificate_rows = multibatch_add_distance_certificate_constraints(
-        parameters,
-        variables,
-        _distance_certificate=_distance_certificate,
-        check_budget=check_budget,
-        component_costs=component_costs,
-        deadline=deadline,
-        objective=objective,
-    )
     set_distance_objective(m, objective)
     m.update()
     return m, dict(
@@ -362,14 +288,11 @@ def build_model(
         compressed_e2_routes=compressed_routes,
         indexed_e2_internal_arcs=indexed_internal,
         assignments=assignments,
-        capacity_activation_cuts=strengthen,
+        capacity_activation_cuts=False,
         pickup_returns=pickup_returns,
         shared_cutoff=compact_cutoff,
-        capacity_separator=capacity_separator,
         trip_count_symmetry=trip_symmetry,
         linear_e2_links=linear_links,
         factored_e2_loads=bool(factor_e2_loads),
-        distance_cut_mode=distance_cut_mode,
-        distance_certificate_rows=certificate_rows,
         distance_component_costs=component_costs,
     )

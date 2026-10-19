@@ -37,15 +37,17 @@ M3/M5/M6/M7/M8 最新成本对比的逐轮专属脚本及复现步骤见[结果�
 .venv/bin/python -m experiments.runs.run_thesis_completion status --output output/thesis_completion/new_smoke
 ```
 
-正式 `prepare` 须用 `--overhead-basis` 记录短预算试跑测得的外层启动/收尾开销，`--timeout-overhead` 给出登记宽限。`--full-k-domain` 用于 E1a 的同模型新旧策略对照；E0 保持共同 K={1,2,3} 和整数时钟。新旧策略隔离检查只允许六个 `batch_search.py` 的求解代码有差异。
+正式 `prepare` 须用 `--overhead-basis` 记录短预算试跑测得的外层启动/收尾开销，`--timeout-overhead` 给出登记宽限。`--full-k-domain` 用于 E1a 的同模型新旧策略对照；E0 保持共同 K={1,2,3} 和整数时钟。历史 E1a 的隔离检查只允许六个 `batch_search.py` 的求解代码有差异；它属于旧版 K 搜索实验，不能直接用于当前统一 MILP 与旧源码的差异检查。
 
 重复运行 `run` 会校验哈希并跳过完整任务；`--retry-failed` 为错误、外层超时或中断另建 attempt，首轮分母保持不变。`restore` 从校验过的 ZIP 恢复未随 Git 重复保存的源码副本，拒绝覆盖修改过的文件。`analyze` 生成逐种子的参照差异和阶段门槛，区分精确最优值与仅可行参照。`pipeline --output <队列目录> --studies <阶段目录...>` 顺序执行已冻结阶段，遇到执行错误、审计或证书矛盾时停在该阶段。运行目录中的 `STOP` 文件使当前阶段在活动子进程结束后停下；队列目录的 `STOP` 在下一阶段前生效。
 
-`count_search` 保留每个 K 一行，`count_search_visits` 保留逐轮访问；`anytime.csv` 对两版使用同一外层观察器，在下一候选开始或全调用返回时确认已处理候选的最好可行费用，不把局部历史提前记成全局发现。原生细粒度轨迹仍保存在新版 `result.json`，逐 K 建模和搜索诊断另存 `candidate_diagnostics.json`。`summary.csv` 包含全部计划任务，`attempts.csv` 保留每一次尝试；完成状态不代表所有任务可行或最优。
+对历史精确调度及当前 ALNS，`count_search` 保留每个 K 一行，`count_search_visits` 保留逐轮访问；`anytime.csv` 对两版使用同一外层观察器，在下一候选开始或全调用返回时确认已处理候选的最好可行费用，不把局部历史提前记成全局发现。原生细粒度轨迹仍保存在新版 `result.json`，逐 K 建模和搜索诊断另存 `candidate_diagnostics.json`。`summary.csv` 包含全部计划任务，`attempts.csv` 保留每一次尝试；完成状态不代表所有任务可行或最优。
+
+当前统一 MILP 不输出逐 K 搜索记录，驱动保存整个求解调用的最终结果和全局求解器界；完成时刻不视为首次发现解的时刻。当前源码与历史精确算法对照需要单独登记实验，不能沿用旧策略实验的性能结论。
 
 ## 模型6均匀周期基础版（2026-10-05）
 
-`runs/run_model6_uniform_comparison.py`比较M5原固定日历与M6均匀周期模型，逐次冻结源码与输入、独立审计并保存所有超时和失败。M6的一次总预算在配置K之间分配，各批共用分界；结果分别显示K、箱数、配送批次、实际回运轮数和统一两阶段时长。只有所有K解决才报告整体成本最优。数据生成器用`--uniform-cycle --batch-count-candidates 1 2 3`启用。
+`runs/run_model6_uniform_comparison.py`比较M5原固定日历与M6均匀周期模型，逐次冻结源码与输入、独立审计并保存所有超时和失败。当前 M6 的精确求解在一个 MILP 内选择 K，各批共用分界；ALNS 仍按其搜索策略处理候选 K。结果分别显示 K、箱数、配送批次、实际回运轮数和统一两阶段时长。精确最优性来自统一模型的 Gurobi 状态及独立审计。数据生成器用`--uniform-cycle --batch-count-candidates 1 2 3`启用。
 
     .venv/bin/python -m experiments.runs.run_model6_uniform_comparison --manifest data/model6/uniform_v1_20261005/manifest.json --exact-time 24 --time 10 --iterations 5000 --seeds 42 43 --workers 2 --output /path/to/new/uniform_study
 

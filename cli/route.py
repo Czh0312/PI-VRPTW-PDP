@@ -32,11 +32,11 @@ def main(argv=None):
                          help='M6 优化两窗截点，保持候选批次起止与顾客窗口不变')
     cutoffs.add_argument('--fixed-cutoffs',dest='optimize_cutoffs',action='store_false',default=None,
                          help='M6 使用原固定截点，作为对照')
-    parser.add_argument('--initial-joint-result',help='M6–M8 同模型已有可行解 JSON；审计后用于 ALNS 初解或精确求解 MIP start')
+    parser.add_argument('--initial-joint-result',help='M6–M8 同模型已有可行解 JSON；审计后用于 ALNS 初解；默认直接Gurobi不接收初解')
     parser.add_argument("--solver", choices=("alns", "exact"))
     parser.add_argument("--exact-time", type=float)
-    parser.add_argument("--exact-strategy", choices=("auto", "milp", "joint", "domain_tree", "enumeration"),
-                        help="milp: Gurobi直接求解；auto: 现有方法；joint/domain_tree/enumeration: M2/M4")
+    parser.add_argument("--exact-strategy", choices=("auto", "milp"),
+                        help="直接Gurobi（默认milp，auto为兼容别名）；M6–M8统一优化批次数")
     parser.add_argument("--milp-threads", type=int, help="直接MILP基线的线程数，默认1")
     parser.add_argument("--milp-formulation", choices=("expanded", "compact"),
                         help="直接MILP基线的等价表达，默认expanded")
