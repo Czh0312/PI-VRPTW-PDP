@@ -144,7 +144,7 @@ def main():
     sub = parser.add_subparsers(dest='command', required=True)
     run = sub.add_parser('compare')
     run.add_argument('--cases', nargs='+', required=True, help='M:CASE, e.g. 6:S03 8:L05')
-    run.add_argument('--seeds', type=int, nargs='+', default=[42, 44])
+    run.add_argument('--seeds', type=int, nargs='+', default=[42])
     run.add_argument('--baseline-source', type=Path, help='Frozen source ZIP; defaults to revision-3 formal study')
     one = sub.add_parser('worker')
     one.add_argument('--source', type=Path, required=True)

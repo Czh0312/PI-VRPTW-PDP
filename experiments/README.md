@@ -12,6 +12,7 @@
 | --- | --- | --- |
 | 正式27例八模型、精确与多种子ALNS | `experiments.runs.run_formal_benchmark27` | [冻结、恢复与结果口径](../docs/benchmark27_remote_run.md) |
 | M6–M8 求解改进的同机成对诊断 | `experiments.runs.compare_joint_refinement` | [有限预算验证（选例）](../output/inspections/solver_improvement_20261017/report.md) |
+| ALNS 解码耗时与当前数据配对诊断 | `experiments.runs.profile_alns_evaluation` | 默认 spacetime_v2，显式选例；支持 cProfile 和冻结源码对照 |
 | 单批四模型机制与经济对照 | `experiments.runs.run_single_batch_comparison` | [四模型说明](../docs/single_batch_comparison.md) |
 | M1–M4 全规模算法比较 | `experiments.runs.run_single_batch_benchmark` | [预算与结果](../output/experiments/m1_m4_comparison_20261004/m1_m4_solver_comparison_20261004.md) |
 | 固定批次与池规模扫描 | `experiments.runs.run_multibatch_cycle` | [使用说明](../docs/static_multibatch_implementation.md) |

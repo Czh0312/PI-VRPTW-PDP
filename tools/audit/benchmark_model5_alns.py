@@ -102,6 +102,7 @@ def worker(job, destination):
     from models.routing.service import solve_routing
     config, fleet = load_routing_case(job['case'], use_pool_config=False)
     config, fleet = apply_container_pool_size(config, fleet, job['pool'])
+    config['objective_mode'] = 'distance'  # Frozen historical distance benchmark.
     problem = load_instance(config, fleet)
     begun = time.perf_counter()
     result = solve_routing(model=5, method='alns', problem=problem,

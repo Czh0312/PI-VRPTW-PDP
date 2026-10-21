@@ -69,6 +69,10 @@ def build_model(
     total = parameters.total_containers
     m = gp.Model("multi_batch_cutoff_v1")
     variables = ModelVariables(m)
+    if getattr(problem, 'optimize_pool', False):
+        from gurobipy import GRB
+        variables.pool = m.addVar(vtype=GRB.INTEGER, lb=problem.pool_min,
+                                  ub=problem.pool_max, name='container_pool')
     m.Params.OutputFlag = int(verbose)
     m.Params.MIPGap = 0
     m.Params.MIPGapAbs = 0
@@ -275,7 +279,12 @@ def build_model(
         check_budget=check_budget,
     )
     multibatch_add_inventory_constraints(parameters, variables)
-    set_distance_objective(m, objective)
+    cost_parts = None
+    if getattr(problem, 'optimize_pool', False):
+        from models.routing.model_5.exact.objective import set_pool_cost_objective
+        cost_parts = set_pool_cost_objective(parameters, variables, component_costs)
+    else:
+        set_distance_objective(m, objective)
     m.update()
     return m, dict(
         parameters=parameters,
@@ -295,4 +304,6 @@ def build_model(
         linear_e2_links=linear_links,
         factored_e2_loads=bool(factor_e2_loads),
         distance_component_costs=component_costs,
+        pool=variables.pool,
+        cost_parts=cost_parts,
     )

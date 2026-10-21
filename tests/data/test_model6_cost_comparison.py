@@ -13,7 +13,7 @@ from tools.configuration.loader import load_routing_case
 from tools.data.build_model6_demo_suite import build_suite
 
 
-def test_m5_cli_prices_pool_trips_and_wear_after_distance_solving(tmp_path):
+def test_m5_cli_prices_optimized_pool_trips_and_wear(tmp_path):
     from cli.route import main as route
     from cli.cost import main as price
     manifest = json.loads(build_suite(tmp_path/'data').read_text(encoding='utf-8'))
@@ -26,16 +26,14 @@ def test_m5_cli_prices_pool_trips_and_wear_after_distance_solving(tmp_path):
     audited = audit_solution(problem,result)
     # Fixture prices: 5/box, 1/trip, 10/50 wear/use. These were missing in
     # the old M5 cost command, even when the M6 economic profile was supplied.
-    assert cost['components']['container_pool'] == 5*problem.operating_policy.container_pool_size
+    assert cost['components']['container_pool'] == 5*result['container_pool_size']
     assert cost['components']['e1_trips'] == audited['e1_trip_count']
     assert cost['components']['e2_trips'] == audited['e2_trip_count']
     assert cost['components']['container_wear'] == pytest.approx(problem.total*10/50)
     assert cost['total'] == pytest.approx(sum(cost['components'].values()))
-    assert cost['route_objective_mode']=='distance' and not cost['cost_is_optimized']
-    reference = cost['schedule_minimum_pool_reference']
-    assert reference['container_pool_size']==audited['minimum_pool_for_schedule']
-    assert cost['total']-reference['total']==pytest.approx(
-        5*(problem.operating_policy.container_pool_size-audited['minimum_pool_for_schedule']))
+    assert cost['route_objective_mode']=='cost' and cost['cost_is_optimized']
+    assert cost['pool_basis'] == 'optimized_pool'
+    assert 'schedule_minimum_pool_reference' not in cost
     assert result==original
     invalid = deepcopy(result)
     invalid['e2_trips']=[]

@@ -22,7 +22,7 @@ def main(argv=None):
     parser.add_argument('--anchors-only', action='store_true')
     parser.add_argument('--arms', nargs='+', choices=ARMS, default=['joint'])
     parser.add_argument('--solvers', nargs='+', choices=['alns','exact'], default=['alns'])
-    parser.add_argument('--seeds', nargs='+', type=int, default=[42,43,44])
+    parser.add_argument('--seeds', nargs='+', type=int, default=[42])
     parser.add_argument('--time', type=float, default=10)
     parser.add_argument('--exact-time', type=float, default=30)
     parser.add_argument('--iterations', type=int, default=5000)

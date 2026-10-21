@@ -148,7 +148,7 @@ def main():
     run = sub.add_parser('compare')
     run.add_argument('--output', type=Path, required=True)
     run.add_argument('--seconds', type=float, default=15)
-    run.add_argument('--seeds', type=int, nargs='+', default=[42, 44])
+    run.add_argument('--seeds', type=int, nargs='+', default=[42])
     one = sub.add_parser('worker')
     one.add_argument('--source', type=Path, required=True)
     one.add_argument('--output', type=Path, required=True)

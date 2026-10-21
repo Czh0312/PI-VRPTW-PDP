@@ -17,7 +17,11 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--case", default=str(DEFAULT_CASE))
     parser.add_argument("--model", type=int, choices=range(1, 9), help="M1–M5 原模型；M6 统一分界；M7 独立分界；M8 不等长批次")
-    parser.add_argument("--economic-config", help="M6–M8 成本参数与证据配置")
+    parser.add_argument("--economic-config", help="M5–M8 成本参数与证据配置")
+    parser.add_argument('--objective-mode', choices=('cost', 'distance'),
+                        help='M5 默认成本目标；distance 仅用于历史固定池诊断')
+    parser.add_argument('--pool-min', type=int, help='M5–M8 容器池决策下界')
+    parser.add_argument('--pool-max', type=int, help='M5–M8 容器池决策上界')
     schedules=parser.add_mutually_exclusive_group()
     schedules.add_argument('--uniform-cycle',dest='uniform_cycle',action='store_true',default=None,
                            help='M6 基础版：优化周期批次数，均分周期，各批共用相对分界点')
@@ -66,6 +70,12 @@ def main(argv=None):
         value = getattr(args, argument)
         if value is not None:
             config[key] = value
+    if args.objective_mode is not None:
+        if config['model'] != 5:
+            raise ValueError('--objective-mode is only supported for M5')
+        config['objective_mode'] = args.objective_mode
+    elif args.economic_config and config['model'] == 5:
+        config['objective_mode'] = 'cost'
     milp_options = dict(config.get('milp_options') or {})
     if args.milp_threads is not None:
         milp_options['threads'] = args.milp_threads
@@ -109,12 +119,27 @@ def main(argv=None):
         config['joint_batch_options']=options
     if args.initial_joint_result:
         config['initial_joint_result']=args.initial_joint_result
+    if args.pool_min is not None or args.pool_max is not None:
+        if config['model'] not in (5, 6, 7, 8):
+            raise ValueError('Pool decision bounds require M5–M8')
+        if config['model'] == 5 and config.get('objective_mode') == 'distance':
+            raise ValueError('M5 pool decision bounds require cost mode and --economic-config')
+        key = 'pool_options' if config['model'] == 5 else 'joint_batch_options'
+        bounds = dict(config.get(key, {}))
+        for name in ('pool_min', 'pool_max'):
+            if getattr(args, name) is not None:
+                bounds[name] = getattr(args, name)
+        config[key] = bounds
     if args.container_pool_size is not None:
         config, fleet = apply_container_pool_size(config, fleet, args.container_pool_size)
-        if config['model'] in (6, 7, 8):
-            config['joint_batch_options'] = {**config.get('joint_batch_options', {}),
+        if config['model'] in (5, 6, 7, 8):
+            key = 'pool_options' if config['model'] == 5 else 'joint_batch_options'
+            config[key] = {**config.get(key, {}),
                                            'pool_min': args.container_pool_size, 'pool_max': args.container_pool_size}
-    elif config['model'] not in (6, 7, 8):
+    elif config['model'] not in (5, 6, 7, 8) or (
+            config['model'] == 5 and config.get('objective_mode') == 'distance'):
         config, fleet = apply_pool_config(config, fleet, args.pool_config)
+    elif args.pool_config:
+        raise ValueError('M5–M8 optimize N; use --pool-min/--pool-max instead of --pool-config')
     from .multibatch import run_case
     return run_case(config, fleet, case_path=args.case, output=args.output)

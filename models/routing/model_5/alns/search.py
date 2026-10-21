@@ -59,7 +59,8 @@ def solve_alns(
     begun = time.perf_counter()
     parameters = ALNSParameters(max_time, max_iterations, seed)
     control = SearchControl(parameters, begun, time.perf_counter)
-    precheck = check_necessary_conditions(problem, _travel_bounds or travel_lower_bounds(problem))
+    travel_bounds = _travel_bounds or travel_lower_bounds(problem)
+    precheck = check_necessary_conditions(problem, travel_bounds)
     if not precheck["passed"]:
         return rejected_result(problem, "alns", precheck, time.perf_counter() - begun)
     rng = random.Random(seed)
@@ -112,10 +113,14 @@ def solve_alns(
         [dict(time=first_feasible, iteration=0, objective=best_cost)] if best is not None else []
     )
     descent = None
+    pool_descent = None
     if multibatch:
         from models.routing.model_5.alns.intensification import CycleDescent
 
         descent = CycleDescent(problem, cache_distances=cache_descent_distances)
+        if getattr(problem, 'optimize_pool', False):
+            from models.routing.model_5.alns.pool_moves import PoolReuseDescent
+            pool_descent = PoolReuseDescent(problem, travel_bounds=travel_bounds)
     operators = [
         "relocate",
         "split_merge",
@@ -136,6 +141,8 @@ def solve_alns(
     if multibatch:
         for counts in (attempts, improved, noops):
             counts["cycle_descent"] = 0
+            if pool_descent is not None:
+                counts['pool_reuse'] = 0
     restarts = 0
     search_rng, anchor_rng = rng, random.Random(0)
     anchor_iterations = 0
@@ -156,10 +163,15 @@ def solve_alns(
         anchor_iterations += int(anchor_phase)
         proposed = None
         index = None
+        pool_proposal = False
         if descent is not None and best_state is not None and iteration % 3 != 2:
-            proposed = descent.propose(best_state, best, begun + max_time)
+            if pool_descent is not None and iteration % 9 == 0:
+                proposed = pool_descent.propose(best_state, best, begun + max_time)
+                pool_proposal = proposed is not None
+            if proposed is None:
+                proposed = descent.propose(best_state, best, begun + max_time)
         if proposed is not None:
-            op = "cycle_descent"
+            op = 'pool_reuse' if pool_proposal else "cycle_descent"
         else:
             if time.perf_counter() - begun >= max_time:
                 break
@@ -246,11 +258,14 @@ def solve_alns(
     if multibatch:
         arc_cache = descent.distance.cache_info() if cache_descent_distances else None
         result["info"].update(
-            algorithm="adaptive_cycle_search_with_distance_descent",
+            algorithm=("adaptive_cycle_cost_search_with_pool_optimization"
+                       if getattr(problem, 'optimize_pool', False)
+                       else "adaptive_cycle_search_with_distance_descent"),
             initial_objective=initial_objective,
             incumbent_history=history,
             incumbent_restarts=restarts,
             descent_candidates=descent.generated,
+            pool_reuse_candidates=pool_descent.generated if pool_descent is not None else 0,
             descent_filtered=descent.filtered,
             descent_exhausted=descent.exhausted,
             descent_enumerations=descent.enumerations,

@@ -231,12 +231,20 @@ def lift_result(problem, raw, assignment, pool, method, cutoffs=None, loading_st
                   cutoff_snapshots=physical['cutoff_snapshots'], depot_releases=physical['depot_releases'],
                   recovery_rounds=physical['cutoff_snapshots'])
     result['info']['objective'] = cost['total']
-    result['audit'] = audit_joint_solution(problem, result)
+    # This owned schedule has just passed a full two-cycle physical replay.
+    # Validate the joint contract against that replay instead of replaying the
+    # identical schedule again. Public audits always reconstruct independently.
+    result['audit'] = _audit_joint_solution(problem, result, True, physical=physical)
     return result
 
 
 def audit_joint_solution(problem, result, repeat=True):
     """Reconstruct assigned demand and replay; distrust cached solver metrics."""
+    return _audit_joint_solution(problem, result, repeat)
+
+
+def _audit_joint_solution(problem, result, repeat, *, physical=None):
+    """Only lift_result may reuse its freshly audited, caller-owned replay."""
     try:
         errors = []
         if result.get('model') != 6 or result.get('strategy') != STRATEGY or result.get('objective_mode') != 'cost':
@@ -266,8 +274,9 @@ def audit_joint_solution(problem, result, repeat=True):
         if result.get('candidate_schedule') != joint_empty_result(problem, result.get('solver'))['candidate_schedule']:
             errors.append(dict(code='CANDIDATE_CALENDAR_MISMATCH'))
         from models.common.cycle.audit import _audit
-        physical = _audit(fixed, {**result, 'model':fixed.model_number,
-                                 'info':{**result.get('info',{}), 'objective':result.get('total_distance')}}, repeat)
+        if physical is None:
+            physical = _audit(fixed, {**result, 'model':fixed.model_number,
+                                     'info':{**result.get('info',{}), 'objective':result.get('total_distance')}}, repeat)
         errors.extend(physical['errors'])
         cost = problem.cost_profile.evaluate(physical, pool)
         claimed = result.get('info', {}).get('objective')

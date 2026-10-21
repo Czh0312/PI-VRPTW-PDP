@@ -107,6 +107,10 @@ def load_routing_case(path: str | Path, *, use_pool_config=True) -> tuple[dict[s
 
     algorithm = load_json(case["algorithm_config"]) if case.get("algorithm_config") else {}
     run_config = {**algorithm, **case}
+    # Old distance-only inputs have no economic contract. Mark that diagnostic
+    # explicitly when loading them; new M5 inputs must declare their prices.
+    if case['model'] == 5 and not run_config.get('economic_config') and 'objective_mode' not in run_config:
+        run_config['objective_mode'] = 'distance'
     fleet_config = load_json(case["routing_config"])
     if "operating_policy" in case:
         policy = case["operating_policy"]
@@ -118,7 +122,9 @@ def load_routing_case(path: str | Path, *, use_pool_config=True) -> tuple[dict[s
             raise ValueError('Multibatch cases require schema_version=2 and orders')
     elif case.get('schema_version', 1) != 1 or case.get('orders'):
         raise ValueError('schema_version=2/orders requires multi_batch_cutoff_v1')
-    if version == 'multi_batch_cutoff_v1' and use_pool_config and case['model'] not in (6, 7, 8):
+    fixed_pool = case['model'] not in (5, 6, 7, 8) or (
+        case['model'] == 5 and run_config.get('objective_mode') == 'distance')
+    if version == 'multi_batch_cutoff_v1' and use_pool_config and fixed_pool:
         from .container_pools import apply_pool_config
         run_config, fleet_config = apply_pool_config(run_config, fleet_config)
     elif 'container_pool_size' in run_config:

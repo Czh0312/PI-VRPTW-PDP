@@ -26,7 +26,7 @@ from models.common.cycle import load_instance, MultiBatchPolicy
 from tools.data.static_batch_dataset import load_manifest, check_pairing, suggested_pool_sizes
 
 INPUT_KEYS = ('data', 'orders', 'routing_config', 'operating_policy', 'algorithm_config',
-              'distance_matrix', 'duration_matrix', 'dataset_metadata', 'pool_config')
+              'distance_matrix', 'duration_matrix', 'dataset_metadata', 'pool_config', 'economic_config')
 
 
 def write_json(path, value):
@@ -37,6 +37,10 @@ def prepare_variants(args, records):
     variants = []
     for index, source in enumerate(args.case):
         cfg, fleet = load_routing_case(source, use_pool_config=False)
+        # This runner explicitly scans fixed pools for historical distance
+        # diagnostics. Current M5 cost optimization runs through main.py route.
+        if cfg['model'] == 5:
+            cfg['objective_mode'] = 'distance'
         if (fleet.get('operating_policy') or {}).get('policy_version') != 'multi_batch_cutoff_v1':
             raise ValueError(f'{source} is not a multibatch case')
         if not args.pool_sizes and not args.suggested_pools:
@@ -192,7 +196,7 @@ def main(argv=None):
     parser.add_argument('--list-only', action='store_true', help='Validate and list selected cases; no solver/output')
     parser.add_argument('--dry-run', action='store_true', help='Validate and print every planned job; no solver/output')
     parser.add_argument('--solver', choices=['both', 'exact', 'alns'], default='both')
-    parser.add_argument('--seeds', nargs='+', type=int, default=[42, 43, 44])
+    parser.add_argument('--seeds', nargs='+', type=int, default=[42])
     pools = parser.add_mutually_exclusive_group()
     pools.add_argument('--pool-sizes', nargs='+', type=int)
     pools.add_argument('--pool-config', help='Override the shared demand-ratio config (used by default)')

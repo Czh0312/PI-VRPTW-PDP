@@ -220,6 +220,7 @@ def multibatch_add_second_echelon_constraints(
                 present_batches = {o.batch for o in orders}
                 batches = [b.id for b in parameters.policy.batches if b.id in present_batches]
                 selects = {b: variables.multibatch_create_r() for b in batches}
+                r['has_delivery'] = gp.quicksum(selects.values())
                 variables.model.addConstr(
                     gp.quicksum(selects.values())
                     <= ((1))

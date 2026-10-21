@@ -8,7 +8,7 @@ M1–M8 的精确模型按数学职责组织。每个模型独立拥有下列文
 | `parameters.py` | 已知参数及安全派生界 | `ModelParameters`、`prepare_parameters`；M5 另有 `MultibatchParameters` |
 | `variables.py` | 决策变量定义和管理 | `ModelVariables` 的变量创建方法、路线和任务变量分组 |
 | `constraints.py` | 业务约束 | 分仓／分批、路径、容量、时间、车辆串行、回收量、清洁库存 |
-| `objective.py` | 目标函数 | M1–M5 的距离表达；M6–M8 的箱池、距离、工时、趟次及车辆费用 |
+| `objective.py` | 目标函数 | M1–M4 的距离表达；M5–M8 的箱池、距离、工时、趟次及车辆费用；M5 保留历史距离诊断 |
 | `formulation.py` | 实际组装实现 | 使用同一参数对象与变量容器，连接全部约束组 |
 | `milp_solver.py` | 直接 Gurobi 基线 | 显式配置、完整问题范围和原始求解器证据 |
 | `solution.py` | 业务解提取 | 路线、分仓、分批、箱池及日历，不聚合跨子问题证明 |

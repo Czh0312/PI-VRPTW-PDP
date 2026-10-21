@@ -1,5 +1,7 @@
 # M5 — ALNS 阅读导航
 
+当前成本模式在每个候选时间表下重新计算所需实体箱数 N，以包含 N 的总成本评价候选。固定分批和日历，输入与审计规则见[箱池优化说明](../../../../docs/model5_pool_optimization.md)。
+
 先看 `solver.py` 确认入口，再看 **`search.py`** 理解主要迭代流程；遇到构造、邻域、评价和搜索控制时，再进入对应文件。
 本目录独立拥有本模型算法，不导入其他编号模型的求解实现。
 
@@ -26,6 +28,7 @@
 | --- | --- |
 | [local_descent.py](local_descent.py) | 单批次局部距离下降；生成改进候选，仍由完整评价确认 |
 | [intensification.py](intensification.py) | M5 多批次强化局部搜索 |
+| [pool_moves.py](pool_moves.py) | 成本模式的箱池复用候选：移除等待提示、拆出较早回仓的回收前缀；允许距离增加，仍按完整成本评价 |
 | [single_batch_search.py](single_batch_search.py) | M5 内部 B=1 专门化搜索；不是多批次失败后的兜底 |
 
 ## 缓存与快速计算
@@ -38,6 +41,9 @@
 | [performance/timing.py](performance/timing.py) | 数组化时间约束传播 |
 
 快速评分用于候选排序或筛选；完整评价和独立业务审计决定可行性与最终成本。
+成本模式每九次迭代至多尝试一次箱池复用候选；无可用候选时继续原下降搜索。
+候选队列按当前最好状态重建、最多64项，遵守物理车辆趟次上限和原时间预算。
+E1 回收插入复用配送前缀及未改变的弧值，保留原距离累加顺序；单回收站直接评价。
 局部下降、强化和精修属于搜索策略，因此放在顶层；`performance/` 收纳缓存和快速计算。
 
 日常调用仍使用 `from models.routing.model_5.alns import solve_alns`。

@@ -138,14 +138,20 @@ def audit_dataset(dataset):
                         f'Incorrect fixed satellite mapping: {path}')
             if model <= 5:
                 require('joint_batch_options' not in cfg, f'Unexpected joint options: {path}')
-                require(len(problem.batch_map) == (1 if model <= 4 else 3), f'Wrong fixed K: {path}')
+                require(len(problem.batch_map) == (1 if model <= 4 else len(ref_policy.batches)),
+                        f'Wrong fixed K: {path}')
                 require(all(o.allowed_batch_ids == (o.batch,) for o in problem.orders),
                         f'Fixed order binding not explicit: {path}')
                 require(fixed['order_batch_assignment'] == {o.id: o.batch for o in problem.orders},
                         f'Fixed order mapping differs: {path}')
                 require(fixed['calendar'] == actual_policy['batches'], f'Fixed calendar differs: {path}')
-                require('container_pool_size' not in optimized, f'Unexpected variable pool: {path}')
-                if model >= 3:
+                variable_pool = model == 5 and contract['objective'] == 'cost'
+                require(('container_pool_size' in optimized) == variable_pool,
+                        f'Incorrect pool decision documentation: {path}')
+                if variable_pool:
+                    require('container_pool_size' not in fixed and problem.optimize_pool,
+                            f'M5 pool must be optimized: {path}')
+                elif model >= 3:
                     require(fixed['container_pool_size'] == problem.total, f'Pool not fixed to Q: {path}')
                 else:
                     require('container_pool_size' not in fixed, f'Single-use model has a cyclic pool: {path}')
@@ -178,7 +184,7 @@ def audit_dataset(dataset):
                 expected_k = tuple(certificate['candidates_by_model'][str(model)])
                 require(tuple(problem.batch_count_candidates) == expected_k, f'Unexpected K bounds: {path}')
                 domains.append(tuple(problem.batch_count_candidates))
-                child = problem.for_count(3)
+                child = problem.for_count(1)
                 require(child.require_productive_batches, f'Projection lost productive-batch semantics: {path}')
                 if model == 6:
                     require(child.shared_cutoff, f'M6 must share the cutoff: {path}')
@@ -207,8 +213,8 @@ def audit_dataset(dataset):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--dataset', default='data/formal_benchmark27_one_box_v1')
-    parser.add_argument('--output', default='output/inspections/formal_benchmark27_one_box_v1/input_audit.json')
+    parser.add_argument('--dataset', default='data/formal_benchmark27_spacetime_v2')
+    parser.add_argument('--output', default='output/inspections/formal_benchmark27_spacetime_v2/input_audit.json')
     args = parser.parse_args()
     result = audit_dataset(args.dataset)
     output = resolve_project_path(args.output)

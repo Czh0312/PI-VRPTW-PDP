@@ -85,6 +85,20 @@ def prepare(args):
         key = f'{record["base_case_id"]}_m{record["model"]}'
         cfg, original = freeze_case(record['case_path'], out, key)
         evidence.update(original)
+        if record['model'] == 5:
+            # Old immutable datasets document a fixed-Q distance baseline.
+            # Freeze a separate, explicit current M5 contract for this run.
+            cfg.update(objective_mode='cost', pool_options=dict(pool_min=1, pool_max=record['total_container_uses']))
+            cfg.pop('container_pool_size', None)
+            contract = d.read(cfg['parameter_contract'])
+            contract['objective'] = 'cost'
+            contract['fixed_parameters'].pop('container_pool_size', None)
+            if 'container_pool_size' not in contract['optimized_decisions']:
+                contract['optimized_decisions'].append('container_pool_size')
+            contract['decision_bounds'] = cfg['pool_options']
+            contract_path = out/'inputs'/f'{key}_current_parameters.json'
+            d.write(contract_path, contract)
+            cfg['parameter_contract'] = str(contract_path)
         target = out/'cases'/f'{key}.json'
         d.write(target, cfg)
         problem = load_instance(*load_routing_case(target, use_pool_config=False))
@@ -93,6 +107,8 @@ def prepare(args):
                      counts=list(getattr(problem, 'batch_count_candidates',
                                          [len(problem.operating_policy.batches)])),
                      time_tick_seconds=problem.operating_policy.time_tick_seconds)
+        if getattr(problem, 'optimize_pool', False):
+            check.update(objective_mode='cost', pool_min=problem.pool_min, pool_max=problem.pool_max)
         configs[record['case_path']] = check
         checks.append(check)
     for job in jobs:
@@ -159,6 +175,7 @@ def prepare(args):
         alns_seeds=args.seeds, exact_seed=42, exact_seconds=args.exact_seconds, alns_seconds=args.alns_seconds,
         witness_initialization=False, source_block_count=len({r['source_block'] for r in records}),
         full_dataset=len(records) == 216,
+        objective_by_model={str(m): 'distance' if m <= 4 else 'cost' for m in range(1, 9)},
         limitations=d.read(dataset/'comparison_protocol.json')['scope_limits'])
     d.write(out/'manifest.json', manifest)
     d.write(out/'manifest.sha256.json', dict(sha256=d.sha(out/'manifest.json')))
@@ -178,6 +195,8 @@ def worker(args):
     # Do not leave a complete marker if metric enrichment raises an exception.
     (path/'completion.json').unlink()
     row = d.read(path/'row.json')
+    result = d.read(path/'result.json') if (path/'result.json').exists() else {}
+    row['objective_mode'] = result.get('objective_mode', 'distance' if row['model'] <= 5 else 'cost')
     audit = d.read(path/'audit.json')['audit']
     if row['valid']:
         from tools.configuration.loader import load_routing_case
@@ -274,7 +293,10 @@ def paired_rows(rows):
             if left not in values or right not in values:
                 continue
             a, b = values[left], values[right]
-            metric = 'objective' if left <= 5 and right <= 5 else 'comparable_reusable_cost'
+            def mode(row):
+                return row.get('objective_mode', 'distance' if row['model'] <= 5 else 'cost')
+            metric = ('objective' if left <= 5 and right <= 5 and mode(a) == mode(b)
+                      else 'comparable_reusable_cost')
             both = bool(a['valid'] and b['valid'])
             av, bv = a.get(metric), b.get(metric)
             pairs.append(dict(case=key[0], method=key[1], seed=key[2], size=a['size'],
@@ -282,7 +304,9 @@ def paired_rows(rows):
                 both_valid=both, left_status=a['status'], right_status=b['status'],
                 left_value=av, right_value=bv,
                 difference_right_minus_left=bv-av if both and av is not None and bv is not None else None,
-                interpretation='M5/M6 changes both objective and batch rules' if (left,right)==(5,6)
+                interpretation=('M5/M6 uses the same cost objective; changes order batches and calendar freedom'
+                                if (left,right)==(5,6) and mode(a) == 'cost'
+                                else 'M5/M6 changes both objective and batch rules') if (left,right)==(5,6)
                                else 'paired finite-budget schedules; no universal dominance claim'))
     return pairs
 
@@ -301,7 +325,9 @@ def analyze(out):
         valid = [r for r in group if r['valid']]
         item = dict(size=size, model=model, method=method, planned=len(group),
                     valid=len(valid), proven_optimal=sum(r['proven_optimal'] for r in group),
-                    native_metric='distance' if model <= 5 else 'cost',
+                    native_metric=next((r['objective_mode'] for r in group if 'objective_mode' in r),
+                        manifest.get('objective_by_model', {}).get(str(model),
+                            'distance' if model <= 5 else 'cost')),
                     statuses=dict(Counter(r['status'] for r in group)))
         for metric in ('objective', 'total_distance', 'comparable_reusable_cost', 'N', 'k', 'solve_wall_seconds'):
             numbers = [r[metric] for r in valid if isinstance(r.get(metric), (float, int))]
@@ -373,8 +399,12 @@ def analyze(out):
         lines.append(f'| {r["size"]} | M{r["model"]} | {r["method"]} | {r["valid"]}/{r["planned"]} | {r["proven_optimal"]} | {value} |')
     lines += ['', '逐种子、逐例均值/最好/最差/标准差、同源块均值及块平衡均值、模型配对、精确参照误差见 tables/。',
         '均值仅对可行结果计算；可行率以全部计划调用为分母。各规模分别报告，种子不计为独立算例。',
-        'M1–M5原生目标为距离，M6–M8为合成成本。M3–M8另按共同费用评价，M1/M2无一次性包装单价，不报告可比总费用。',
-        'M5/M6目标和批次作业规则均不同，其差值不能单独归因为增加决策自由度。',
+        ('M1–M4原生目标为距离，M5–M8为合成成本。M3–M8另按共同费用评价，M1/M2无一次性包装单价，不报告可比总费用。'
+         if manifest.get('objective_by_model', {}).get('5') == 'cost' else
+         '历史实验：M1–M5原生目标为距离，M6–M8为合成成本。M3–M8另按共同费用评价。'),
+        ('M5/M6使用相同成本目标，比较固定分批日历与优化分批日历；允许域未必嵌套，不声明普遍支配。'
+         if manifest.get('objective_by_model', {}).get('5') == 'cost' else
+         '历史M5/M6目标和批次作业规则均不同，其差值不能单独归因为增加决策自由度。'),
         '仅精确已证最优参照计算最优误差；限时可行参照只报告费用差。未找到解不等于不可行。',
         '27例来自14个来源块，中大规模含嵌套；不作独立同分布总体推断。可行性见证未作为算法初始解。',
         '完整输入、环境、命令、K域、时间精度、上下界和原始日志随实验保存。', '',
@@ -425,12 +455,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['prepare','run','worker','status','analyze','pack'])
     parser.add_argument('--output', required=True)
-    parser.add_argument('--dataset', default='data/formal_benchmark27_one_box_v1')
+    parser.add_argument('--dataset', default='data/formal_benchmark27_spacetime_v2')
     parser.add_argument('--models', nargs='+', type=int, choices=range(1,9), default=list(range(1,9)))
     parser.add_argument('--bases', nargs='+')
     parser.add_argument('--exact-seconds', type=float, default=300)
     parser.add_argument('--alns-seconds', type=float, default=30)
-    parser.add_argument('--seeds', nargs='+', type=int, default=[42,43,44,45,46])
+    parser.add_argument('--seeds', nargs='+', type=int, default=[42])
     parser.add_argument('--workers', type=int, default=2)
     parser.add_argument('--timeout-overhead', type=float, default=60)
     parser.add_argument('--overhead-basis', help='Measured pilot evidence; required for preparation')

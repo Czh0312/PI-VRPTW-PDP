@@ -13,7 +13,7 @@
 | M2 | 一次性包装、自由分仓、纯配送，B=1 | 联合分仓 MILP / ALNS |
 | M3 | 单批次循环包装、固定分仓，B=1 | MILP / ALNS |
 | M4 | 单批次循环包装、自由分仓，B=1 | 联合分仓 MILP / ALNS |
-| M5 | 多批次循环包装、固定分仓，B>1 | MILP / ALNS |
+| M5 | 固定分仓与分批，B>1，联合优化箱数与调度成本 | MILP / ALNS |
 | M6 | 分批、箱池与路线成本优化：等长批次、共同分界 | MILP / ALNS |
 | M7 | 分批、箱池与路线成本优化：等长批次、逐批独立分界 | MILP / ALNS |
 | M8 | 分批、箱池与路线成本优化：不等长批次、逐批独立分界 | MILP / ALNS |
@@ -82,9 +82,11 @@ make test
 
 其他电脑的拉取、安装与运行步骤见 [正式数据远程运行说明](docs/benchmark27_remote_run.md)。
 
-现行统一主实验输入使用 [formal_benchmark27_one_box_v1](data/formal_benchmark27_one_box_v1/README.md)：27个基础算例、216份模型配置，每位顾客一个订单、一个标准箱，完整保留货物重量。假设一位顾客的需求能由一个标准箱承载，不进行装箱优化；配送计货重加箱重，回收计空箱重。原 [formal_benchmark27_v1](data/formal_benchmark27_v1/README.md) 与冻结结果保留，作为“多箱需求情景”。新版本只修正箱数及相关箱池参数，批次数定义和候选域不变，K≤3仍为独立诊断。验证与重跑状态见[版本说明](docs/benchmark27_one_box_20261019.md)。此前静态配对及来源数据保存在[历史数据归档](archive/datasets/README.md)。
+现行物理算例使用 [formal_benchmark27_spacetime_v2](data/formal_benchmark27_spacetime_v2/README.md)：小、中、大各9个，共27个基础算例。两、三、四个外部需求时段各9例，卫星站数量覆盖1—5个；三种需求分布在这27例中安排，不扩展额外组合。每位顾客仍一个订单、一个标准箱，顾客与中央仓坐标及完整货物重量保留。8个模型读取同一批27个基础算例，对应216份运行配置。旧 [formal_benchmark27_one_box_v1](data/formal_benchmark27_one_box_v1/README.md) 及其结果保留为历史版本；[formal_benchmark27_v1](data/formal_benchmark27_v1/README.md) 保留为多箱需求情景。
 
-当前修订3费用为 `0.1*D1 + 0.05*D2 + 5*N + 0.02*Q`，其中清洗与追踪合计0.01/箱次、磨损0.01/箱次，工时、启用与趟次费用均为0。参数源见[基础费用配置](config/experiments/benchmark27_v1/economic.json)。M1–M5仍优化原生距离目标，M6–M8及循环模型共同费用评价使用新参数。异机重跑应重新prepare到新目录，旧冻结实验继续使用其原费用。
+后续ALNS默认每个模型、每个算例只运行一个种子42；额外种子需明确指定。
+
+当前容量修订2：一级载重为体积容量×20；小规模二级3箱／60，中大规模二级6箱／120，车辆数量保持。本轮只设计空间、时段和运力，不调整成本、不评价经济优势。新版economic.json逐字节保留原费用模板，等待另行设计。模型1—4保持距离目标，模型5—8保持现有成本目标。27例全部216个模型配置已有独立两周期可行调度见证；见证不自动作为ALNS初解，也不代表已完成新一轮正式最优求解。每例的需求密度、仓—时段数量和来源见[设计总表](data/formal_benchmark27_spacetime_v2/design_summary.csv)。
 
 费用包含合成情景和有来源说明的参考参数，各自适用范围见[费用复核](docs/cost_calibration_review_20261006.md)。真实配送基础不等于完整真实闭环数据，已保存方案重计价也不等于按新目标重新求解。
 

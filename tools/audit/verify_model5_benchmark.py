@@ -41,6 +41,7 @@ def verify(folder, before='before', after='after'):
             if key not in problems:
                 config, fleet = load_routing_case(job['case'],use_pool_config=False)
                 config, fleet = apply_container_pool_size(config,fleet,job['pool'])
+                config['objective_mode'] = 'distance'
                 problems[key] = load_instance(config,fleet)
             result = record['result']
             audit = audit_solution(problems[key],result)

@@ -8,11 +8,12 @@ def multibatch_add_inventory_constraints(parameters, variables):
     import gurobipy as gp
 
     cumulative = 0
+    pool = variables.pool if variables.pool is not None else parameters.policy.container_pool_size
     for b in parameters.policy.batches if parameters.problem.reusable else ():
         cumulative += parameters.problem.batch_demands[b.id]
         if parameters.single_batch:
             variables.model.addConstr(
-                gp.LinExpr(parameters.policy.container_pool_size) >= cumulative,
+                gp.LinExpr(pool) >= cumulative,
                 f"clean_stock_{b.id}",
             )
             continue
@@ -34,6 +35,6 @@ def multibatch_add_inventory_constraints(parameters, variables):
             )
             released.append(q)
         variables.model.addConstr(
-            parameters.policy.container_pool_size + gp.quicksum(released) >= cumulative,
+            pool + gp.quicksum(released) >= cumulative,
             f"clean_stock_{b.id}",
         )

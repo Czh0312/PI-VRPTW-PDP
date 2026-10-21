@@ -215,7 +215,7 @@ def main(argv=None):
     parser.add_argument('--exact-time', type=float, default=20)
     parser.add_argument('--time', type=float, default=1)
     parser.add_argument('--iterations', type=int, default=1000)
-    parser.add_argument('--seeds', nargs='+', type=int, default=[42,43,44])
+    parser.add_argument('--seeds', nargs='+', type=int, default=[42])
     parser.add_argument('--timeout-overhead', type=float, default=15)
     parser.add_argument('--treatments',nargs='+',choices=['M5_distance','M6_fixed','M6_pool_only','M6_batch_only','M6_joint'],
                         default=['M5_distance','M6_fixed','M6_pool_only','M6_batch_only','M6_joint'])
@@ -246,7 +246,8 @@ def main(argv=None):
     for index, record in enumerate(cases):
         c5,h5 = freeze_case(record['m5_case'],out,f'{index}_M5'); input_hashes.update(h5)
         c6,h6 = freeze_case(record['m6_case'],out,f'{index}_M6'); input_hashes.update(h6)
-        p5 = load_instance(*load_routing_case(record['m5_case'],use_pool_config=False))
+        cfg5, fleet5 = load_routing_case(record['m5_case'], use_pool_config=False)
+        p5 = load_instance({**cfg5, 'objective_mode': 'distance'}, fleet5)
         p6 = load_instance(*load_routing_case(record['m6_case'],use_pool_config=False))
         def same_input(key):
             first, second = c5.get(key), c6.get(key)
@@ -259,6 +260,7 @@ def main(argv=None):
         original = {o.id:o.batch for o in p5.orders}
         p6.project(original)  # Original M5 assignment must also obey M6 release/allowed constraints.
         pool = p5.operating_policy.container_pool_size
+        c5['objective_mode'] = 'distance'  # Explicit historical ablation.
         variants = {'M5_distance':c5, 'M6_joint':c6}
         for label,fix_batches,fix_pool in [('M6_fixed',True,True),('M6_pool_only',True,False),('M6_batch_only',False,True)]:
             config = deepcopy(c6); options = deepcopy(c6.get('joint_batch_options',{}))

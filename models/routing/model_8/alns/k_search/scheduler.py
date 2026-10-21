@@ -15,6 +15,12 @@ from models.common.cycle.joint import joint_empty_result
 from models.common.cycle.calendar import STRATEGIES, attach_calendar_decisions, audit_calendar_solution
 
 
+CALENDAR_METRICS = ('calendar_retiming_attempts', 'calendar_retiming_feasible',
+                    'calendar_reconstructions', 'calendar_reconstruction_improvements',
+                    'calendar_retiming_seconds', 'calendar_reconstruction_seconds',
+                    'calendar_cache_hits', 'calendar_cache_misses', 'calendar_cache_evictions')
+
+
 def _audit(problem, result):
     return audit_calendar_solution(problem, result)
 
@@ -203,9 +209,9 @@ def solve_counts(problem, *, solve_candidate, method, budget, seed, max_iteratio
                          local_history=deepcopy(info.get('history', [])))
             for key in ('proof_scope', 'build_time', 'variables', 'constraints', 'node_count',
                         'sol_count', 'evaluations', 'cache_hits', 'calendar_evaluations',
-                        'operator_attempts', 'operator_improvements', 'cutoff_polish_calls',
+                        'operator_attempts', 'operator_improvements', 'operator_noops', 'cutoff_polish_calls',
                         'cutoff_polish_improvements', 'cutoff_polish_evaluations',
-                        'cutoff_polish_runtime', 'cutoff_polish_budget'):
+                        'cutoff_polish_runtime', 'cutoff_polish_budget') + CALENDAR_METRICS:
                 if key in info:
                     visit[key] = deepcopy(info[key])
             visits.append(visit)
@@ -267,10 +273,10 @@ def solve_counts(problem, *, solve_candidate, method, budget, seed, max_iteratio
 
     sum_keys = ('evaluations', 'cache_hits', 'calendar_evaluations', 'cutoff_polish_calls',
                 'cutoff_polish_improvements', 'cutoff_polish_evaluations',
-                'cutoff_polish_runtime', 'cutoff_polish_budget')
+                'cutoff_polish_runtime', 'cutoff_polish_budget') + CALENDAR_METRICS
     for row in rows:
         row.update({key: sum(v.get(key, 0) for v in row['visits']) for key in sum_keys})
-        for key in ('operator_attempts', 'operator_improvements'):
+        for key in ('operator_attempts', 'operator_improvements', 'operator_noops'):
             row[key] = operators(key, row['visits'])
     result['info'].update(
         status='OPTIMAL' if optimal else 'INFEASIBLE' if infeasible else 'FEASIBLE' if best is not None
@@ -294,6 +300,7 @@ def solve_counts(problem, *, solve_candidate, method, budget, seed, max_iteratio
         initial_incumbent_cost=initial_result['info']['objective'] if initial_result else None,
         operator_attempts=operators('operator_attempts', visits),
         operator_improvements=operators('operator_improvements', visits),
+        operator_noops=operators('operator_noops', visits),
         **{key: sum(v.get(key, 0) for v in visits) for key in sum_keys})
     if best is not None:
         result['audit'] = _audit(problem, result)

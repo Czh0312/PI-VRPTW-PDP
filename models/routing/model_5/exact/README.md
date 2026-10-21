@@ -1,5 +1,7 @@
 # M5 直接 Gurobi 求解
 
+当前 M5 在固定分批和日历下联合优化整数箱数 N 与调度总成本，与 M6–M8 使用相同费用定义。输入、结果及历史诊断兼容见[箱池优化说明](../../../../docs/model5_pool_optimization.md)。
+
 `solver.py` 只调用直接 Gurobi；`strategy="milp"` 为默认，`auto` 为兼容别名。
 
 | 文件 | 职责 |

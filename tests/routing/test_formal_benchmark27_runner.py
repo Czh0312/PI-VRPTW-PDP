@@ -39,3 +39,16 @@ def test_failed_member_stays_in_pair_without_invented_improvement():
     assert not pair['both_valid']
     assert pair['right_status']=='TIME_LIMIT'
     assert pair['difference_right_minus_left'] is None
+
+
+def test_current_m5_comparisons_use_matching_costs_and_describe_added_decisions():
+    common = dict(case='S01', method='alns', seed=42, size='small', source_block='source',
+                  valid=True, status='FEASIBLE')
+    rows = [dict(common, model=3, objective_mode='distance', objective=100, comparable_reusable_cost=500),
+            dict(common, model=5, objective_mode='cost', objective=450, comparable_reusable_cost=450),
+            dict(common, model=6, objective_mode='cost', objective=400, comparable_reusable_cost=400)]
+    pairs = paired_rows(rows)
+    assert all(pair['metric'] == 'comparable_reusable_cost' for pair in pairs)
+    m56 = next(pair for pair in pairs if (pair['left'], pair['right']) == (5, 6))
+    assert 'same cost objective' in m56['interpretation']
+    assert m56['difference_right_minus_left'] == -50

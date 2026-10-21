@@ -64,7 +64,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--case', default='config/experiments/examples/single_batch_demo.json')
     parser.add_argument('--solver', choices=('both', 'exact', 'alns'), default='both')
-    parser.add_argument('--seeds', nargs='+', type=int, default=[42, 43, 44])
+    parser.add_argument('--seeds', nargs='+', type=int, default=[42])
     parser.add_argument('--time', type=float, default=2)
     parser.add_argument('--exact-time', type=float, default=30)
     parser.add_argument('--iterations', type=int, default=5000)

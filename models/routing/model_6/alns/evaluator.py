@@ -78,28 +78,67 @@ def _e1_returns(problem, state, quantities):
     for b in p.batches:
         picked = [[] for _ in range(f.e1_count)]
         q = quantities[b.id]
-        for s in state["pickup_order"][b.id]:
-            if not q[s]:
-                continue
+        active = [s for s in state["pickup_order"][b.id] if q[s]]
+        # Delivery times are independent of pickup insertion. Decode that
+        # prefix once; pickup stops have no individual time windows, so their
+        # return deadline checks use exact integer travel/service deltas.
+        forward = []
+        for k in range(f.e1_count) if len(active) > 1 else ():
+            deliveries = state["deliveries"][b.id][k]
+            trip, issues = _e1_trip(problem, b, k, deliveries, [], {}, ready[k])
+            end = (trip["events"][-1]["start"] + problem.service(deliveries[-1])
+                   if deliveries else max(b.cutoff, ready[k]))
+            forward.append((
+                max(end, b.cutoff),
+                sum(code in ("E1_VEHICLE_OVERLAP", "E1_DELIVERY_DEADLINE") for code in issues),
+                sum(problem.weights[c, b.id] for c in deliveries),
+                sum(problem.demands[c, b.id] * f.container_volume for c in deliveries),
+            ))
+        for s in active:
             options = []
             hint = state["pickup_vehicle"][b.id].get(s)
-            for k in range(f.e1_count):
-                for position in range(len(picked[k]) + 1):
-                    proposed = picked[k][:position] + [s] + picked[k][position:]
+            if len(active) == 1:
+                # One pickup has no alternative insertion positions; avoid
+                # preparing prefixes that cannot be reused.
+                for k in range(f.e1_count):
                     trip, issues = _e1_trip(
-                        problem, b, k, state["deliveries"][b.id][k], proposed, q, ready[k]
-                    )
-                    options.append(
-                        (
-                            len(issues),
-                            int(hint is not None and hint != k),
-                            route_distance(problem, trip, "e1"),
-                            k,
-                            proposed,
-                        )
-                    )
-            _, _, _, k, chosen = min(options, key=lambda x: x[:4])
-            picked[k] = chosen
+                        problem, b, k, state["deliveries"][b.id][k], [s], q, ready[k])
+                    options.append((len(issues), int(hint is not None and hint != k),
+                                    route_distance(problem, trip, "e1"), k))
+                k = min(options)[3]
+                picked[k] = [s]
+                continue
+            for k in range(f.e1_count):
+                deliveries = state["deliveries"][b.id][k]
+                start, fixed_issues, dw, dv = forward[k]
+                pickup_nodes = [deliveries[-1] if deliveries else problem.depot] + picked[k] + [problem.depot]
+                pickup_edges = list(zip(pickup_nodes, pickup_nodes[1:]))
+                travel_edges = [problem.travel(a, c) for a, c in pickup_edges]
+                completed = (start + sum(travel_edges) + sum(problem.service(c) for c in picked[k])
+                             + p.depot_return_unload_time)
+                quantity = sum(q[c] for c in picked[k]) + q[s]
+                capacity_issues = (
+                    int(dw > f.e1_weight_cap + 1e-6 or quantity * f.container_weight > f.e1_weight_cap + 1e-6)
+                    + int(dv > f.e1_volume_cap + 1e-6 or quantity * f.container_volume > f.e1_volume_cap + 1e-6)
+                )
+                nodes = [problem.depot] + deliveries + picked[k] + [problem.depot]
+                distance_edges = [problem.distance(a, c) for a, c in zip(nodes, nodes[1:])]
+                for position, (left, right) in enumerate(pickup_edges):
+                    returned = (completed + problem.travel(left, s) + problem.service(s)
+                                + problem.travel(s, right) - travel_edges[position])
+                    issues = (fixed_issues + capacity_issues + int(returned > b.end)
+                              + int(returned + p.e1_turnaround_time > p.cycle_end)
+                              + int(returned + p.cleaning_duration > p.cycle_end))
+                    edge = len(deliveries) + position
+                    # Reuse unchanged arc values while preserving the original
+                    # floating-point summation order and insertion tie breaks.
+                    distance = sum(distance_edges[:edge]
+                                   + [problem.distance(left, s), problem.distance(s, right)]
+                                   + distance_edges[edge + 1:])
+                    options.append((issues, int(hint is not None and hint != k),
+                                    distance, k, position))
+            _, _, _, k, position = min(options, key=lambda x: x[:4])
+            picked[k].insert(position, s)
         for k in range(f.e1_count):
             trip, issues = _e1_trip(
                 problem, b, k, state["deliveries"][b.id][k], picked[k], q, ready[k]

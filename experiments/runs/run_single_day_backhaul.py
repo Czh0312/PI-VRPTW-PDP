@@ -37,7 +37,7 @@ def main(argv=None):
     parser.add_argument('--solver', choices=('both', 'exact', 'alns'), default='both')
     parser.add_argument('--backends', nargs='+', choices=('commodity_flow', 'indexed'),
                         default=['commodity_flow', 'indexed'])
-    parser.add_argument('--seeds', nargs='+', type=int, default=[42, 43, 44])
+    parser.add_argument('--seeds', nargs='+', type=int, default=[42])
     parser.add_argument('--time', type=float, default=10)
     parser.add_argument('--exact-time', type=float, default=60)
     parser.add_argument('--day-end', type=float)

@@ -40,4 +40,7 @@ def extract_solution(problem, model, ctx, result):
                 event['site_id' if layer == 'e1' else 'order_id'] = n['site'] if layer == 'e1' else n['order'].id
                 trip['events'].append(event)
             result[layer+'_trips'].append(trip)
+    if getattr(problem, 'optimize_pool', False):
+        from models.common.cycle.fixed_pool import attach_pool_cost
+        attach_pool_cost(problem, result, int_value(ctx['pool']))
     return result

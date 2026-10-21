@@ -75,7 +75,9 @@ def parameter_contract(model, record, orders, policy, joint_options):
     if model <= 5:
         fixed.update(batch_count=len(policy['batches']), calendar=policy['batches'],
                      order_batch_assignment={o['order_id']: o['delivery_batch_id'] for o in orders})
-        if model >= 3:
+        if model == 5:
+            optimized.append('container_pool_size')
+        elif model >= 3:
             fixed['container_pool_size'] = record['total_container_uses']
         else:
             inactive = ['reusable_container_pool', 'pickup_tasks', 'cleaning', 'container_cycle_closure']
@@ -89,9 +91,10 @@ def parameter_contract(model, record, orders, policy, joint_options):
             fixed['batch_length_rule'] = 'cycle_length / selected_batch_count'
     return dict(model=model, base_case_id=record['id'], source_family=record['family_id'],
                 demand_container_uses=record['total_container_uses'],
-                objective='distance' if model <= 5 else 'cost',
+                objective='distance' if model <= 4 else 'cost',
                 fixed_parameters=fixed, optimized_decisions=optimized, inactive_components=inactive,
-                decision_bounds=joint_options or {},
+                decision_bounds=(dict(pool_min=1, pool_max=record['total_container_uses'])
+                                 if model == 5 else joint_options or {}),
                 reference_only=dict(customer_satellite_assignment=assignment,
                     container_pool_size=record['total_container_uses']),
                 notes=['The model number activates packaging and free-assignment semantics in the solver.',
@@ -138,7 +141,7 @@ def build_suite(output=DEFAULT_OUTPUT, selection=DEFAULT_SELECTION):
                     selection_source=reference(source), selection_sha256=digest(source),
                     batch_definition='M6-M8: each counted batch has positive delivery and depot-return quantities',
                     runtime_path_basis='Project-root-relative paths; no runtime dependencies outside this dataset',
-                    objective_by_model={str(i): 'distance' if i <= 5 else 'cost' for i in range(1, 9)},
+                    objective_by_model={str(i): 'distance' if i <= 4 else 'cost' for i in range(1, 9)},
                     cases=[], base_cases=[], limitations=[
                         '27 spatial networks are derived from 14 source blocks; nested sizes remain paired.',
                         'Synthetic appointments and economic coefficients, not measured operating costs.',
@@ -248,6 +251,9 @@ def build_suite(output=DEFAULT_OUTPUT, selection=DEFAULT_SELECTION):
                        exact_time=300, alns_time=30, alns_iter=10**9, seed=42, save_plots=False,
                        dataset_version=version, base_case_id=record['id'],
                        parameter_contract=reference(folder/'parameters.json'))
+            if model == 5:
+                cfg.update(objective_mode='cost', pool_options=dict(pool_min=1, pool_max=record['total_container_uses']))
+                cfg.pop('container_pool_size')
             if options:
                 cfg['joint_batch_options'] = options
                 cfg['batch_count_certificate'] = reference(shared/'batch_count_certificate.json')
@@ -262,6 +268,8 @@ def build_suite(output=DEFAULT_OUTPUT, selection=DEFAULT_SELECTION):
     for model in range(1, 9):
         directory = out/f'model_{model}'
         profile = design['model_profiles'][str(model)]
+        if model == 5:
+            profile = {**profile, 'pool': 'optimized_integer_N', 'objective': 'cost'}
         (directory/'README.md').write_text(
             f'# 模型 {model} 数据集\n\n小、中、大各9例，共27例。每例的 `case.json` 可直接运行，'
             '`parameters.json` 列出固定参数、优化决策及不适用的机制。\n\n'

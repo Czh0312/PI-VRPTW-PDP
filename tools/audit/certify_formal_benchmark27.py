@@ -33,19 +33,32 @@ def fixed_witness(problem, model):
     evaluator = import_module(f'models.routing.model_{model}.alns.evaluator')
     _, result, violations = evaluator.evaluate(problem, construction.appointment_state(problem,random.Random(42)))
     audited = audit_solution(problem,result)
+    default_violations = list(violations)
+    method = 'legacy_two_order_appointment_construction'
+    if violations or not audited['valid']:
+        from tools.audit.construct_appointment_witness import packed_appointment_state
+        state = packed_appointment_state(problem,model)
+        _, result, violations = evaluator.evaluate(problem,state)
+        audited = audit_solution(problem,result)
+        method = 'capacity_sized_appointment_packing_validation_only'
     if violations or not audited['valid']:
         raise ValueError(f'Constructive witness failed: {violations}; {audited["errors"]}')
     keep = ('schema_version','policy_version','time_unit','model','packaging','time_tick_seconds',
-            'time_tick_subdivision','objective_mode','operating_policy','batches','e1_trips','e2_trips')
+            'time_tick_subdivision','objective_mode','operating_policy','batches','e1_trips','e2_trips',
+            'container_pool_size','pool_bounds','economic_profile_hash','evidence_hash',
+            'total_distance','cost','cost_components')
     result = {key:result[key] for key in keep if key in result}
     result.update(solver='feasibility_witness',validation_only=True,
+        witness_construction=method, legacy_seed_violations=default_violations,
         info=dict(status='FEASIBLE',objective=audited['objective'],proven_optimal=False,
                   proven_infeasible=False,proof_scope='Existence of an audited feasible schedule only'))
     return result
 
 
-def load_problem(base, model):
+def load_problem(base, model, *, objective_mode=None):
     config, fleet = load_routing_case(base['models'][str(model)])
+    if objective_mode is not None:
+        config['objective_mode'] = objective_mode
     return load_instance(config,fleet)
 
 
@@ -66,7 +79,11 @@ def verify_witnesses(root):
                 name=f'{b["id"]}/model_{m}.json';payload=z.read(name)
                 if hashlib.sha256(payload).hexdigest()!=report['witness_sha256'][name]:
                     raise ValueError(f'Witness bytes changed: {name}')
-                audited=audit_solution(load_problem(b,m),json.loads(payload))
+                saved = json.loads(payload)
+                # Replay frozen historical distance witnesses under their
+                # original fixed-pool contract, without changing stored bytes.
+                mode = 'distance' if m == 5 and saved.get('objective_mode') == 'distance' else None
+                audited=audit_solution(load_problem(b,m,objective_mode=mode),saved)
                 if not audited['valid']:
                     raise ValueError(f'Witness failed independent replay: {name}: {audited["errors"]}')
                 rows.append(dict(base_case_id=b['id'],model=m,valid=True))
@@ -139,7 +156,7 @@ def certify(root):
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--dataset',default='data/formal_benchmark27_one_box_v1')
+    parser.add_argument('--dataset',default='data/formal_benchmark27_spacetime_v2')
     parser.add_argument('--verify',action='store_true')
     args=parser.parse_args()
     result=verify_witnesses(args.dataset) if args.verify else certify(args.dataset)

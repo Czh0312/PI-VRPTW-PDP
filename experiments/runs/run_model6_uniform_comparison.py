@@ -105,7 +105,8 @@ def main(argv=None):
     shutil.copy2(manifest_path,out/'inputs/manifest.json')
     hashes={}; jobs=[]
     for index,record in enumerate(manifest['cases']):
-        p5=load_instance(*load_routing_case(record['m5_case'],use_pool_config=False))
+        cfg5, fleet5 = load_routing_case(record['m5_case'], use_pool_config=False)
+        p5=load_instance({**cfg5, 'objective_mode': 'distance'}, fleet5)
         p6=load_instance(*load_routing_case(record['m6_case'],use_pool_config=False))
         if p5.model_number!=5 or not getattr(p6,'uniform_cycle',False):
             raise ValueError('Comparison requires M5 and uniform-cycle M6')
@@ -118,6 +119,7 @@ def main(argv=None):
             hashes.update(evidence)
             configs[label]=config
         c5,c6=configs['M5_distance'],configs['M6_uniform']
+        c5['objective_mode'] = 'distance'  # Explicit historical baseline.
         for key in ('data','routing_config','distance_matrix','duration_matrix'):
             first,second=c5.get(key),c6.get(key)
             if isinstance(first,str) and isinstance(second,str):

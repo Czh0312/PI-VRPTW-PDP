@@ -20,7 +20,7 @@ def main(argv=None):
     parser.add_argument('--exact-time',type=float,default=24)
     parser.add_argument('--time',type=float,default=10)
     parser.add_argument('--iterations',type=int,default=5000)
-    parser.add_argument('--seeds',type=int,nargs='+',default=[42,43])
+    parser.add_argument('--seeds',type=int,nargs='+',default=[42])
     parser.add_argument('--solvers',choices=('exact','alns'),nargs='+',default=['exact','alns'])
     args=parser.parse_args(argv)
     if any(not math.isfinite(v) or v<=0 for v in (args.exact_time,args.time)) or args.iterations<0:

@@ -5,7 +5,7 @@ No mathematical solver, exact backend, or exact solution is used to initialize.
 """
 from __future__ import annotations
 
-from models.routing.model_8.alns.parameters import ALNSParameters
+from models.routing.model_8.alns.parameters import ALNSParameters, validate_calendar_reconstruction_period
 from models.routing.model_8.alns.search_control import SearchControl
 
 from models.routing.model_8.alns.construction import initial_calendars, cover_delivery_batches
@@ -32,7 +32,9 @@ from models.routing.model_8.alns.neighborhoods import (
 from models.routing.model_8.alns.cutoff_moves import _cutoff_move
 
 
-def solve_variable_count(variable, *, max_time, max_iterations, seed, initial_result=None):
+def solve_variable_count(variable, *, max_time, max_iterations, seed, initial_result=None,
+                         calendar_reconstruction_period=1):
+    calendar_reconstruction_period = validate_calendar_reconstruction_period(calendar_reconstruction_period)
     parent, k = variable.parent, variable.count
     if k == 1:
         # There are no movable boundaries. Use exactly the same independent-
@@ -65,7 +67,8 @@ def solve_variable_count(variable, *, max_time, max_iterations, seed, initial_re
             runtime=time.perf_counter() - begun, iterations=0,
         )
         return result
-    parameters = ALNSParameters(max_time, max_iterations, seed)
+    parameters = ALNSParameters(max_time, max_iterations, seed,
+                               calendar_reconstruction_period=calendar_reconstruction_period)
     control = SearchControl(parameters, begun, time.perf_counter)
     deadline = begun + max_time
     search_deadline = deadline - (.2*max_time if len(parent.orders) <= 16 else 0.)
@@ -73,6 +76,10 @@ def solve_variable_count(variable, *, max_time, max_iterations, seed, initial_re
     evaluators = OrderedDict()
     evicted_hits = evicted_misses = 0
     calendar_visits = set()
+    calendar_stats = dict(calendar_retiming_attempts=0, calendar_retiming_feasible=0,
+                          calendar_reconstructions=0, calendar_reconstruction_improvements=0,
+                          calendar_retiming_seconds=0.0, calendar_reconstruction_seconds=0.0,
+                          calendar_cache_hits=0, calendar_cache_misses=0, calendar_cache_evictions=0)
     penalty = (
         max(1.0, sum(parent.cost_profile.rates.values()))
         * parent.total
@@ -85,11 +92,15 @@ def solve_variable_count(variable, *, max_time, max_iterations, seed, initial_re
         boundaries = tuple(boundaries)
         calendar_visits.add(boundaries)
         if boundaries not in evaluators:
+            calendar_stats['calendar_cache_misses'] += 1
             evaluators[boundaries] = JointEvaluator(parent.fixed_calendar(k, boundaries))
             if len(evaluators) > 24:
+                calendar_stats['calendar_cache_evictions'] += 1
                 _, old = evaluators.popitem(last=False)
                 evicted_hits += old.hits
                 evicted_misses += old.misses
+        else:
+            calendar_stats['calendar_cache_hits'] += 1
         evaluators.move_to_end(boundaries)
         evaluator = evaluators[boundaries]
         return evaluator.problem, evaluator
@@ -109,7 +120,10 @@ def solve_variable_count(variable, *, max_time, max_iterations, seed, initial_re
         cuts = profile or (state.get("cutoffs") if state is not None else child.default_cutoffs)
         cuts = {bid: min(hi, max(lo, cuts[bid])) for bid, (lo, hi) in child.cutoff_bounds.items()}
         chosen = None
+        diversify = False
         if state is not None and proposed == assignment:
+            calendar_stats['calendar_retiming_attempts'] += 1
+            retiming_started = time.perf_counter()
             trial = clone_state(state)
             trial["cutoffs"] = cuts
             # Explicit waits from an old calendar must not pin the new one.
@@ -118,7 +132,17 @@ def solve_variable_count(variable, *, max_time, max_iterations, seed, initial_re
                 route.pop("return_after", None)
             score, result, _ = evaluator(proposed, trial)
             chosen = score, proposed, trial, result
-        if chosen is None or time.perf_counter() < search_deadline:
+            calendar_stats['calendar_retiming_seconds'] += time.perf_counter() - retiming_started
+            if result is not None:
+                calendar_stats['calendar_retiming_feasible'] += 1
+                diversify = (calendar_stats['calendar_retiming_feasible']
+                             % parameters.calendar_reconstruction_period == 0)
+        # Invalid retained routes still require repair. Feasible retimings get
+        # occasional reconstruction for diversification, with no extra budget.
+        if chosen is None or (time.perf_counter() < search_deadline
+                              and (chosen[3] is None or diversify)):
+            calendar_stats['calendar_reconstructions'] += 1
+            reconstruction_started = time.perf_counter()
             score, trial, result, _ = _best_construction(
                 child,
                 evaluator,
@@ -128,7 +152,10 @@ def solve_variable_count(variable, *, max_time, max_iterations, seed, initial_re
                 randomized=state is not None,
                 cutoffs=cuts,
             )
+            calendar_stats['calendar_reconstruction_seconds'] += time.perf_counter() - reconstruction_started
             if chosen is None or score < chosen[0]:
+                if chosen is not None:
+                    calendar_stats['calendar_reconstruction_improvements'] += 1
                 chosen = score, proposed, trial, result
         return chosen
 
@@ -224,6 +251,7 @@ def solve_variable_count(variable, *, max_time, max_iterations, seed, initial_re
     rewards = {op: 0.0 for op in operators}
     uses = {op: 0 for op in operators}
     accepted = iterations = 0
+    noops = {op: 0 for op in operators}
     for iteration in range(max_iterations-warm_iterations):
         if time.perf_counter() >= search_deadline:
             break
@@ -238,6 +266,12 @@ def solve_variable_count(variable, *, max_time, max_iterations, seed, initial_re
         proposed_bounds = bounds
         if op in boundary_ops:
             proposed_bounds = move_boundaries(variable, bounds, rng, op, best)
+            if (parameters.calendar_reconstruction_period > 1
+                    and tuple(proposed_bounds) == tuple(bounds)):
+                noops[op] += 1
+                if iterations % parameters.segment_period == 0:
+                    control.update_named_segment(operators, weights, rewards, uses)
+                continue
             new_score, proposed_assignment, proposed, candidate = repair(
                 proposed_bounds, assignment, state
             )
@@ -324,6 +358,9 @@ def solve_variable_count(variable, *, max_time, max_iterations, seed, initial_re
         calendar_evaluations=len(calendar_visits),
         evaluations=evicted_misses + sum(e.misses for e in evaluators.values()),
         cache_hits=evicted_hits + sum(e.hits for e in evaluators.values()),
+        operator_noops=noops,
+        calendar_reconstruction_period=parameters.calendar_reconstruction_period,
+        **calendar_stats,
     )
     if best is not None:
         result["audit"] = audit_joint_solution(parent.fixed_calendar(k, best_boundaries), result)

@@ -583,7 +583,7 @@ def worker(args):
         row.update(valid=bool(audit['valid']), audit_errors=audit['errors'])
         if audit['valid']:
             cost = (evaluate_comparison_cost(problem, result, config['economic_config'], audit=audit)
-                    if job['model'] >= 6 else dict(total=audit['objective'], components={},
+                    if job['model'] >= 6 or getattr(problem, 'optimize_pool', False) else dict(total=audit['objective'], components={},
                         container_pool_size=problem.operating_policy.container_pool_size))
             if not math.isclose(cost['total'], info['objective'], rel_tol=1e-7, abs_tol=1e-6):
                 raise ValueError('Independent cost differs from solver objective')

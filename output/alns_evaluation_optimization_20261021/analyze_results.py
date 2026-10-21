@@ -1,0 +1,115 @@
+"""Build the descriptive optimization report without dropping regressions."""
+import hashlib
+import json
+from pathlib import Path
+import re
+
+OUT = Path(__file__).resolve().parent
+
+
+def paired(folder):
+    path = OUT / folder / 'results.json'
+    if not path.exists():
+        return ['待完成。']
+    rows = json.loads(path.read_text())
+    pairs = {}
+    for row in rows:
+        pairs.setdefault((row['model'], row['case']), {})[row['variant']] = row
+    lines = ['| 模型/算例 | 旧版目标 | 新版目标 | 目标变化 | 旧/新独立审计 | 旧/新评价次数 |',
+             '|---|---:|---:|---:|---|---:|']
+    for (number, case), variants in pairs.items():
+        if 'baseline' not in variants or 'candidate' not in variants:
+            continue
+        before, after = variants['baseline'], variants['candidate']
+        values = []
+        for variant in ('baseline', 'candidate'):
+            result = json.loads((OUT / folder / variant / f'm{number}_{case}' / 'result.json').read_text())
+            info = result['info']
+            values.append(info.get('evaluations', info.get('evaluation_cache_misses')))
+        b, a = before['objective'], after['objective']
+        delta = f'{100 * (a / b - 1):+.2f}%' if b and a is not None else 'NA'
+        lines.append(f'| M{number}/{case} | {b:.6f} | {a:.6f} | {delta} | '
+                     f'{before["valid"]}/{after["valid"]} | {values[0]}/{values[1]} |')
+    return lines
+
+
+lines = ['# ALNS 评价与搜索优化核验（2026-10-21）', '',
+    '本轮完成 E1 插入评价复用、联合结果去重审计、M5 箱池复用邻域，以及可选 M8 快速日历修复。'
+    '当前默认保留 M8 原重构频率。所有业务约束、目标系数和 K 允许域保持输入定义；'
+    '完整跨路线增量解码尚未实现。', '',
+    '本报告是选例工程诊断，不是27例正式比较、最优性证明或统计显著性结论。'
+    '所有 ALNS 使用种子42；固定墙钟预算仍可能导致搜索轨迹不同。', '',
+    '## 最终默认配置：受控30秒配对', '',
+    '输入为 spacetime_v2 的 L01。串行、两版先后顺序交替、单线程数值库，'
+    '固定子进程 PYTHONHASHSEED=0，迭代上限10^9。目标变化为新版/旧版−1，负值更好。', '']
+lines += paired('controlled_final_30s')
+lines += ['', '原始结果、外部独立审计及各次运行元信息见 '
+          '[controlled_final_30s](controlled_final_30s/results.json)。'
+          '两组选例不能代表全部规模或长期平均收益。', '',
+          '## 实际修改与验证边界', '',
+          '- M5–M8 的 E1 配送前缀只解码一次；用整数时间增量检查回收插入，复用未改变的距离弧，'
+          '保留原浮点累加顺序及平局处理。零/单回收站走轻量分支，最后仍完整解码选定路线。',
+          '- 一个未缓存且可行的 JointEvaluator 候选，物理审计由3次减为2次。'
+          '结果构建仅复用刚完成的、属于该方案的完整两周期审计；公开 audit_solution / '
+          'audit_joint_solution 继续重建并核对，篡改事件、箱数、距离或费用仍被拒绝。',
+          '- M5 每九次迭代至多尝试一次箱池复用候选。清除等待提示或拆出可早回仓的回收前缀，'
+          '允许距离增加。队列最多64项；复用预处理最短时间下界，支持非对称和非度量路网。'
+          '完整解码和独立审计最终决定可行性与总成本。',
+          '- M8 默认 calendar_reconstruction_period=1，保持原来的每次重构策略。'
+          'Python 入口传 calendar_reconstruction_period=8 才启用快速修复及日历空移动跳过。'
+          '不可行保留方案仍重构；可行方案周期性重构以保持多样化。'
+          '新增重算/重构耗时、缓存命中/失效及逐K汇总。', '',
+          '## 相同 E1 输入的微基准', '',
+          '与会话开始时冻结的完整插入算法比较。每种站数20组确定性输入，每轮1600次调用，'
+          '五轮串行交替先后顺序，报告中位数。输入含违反容量/截止条件的状态、零回收、'
+          '非对称非度量时间及分数距离。此处加速仅指 E1 子程序。', '']
+micro = OUT / 'e1_microbenchmark.json'
+if micro.exists():
+    lines += ['| 卫星站数 | 原完整算法/秒 | 新算法/秒 | 加速倍数 |', '|---:|---:|---:|---:|']
+    for row in json.loads(micro.read_text()):
+        times = row['median_seconds']
+        lines.append(f'| {row["satellites"]} | {times["baseline"]:.6f} | '
+                     f'{times["candidate"]:.6f} | {row["speedup"]:.2f} |')
+lines += ['', '## 探索过程与退化记录', '',
+          '以下早期运行未固定 Python 哈希种子，仅作探索记录。保留全部退化，不与最终受控数据混为一组。'
+          'v1 为快速日历修复默认开启及较宽松的 M5 候选；v2 增加 M5 的回库时点筛选。', '',
+          '### v1：每例10秒，9组配对', '']
+lines += paired('paired_10s')
+lines += ['', '### v2：每例30秒，5组配对', '']
+lines += paired('paired_30s')
+lines += ['', 'M8/L01 的探索消融中，保留旧日历搜索、仅加速评价的版本得到280.165279，'
+          '快速修复版得到289.665392；另一次旧版为282.719412。'
+          '这支持将快速修复保留为实验选项，不能证明某种策略全面更优。'
+          '原始消融见 [m8_calendar_ablation](m8_calendar_ablation/results.json)。', '',
+          '随后最终默认版本的未固定哈希重复运行也保留在 '
+          '[final_paired_30s](final_paired_30s/results.json)。'
+          '其中旧版M8/L01还出现326.259169，说明不能把某一次百分比当作稳定收益。', '',
+          '## 回归与复现', '']
+test_path = OUT / 'final_tests.log'
+if test_path.exists():
+    text = test_path.read_text()
+    matches = re.findall(r'\d+ passed[^\n]*', text)
+    lines += [f'最终相关回归：`{matches[-1]}`。详见 [原始测试日志](final_tests.log)。', '']
+lines += ['E1 四个实现各与原完整算法比较400组随机输入（共1600组），逐项比较路线、违规列表及清洗释放。'
+          'M5 的定向用例确认距离上升而箱数减少、总成本下降；非度量用例确认经其他站回库的改进被保留。'
+          'M8 受控32次可行日历邻域，默认重构32次、快速模式重构4次；失败保留方案全部触发重构，'
+          '快速模式下相同边界移动跳过评价。相关 MILP、独立日历 oracle、箱池、隔离及成本测试一并运行。', '',
+          '- 初始源码：[baseline_sources.zip](baseline_sources.zip)。最终源码和新增测试：'
+          '[candidate_final_sources.zip](candidate_final_sources.zip)。早期v1/v2源码分别保留。',
+          '- 选例60份输入：[inputs.zip](inputs.zip)，[输入哈希](input_sha256.json)。'
+          '输入在运行后再次校验，未变化。环境见 [environment.json](environment.json)。',
+          '- 基线剖析：[baseline_profile/results.json](baseline_profile/results.json)。'
+          '各例保留 solve.prof、完整函数统计和独立审计。profiler 会影响吞吐，未用其目标值替代未剖析配对。',
+          '- 同迭代上限对照：[fixed_iterations/results.json](fixed_iterations/results.json)。'
+          '500为全局上限，实际消耗和墙钟时间以逐次 summary 为准。', '',
+          '可在仓库根目录复现受控配对（输出须为新的空目录）：', '',
+          '```sh',
+          '.venv/bin/python -m experiments.runs.profile_alns_evaluation ' + chr(92),
+          '  --cases 5:L01 8:L01 --seconds 30 --seed 42 ' + chr(92),
+          '  --baseline-source output/alns_evaluation_optimization_20261021/baseline_source ' + chr(92),
+          '  --output /path/to/new/diagnostic', '```', '',
+          '若仅保留 ZIP，先解压 baseline_sources.zip 到独立目录，并为其 data/config/archive '
+          '提供项目输入路径，再传给 --baseline-source。正式27例运行应另建输出快照并记录算法版本；'
+          '本轮没有修改历史结果，也没有执行整套正式比较。', '']
+(OUT / 'report.md').write_text('\n'.join(lines))
+print(OUT / 'report.md')

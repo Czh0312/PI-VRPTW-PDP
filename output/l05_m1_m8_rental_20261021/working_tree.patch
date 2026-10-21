@@ -1,0 +1,1030 @@
+diff --git a/README.md b/README.md
+index 918d539a0..a866a2265 100644
+--- a/README.md
++++ b/README.md
+@@ -13,7 +13,7 @@
+ | M2 | 一次性包装、自由分仓、纯配送，B=1 | 联合分仓 MILP / ALNS |
+ | M3 | 单批次循环包装、固定分仓，B=1 | MILP / ALNS |
+ | M4 | 单批次循环包装、自由分仓，B=1 | 联合分仓 MILP / ALNS |
+-| M5 | 多批次循环包装、固定分仓，B>1 | MILP / ALNS |
++| M5 | 固定分仓与分批，B>1，联合优化箱数与调度成本 | MILP / ALNS |
+ | M6 | 分批、箱池与路线成本优化：等长批次、共同分界 | MILP / ALNS |
+ | M7 | 分批、箱池与路线成本优化：等长批次、逐批独立分界 | MILP / ALNS |
+ | M8 | 分批、箱池与路线成本优化：不等长批次、逐批独立分界 | MILP / ALNS |
+@@ -84,7 +84,7 @@ make test
+ 
+ 现行统一主实验输入使用 [formal_benchmark27_one_box_v1](data/formal_benchmark27_one_box_v1/README.md)：27个基础算例、216份模型配置，每位顾客一个订单、一个标准箱，完整保留货物重量。假设一位顾客的需求能由一个标准箱承载，不进行装箱优化；配送计货重加箱重，回收计空箱重。原 [formal_benchmark27_v1](data/formal_benchmark27_v1/README.md) 与冻结结果保留，作为“多箱需求情景”。新版本只修正箱数及相关箱池参数，批次数定义和候选域不变，K≤3仍为独立诊断。验证与重跑状态见[版本说明](docs/benchmark27_one_box_20261019.md)。此前静态配对及来源数据保存在[历史数据归档](archive/datasets/README.md)。
+ 
+-当前修订3费用为 `0.1*D1 + 0.05*D2 + 5*N + 0.02*Q`，其中清洗与追踪合计0.01/箱次、磨损0.01/箱次，工时、启用与趟次费用均为0。参数源见[基础费用配置](config/experiments/benchmark27_v1/economic.json)。M1–M5仍优化原生距离目标，M6–M8及循环模型共同费用评价使用新参数。异机重跑应重新prepare到新目录，旧冻结实验继续使用其原费用。
++当前修订3费用为 `0.1*D1 + 0.05*D2 + 5*N + 0.02*Q`，其中清洗与追踪合计0.01/箱次、磨损0.01/箱次，工时、启用与趟次费用均为0。参数源见[基础费用配置](config/experiments/benchmark27_v1/economic.json)。M1–M4 优化原生距离目标；[M5](docs/model5_pool_optimization.md) 与 M6–M8 使用同一成本口径并联合优化箱数。异机重跑应重新prepare到新目录，旧冻结实验继续使用其原费用和目标。
+ 
+ 费用包含合成情景和有来源说明的参考参数，各自适用范围见[费用复核](docs/cost_calibration_review_20261006.md)。真实配送基础不等于完整真实闭环数据，已保存方案重计价也不等于按新目标重新求解。
+ 
+diff --git a/cli/multibatch.py b/cli/multibatch.py
+index fc26dcace..b77fdb30f 100644
+--- a/cli/multibatch.py
++++ b/cli/multibatch.py
+@@ -112,6 +112,8 @@ def run_case(config, fleet, *, case_path=None, output=None):
+         input_paths.append(resolve_project_path(case_path))
+     if getattr(instance, 'joint_batch', False) and instance.cost_profile.config.get('evidence_file'):
+         input_paths.append(resolve_project_path(instance.cost_profile.config['evidence_file']))
++    if getattr(instance, 'optimize_pool', False) and instance.cost_profile.config.get('evidence_file'):
++        input_paths.append(resolve_project_path(instance.cost_profile.config['evidence_file']))
+     input_paths = sorted({dependency for path in input_paths for dependency in config_sources(path)})
+     sources = [path for name in ('models/routing', 'models/common', 'models/cost', 'tools/configuration', 'cli')
+                for path in (PROJECT_ROOT/name).rglob('*.py')]
+@@ -150,6 +152,13 @@ def run_case(config, fleet, *, case_path=None, output=None):
+             manifest.update(calendar_config=instance.calendar_contract,
+                             cutoff_bounds_ticks=None, legal_order_batches=None,
+                             source_calendar_note='Reference only; M7/M8 optimize a new calendar over the entire cycle')
++    if getattr(instance, 'optimize_pool', False):
++        manifest.update(economic_profile=instance.cost_profile.config,
++                        economic_profile_hash=instance.cost_profile.hash,
++                        evidence_hash=instance.cost_profile.evidence_hash,
++                        pool_options=instance.options,
++                        pool_bounds=dict(min=instance.pool_min, max=instance.pool_max),
++                        objective_mode='cost')
+     _json(out/'manifest.json', manifest)
+     print(f'M{instance.model_number} {"single_batch" if len(instance.operating_policy.batches) == 1 else "multi_batch"} {config["solver"]}: {out}')
+     log, begun = io.StringIO(), time.perf_counter()
+@@ -171,8 +180,9 @@ def run_case(config, fleet, *, case_path=None, output=None):
+         (out/'solver.log').write_text(log.getvalue(), encoding='utf-8')
+         audit = result.get('audit', {})
+         joint = getattr(instance, 'joint_batch', False)
++        pool_optimized = getattr(instance, 'optimize_pool', False)
+         pool = result.get('container_pool_size', instance.operating_policy.container_pool_size)
+-        objective_label = '总成本' if joint else '距离'
++        objective_label = '总成本' if joint or pool_optimized else '距离'
+         lines = [f'M{instance.model_number} {"联合分批成本" if joint else "固定批次"}运行结果', '',
+                  f"包装：{'循环' if instance.reusable else '一次性'}；批次数：{result.get('cycle_batch_count',len(instance.operating_policy.batches))}。",
+                  f"状态：{result['info']['status']}。",
+@@ -191,6 +201,11 @@ def run_case(config, fleet, *, case_path=None, output=None):
+             lines += ['一次性包装的重放检查车辆与配送服务；每个周期重新购入包装，不声明容器闭环。']
+         if instance.free_assignment:
+             lines += ['自由分仓按顾客选择，每个顾客的全部订单保持同仓。完整模型的全局证明状态以 info 为准。']
++        if pool_optimized:
++            lines += ['', '固定订单分批和批次日历，联合优化箱池规模、两级路线与调度。',
++                      f'箱池决策范围：{instance.pool_min}–{instance.pool_max}；总距离：{result.get("total_distance")}。',
++                      f'成本单位：{instance.cost_profile.config["currency"]}；来源：{instance.cost_profile.config["source_type"]}。']
++            lines.extend(f'- {key}: {value}' for key, value in result.get('cost_components', {}).items())
+         if joint:
+             lines += ['', f"启用配送批次数：{result.get('delivery_batch_count')}；总距离：{result.get('total_distance')}。",
+                       f"成本来源类型：{instance.cost_profile.config['source_type']}；单位：{instance.cost_profile.config['currency']}。",
+@@ -237,6 +252,8 @@ def run_case(config, fleet, *, case_path=None, output=None):
+             if getattr(instance, 'calendar_cycle', False):
+                 selected = instance.selected_problem(result)
+             plotted = selected.project(result['order_batch_assignment'], pool,result.get('batch_cutoffs')) if joint else instance
++            if pool_optimized:
++                plotted = instance.project_pool(pool)
+             plot_result(plotted, result, out/'timeline.png')
+         print(f"{result['info']['status']} | valid={audit.get('valid', False)} | {objective_label}={result['info']['objective']}")
+         return result
+diff --git a/cli/multibatch_cost.py b/cli/multibatch_cost.py
+index 1c643b7eb..c46598439 100644
+--- a/cli/multibatch_cost.py
++++ b/cli/multibatch_cost.py
+@@ -17,7 +17,7 @@ def run_cost(config, fleet, args):
+     source = resolve_project_path(args.route_result)
+     result = json.loads(source.read_text(encoding='utf-8'))
+     parameters = load_json(economic) if isinstance(economic, str) else economic
+-    if getattr(problem, 'joint_batch', False) or (
++    if getattr(problem, 'joint_batch', False) or getattr(problem, 'optimize_pool', False) or (
+             problem.model_number in (3, 5) and 'container_pool_cost_per_period' in parameters):
+         from models.cost.comparison import evaluate_comparison_cost
+         cost = evaluate_comparison_cost(problem, result, parameters)
+diff --git a/cli/route.py b/cli/route.py
+index 2943e2b5e..59d64f3c1 100644
+--- a/cli/route.py
++++ b/cli/route.py
+@@ -17,7 +17,11 @@ def main(argv=None):
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument("--case", default=str(DEFAULT_CASE))
+     parser.add_argument("--model", type=int, choices=range(1, 9), help="M1–M5 原模型；M6 统一分界；M7 独立分界；M8 不等长批次")
+-    parser.add_argument("--economic-config", help="M6–M8 成本参数与证据配置")
++    parser.add_argument("--economic-config", help="M5–M8 成本参数与证据配置")
++    parser.add_argument('--objective-mode', choices=('cost', 'distance'),
++                        help='M5 默认成本目标；distance 仅用于历史固定池诊断')
++    parser.add_argument('--pool-min', type=int, help='M5–M8 容器池决策下界')
++    parser.add_argument('--pool-max', type=int, help='M5–M8 容器池决策上界')
+     schedules=parser.add_mutually_exclusive_group()
+     schedules.add_argument('--uniform-cycle',dest='uniform_cycle',action='store_true',default=None,
+                            help='M6 基础版：优化周期批次数，均分周期，各批共用相对分界点')
+@@ -66,6 +70,12 @@ def main(argv=None):
+         value = getattr(args, argument)
+         if value is not None:
+             config[key] = value
++    if args.objective_mode is not None:
++        if config['model'] != 5:
++            raise ValueError('--objective-mode is only supported for M5')
++        config['objective_mode'] = args.objective_mode
++    elif args.economic_config and config['model'] == 5:
++        config['objective_mode'] = 'cost'
+     milp_options = dict(config.get('milp_options') or {})
+     if args.milp_threads is not None:
+         milp_options['threads'] = args.milp_threads
+@@ -109,12 +119,27 @@ def main(argv=None):
+         config['joint_batch_options']=options
+     if args.initial_joint_result:
+         config['initial_joint_result']=args.initial_joint_result
++    if args.pool_min is not None or args.pool_max is not None:
++        if config['model'] not in (5, 6, 7, 8):
++            raise ValueError('Pool decision bounds require M5–M8')
++        if config['model'] == 5 and config.get('objective_mode') == 'distance':
++            raise ValueError('M5 pool decision bounds require cost mode and --economic-config')
++        key = 'pool_options' if config['model'] == 5 else 'joint_batch_options'
++        bounds = dict(config.get(key, {}))
++        for name in ('pool_min', 'pool_max'):
++            if getattr(args, name) is not None:
++                bounds[name] = getattr(args, name)
++        config[key] = bounds
+     if args.container_pool_size is not None:
+         config, fleet = apply_container_pool_size(config, fleet, args.container_pool_size)
+-        if config['model'] in (6, 7, 8):
+-            config['joint_batch_options'] = {**config.get('joint_batch_options', {}),
++        if config['model'] in (5, 6, 7, 8):
++            key = 'pool_options' if config['model'] == 5 else 'joint_batch_options'
++            config[key] = {**config.get(key, {}),
+                                            'pool_min': args.container_pool_size, 'pool_max': args.container_pool_size}
+-    elif config['model'] not in (6, 7, 8):
++    elif config['model'] not in (5, 6, 7, 8) or (
++            config['model'] == 5 and config.get('objective_mode') == 'distance'):
+         config, fleet = apply_pool_config(config, fleet, args.pool_config)
++    elif args.pool_config:
++        raise ValueError('M5–M8 optimize N; use --pool-min/--pool-max instead of --pool-config')
+     from .multibatch import run_case
+     return run_case(config, fleet, case_path=args.case, output=args.output)
+diff --git a/config/README.md b/config/README.md
+index 02c3e8d61..7c4ee683b 100644
+--- a/config/README.md
++++ b/config/README.md
+@@ -6,7 +6,7 @@
+ | 类别 | 目录 | 内容与入口 |
+ | --- | --- | --- |
+ | 车辆 | [vehicles/](vehicles/) | 一级/二级车辆数量、载重、容积、速度；按 Zhou 小例、大例、LaDe、机制例区分 |
+-| 容器 | [containers/](containers/) | 容器重量、体积、初始池量；[pool_ratio.json](containers/pool_ratio.json) 是 M1–M5 的统一需求比例入口 |
++| 容器 | [containers/](containers/) | 容器重量、体积、参考池量；[pool_ratio.json](containers/pool_ratio.json) 用于 M1–M4 及历史固定池诊断 |
+ | 运行规则 | [operations/](operations/) | 周期、批次、装卸、清洗、周转、闭合规则；单批对比共用一份运行规则 |
+ | 成本 | [cost/](cost/) | `synthetic/` 算术示例、`lade/` 人民币参考参数、`scenarios/` 成本情景、`transport_ratio_v1/` 运输/容器比例参数 |
+ | 求解参数 | [solvers/](solvers/) | `exact/` 的预算和求解后端；`alns/` 的预算、迭代数、种子和算法选项 |
+@@ -58,10 +58,10 @@ JSON 的 `$include` 列表引用其他参数文件，路径相对仓库根目录
+ 随后沿用原来的优先级：案例覆盖 `algorithm_config`，命令行显式参数覆盖案例。
+ 循环引用会报错。`default.json` 只有被明确引用才生效，不会自动覆盖已有案例。
+ 
+-M1–M5 默认按 `N = ceil(Q × demand_ratio)` 计算池量，Q 是订单箱次总需求。
+-循环池约束适用于 M3–M5；显式 `container_pool_size`、`--container-pool-size`、实验池量扫描
++M1–M4 默认按 `N = ceil(Q × demand_ratio)` 计算池量，Q 是订单箱次总需求。
++循环池约束适用于 M3–M4；显式 `container_pool_size`、`--container-pool-size`、实验池量扫描
+ 以及 `--pool-config` 的原有优先级保持不变。设置不足时报告不可行，不自动扩大池量。
+-M6–M8 继续使用 `joint_batch_options` 的池上下限和日历允许域，不继承需求比例。
++[M5](../docs/model5_pool_optimization.md) 使用 `economic_config` 与 `pool_options` 的池上下限，固定订单分批和日历下联合优化箱数和调度成本。M6–M8 使用 `joint_batch_options` 的池上下限和日历允许域，均不继承需求比例。历史 `objective_mode=distance` 的 M5 诊断仍使用固定池规则。
+ 
+ 新实验会冻结被引用的参数文件，并保存供运行使用的合并值；修改当前参数不会改变已冻结的实验。
+ 成本公式位于 `models/cost/`，价格来源与适用范围位于 [reference/cost/](../reference/cost/)。
+diff --git a/config/experiments/examples/multibatch_demo.json b/config/experiments/examples/multibatch_demo.json
+index 7075dc903..bdf1cbdf6 100644
+--- a/config/experiments/examples/multibatch_demo.json
++++ b/config/experiments/examples/multibatch_demo.json
+@@ -5,8 +5,10 @@
+   ],
+   "schema_version": 2,
+   "case_name": "multibatch_cutoff_demo",
+-  "description": "Two satellites, two serial batches, four container uses. Pool size comes from the shared config. Synthetic mechanism data.",
++  "description": "M5 jointly optimizes container pool size and routing with fixed batches. Synthetic mechanism prices.",
++  "economic_config": "config/experiments/benchmark27_v1/economic.json",
+   "model": 5,
++  "objective_mode": "cost",
+   "solver": "alns",
+   "data": "data/source_inputs/mechanism/network.csv",
+   "orders": "data/source_inputs/mechanism/orders.json",
+diff --git a/docs/exact_model_layout.md b/docs/exact_model_layout.md
+index 2cda36e54..3a254fe61 100644
+--- a/docs/exact_model_layout.md
++++ b/docs/exact_model_layout.md
+@@ -8,7 +8,7 @@ M1–M8 的精确模型按数学职责组织。每个模型独立拥有下列文
+ | `parameters.py` | 已知参数及安全派生界 | `ModelParameters`、`prepare_parameters`；M5 另有 `MultibatchParameters` |
+ | `variables.py` | 决策变量定义和管理 | `ModelVariables` 的变量创建方法、路线和任务变量分组 |
+ | `constraints.py` | 业务约束 | 分仓／分批、路径、容量、时间、车辆串行、回收量、清洁库存 |
+-| `objective.py` | 目标函数 | M1–M5 的距离表达；M6–M8 的箱池、距离、工时、趟次及车辆费用 |
++| `objective.py` | 目标函数 | M1–M4 的距离表达；M5–M8 的箱池、距离、工时、趟次及车辆费用；M5 保留历史距离诊断 |
+ | `formulation.py` | 实际组装实现 | 使用同一参数对象与变量容器，连接全部约束组 |
+ | `milp_solver.py` | 直接 Gurobi 基线 | 显式配置、完整问题范围和原始求解器证据 |
+ | `solution.py` | 业务解提取 | 路线、分仓、分批、箱池及日历，不聚合跨子问题证明 |
+diff --git a/docs/model5_multibatch_cycle.md b/docs/model5_multibatch_cycle.md
+index 64dfb0c8a..69aacaf8e 100644
+--- a/docs/model5_multibatch_cycle.md
++++ b/docs/model5_multibatch_cycle.md
+@@ -1,5 +1,7 @@
+ **M5 多批次有限容器池循环系统**
+ 
++2026-10-20：当前 M5 已改为固定订单分批和日历下的箱池与调度成本联合优化，见[当前定义与运行方式](model5_pool_optimization.md)。以下距离目标、固定池扫描及其结果描述属于历史实现与诊断口径。
++
+ 实现日期：2026-09-29。策略：`multi_batch_cutoff_v1`，案例和结果 schema：2。
+ 本版实现串行一级批次、二级跨批回收、有限容器周转、周期末闭合，以及联合精确求解和独立 ALNS。
+ 设计依据见 [完整实施计划](multibatch_container_cycle_plan.md)。
+diff --git a/docs/model6_joint_batch_cost_design.md b/docs/model6_joint_batch_cost_design.md
+index 835943015..075b23e61 100644
+--- a/docs/model6_joint_batch_cost_design.md
++++ b/docs/model6_joint_batch_cost_design.md
+@@ -1,5 +1,7 @@
+ # 模型6 静态分批与容器路径成本联合优化设计
+ 
++2026-10-20：M5 已修正为固定订单分批和日历下的箱数与调度成本联合优化；M6–M8 在此基础上进一步优化分批及日历。见[当前四模型层级](model5_pool_optimization.md)。本文历史设计中“固定池规模、距离目标的 M5”仅指旧对照。
++
+ 2026-10-05：逐批独立分界和不等长批次已分别实现为独立编号 M7、M8，见[日历扩展定义与运行](model7_model8_calendar_design.md)。本文件的 M6 基础版仍保留等长批次、共同分界。
+ 
+ 2026-10-15：M6–M8 的批次统一修正为有实际送取任务的作业窗口；每批配送箱量和回总仓箱量都必须为正。空闲段、纯配送段或纯回收段不能计作一个完整批次。允许回收前批订单的箱子，不要求当批全部收齐或清洗完。精确求解、ALNS 及独立审计均执行该规则；以下历史设计中允许关闭配送的候选槽位不再代表当前允许域，旧实验文件保留，不能直接继承到新模型。细则见上述日历说明。
+diff --git a/docs/project_overview.md b/docs/project_overview.md
+index 6d8972dc8..53d87a0a3 100644
+--- a/docs/project_overview.md
++++ b/docs/project_overview.md
+@@ -1,6 +1,6 @@
+ # 项目总览
+ 
+-当前规则为 `multi_batch_cutoff_v1`。M1–M4 支持单批次的一次性/循环包装与固定/自由分仓对照；M5 支持固定分仓、多批次容器周转。M6–M8 联合优化批次数、箱池及路线成本，分别使用等长共同分界、等长独立分界和不等长独立分界。
++当前规则为 `multi_batch_cutoff_v1`。M1–M4 支持单批次的一次性/循环包装与固定/自由分仓对照；[M5](model5_pool_optimization.md) 在固定分仓、订单分批和日历下联合优化箱池及调度成本。M6–M8 在此基础上进一步优化订单分批及日历，分别使用等长共同分界、等长独立分界和不等长独立分界。
+ 
+ 循环方案包含一级先送后取、截止库存全取、有限箱池、清洗后释放和周期末全池清洁归仓。M1–M5 的日历与订单批次给定，M6–M8 在声明的允许域内优化日历及订单分批。可行结果须通过独立物理审计与周期重放。
+ 
+diff --git a/experiments/runs/run_formal_benchmark27.py b/experiments/runs/run_formal_benchmark27.py
+index 2d1409ecd..856165f6d 100644
+--- a/experiments/runs/run_formal_benchmark27.py
++++ b/experiments/runs/run_formal_benchmark27.py
+@@ -85,6 +85,20 @@ def prepare(args):
+         key = f'{record["base_case_id"]}_m{record["model"]}'
+         cfg, original = freeze_case(record['case_path'], out, key)
+         evidence.update(original)
++        if record['model'] == 5:
++            # Old immutable datasets document a fixed-Q distance baseline.
++            # Freeze a separate, explicit current M5 contract for this run.
++            cfg.update(objective_mode='cost', pool_options=dict(pool_min=1, pool_max=record['total_container_uses']))
++            cfg.pop('container_pool_size', None)
++            contract = d.read(cfg['parameter_contract'])
++            contract['objective'] = 'cost'
++            contract['fixed_parameters'].pop('container_pool_size', None)
++            if 'container_pool_size' not in contract['optimized_decisions']:
++                contract['optimized_decisions'].append('container_pool_size')
++            contract['decision_bounds'] = cfg['pool_options']
++            contract_path = out/'inputs'/f'{key}_current_parameters.json'
++            d.write(contract_path, contract)
++            cfg['parameter_contract'] = str(contract_path)
+         target = out/'cases'/f'{key}.json'
+         d.write(target, cfg)
+         problem = load_instance(*load_routing_case(target, use_pool_config=False))
+@@ -93,6 +107,8 @@ def prepare(args):
+                      counts=list(getattr(problem, 'batch_count_candidates',
+                                          [len(problem.operating_policy.batches)])),
+                      time_tick_seconds=problem.operating_policy.time_tick_seconds)
++        if getattr(problem, 'optimize_pool', False):
++            check.update(objective_mode='cost', pool_min=problem.pool_min, pool_max=problem.pool_max)
+         configs[record['case_path']] = check
+         checks.append(check)
+     for job in jobs:
+@@ -159,6 +175,7 @@ def prepare(args):
+         alns_seeds=args.seeds, exact_seed=42, exact_seconds=args.exact_seconds, alns_seconds=args.alns_seconds,
+         witness_initialization=False, source_block_count=len({r['source_block'] for r in records}),
+         full_dataset=len(records) == 216,
++        objective_by_model={str(m): 'distance' if m <= 4 else 'cost' for m in range(1, 9)},
+         limitations=d.read(dataset/'comparison_protocol.json')['scope_limits'])
+     d.write(out/'manifest.json', manifest)
+     d.write(out/'manifest.sha256.json', dict(sha256=d.sha(out/'manifest.json')))
+@@ -178,6 +195,8 @@ def worker(args):
+     # Do not leave a complete marker if metric enrichment raises an exception.
+     (path/'completion.json').unlink()
+     row = d.read(path/'row.json')
++    result = d.read(path/'result.json') if (path/'result.json').exists() else {}
++    row['objective_mode'] = result.get('objective_mode', 'distance' if row['model'] <= 5 else 'cost')
+     audit = d.read(path/'audit.json')['audit']
+     if row['valid']:
+         from tools.configuration.loader import load_routing_case
+@@ -274,7 +293,10 @@ def paired_rows(rows):
+             if left not in values or right not in values:
+                 continue
+             a, b = values[left], values[right]
+-            metric = 'objective' if left <= 5 and right <= 5 else 'comparable_reusable_cost'
++            def mode(row):
++                return row.get('objective_mode', 'distance' if row['model'] <= 5 else 'cost')
++            metric = ('objective' if left <= 5 and right <= 5 and mode(a) == mode(b)
++                      else 'comparable_reusable_cost')
+             both = bool(a['valid'] and b['valid'])
+             av, bv = a.get(metric), b.get(metric)
+             pairs.append(dict(case=key[0], method=key[1], seed=key[2], size=a['size'],
+@@ -282,7 +304,9 @@ def paired_rows(rows):
+                 both_valid=both, left_status=a['status'], right_status=b['status'],
+                 left_value=av, right_value=bv,
+                 difference_right_minus_left=bv-av if both and av is not None and bv is not None else None,
+-                interpretation='M5/M6 changes both objective and batch rules' if (left,right)==(5,6)
++                interpretation=('M5/M6 uses the same cost objective; changes order batches and calendar freedom'
++                                if (left,right)==(5,6) and mode(a) == 'cost'
++                                else 'M5/M6 changes both objective and batch rules') if (left,right)==(5,6)
+                                else 'paired finite-budget schedules; no universal dominance claim'))
+     return pairs
+ 
+@@ -301,7 +325,9 @@ def analyze(out):
+         valid = [r for r in group if r['valid']]
+         item = dict(size=size, model=model, method=method, planned=len(group),
+                     valid=len(valid), proven_optimal=sum(r['proven_optimal'] for r in group),
+-                    native_metric='distance' if model <= 5 else 'cost',
++                    native_metric=next((r['objective_mode'] for r in group if 'objective_mode' in r),
++                        manifest.get('objective_by_model', {}).get(str(model),
++                            'distance' if model <= 5 else 'cost')),
+                     statuses=dict(Counter(r['status'] for r in group)))
+         for metric in ('objective', 'total_distance', 'comparable_reusable_cost', 'N', 'k', 'solve_wall_seconds'):
+             numbers = [r[metric] for r in valid if isinstance(r.get(metric), (float, int))]
+@@ -373,8 +399,12 @@ def analyze(out):
+         lines.append(f'| {r["size"]} | M{r["model"]} | {r["method"]} | {r["valid"]}/{r["planned"]} | {r["proven_optimal"]} | {value} |')
+     lines += ['', '逐种子、逐例均值/最好/最差/标准差、同源块均值及块平衡均值、模型配对、精确参照误差见 tables/。',
+         '均值仅对可行结果计算；可行率以全部计划调用为分母。各规模分别报告，种子不计为独立算例。',
+-        'M1–M5原生目标为距离，M6–M8为合成成本。M3–M8另按共同费用评价，M1/M2无一次性包装单价，不报告可比总费用。',
+-        'M5/M6目标和批次作业规则均不同，其差值不能单独归因为增加决策自由度。',
++        ('M1–M4原生目标为距离，M5–M8为合成成本。M3–M8另按共同费用评价，M1/M2无一次性包装单价，不报告可比总费用。'
++         if manifest.get('objective_by_model', {}).get('5') == 'cost' else
++         '历史实验：M1–M5原生目标为距离，M6–M8为合成成本。M3–M8另按共同费用评价。'),
++        ('M5/M6使用相同成本目标，比较固定分批日历与优化分批日历；允许域未必嵌套，不声明普遍支配。'
++         if manifest.get('objective_by_model', {}).get('5') == 'cost' else
++         '历史M5/M6目标和批次作业规则均不同，其差值不能单独归因为增加决策自由度。'),
+         '仅精确已证最优参照计算最优误差；限时可行参照只报告费用差。未找到解不等于不可行。',
+         '27例来自14个来源块，中大规模含嵌套；不作独立同分布总体推断。可行性见证未作为算法初始解。',
+         '完整输入、环境、命令、K域、时间精度、上下界和原始日志随实验保存。', '',
+diff --git a/experiments/runs/run_model6_comparison.py b/experiments/runs/run_model6_comparison.py
+index 61aa5acc9..ac9363d39 100644
+--- a/experiments/runs/run_model6_comparison.py
++++ b/experiments/runs/run_model6_comparison.py
+@@ -246,7 +246,8 @@ def main(argv=None):
+     for index, record in enumerate(cases):
+         c5,h5 = freeze_case(record['m5_case'],out,f'{index}_M5'); input_hashes.update(h5)
+         c6,h6 = freeze_case(record['m6_case'],out,f'{index}_M6'); input_hashes.update(h6)
+-        p5 = load_instance(*load_routing_case(record['m5_case'],use_pool_config=False))
++        cfg5, fleet5 = load_routing_case(record['m5_case'], use_pool_config=False)
++        p5 = load_instance({**cfg5, 'objective_mode': 'distance'}, fleet5)
+         p6 = load_instance(*load_routing_case(record['m6_case'],use_pool_config=False))
+         def same_input(key):
+             first, second = c5.get(key), c6.get(key)
+@@ -259,6 +260,7 @@ def main(argv=None):
+         original = {o.id:o.batch for o in p5.orders}
+         p6.project(original)  # Original M5 assignment must also obey M6 release/allowed constraints.
+         pool = p5.operating_policy.container_pool_size
++        c5['objective_mode'] = 'distance'  # Explicit historical ablation.
+         variants = {'M5_distance':c5, 'M6_joint':c6}
+         for label,fix_batches,fix_pool in [('M6_fixed',True,True),('M6_pool_only',True,False),('M6_batch_only',False,True)]:
+             config = deepcopy(c6); options = deepcopy(c6.get('joint_batch_options',{}))
+diff --git a/experiments/runs/run_model6_uniform_comparison.py b/experiments/runs/run_model6_uniform_comparison.py
+index f72f0e92a..a80e0193d 100644
+--- a/experiments/runs/run_model6_uniform_comparison.py
++++ b/experiments/runs/run_model6_uniform_comparison.py
+@@ -105,7 +105,8 @@ def main(argv=None):
+     shutil.copy2(manifest_path,out/'inputs/manifest.json')
+     hashes={}; jobs=[]
+     for index,record in enumerate(manifest['cases']):
+-        p5=load_instance(*load_routing_case(record['m5_case'],use_pool_config=False))
++        cfg5, fleet5 = load_routing_case(record['m5_case'], use_pool_config=False)
++        p5=load_instance({**cfg5, 'objective_mode': 'distance'}, fleet5)
+         p6=load_instance(*load_routing_case(record['m6_case'],use_pool_config=False))
+         if p5.model_number!=5 or not getattr(p6,'uniform_cycle',False):
+             raise ValueError('Comparison requires M5 and uniform-cycle M6')
+@@ -118,6 +119,7 @@ def main(argv=None):
+             hashes.update(evidence)
+             configs[label]=config
+         c5,c6=configs['M5_distance'],configs['M6_uniform']
++        c5['objective_mode'] = 'distance'  # Explicit historical baseline.
+         for key in ('data','routing_config','distance_matrix','duration_matrix'):
+             first,second=c5.get(key),c6.get(key)
+             if isinstance(first,str) and isinstance(second,str):
+diff --git a/experiments/runs/run_multibatch_cycle.py b/experiments/runs/run_multibatch_cycle.py
+index ae6767622..1f08391f0 100644
+--- a/experiments/runs/run_multibatch_cycle.py
++++ b/experiments/runs/run_multibatch_cycle.py
+@@ -26,7 +26,7 @@ from models.common.cycle import load_instance, MultiBatchPolicy
+ from tools.data.static_batch_dataset import load_manifest, check_pairing, suggested_pool_sizes
+ 
+ INPUT_KEYS = ('data', 'orders', 'routing_config', 'operating_policy', 'algorithm_config',
+-              'distance_matrix', 'duration_matrix', 'dataset_metadata', 'pool_config')
++              'distance_matrix', 'duration_matrix', 'dataset_metadata', 'pool_config', 'economic_config')
+ 
+ 
+ def write_json(path, value):
+@@ -37,6 +37,10 @@ def prepare_variants(args, records):
+     variants = []
+     for index, source in enumerate(args.case):
+         cfg, fleet = load_routing_case(source, use_pool_config=False)
++        # This runner explicitly scans fixed pools for historical distance
++        # diagnostics. Current M5 cost optimization runs through main.py route.
++        if cfg['model'] == 5:
++            cfg['objective_mode'] = 'distance'
+         if (fleet.get('operating_policy') or {}).get('policy_version') != 'multi_batch_cutoff_v1':
+             raise ValueError(f'{source} is not a multibatch case')
+         if not args.pool_sizes and not args.suggested_pools:
+diff --git a/experiments/runs/run_thesis_completion.py b/experiments/runs/run_thesis_completion.py
+index 820322fc8..b83179807 100644
+--- a/experiments/runs/run_thesis_completion.py
++++ b/experiments/runs/run_thesis_completion.py
+@@ -583,7 +583,7 @@ def worker(args):
+         row.update(valid=bool(audit['valid']), audit_errors=audit['errors'])
+         if audit['valid']:
+             cost = (evaluate_comparison_cost(problem, result, config['economic_config'], audit=audit)
+-                    if job['model'] >= 6 else dict(total=audit['objective'], components={},
++                    if job['model'] >= 6 or getattr(problem, 'optimize_pool', False) else dict(total=audit['objective'], components={},
+                         container_pool_size=problem.operating_policy.container_pool_size))
+             if not math.isclose(cost['total'], info['objective'], rel_tol=1e-7, abs_tol=1e-6):
+                 raise ValueError('Independent cost differs from solver objective')
+diff --git a/models/common/cycle/audit.py b/models/common/cycle/audit.py
+index 958969dd7..f37d36804 100644
+--- a/models/common/cycle/audit.py
++++ b/models/common/cycle/audit.py
+@@ -38,6 +38,9 @@ def replay_ledger(events, pool, satellites, repetitions=1, period=0):
+ 
+ def audit_solution(problem, result, repeat=True):
+     try:
++        if getattr(problem, 'optimize_pool', False):
++            from models.common.cycle.fixed_pool import audit_pool_solution
++            return audit_pool_solution(problem, result, repeat)
+         if getattr(problem, 'joint_batch', False):
+             if getattr(problem, 'calendar_cycle', False):
+                 from models.common.cycle.calendar import audit_calendar_solution
+diff --git a/models/common/cycle/instance.py b/models/common/cycle/instance.py
+index df9a42432..ee84992c9 100644
+--- a/models/common/cycle/instance.py
++++ b/models/common/cycle/instance.py
+@@ -242,4 +242,13 @@ def load_instance(config, fleet_config):
+         factory = UniformCycleInstance if options.get('schedule_mode') == 'uniform_cycle' else JointBatchInstance
+         return factory(network, orders, policy, options,
+                                   config['economic_config'])
++    if config['model'] == 5 and config.get('objective_mode', 'cost') not in ('cost', 'distance'):
++        raise ValueError('M5 objective_mode must be cost or historical distance')
++    if config['model'] == 5 and config.get('objective_mode') != 'distance':
++        from models.common.cycle.fixed_pool import FixedBatchPoolInstance
++        if not config.get('economic_config'):
++            raise ValueError('M5 requires economic_config for joint pool/routing cost optimization; '
++                             'objective_mode=distance is only for historical fixed-pool diagnostics')
++        return FixedBatchPoolInstance(network, orders, policy, config.get('pool_options', {}),
++                                      config['economic_config'])
+     return MultiBatchInstance(network, orders, policy, model=config['model'])
+diff --git a/models/common/cycle/state.py b/models/common/cycle/state.py
+index 077029cad..7452a7604 100644
+--- a/models/common/cycle/state.py
++++ b/models/common/cycle/state.py
+@@ -7,7 +7,8 @@ def empty_result(problem, method):
+     return dict(**({'time_tick_subdivision': p.time_tick_subdivision} if p.time_tick_subdivision != 1 else {}),
+                 schema_version=2, policy_version=VERSION, time_unit='ticks',
+                 model=problem.model_number, packaging='reusable' if problem.reusable else 'single_use',
+-                time_tick_seconds=p.time_tick_seconds, objective_mode='distance',
++                time_tick_seconds=p.time_tick_seconds,
++                objective_mode='cost' if getattr(problem, 'optimize_pool', False) else 'distance',
+                 operating_policy=p.as_dict(), solver=method,
+                 batches=[dict(id=b.id, start=b.start, cutoff=b.cutoff, end=b.end,
+                               container_demand=problem.batch_demands[b.id]) for b in p.batches],
+diff --git a/models/cost/comparison.py b/models/cost/comparison.py
+index 1c5579da9..5c3dbbf75 100644
+--- a/models/cost/comparison.py
++++ b/models/cost/comparison.py
+@@ -1,4 +1,4 @@
+-"""Price M3/M5 distance schedules and M6-M8 cost schedules under one contract."""
++"""Price M3 distance schedules and M5–M8 cost schedules under one contract."""
+ from __future__ import annotations
+ 
+ from tools.configuration.loader import load_json
+@@ -10,21 +10,22 @@ def evaluate_comparison_cost(problem, result, parameters, *, audit=None):
+     if problem.model_number not in (3, 5, 6, 7, 8):
+         raise ValueError('Matched joint-cost comparison requires M3 or M5–M8')
+     joint = getattr(problem, 'joint_batch', False)
++    optimized = joint or getattr(problem, 'optimize_pool', False)
+     profile = JointCostProfile(load_json(parameters) if isinstance(parameters, str) else parameters)
+-    if joint and profile.hash != problem.cost_profile.hash:
++    if optimized and profile.hash != problem.cost_profile.hash:
+         raise ValueError('Joint replay requires the same economic profile as the saved solution')
+     audited = audit_solution(problem, result) if audit is None else audit
+     if not audited['valid']:
+         raise ValueError(f'Cannot price an invalid route: {audited["errors"]}')
+-    pool = (result['container_pool_size'] if joint
++    pool = (result['container_pool_size'] if optimized
+             else problem.operating_policy.container_pool_size)
+     cost = profile.evaluate(audited, pool)
+     cost.update(model=problem.model_number, container_pool_size=pool,
+                 minimum_pool_for_schedule=audited['minimum_pool_for_schedule'],
+-                route_objective_mode='cost' if joint else 'distance',
+-                cost_is_optimized=joint,
+-                pool_basis='optimized_pool' if joint else 'configured_pool')
+-    if problem.model_number in (3, 5):
++                route_objective_mode='cost' if optimized else 'distance',
++                cost_is_optimized=optimized,
++                pool_basis='optimized_pool' if optimized else 'configured_pool')
++    if problem.model_number in (3, 5) and not optimized:
+         # This changes only the price of the pool, never the distance solution.
+         reference = profile.evaluate(audited, audited['minimum_pool_for_schedule'])
+         reference.update(container_pool_size=audited['minimum_pool_for_schedule'],
+diff --git a/models/routing/model_5/alns/README.md b/models/routing/model_5/alns/README.md
+index 254023598..0742d2049 100644
+--- a/models/routing/model_5/alns/README.md
++++ b/models/routing/model_5/alns/README.md
+@@ -1,5 +1,7 @@
+ # M5 — ALNS 阅读导航
+ 
++当前成本模式在每个候选时间表下重新计算所需实体箱数 N，以包含 N 的总成本评价候选。固定分批和日历，输入与审计规则见[箱池优化说明](../../../../docs/model5_pool_optimization.md)。
++
+ 先看 `solver.py` 确认入口，再看 **`search.py`** 理解主要迭代流程；遇到构造、邻域、评价和搜索控制时，再进入对应文件。
+ 本目录独立拥有本模型算法，不导入其他编号模型的求解实现。
+ 
+diff --git a/models/routing/model_5/alns/evaluator.py b/models/routing/model_5/alns/evaluator.py
+index cb3190509..61d8835c9 100644
+--- a/models/routing/model_5/alns/evaluator.py
++++ b/models/routing/model_5/alns/evaluator.py
+@@ -273,8 +273,11 @@ def evaluate(problem, state, *, _memo=None, _prepared=None):
+     )
+     violations.extend(e1_issues)
+     issued, shortage = 0, 0
++    pool_mode = getattr(problem, 'optimize_pool', False)
++    required_pool = problem.pool_min if pool_mode else p.container_pool_size
+     for b in p.batches if problem.reusable else ():
+         issued += problem.batch_demands[b.id]
++        required_pool = max(required_pool, issued - sum(n for t, n in releases if t <= b.start))
+         gap = issued - p.container_pool_size - sum(n for t, n in releases if t <= b.start)
+         if gap > 0:
+             violations.append("CLEAN_STOCK_SHORTAGE")
+@@ -284,6 +287,22 @@ def evaluate(problem, state, *, _memo=None, _prepared=None):
+         distance_of(problem, r, layer) for layer in ("e1", "e2") for r in result[layer + "_trips"]
+     )
+     result["info"]["objective"] = distance
++    if pool_mode:
++        if violations:
++            # Infeasible search proposals may lie outside the time horizon;
++            # the physical auditor only accepts complete, bounded schedules.
++            return distance + len(violations) * 1e6 + shortage * 1e5, result, violations
++        # N is the exact conditional minimum for each candidate schedule. The
++        # search compares full costs, so changing routes/times can change N.
++        from models.common.cycle.fixed_pool import attach_pool_cost
++        pool = min(problem.pool_max, required_pool)
++        try:
++            physical = attach_pool_cost(problem, result, pool)
++        except ValueError:
++            return 1e12, result, ['INVALID_SCHEDULE']
++        if not physical['valid']:
++            violations.extend(e['code'] for e in physical['errors'])
++        return result['info']['objective'] + len(violations) * 1e6 + shortage * 1e5, result, violations
+     return distance + len(violations) * 1e6 + shortage * 1e5, result, violations
+ 
+ 
+diff --git a/models/routing/model_5/alns/search.py b/models/routing/model_5/alns/search.py
+index 382c3b77e..2d37b46e5 100644
+--- a/models/routing/model_5/alns/search.py
++++ b/models/routing/model_5/alns/search.py
+@@ -246,7 +246,9 @@ def solve_alns(
+     if multibatch:
+         arc_cache = descent.distance.cache_info() if cache_descent_distances else None
+         result["info"].update(
+-            algorithm="adaptive_cycle_search_with_distance_descent",
++            algorithm=("adaptive_cycle_cost_search_with_pool_optimization"
++                       if getattr(problem, 'optimize_pool', False)
++                       else "adaptive_cycle_search_with_distance_descent"),
+             initial_objective=initial_objective,
+             incumbent_history=history,
+             incumbent_restarts=restarts,
+diff --git a/models/routing/model_5/exact/README.md b/models/routing/model_5/exact/README.md
+index 6be979555..6d7dc9940 100644
+--- a/models/routing/model_5/exact/README.md
++++ b/models/routing/model_5/exact/README.md
+@@ -1,5 +1,7 @@
+ # M5 直接 Gurobi 求解
+ 
++当前 M5 在固定分批和日历下联合优化整数箱数 N 与调度总成本，与 M6–M8 使用相同费用定义。输入、结果及历史诊断兼容见[箱池优化说明](../../../../docs/model5_pool_optimization.md)。
++
+ `solver.py` 只调用直接 Gurobi；`strategy="milp"` 为默认，`auto` 为兼容别名。
+ 
+ | 文件 | 职责 |
+diff --git a/models/routing/model_5/exact/constraint_blocks/echelon.py b/models/routing/model_5/exact/constraint_blocks/echelon.py
+index aeeb6a674..6248f803f 100644
+--- a/models/routing/model_5/exact/constraint_blocks/echelon.py
++++ b/models/routing/model_5/exact/constraint_blocks/echelon.py
+@@ -220,6 +220,7 @@ def multibatch_add_second_echelon_constraints(
+                 present_batches = {o.batch for o in orders}
+                 batches = [b.id for b in parameters.policy.batches if b.id in present_batches]
+                 selects = {b: variables.multibatch_create_r() for b in batches}
++                r['has_delivery'] = gp.quicksum(selects.values())
+                 variables.model.addConstr(
+                     gp.quicksum(selects.values())
+                     <= ((1))
+diff --git a/models/routing/model_5/exact/constraint_blocks/inventory.py b/models/routing/model_5/exact/constraint_blocks/inventory.py
+index 3204a2cbc..c0e9b09e2 100644
+--- a/models/routing/model_5/exact/constraint_blocks/inventory.py
++++ b/models/routing/model_5/exact/constraint_blocks/inventory.py
+@@ -8,11 +8,12 @@ def multibatch_add_inventory_constraints(parameters, variables):
+     import gurobipy as gp
+ 
+     cumulative = 0
++    pool = variables.pool if variables.pool is not None else parameters.policy.container_pool_size
+     for b in parameters.policy.batches if parameters.problem.reusable else ():
+         cumulative += parameters.problem.batch_demands[b.id]
+         if parameters.single_batch:
+             variables.model.addConstr(
+-                gp.LinExpr(parameters.policy.container_pool_size) >= cumulative,
++                gp.LinExpr(pool) >= cumulative,
+                 f"clean_stock_{b.id}",
+             )
+             continue
+@@ -34,6 +35,6 @@ def multibatch_add_inventory_constraints(parameters, variables):
+             )
+             released.append(q)
+         variables.model.addConstr(
+-            parameters.policy.container_pool_size + gp.quicksum(released) >= cumulative,
++            pool + gp.quicksum(released) >= cumulative,
+             f"clean_stock_{b.id}",
+         )
+diff --git a/models/routing/model_5/exact/constraint_blocks/routing.py b/models/routing/model_5/exact/constraint_blocks/routing.py
+index 903ba08de..d71c787fc 100644
+--- a/models/routing/model_5/exact/constraint_blocks/routing.py
++++ b/models/routing/model_5/exact/constraint_blocks/routing.py
+@@ -152,6 +152,7 @@ def multibatch_add_route_constraints(
+         if not (shared and compressed_routes and a >= 0 and b >= 0):
+             term = parameters.problem.distance(left, right) * x[a, b]
+             objective = add_distance_term(objective, term)
++            component_costs[layer] = component_costs.get(layer, 0) + term
+         if a == -1:
+             if shared and parameters.linear_e2_links:
+                 lower = nodes[b]["window"][0]
+@@ -313,6 +314,7 @@ def multibatch_add_shared_route_constraints(
+                     * active
+                 )
+                 objective = add_distance_term(objective, term)
++                component_costs['e2'] = component_costs.get('e2', 0) + term
+             else:
+                 variables.model.addConstr(active == gp.quicksum(indexed))
+             a, b = parameters.problem.order_map[left[0]], parameters.problem.order_map[right[0]]
+diff --git a/models/routing/model_5/exact/formulation.py b/models/routing/model_5/exact/formulation.py
+index c91f29693..a6f707606 100644
+--- a/models/routing/model_5/exact/formulation.py
++++ b/models/routing/model_5/exact/formulation.py
+@@ -69,6 +69,10 @@ def build_model(
+     total = parameters.total_containers
+     m = gp.Model("multi_batch_cutoff_v1")
+     variables = ModelVariables(m)
++    if getattr(problem, 'optimize_pool', False):
++        from gurobipy import GRB
++        variables.pool = m.addVar(vtype=GRB.INTEGER, lb=problem.pool_min,
++                                  ub=problem.pool_max, name='container_pool')
+     m.Params.OutputFlag = int(verbose)
+     m.Params.MIPGap = 0
+     m.Params.MIPGapAbs = 0
+@@ -275,7 +279,12 @@ def build_model(
+         check_budget=check_budget,
+     )
+     multibatch_add_inventory_constraints(parameters, variables)
+-    set_distance_objective(m, objective)
++    cost_parts = None
++    if getattr(problem, 'optimize_pool', False):
++        from models.routing.model_5.exact.objective import set_pool_cost_objective
++        cost_parts = set_pool_cost_objective(parameters, variables, component_costs)
++    else:
++        set_distance_objective(m, objective)
+     m.update()
+     return m, dict(
+         parameters=parameters,
+@@ -295,4 +304,6 @@ def build_model(
+         linear_e2_links=linear_links,
+         factored_e2_loads=bool(factor_e2_loads),
+         distance_component_costs=component_costs,
++        pool=variables.pool,
++        cost_parts=cost_parts,
+     )
+diff --git a/models/routing/model_5/exact/objective.py b/models/routing/model_5/exact/objective.py
+index 0bf1f3e82..a00ea96b8 100644
+--- a/models/routing/model_5/exact/objective.py
++++ b/models/routing/model_5/exact/objective.py
+@@ -17,3 +17,39 @@ def set_distance_objective(model, expression):
+     from gurobipy import GRB
+ 
+     model.setObjective(expression, GRB.MINIMIZE)
++
++
++def set_pool_cost_objective(parameters, variables, distances):
++    """Use the same pool, transport, work and activation costs as M6–M8."""
++    from collections import defaultdict
++    import gurobipy as gp
++    from gurobipy import GRB
++
++    profile, policy = parameters.problem.cost_profile, parameters.policy
++    rates = profile.rates
++    parts = dict(container_pool=rates['container_pool_cost_per_period'] * variables.pool)
++    for layer in ('e1', 'e2'):
++        routes = variables.routes[layer]
++        prep = policy.e1_load_time if layer == 'e1' else policy.e2_dispatch_prep_time
++        parts[layer + '_distance'] = (distances.get(layer, 0) * rates['distance_scale_to_km']
++                                     * rates[layer + '_distance_cost_per_km'])
++        parts[layer + '_work'] = (gp.quicksum(r['end'] - r['start'] + prep * r['has_delivery']
++                                             for r in routes)
++                                 * policy.minutes(1) * rates[layer + '_work_cost_per_minute'])
++        parts[layer + '_trips'] = gp.quicksum(r['used'] for r in routes) * rates[layer + '_trip_cost']
++        groups = defaultdict(list)
++        for r in routes:
++            key = r['vehicle'] if layer == 'e1' else (r['satellite'], r['vehicle'])
++            groups[key].append(r['used'])
++        active = []
++        for i, uses in enumerate(groups.values()):
++            flag = variables.model.addVar(vtype=GRB.BINARY, name=f'active_{layer}_{i}')
++            variables.model.addConstr(flag <= gp.quicksum(uses))
++            for used in uses:
++                variables.model.addConstr(flag >= used)
++            active.append(flag)
++        variables.physical_vehicles[layer] = active
++        parts[layer + '_vehicles'] = gp.quicksum(active) * rates[layer + '_vehicle_cost_per_cycle']
++    parts.update(profile.constant_cost(parameters.problem.total))
++    variables.model.setObjective(gp.quicksum(parts.values()), GRB.MINIMIZE)
++    return parts
+diff --git a/models/routing/model_5/exact/solution.py b/models/routing/model_5/exact/solution.py
+index daa93ac5a..903d65b10 100644
+--- a/models/routing/model_5/exact/solution.py
++++ b/models/routing/model_5/exact/solution.py
+@@ -40,4 +40,7 @@ def extract_solution(problem, model, ctx, result):
+                 event['site_id' if layer == 'e1' else 'order_id'] = n['site'] if layer == 'e1' else n['order'].id
+                 trip['events'].append(event)
+             result[layer+'_trips'].append(trip)
++    if getattr(problem, 'optimize_pool', False):
++        from models.common.cycle.fixed_pool import attach_pool_cost
++        attach_pool_cost(problem, result, int_value(ctx['pool']))
+     return result
+diff --git a/tests/data/test_model6_cost_comparison.py b/tests/data/test_model6_cost_comparison.py
+index 111a69eae..88fe40bd3 100644
+--- a/tests/data/test_model6_cost_comparison.py
++++ b/tests/data/test_model6_cost_comparison.py
+@@ -13,7 +13,7 @@ from tools.configuration.loader import load_routing_case
+ from tools.data.build_model6_demo_suite import build_suite
+ 
+ 
+-def test_m5_cli_prices_pool_trips_and_wear_after_distance_solving(tmp_path):
++def test_m5_cli_prices_optimized_pool_trips_and_wear(tmp_path):
+     from cli.route import main as route
+     from cli.cost import main as price
+     manifest = json.loads(build_suite(tmp_path/'data').read_text(encoding='utf-8'))
+@@ -26,16 +26,14 @@ def test_m5_cli_prices_pool_trips_and_wear_after_distance_solving(tmp_path):
+     audited = audit_solution(problem,result)
+     # Fixture prices: 5/box, 1/trip, 10/50 wear/use. These were missing in
+     # the old M5 cost command, even when the M6 economic profile was supplied.
+-    assert cost['components']['container_pool'] == 5*problem.operating_policy.container_pool_size
++    assert cost['components']['container_pool'] == 5*result['container_pool_size']
+     assert cost['components']['e1_trips'] == audited['e1_trip_count']
+     assert cost['components']['e2_trips'] == audited['e2_trip_count']
+     assert cost['components']['container_wear'] == pytest.approx(problem.total*10/50)
+     assert cost['total'] == pytest.approx(sum(cost['components'].values()))
+-    assert cost['route_objective_mode']=='distance' and not cost['cost_is_optimized']
+-    reference = cost['schedule_minimum_pool_reference']
+-    assert reference['container_pool_size']==audited['minimum_pool_for_schedule']
+-    assert cost['total']-reference['total']==pytest.approx(
+-        5*(problem.operating_policy.container_pool_size-audited['minimum_pool_for_schedule']))
++    assert cost['route_objective_mode']=='cost' and cost['cost_is_optimized']
++    assert cost['pool_basis'] == 'optimized_pool'
++    assert 'schedule_minimum_pool_reference' not in cost
+     assert result==original
+     invalid = deepcopy(result)
+     invalid['e2_trips']=[]
+diff --git a/tests/routing/test_container_pool_config.py b/tests/routing/test_container_pool_config.py
+index 0f906ab5a..83a042cc4 100644
+--- a/tests/routing/test_container_pool_config.py
++++ b/tests/routing/test_container_pool_config.py
+@@ -79,7 +79,8 @@ def test_case_override_preserves_source_policy(tmp_path, monkeypatch):
+     assert policy_path.read_bytes() == original
+     del case['container_pool_size']
+     _, fleet = load_routing_case(write_config(tmp_path/'case.json', case))
+-    assert fleet['operating_policy']['container_pool_size'] == 4
++    # Current M5 does not inherit the demand-ratio pool; the policy is reference.
++    assert fleet['operating_policy']['container_pool_size'] == load_json(policy_path)['container_pool_size']
+ 
+ 
+ @pytest.mark.parametrize('value', [0, -1, True, 3.5, 3.0, '3', None])
+@@ -166,29 +167,34 @@ def test_sweep_overrides_top_level_case_pool(tmp_path):
+         assert fleet['operating_policy']['container_pool_size'] == variant['pool']
+ 
+ 
+-def test_cli_and_batch_runner_use_shared_setting_by_default(tmp_path, monkeypatch):
++def test_current_cli_optimizes_pool_and_legacy_batch_runner_scans_fixed_pool(tmp_path, monkeypatch):
+     from cli import multibatch
+     from cli.route import main
+     from tools.configuration import container_pools
+     monkeypatch.setattr(container_pools, 'DEFAULT_POOL_CONFIG', pool_file(tmp_path, .75))
+     monkeypatch.setattr(multibatch, 'run_case', lambda config, fleet, **kw: (config, fleet))
+     cfg, fleet = main(['--case', 'config/experiments/examples/multibatch_demo.json'])
+-    assert cfg['container_pool_size'] == fleet['operating_policy']['container_pool_size'] == 3
++    assert 'container_pool_size' not in cfg
++    assert 'pool_options' not in cfg  # Instance defaults to [1, total uses].
+     plan = run_study(['--case', 'config/experiments/examples/multibatch_demo.json', '--solver', 'alns',
+                       '--seeds', '42', '--dry-run'])
+     assert plan['jobs'][0]['pool'] == 3
+ 
+ 
+-def test_cli_orders_override_recalculates_pool(tmp_path, monkeypatch):
++def test_cli_orders_override_recalculates_pool_decision_bound(tmp_path, monkeypatch):
+     from cli import multibatch
+     from cli.route import main
+     orders = json.loads(resolve_project_path('data/source_inputs/mechanism/orders.json').read_text())
+     orders[0]['container_count'] = 5
+     orders_path = write_config(tmp_path/'orders.json', orders)
+     monkeypatch.setattr(multibatch, 'run_case', lambda config, fleet, **kw: (config, fleet))
+-    _, fleet = main(['--case', 'config/experiments/examples/multibatch_demo.json', '--orders', orders_path,
+-                     '--pool-config', pool_file(tmp_path, .75)])
+-    assert fleet['operating_policy']['container_pool_size'] == 6
++    cfg, fleet = main(['--case', 'config/experiments/examples/multibatch_demo.json', '--orders', orders_path])
++    from models.common.cycle import load_instance
++    p = load_instance(cfg, fleet)
++    assert p.pool_min == 1 and p.pool_max == 8
++    with pytest.raises(ValueError, match='optimize N'):
++        main(['--case', 'config/experiments/examples/multibatch_demo.json',
++              '--pool-config', pool_file(tmp_path, .75)])
+ 
+ 
+ def test_decimal_ratio_does_not_add_spurious_container():
+diff --git a/tests/routing/test_formal_benchmark27_runner.py b/tests/routing/test_formal_benchmark27_runner.py
+index cfed3391b..f98be9a1d 100644
+--- a/tests/routing/test_formal_benchmark27_runner.py
++++ b/tests/routing/test_formal_benchmark27_runner.py
+@@ -39,3 +39,16 @@ def test_failed_member_stays_in_pair_without_invented_improvement():
+     assert not pair['both_valid']
+     assert pair['right_status']=='TIME_LIMIT'
+     assert pair['difference_right_minus_left'] is None
++
++
++def test_current_m5_comparisons_use_matching_costs_and_describe_added_decisions():
++    common = dict(case='S01', method='alns', seed=42, size='small', source_block='source',
++                  valid=True, status='FEASIBLE')
++    rows = [dict(common, model=3, objective_mode='distance', objective=100, comparable_reusable_cost=500),
++            dict(common, model=5, objective_mode='cost', objective=450, comparable_reusable_cost=450),
++            dict(common, model=6, objective_mode='cost', objective=400, comparable_reusable_cost=400)]
++    pairs = paired_rows(rows)
++    assert all(pair['metric'] == 'comparable_reusable_cost' for pair in pairs)
++    m56 = next(pair for pair in pairs if (pair['left'], pair['right']) == (5, 6))
++    assert 'same cost objective' in m56['interpretation']
++    assert m56['difference_right_minus_left'] == -50
+diff --git a/tests/routing/test_static_multibatch_study.py b/tests/routing/test_static_multibatch_study.py
+index fb2e78cc5..a9bf84b21 100644
+--- a/tests/routing/test_static_multibatch_study.py
++++ b/tests/routing/test_static_multibatch_study.py
+@@ -28,6 +28,8 @@ MANIFEST = 'data/manifest.json'
+ def test_pool_bound_accounts_for_unavoidable_late_recovery():
+     cfg, fleet = load_routing_case('config/experiments/examples/multibatch_demo.json')
+     fleet['operating_policy']['container_pool_size'] = 2
++    # Current M5 selects N; this diagnostic explicitly caps it at two.
++    cfg['pool_options'] = dict(pool_min=1, pool_max=2)
+     result = solve_alns(load_instance(cfg, fleet), max_time=.2)
+     assert result['info']['status'] == 'INFEASIBLE'
+     assert result['info']['proven_infeasible']
+diff --git a/tools/audit/audit_formal_benchmark27.py b/tools/audit/audit_formal_benchmark27.py
+index 8c56ba672..4f7e734ac 100644
+--- a/tools/audit/audit_formal_benchmark27.py
++++ b/tools/audit/audit_formal_benchmark27.py
+@@ -144,8 +144,13 @@ def audit_dataset(dataset):
+                 require(fixed['order_batch_assignment'] == {o.id: o.batch for o in problem.orders},
+                         f'Fixed order mapping differs: {path}')
+                 require(fixed['calendar'] == actual_policy['batches'], f'Fixed calendar differs: {path}')
+-                require('container_pool_size' not in optimized, f'Unexpected variable pool: {path}')
+-                if model >= 3:
++                variable_pool = model == 5 and contract['objective'] == 'cost'
++                require(('container_pool_size' in optimized) == variable_pool,
++                        f'Incorrect pool decision documentation: {path}')
++                if variable_pool:
++                    require('container_pool_size' not in fixed and problem.optimize_pool,
++                            f'M5 pool must be optimized: {path}')
++                elif model >= 3:
+                     require(fixed['container_pool_size'] == problem.total, f'Pool not fixed to Q: {path}')
+                 else:
+                     require('container_pool_size' not in fixed, f'Single-use model has a cyclic pool: {path}')
+diff --git a/tools/audit/benchmark_model5_alns.py b/tools/audit/benchmark_model5_alns.py
+index 8a6f33969..8b11f2b7d 100644
+--- a/tools/audit/benchmark_model5_alns.py
++++ b/tools/audit/benchmark_model5_alns.py
+@@ -102,6 +102,7 @@ def worker(job, destination):
+     from models.routing.service import solve_routing
+     config, fleet = load_routing_case(job['case'], use_pool_config=False)
+     config, fleet = apply_container_pool_size(config, fleet, job['pool'])
++    config['objective_mode'] = 'distance'  # Frozen historical distance benchmark.
+     problem = load_instance(config, fleet)
+     begun = time.perf_counter()
+     result = solve_routing(model=5, method='alns', problem=problem,
+diff --git a/tools/audit/certify_formal_benchmark27.py b/tools/audit/certify_formal_benchmark27.py
+index 62d883c6e..cf42dc5c7 100644
+--- a/tools/audit/certify_formal_benchmark27.py
++++ b/tools/audit/certify_formal_benchmark27.py
+@@ -36,7 +36,9 @@ def fixed_witness(problem, model):
+     if violations or not audited['valid']:
+         raise ValueError(f'Constructive witness failed: {violations}; {audited["errors"]}')
+     keep = ('schema_version','policy_version','time_unit','model','packaging','time_tick_seconds',
+-            'time_tick_subdivision','objective_mode','operating_policy','batches','e1_trips','e2_trips')
++            'time_tick_subdivision','objective_mode','operating_policy','batches','e1_trips','e2_trips',
++            'container_pool_size','pool_bounds','economic_profile_hash','evidence_hash',
++            'total_distance','cost','cost_components')
+     result = {key:result[key] for key in keep if key in result}
+     result.update(solver='feasibility_witness',validation_only=True,
+         info=dict(status='FEASIBLE',objective=audited['objective'],proven_optimal=False,
+@@ -44,8 +46,10 @@ def fixed_witness(problem, model):
+     return result
+ 
+ 
+-def load_problem(base, model):
++def load_problem(base, model, *, objective_mode=None):
+     config, fleet = load_routing_case(base['models'][str(model)])
++    if objective_mode is not None:
++        config['objective_mode'] = objective_mode
+     return load_instance(config,fleet)
+ 
+ 
+@@ -66,7 +70,11 @@ def verify_witnesses(root):
+                 name=f'{b["id"]}/model_{m}.json';payload=z.read(name)
+                 if hashlib.sha256(payload).hexdigest()!=report['witness_sha256'][name]:
+                     raise ValueError(f'Witness bytes changed: {name}')
+-                audited=audit_solution(load_problem(b,m),json.loads(payload))
++                saved = json.loads(payload)
++                # Replay frozen historical distance witnesses under their
++                # original fixed-pool contract, without changing stored bytes.
++                mode = 'distance' if m == 5 and saved.get('objective_mode') == 'distance' else None
++                audited=audit_solution(load_problem(b,m,objective_mode=mode),saved)
+                 if not audited['valid']:
+                     raise ValueError(f'Witness failed independent replay: {name}: {audited["errors"]}')
+                 rows.append(dict(base_case_id=b['id'],model=m,valid=True))
+diff --git a/tools/audit/verify_model5_benchmark.py b/tools/audit/verify_model5_benchmark.py
+index cee19daba..8431f5ead 100644
+--- a/tools/audit/verify_model5_benchmark.py
++++ b/tools/audit/verify_model5_benchmark.py
+@@ -41,6 +41,7 @@ def verify(folder, before='before', after='after'):
+             if key not in problems:
+                 config, fleet = load_routing_case(job['case'],use_pool_config=False)
+                 config, fleet = apply_container_pool_size(config,fleet,job['pool'])
++                config['objective_mode'] = 'distance'
+                 problems[key] = load_instance(config,fleet)
+             result = record['result']
+             audit = audit_solution(problems[key],result)
+diff --git a/tools/configuration/loader.py b/tools/configuration/loader.py
+index d6e87b84c..f2560a646 100644
+--- a/tools/configuration/loader.py
++++ b/tools/configuration/loader.py
+@@ -107,6 +107,10 @@ def load_routing_case(path: str | Path, *, use_pool_config=True) -> tuple[dict[s
+ 
+     algorithm = load_json(case["algorithm_config"]) if case.get("algorithm_config") else {}
+     run_config = {**algorithm, **case}
++    # Old distance-only inputs have no economic contract. Mark that diagnostic
++    # explicitly when loading them; new M5 inputs must declare their prices.
++    if case['model'] == 5 and not run_config.get('economic_config') and 'objective_mode' not in run_config:
++        run_config['objective_mode'] = 'distance'
+     fleet_config = load_json(case["routing_config"])
+     if "operating_policy" in case:
+         policy = case["operating_policy"]
+@@ -118,7 +122,9 @@ def load_routing_case(path: str | Path, *, use_pool_config=True) -> tuple[dict[s
+             raise ValueError('Multibatch cases require schema_version=2 and orders')
+     elif case.get('schema_version', 1) != 1 or case.get('orders'):
+         raise ValueError('schema_version=2/orders requires multi_batch_cutoff_v1')
+-    if version == 'multi_batch_cutoff_v1' and use_pool_config and case['model'] not in (6, 7, 8):
++    fixed_pool = case['model'] not in (5, 6, 7, 8) or (
++        case['model'] == 5 and run_config.get('objective_mode') == 'distance')
++    if version == 'multi_batch_cutoff_v1' and use_pool_config and fixed_pool:
+         from .container_pools import apply_pool_config
+         run_config, fleet_config = apply_pool_config(run_config, fleet_config)
+     elif 'container_pool_size' in run_config:
+diff --git a/tools/data/build_formal_benchmark27.py b/tools/data/build_formal_benchmark27.py
+index 264af5c73..079b1c712 100644
+--- a/tools/data/build_formal_benchmark27.py
++++ b/tools/data/build_formal_benchmark27.py
+@@ -75,7 +75,9 @@ def parameter_contract(model, record, orders, policy, joint_options):
+     if model <= 5:
+         fixed.update(batch_count=len(policy['batches']), calendar=policy['batches'],
+                      order_batch_assignment={o['order_id']: o['delivery_batch_id'] for o in orders})
+-        if model >= 3:
++        if model == 5:
++            optimized.append('container_pool_size')
++        elif model >= 3:
+             fixed['container_pool_size'] = record['total_container_uses']
+         else:
+             inactive = ['reusable_container_pool', 'pickup_tasks', 'cleaning', 'container_cycle_closure']
+@@ -89,9 +91,10 @@ def parameter_contract(model, record, orders, policy, joint_options):
+             fixed['batch_length_rule'] = 'cycle_length / selected_batch_count'
+     return dict(model=model, base_case_id=record['id'], source_family=record['family_id'],
+                 demand_container_uses=record['total_container_uses'],
+-                objective='distance' if model <= 5 else 'cost',
++                objective='distance' if model <= 4 else 'cost',
+                 fixed_parameters=fixed, optimized_decisions=optimized, inactive_components=inactive,
+-                decision_bounds=joint_options or {},
++                decision_bounds=(dict(pool_min=1, pool_max=record['total_container_uses'])
++                                 if model == 5 else joint_options or {}),
+                 reference_only=dict(customer_satellite_assignment=assignment,
+                     container_pool_size=record['total_container_uses']),
+                 notes=['The model number activates packaging and free-assignment semantics in the solver.',
+@@ -138,7 +141,7 @@ def build_suite(output=DEFAULT_OUTPUT, selection=DEFAULT_SELECTION):
+                     selection_source=reference(source), selection_sha256=digest(source),
+                     batch_definition='M6-M8: each counted batch has positive delivery and depot-return quantities',
+                     runtime_path_basis='Project-root-relative paths; no runtime dependencies outside this dataset',
+-                    objective_by_model={str(i): 'distance' if i <= 5 else 'cost' for i in range(1, 9)},
++                    objective_by_model={str(i): 'distance' if i <= 4 else 'cost' for i in range(1, 9)},
+                     cases=[], base_cases=[], limitations=[
+                         '27 spatial networks are derived from 14 source blocks; nested sizes remain paired.',
+                         'Synthetic appointments and economic coefficients, not measured operating costs.',
+@@ -248,6 +251,9 @@ def build_suite(output=DEFAULT_OUTPUT, selection=DEFAULT_SELECTION):
+                        exact_time=300, alns_time=30, alns_iter=10**9, seed=42, save_plots=False,
+                        dataset_version=version, base_case_id=record['id'],
+                        parameter_contract=reference(folder/'parameters.json'))
++            if model == 5:
++                cfg.update(objective_mode='cost', pool_options=dict(pool_min=1, pool_max=record['total_container_uses']))
++                cfg.pop('container_pool_size')
+             if options:
+                 cfg['joint_batch_options'] = options
+                 cfg['batch_count_certificate'] = reference(shared/'batch_count_certificate.json')
+@@ -262,6 +268,8 @@ def build_suite(output=DEFAULT_OUTPUT, selection=DEFAULT_SELECTION):
+     for model in range(1, 9):
+         directory = out/f'model_{model}'
+         profile = design['model_profiles'][str(model)]
++        if model == 5:
++            profile = {**profile, 'pool': 'optimized_integer_N', 'objective': 'cost'}
+         (directory/'README.md').write_text(
+             f'# 模型 {model} 数据集\n\n小、中、大各9例，共27例。每例的 `case.json` 可直接运行，'
+             '`parameters.json` 列出固定参数、优化决策及不适用的机制。\n\n'

@@ -142,7 +142,7 @@ def main(argv=None):
     parser.add_argument('--time',type=float,default=10)
     parser.add_argument('--exact-time',type=float,default=30)
     parser.add_argument('--iterations',type=int,default=30000)
-    parser.add_argument('--seeds',nargs='+',type=int,default=[42,43,44])
+    parser.add_argument('--seeds',nargs='+',type=int,default=[42])
     parser.add_argument('--workers',type=int,default=2)
     parser.add_argument('--timeout-overhead',type=float,default=20)
     parser.add_argument('--output',required=True)

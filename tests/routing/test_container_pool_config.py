@@ -79,7 +79,8 @@ def test_case_override_preserves_source_policy(tmp_path, monkeypatch):
     assert policy_path.read_bytes() == original
     del case['container_pool_size']
     _, fleet = load_routing_case(write_config(tmp_path/'case.json', case))
-    assert fleet['operating_policy']['container_pool_size'] == 4
+    # Current M5 does not inherit the demand-ratio pool; the policy is reference.
+    assert fleet['operating_policy']['container_pool_size'] == load_json(policy_path)['container_pool_size']
 
 
 @pytest.mark.parametrize('value', [0, -1, True, 3.5, 3.0, '3', None])
@@ -166,29 +167,34 @@ def test_sweep_overrides_top_level_case_pool(tmp_path):
         assert fleet['operating_policy']['container_pool_size'] == variant['pool']
 
 
-def test_cli_and_batch_runner_use_shared_setting_by_default(tmp_path, monkeypatch):
+def test_current_cli_optimizes_pool_and_legacy_batch_runner_scans_fixed_pool(tmp_path, monkeypatch):
     from cli import multibatch
     from cli.route import main
     from tools.configuration import container_pools
     monkeypatch.setattr(container_pools, 'DEFAULT_POOL_CONFIG', pool_file(tmp_path, .75))
     monkeypatch.setattr(multibatch, 'run_case', lambda config, fleet, **kw: (config, fleet))
     cfg, fleet = main(['--case', 'config/experiments/examples/multibatch_demo.json'])
-    assert cfg['container_pool_size'] == fleet['operating_policy']['container_pool_size'] == 3
+    assert 'container_pool_size' not in cfg
+    assert 'pool_options' not in cfg  # Instance defaults to [1, total uses].
     plan = run_study(['--case', 'config/experiments/examples/multibatch_demo.json', '--solver', 'alns',
                       '--seeds', '42', '--dry-run'])
     assert plan['jobs'][0]['pool'] == 3
 
 
-def test_cli_orders_override_recalculates_pool(tmp_path, monkeypatch):
+def test_cli_orders_override_recalculates_pool_decision_bound(tmp_path, monkeypatch):
     from cli import multibatch
     from cli.route import main
     orders = json.loads(resolve_project_path('data/source_inputs/mechanism/orders.json').read_text())
     orders[0]['container_count'] = 5
     orders_path = write_config(tmp_path/'orders.json', orders)
     monkeypatch.setattr(multibatch, 'run_case', lambda config, fleet, **kw: (config, fleet))
-    _, fleet = main(['--case', 'config/experiments/examples/multibatch_demo.json', '--orders', orders_path,
-                     '--pool-config', pool_file(tmp_path, .75)])
-    assert fleet['operating_policy']['container_pool_size'] == 6
+    cfg, fleet = main(['--case', 'config/experiments/examples/multibatch_demo.json', '--orders', orders_path])
+    from models.common.cycle import load_instance
+    p = load_instance(cfg, fleet)
+    assert p.pool_min == 1 and p.pool_max == 8
+    with pytest.raises(ValueError, match='optimize N'):
+        main(['--case', 'config/experiments/examples/multibatch_demo.json',
+              '--pool-config', pool_file(tmp_path, .75)])
 
 
 def test_decimal_ratio_does_not_add_spurious_container():

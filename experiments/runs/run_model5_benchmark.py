@@ -161,7 +161,7 @@ def main(argv=None):
     parser.add_argument('--sizes', nargs='+', choices=['small','medium','large'])
     parser.add_argument('--families', nargs='+')
     parser.add_argument('--batch-counts', nargs='+', type=int, choices=[2,3], default=[2,3])
-    parser.add_argument('--seeds', nargs='+', type=int, default=[42,43,44])
+    parser.add_argument('--seeds', nargs='+', type=int, default=[42])
     parser.add_argument('--exact-time', type=float, default=300)
     parser.add_argument('--time', type=float, default=30)
     parser.add_argument('--iterations', type=int, default=1000000)

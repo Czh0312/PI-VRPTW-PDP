@@ -6,7 +6,7 @@
 | 类别 | 目录 | 内容与入口 |
 | --- | --- | --- |
 | 车辆 | [vehicles/](vehicles/) | 一级/二级车辆数量、载重、容积、速度；按 Zhou 小例、大例、LaDe、机制例区分 |
-| 容器 | [containers/](containers/) | 容器重量、体积、初始池量；[pool_ratio.json](containers/pool_ratio.json) 是 M1–M5 的统一需求比例入口 |
+| 容器 | [containers/](containers/) | 容器重量、体积、参考池量；[pool_ratio.json](containers/pool_ratio.json) 用于 M1–M4 及历史固定池诊断 |
 | 运行规则 | [operations/](operations/) | 周期、批次、装卸、清洗、周转、闭合规则；单批对比共用一份运行规则 |
 | 成本 | [cost/](cost/) | `synthetic/` 算术示例、`lade/` 人民币参考参数、`scenarios/` 成本情景、`transport_ratio_v1/` 运输/容器比例参数 |
 | 求解参数 | [solvers/](solvers/) | `exact/` 的预算和求解后端；`alns/` 的预算、迭代数、种子和算法选项 |
@@ -58,10 +58,10 @@ JSON 的 `$include` 列表引用其他参数文件，路径相对仓库根目录
 随后沿用原来的优先级：案例覆盖 `algorithm_config`，命令行显式参数覆盖案例。
 循环引用会报错。`default.json` 只有被明确引用才生效，不会自动覆盖已有案例。
 
-M1–M5 默认按 `N = ceil(Q × demand_ratio)` 计算池量，Q 是订单箱次总需求。
-循环池约束适用于 M3–M5；显式 `container_pool_size`、`--container-pool-size`、实验池量扫描
+M1–M4 默认按 `N = ceil(Q × demand_ratio)` 计算池量，Q 是订单箱次总需求。
+循环池约束适用于 M3–M4；显式 `container_pool_size`、`--container-pool-size`、实验池量扫描
 以及 `--pool-config` 的原有优先级保持不变。设置不足时报告不可行，不自动扩大池量。
-M6–M8 继续使用 `joint_batch_options` 的池上下限和日历允许域，不继承需求比例。
+[M5](../docs/model5_pool_optimization.md) 使用 `economic_config` 与 `pool_options` 的池上下限，固定订单分批和日历下联合优化箱数和调度成本。M6–M8 使用 `joint_batch_options` 的池上下限和日历允许域，均不继承需求比例。历史 `objective_mode=distance` 的 M5 诊断仍使用固定池规则。
 
 新实验会冻结被引用的参数文件，并保存供运行使用的合并值；修改当前参数不会改变已冻结的实验。
 成本公式位于 `models/cost/`，价格来源与适用范围位于 [reference/cost/](../reference/cost/)。

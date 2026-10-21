@@ -152,6 +152,7 @@ def multibatch_add_route_constraints(
         if not (shared and compressed_routes and a >= 0 and b >= 0):
             term = parameters.problem.distance(left, right) * x[a, b]
             objective = add_distance_term(objective, term)
+            component_costs[layer] = component_costs.get(layer, 0) + term
         if a == -1:
             if shared and parameters.linear_e2_links:
                 lower = nodes[b]["window"][0]
@@ -313,6 +314,7 @@ def multibatch_add_shared_route_constraints(
                     * active
                 )
                 objective = add_distance_term(objective, term)
+                component_costs['e2'] = component_costs.get('e2', 0) + term
             else:
                 variables.model.addConstr(active == gp.quicksum(indexed))
             a, b = parameters.problem.order_map[left[0]], parameters.problem.order_map[right[0]]

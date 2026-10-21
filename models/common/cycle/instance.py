@@ -242,4 +242,13 @@ def load_instance(config, fleet_config):
         factory = UniformCycleInstance if options.get('schedule_mode') == 'uniform_cycle' else JointBatchInstance
         return factory(network, orders, policy, options,
                                   config['economic_config'])
+    if config['model'] == 5 and config.get('objective_mode', 'cost') not in ('cost', 'distance'):
+        raise ValueError('M5 objective_mode must be cost or historical distance')
+    if config['model'] == 5 and config.get('objective_mode') != 'distance':
+        from models.common.cycle.fixed_pool import FixedBatchPoolInstance
+        if not config.get('economic_config'):
+            raise ValueError('M5 requires economic_config for joint pool/routing cost optimization; '
+                             'objective_mode=distance is only for historical fixed-pool diagnostics')
+        return FixedBatchPoolInstance(network, orders, policy, config.get('pool_options', {}),
+                                      config['economic_config'])
     return MultiBatchInstance(network, orders, policy, model=config['model'])

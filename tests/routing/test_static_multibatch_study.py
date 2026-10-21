@@ -28,6 +28,8 @@ MANIFEST = 'data/manifest.json'
 def test_pool_bound_accounts_for_unavoidable_late_recovery():
     cfg, fleet = load_routing_case('config/experiments/examples/multibatch_demo.json')
     fleet['operating_policy']['container_pool_size'] = 2
+    # Current M5 selects N; this diagnostic explicitly caps it at two.
+    cfg['pool_options'] = dict(pool_min=1, pool_max=2)
     result = solve_alns(load_instance(cfg, fleet), max_time=.2)
     assert result['info']['status'] == 'INFEASIBLE'
     assert result['info']['proven_infeasible']
