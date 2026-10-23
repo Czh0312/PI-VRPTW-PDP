@@ -1,4 +1,4 @@
-"""ALNS schedule decoder. Entire downstream state is rebuilt on every move."""
+"""ALNS schedule decoder with optional exact reuse of E2 event schedules."""
 from __future__ import annotations
 
 from collections import OrderedDict, defaultdict
@@ -150,33 +150,12 @@ def _e1_returns(problem, state, quantities):
     return trips, violations, releases
 
 
-def evaluate(problem, state, *, _memo=None, _prepared=None):
-    """Return (penalized score, result, violations), never silently relax a rule."""
+def _e2_schedule(problem, state, goods_ready, *, _prepared=None):
+    """Decode coupled E2 event times; cutoff assignment stays in evaluate."""
     p, f = problem.operating_policy, problem.fleet
     task = problem.task if _prepared is None else _prepared.task
     summary_of = getattr(_prepared, "load_summary", None)
-    result = empty_result(problem, "alns")
-    violations, goods_ready = [], {}
-    if problem._availability_codes:
-        return 1e12, result, list(problem._availability_codes)
-    # E1 deliveries do not depend on reverse flow; delivery times are explicit.
-    for b in p.batches:
-        seen = []
-        for k, sites in enumerate(state["deliveries"][b.id]):
-            trip, issues = _e1_trip(problem, b, k, sites, [], {}, p.cycle_start)
-            # A delivery-only return may be late whereas the eventual mixed
-            # route fits. Validate final return only after inserting pickups.
-            violations.extend(
-                x for x in issues if x not in ("E1_RETURN_DEADLINE", "E1_TERMINAL_VEHICLE")
-            )
-            if trip:
-                for e in trip["events"]:
-                    goods_ready[e["site_id"], b.id] = e["start"] + problem.service(e["site_id"])
-            seen.extend(sites)
-        expected = [s for s in problem.satellites if problem.demands[s, b.id]]
-        if sorted(seen) != sorted(expected):
-            return 1e12, result, ["E1_DELIVERY_COVERAGE"]
-
+    trips, violations = [], []
     # Difference constraints propagate cross-route customer precedence and
     # physical-vehicle reuse; deliberate departure/return waits are preserved.
     bounds, edges, upper, tasks = {}, [], {}, {}
@@ -186,7 +165,7 @@ def evaluate(problem, state, *, _memo=None, _prepared=None):
     for ri, r in enumerate(plans):
         s, v = r["satellite"], r["vehicle"]
         if s not in problem.satellites or not 0 <= v < f.e2_per_sat_count:
-            return 1e12, result, ["INVALID_E2_VEHICLE"]
+            return [], True, ["INVALID_E2_VEHICLE"]
         key = (s, v)
         slot = slots[key]
         slots[key] += 1
@@ -203,7 +182,7 @@ def evaluate(problem, state, *, _memo=None, _prepared=None):
             else loads[0]
         )
         if len(dbatches) > 1:
-            return 1e12, result, ["MIXED_DELIVERY_BATCHES"]
+            return [], True, ["MIXED_DELIVERY_BATCHES"]
         if key in previous_vehicle:
             edges.append(
                 (
@@ -227,7 +206,7 @@ def evaluate(problem, state, *, _memo=None, _prepared=None):
         for j, (oid, kind) in enumerate(r["tasks"]):
             o, w, vol = task(oid, kind)
             if o.satellite != s or (oid, kind) in tasks:
-                return 1e12, result, ["E2_TASK_COVERAGE"]
+                return [], True, ["E2_TASK_COVERAGE"]
             node = (ri, j)
             tasks[oid, kind] = node
             tw = o.delivery_window if kind == "d" else o.pickup_window
@@ -254,7 +233,7 @@ def evaluate(problem, state, *, _memo=None, _prepared=None):
         else _prepared.expected_tasks
     )
     if set(tasks) != expected:
-        return 1e12, result, ["E2_TASK_COVERAGE"]
+        return [], True, ["E2_TASK_COVERAGE"]
     for o in problem.orders if problem.reusable else ():
         edges.append((tasks[o.id, "d"], tasks[o.id, "p"], o.service_time + o.min_use_time))
     if _prepared is not None and problem.reusable:
@@ -277,24 +256,16 @@ def evaluate(problem, state, *, _memo=None, _prepared=None):
                     queue.append(child)
         acyclic = visited == len(bounds)
     if not acyclic:
-        return 1e12, result, ["TIMING_CYCLE"]
+        return [], True, ["TIMING_CYCLE"]
     if any(t > upper.get(node, p.cycle_end) for node, t in bounds.items()):
         violations.append("E2_TIME_WINDOW")
-    quantities = {b.id: {s: 0 for s in problem.satellites} for b in p.batches}
     for r, ri, slot in parsed:
         u = bounds["end", ri]
-        returned = sum(problem.order_map[o].count for o, k in r["tasks"] if k == "p")
-        batch = next((b for b in p.batches if u <= b.cutoff), None)
-        if returned:
-            if batch:
-                quantities[batch.id][r["satellite"]] += returned
-            else:
-                violations.append("TERMINAL_OUTSTANDING")
         events = [
             dict(order_id=o, kind=k, start=bounds[ri, j], quantity=problem.order_map[o].count)
             for j, (o, k) in enumerate(r["tasks"])
         ]
-        result["e2_trips"].append(
+        trips.append(
             dict(
                 trip_id=f'e2_{r["satellite"]}_{r["vehicle"]}_{slot}',
                 satellite_id=r["satellite"],
@@ -305,6 +276,60 @@ def evaluate(problem, state, *, _memo=None, _prepared=None):
                 events=events,
             )
         )
+    return trips, False, violations
+
+
+def evaluate(problem, state, *, _memo=None, _prepared=None):
+    """Return (penalized score, result, violations), never silently relax a rule."""
+    p, f = problem.operating_policy, problem.fleet
+    result = empty_result(problem, "alns")
+    violations, goods_ready = [], {}
+    if problem._availability_codes:
+        return 1e12, result, list(problem._availability_codes)
+    productive = getattr(problem, 'require_productive_batches', False)
+    if productive:
+        violations.extend('EMPTY_BATCH_DELIVERY' for b in p.batches
+                          if not problem.batch_demands[b.id])
+    # E1 deliveries do not depend on reverse flow; delivery times are explicit.
+    for b in p.batches:
+        seen = []
+        for k, sites in enumerate(state["deliveries"][b.id]):
+            trip, issues = _e1_trip(problem, b, k, sites, [], {}, p.cycle_start)
+            # A delivery-only return may be late whereas the eventual mixed
+            # route fits. Validate final return only after inserting pickups.
+            violations.extend(
+                x for x in issues if x not in ("E1_RETURN_DEADLINE", "E1_TERMINAL_VEHICLE")
+            )
+            if trip:
+                for e in trip["events"]:
+                    goods_ready[e["site_id"], b.id] = e["start"] + problem.service(e["site_id"])
+            seen.extend(sites)
+        expected = [s for s in problem.satellites if problem.demands[s, b.id]]
+        if sorted(seen) != sorted(expected):
+            return 1e12, result, ["E1_DELIVERY_COVERAGE"]
+
+    e2_cache = getattr(_memo, "e2_cache", None)
+    trips, failed, e2_issues = (
+        e2_cache.decode(state, goods_ready) if e2_cache is not None
+        else _e2_schedule(problem, state, goods_ready, _prepared=_prepared)
+    )
+    if failed:
+        return 1e12, result, e2_issues
+    result["e2_trips"] = trips
+    violations.extend(e2_issues)
+    # Reclassify returns against the fixed cutoff calendar on every evaluation.
+    quantities = {b.id: {s: 0 for s in problem.satellites} for b in p.batches}
+    for trip in trips:
+        returned = sum(e["quantity"] for e in trip["events"] if e["kind"] == "p")
+        batch = next((b for b in p.batches if trip["return_complete"] <= b.cutoff), None)
+        if returned:
+            if batch:
+                quantities[batch.id][trip["satellite_id"]] += returned
+            else:
+                violations.append("TERMINAL_OUTSTANDING")
+    if productive:
+        violations.extend('EMPTY_BATCH_RECOVERY' for b in p.batches
+                          if not sum(quantities[b.id].values()))
     result["e1_trips"], e1_issues, releases = (
         _memo.returns(state, quantities)
         if _memo is not None

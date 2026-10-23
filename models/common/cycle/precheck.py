@@ -37,6 +37,8 @@ def check_necessary_conditions(problem, travel_bounds=None):
     p, f = problem.operating_policy, problem.fleet
     from models.common.cycle.availability import fixed_order_availability_errors
     errors, order_bounds = fixed_order_availability_errors(problem), []
+    productive = getattr(problem, 'require_productive_batches', False)
+    possible_recoveries = set()
 
     def fail(code, **details):
         errors.append(dict(code=code, **details))
@@ -44,6 +46,8 @@ def check_necessary_conditions(problem, travel_bounds=None):
     travel_bounds = travel_bounds or travel_lower_bounds(problem)
     outward, inward = travel_bounds['outward'], travel_bounds['inward']
     for batch in p.batches:
+        if productive and not problem.batch_demands[batch.id]:
+            fail('EMPTY_BATCH_DELIVERY', batch_id=batch.id)
         total_weight = total_volume = 0
         for satellite in problem.satellites:
             count = problem.demands[satellite, batch.id]
@@ -102,6 +106,7 @@ def check_necessary_conditions(problem, travel_bounds=None):
             if (depot_return <= wave.end and depot_return + p.e1_turnaround_time <= p.cycle_end
                     and depot_return + p.cleaning_duration <= p.cycle_end):
                 releases.append((depot_return + p.cleaning_duration, wave.id))
+                possible_recoveries.add(wave.id)
         clean, return_batch = min(releases) if releases else (None, None)
         if clean is None:
             fail('NO_POSSIBLE_CLEAN_RETURN', order_id=order.id)
@@ -109,6 +114,14 @@ def check_necessary_conditions(problem, travel_bounds=None):
                                  container_count=order.count, earliest_delivery=delivered,
                                  earliest_pickup=picked, earliest_unload=unloaded,
                                  earliest_clean=clean, optimistic_return_batch=return_batch))
+
+    # Each wave needs some possible recovery. These candidates deliberately
+    # ignore earlier cutoffs and vehicle conflicts: a necessary relaxation,
+    # not an assertion that the same order can actually serve several waves.
+    if productive:
+        for batch in p.batches:
+            if batch.id not in possible_recoveries:
+                fail('NO_POSSIBLE_BATCH_RECOVERY', batch_id=batch.id)
 
     stock_bounds, cumulative = [], 0
     lower_bound = max(problem.batch_demands.values(), default=0) if problem.reusable else 0

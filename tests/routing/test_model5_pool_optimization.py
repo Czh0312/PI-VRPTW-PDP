@@ -36,7 +36,9 @@ def exact_available():
 
 @pytest.mark.parametrize('method', ['exact', 'alns'])
 @pytest.mark.parametrize('cleaning,expected_pool', [(5, 1), (25, 2)])
-def test_pool_depends_on_actual_reuse_timing(method, cleaning, expected_pool, exact_available):
+def test_pool_depends_on_actual_reuse_timing(method, cleaning, expected_pool, request):
+    if method == 'exact':
+        request.getfixturevalue('exact_available')
     p = problem(cleaning=cleaning)
     result = (solve_exact(p, time_limit=5) if method == 'exact' else
               solve_alns(p, max_time=.5, max_iterations=100))
@@ -53,7 +55,7 @@ def test_pool_depends_on_actual_reuse_timing(method, cleaning, expected_pool, ex
         assert result['info']['proven_optimal']
 
 
-def test_candidate_schedules_change_pool_and_cost_before_search_acceptance():
+def test_candidate_that_empties_a_recovery_batch_is_rejected_before_acceptance():
     profile = load_json('config/experiments/benchmark27_v1/economic.json')
     p = problem(profile=profile)
     early = initial_state(p, random.Random(42))
@@ -62,10 +64,10 @@ def test_candidate_schedules_change_pool_and_cost_before_search_acceptance():
     late = deepcopy(early)
     late['e2'][0]['return_after'] = 31  # Miss b1's cutoff, reuse waits until b2.
     late_score, late_result, issues = evaluate(p, late)
-    assert not issues
     assert early_result['container_pool_size'] == 1
-    assert late_result['container_pool_size'] == 2
-    assert late_score - early_score == pytest.approx(5)
+    assert issues == ['EMPTY_BATCH_RECOVERY']
+    assert late_score > early_score + 1e5
+    assert 'container_pool_size' not in late_result
 
 
 def test_infeasible_search_proposals_are_rejected_without_audit_exceptions():
@@ -88,6 +90,8 @@ def test_exact_cost_replay_includes_loading_prep_work_trips_and_physical_vehicle
     # Two distinct customers on one delivery batch require nonzero internal
     # route arcs, including the shared arcs in the compressed formulation.
     orders = [replace(o, batch='b1') for o in p.orders]
+    orders.append(replace(p.orders[0], id='o3', batch='b2',
+                          delivery_window=(65, 90), pickup_window=(65, 95)))
     p = FixedBatchPoolInstance(p.network, orders, policy, {}, synthetic_profile(5))
     model, ctx = build_model(p, compress_multibatch_routes=compact)
     try:
@@ -101,7 +105,7 @@ def test_exact_cost_replay_includes_loading_prep_work_trips_and_physical_vehicle
         assert model.ObjVal == pytest.approx(audit['objective'])
         assert result['cost_components']['e1_work'] > 0
         assert result['cost_components']['e2_vehicles'] > 0
-        assert audit['distances']['e2'] == 4
+        assert audit['distances']['e2'] == 6
     finally:
         model.dispose()
 

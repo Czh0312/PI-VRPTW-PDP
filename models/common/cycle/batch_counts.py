@@ -1,4 +1,4 @@
-"""Positive-integer batch domains and exact clock refinement for equal batches."""
+"""Positive-integer batch domains and a common per-count clock for M6--M8."""
 from dataclasses import replace
 import math
 
@@ -25,10 +25,12 @@ def batch_count_domain(options, duration, minimum):
 
 
 def equal_batch_clock(problem, count):
-    """Rescale integer times, preserving physical minutes and rounded input data.
+    """Use the smallest refinement that can represent an equal K partition.
 
-    Only this K's clock is refined; there is no enormous LCM across all counts.
-    The subdivision is serialized with solutions for independent replay.
+    M8 uses this same grid while leaving its boundaries free, so equal M6/M7
+    calendars remain representable. Physical minutes and already-rounded input
+    travel times are preserved. Only this K's clock is refined, rather than an
+    LCM across all counts. Results serialize the subdivision for replay.
     """
     p = problem.operating_policy
     factor = count // math.gcd(problem.cycle_duration, count)

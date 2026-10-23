@@ -39,8 +39,21 @@ def solve_alns(
     _travel_bounds=None,
     *,
     cache_descent_distances=False,
+    cache_e2_schedule=False,
+    critical_stock_repair=False,
+    stock_chain_strategy='stock_first',
 ):
+    if stock_chain_strategy not in ('stock_first', 'cost_aware', 'cost_aware_marginal'):
+        raise ValueError('Unknown stock-chain strategy')
+    if stock_chain_strategy != 'stock_first' and not critical_stock_repair:
+        raise ValueError('A stock-chain strategy requires critical_stock_repair=True')
+    if critical_stock_repair and (
+        len(problem.operating_policy.batches) < 2 or not getattr(problem, 'optimize_pool', False)
+    ):
+        raise ValueError("Stock-chain repair requires multi-batch M5 cost optimization")
     if len(problem.operating_policy.batches) == 1:
+        if cache_e2_schedule:
+            raise ValueError("E2 schedule cache is an experimental multi-batch option")
         if cache_descent_distances:
             raise ValueError("Descent distance cache is an experimental multi-batch option")
         from models.routing.model_5.alns.single_batch_search import solve_alns as solve_single_batch
@@ -66,7 +79,7 @@ def solve_alns(
     rng = random.Random(seed)
     from models.routing.model_5.alns.performance.cycle_cache import CycleEvaluator
 
-    cycle_evaluator = CycleEvaluator(problem)
+    cycle_evaluator = CycleEvaluator(problem, cache_e2_schedule=cache_e2_schedule)
     cached = EvaluationCache(problem, cycle_evaluator)
     current = initial_state(problem, rng)
     score, decoded, issues = cached(current)
@@ -114,6 +127,8 @@ def solve_alns(
     )
     descent = None
     pool_descent = None
+    stock_repair = None
+    stock_improvements = []
     if multibatch:
         from models.routing.model_5.alns.intensification import CycleDescent
 
@@ -121,6 +136,19 @@ def solve_alns(
         if getattr(problem, 'optimize_pool', False):
             from models.routing.model_5.alns.pool_moves import PoolReuseDescent
             pool_descent = PoolReuseDescent(problem, travel_bounds=travel_bounds)
+            if critical_stock_repair:
+                from models.routing.model_5.alns.stock_chain import CriticalStockRepair
+
+                repair_class = CriticalStockRepair
+                if stock_chain_strategy == 'cost_aware':
+                    from models.routing.model_5.alns.cost_chain import CostAwareStockRepair
+
+                    repair_class = CostAwareStockRepair
+                elif stock_chain_strategy == 'cost_aware_marginal':
+                    from models.routing.model_5.alns.marginal_pickup import MarginalPickupStockRepair
+
+                    repair_class = MarginalPickupStockRepair
+                stock_repair = repair_class(problem, lower_bound=precheck['pool_lower_bound'])
     operators = [
         "relocate",
         "split_merge",
@@ -143,6 +171,8 @@ def solve_alns(
             counts["cycle_descent"] = 0
             if pool_descent is not None:
                 counts['pool_reuse'] = 0
+            if stock_repair is not None:
+                counts['stock_chain'] = 0
     restarts = 0
     search_rng, anchor_rng = rng, random.Random(0)
     anchor_iterations = 0
@@ -164,14 +194,21 @@ def solve_alns(
         proposed = None
         index = None
         pool_proposal = False
-        if descent is not None and best_state is not None and iteration % 3 != 2:
+        stock_proposal = False
+        if (stock_repair is not None and best_state is not None and iteration % 150 == 0
+                and stock_repair.seconds < 0.15 * max_time):
+            local_deadline = min(begun + max_time, time.perf_counter()
+                                 + min(0.4, 0.15 * max_time - stock_repair.seconds))
+            proposed = stock_repair.propose(best_state, best, cached, local_deadline)
+            stock_proposal = proposed is not None
+        if proposed is None and descent is not None and best_state is not None and iteration % 3 != 2:
             if pool_descent is not None and iteration % 9 == 0:
                 proposed = pool_descent.propose(best_state, best, begun + max_time)
                 pool_proposal = proposed is not None
             if proposed is None:
                 proposed = descent.propose(best_state, best, begun + max_time)
         if proposed is not None:
-            op = 'pool_reuse' if pool_proposal else "cycle_descent"
+            op = 'stock_chain' if stock_proposal else ('pool_reuse' if pool_proposal else "cycle_descent")
         else:
             if time.perf_counter() - begun >= max_time:
                 break
@@ -210,6 +247,9 @@ def solve_alns(
                     first_feasible = last_improvement
                 reward = 8
                 improved[op] += 1
+                if stock_proposal:
+                    stock_improvements.append(dict(time=last_improvement, iteration=iterations,
+                        pool=best['container_pool_size'], objective=best_cost, **stock_repair.last_run))
                 if multibatch:
                     history.append(
                         dict(time=last_improvement, iteration=iterations, objective=best_cost)
@@ -275,9 +315,26 @@ def solve_alns(
             descent_arc_cache_misses=arc_cache.misses if arc_cache else 0,
             e1_schedule_cache_hits=cycle_evaluator.hits,
             e1_schedule_cache_misses=cycle_evaluator.misses,
+            e2_schedule_cache_enabled=bool(cache_e2_schedule),
+            e2_schedule_cache_hits=cycle_evaluator.e2_cache.hits if cache_e2_schedule else 0,
+            e2_schedule_cache_misses=cycle_evaluator.e2_cache.misses if cache_e2_schedule else 0,
             shared_search_seed=0,
             shared_search_iterations=anchor_iterations,
         )
+        if stock_repair is not None:
+            result['info'].update(stock_chain_enabled=True, stock_chain_calls=stock_repair.calls,
+                stock_chain_strategy=stock_chain_strategy,
+                stock_chain_evaluations=stock_repair.evaluations,
+                stock_chain_feasible_evaluations=stock_repair.feasible_evaluations,
+                stock_chain_seconds=stock_repair.seconds,
+                stock_chain_best_pool=stock_repair.best_pool,
+                stock_chain_best_pool_cost=stock_repair.best_pool_cost,
+                stock_chain_improvements=stock_improvements,
+                stock_chain_last_run=stock_repair.last_run)
+            if stock_chain_strategy == 'cost_aware_marginal':
+                result['info'].update(stock_chain_marginal_generated=stock_repair.marginal_generated,
+                    stock_chain_marginal_evaluations=stock_repair.marginal_evaluations,
+                    stock_chain_marginal_feasible=stock_repair.marginal_feasible)
     if best is not None:
         audit = audit_solution(problem, result)
         result.update(

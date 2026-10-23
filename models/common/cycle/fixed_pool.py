@@ -11,6 +11,7 @@ from tools.configuration.loader import load_json
 
 class FixedBatchPoolInstance(MultiBatchInstance):
     optimize_pool = True
+    require_productive_batches = True
 
     def __init__(self, network, orders, policy, options, economic_config):
         super().__init__(network, orders, policy, model=5)
@@ -41,6 +42,7 @@ class FixedBatchPoolInstance(MultiBatchInstance):
             self._projections[pool] = MultiBatchInstance(
                 self.network, self.orders, replace(self.operating_policy, container_pool_size=pool),
                 model=5, _physical_source=self)
+            self._projections[pool].require_productive_batches = True
         return self._projections[pool]
 
 

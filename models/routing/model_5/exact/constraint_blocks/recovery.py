@@ -117,3 +117,10 @@ def multibatch_add_task_and_return_coverage_constraints(
                     == variables.expected_returns[s, b.id]
                 )
             variables.model.addConstr(gp.quicksum(r["visit"][i] for r, i, n in nodes) <= 1)
+    if getattr(parameters.problem, 'require_productive_batches', False):
+        for batch in parameters.policy.batches:
+            variables.model.addConstr(
+                gp.quicksum(r['quantity'] for r in variables.routes['e1']
+                            if r['batch'].id == batch.id) >= 1,
+                name=f'batch_recovery_active_{batch.id}',
+            )

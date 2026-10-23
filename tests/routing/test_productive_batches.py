@@ -181,7 +181,9 @@ def test_alns_returns_only_productive_batches(number, count):
 
 @pytest.mark.parametrize('number', [6, 7, 8])
 @pytest.mark.parametrize('method', ['alns', 'exact'])
-def test_one_order_cannot_populate_two_actual_batches(number, method):
+def test_one_order_cannot_populate_two_actual_batches(number, method, request):
+    if method == 'exact':
+        request.getfixturevalue('exact_available')
     problem = productive_fixture(number, orders=1)
     result = solve_routing(model=number, method=method, problem=problem,
                            alns_time=.1, alns_iter=10, exact_time=1)

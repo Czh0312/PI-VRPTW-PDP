@@ -1,0 +1,33 @@
+--- previous/search.py
++++ candidate/search.py
+@@ -43,7 +43,7 @@
+     critical_stock_repair=False,
+     stock_chain_strategy='stock_first',
+ ):
+-    if stock_chain_strategy not in ('stock_first', 'cost_aware'):
++    if stock_chain_strategy not in ('stock_first', 'cost_aware', 'cost_aware_marginal'):
+         raise ValueError('Unknown stock-chain strategy')
+     if stock_chain_strategy != 'stock_first' and not critical_stock_repair:
+         raise ValueError('A stock-chain strategy requires critical_stock_repair=True')
+@@ -144,6 +144,10 @@
+                     from models.routing.model_5.alns.cost_chain import CostAwareStockRepair
+ 
+                     repair_class = CostAwareStockRepair
++                elif stock_chain_strategy == 'cost_aware_marginal':
++                    from models.routing.model_5.alns.marginal_pickup import MarginalPickupStockRepair
++
++                    repair_class = MarginalPickupStockRepair
+                 stock_repair = repair_class(problem, lower_bound=precheck['pool_lower_bound'])
+     operators = [
+         "relocate",
+@@ -327,6 +331,10 @@
+                 stock_chain_best_pool_cost=stock_repair.best_pool_cost,
+                 stock_chain_improvements=stock_improvements,
+                 stock_chain_last_run=stock_repair.last_run)
++            if stock_chain_strategy == 'cost_aware_marginal':
++                result['info'].update(stock_chain_marginal_generated=stock_repair.marginal_generated,
++                    stock_chain_marginal_evaluations=stock_repair.marginal_evaluations,
++                    stock_chain_marginal_feasible=stock_repair.marginal_feasible)
+     if best is not None:
+         audit = audit_solution(problem, result)
+         result.update(

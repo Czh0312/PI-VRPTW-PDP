@@ -59,6 +59,10 @@ class CalendarCycleInstance(JointBatchInstance):
                     cycle_end=p.cycle_end, time_tick_seconds=p.time_tick_seconds)
         if self.optimize_loading:
             contract['loading_mode'] = self.loading_mode
+        if self.model_number == 8:
+            # The old M8 grid omitted equal partitions at nondivisible K.
+            # Identify the expanded domain in saved results and proof inputs.
+            contract['count_clock_rule'] = 'equal_partition_refinement_v1'
         return contract
 
     def balanced_boundaries(self, count):
@@ -67,9 +71,7 @@ class CalendarCycleInstance(JointBatchInstance):
         return tuple(p.cycle_start+i*self.cycle_duration*factor//count for i in range(count+1))
 
     def count_clock(self, count):
-        if self.model_number == 7:
-            return equal_batch_clock(self, count)
-        return self.operating_policy, self.orders, 1
+        return equal_batch_clock(self, self.validate_count(count))
 
     def validate_count(self, count):
         count = integer(count, 'cycle_batch_count', 1)
@@ -138,7 +140,9 @@ class VariableCalendarInstance(JointBatchInstance):
                          reference.options, reference.cost_profile.config, _physical_source=parent)
         self.parent, self.count = parent, count
         self.calendar_model_number = 8
-        self.minimum_phase_ticks = minimum = parent.minimum_phase_ticks
+        factor = (reference.operating_policy.time_tick_subdivision
+                  // parent.operating_policy.time_tick_subdivision)
+        self.minimum_phase_ticks = minimum = parent.minimum_phase_ticks * factor
         p = self.operating_policy
         self.start_bounds = {b.id: ((p.cycle_start, p.cycle_start) if i == 0 else
                                   (p.cycle_start+2*minimum*i, p.cycle_end-2*minimum*(count-i)))

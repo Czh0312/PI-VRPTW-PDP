@@ -166,7 +166,9 @@ def test_m8_accepts_nondivisible_horizon_and_exact_phase_ticks():
     policy = replace(source.operating_policy, cycle_end=131)
     p = CalendarCycleInstance(source.network, source.orders, policy, dict(batch_count_candidates=[3]),
                               source.cost_profile.config, model=8)
-    assert p.balanced_boundaries(3) == (0, 43, 87, 131)
+    assert p.balanced_boundaries(3) == (0, 131, 262, 393)
+    assert p.for_count(3).operating_policy.time_tick_subdivision == 3
+    assert p.for_count(3).minimum_phase_ticks == 3
     equal = CalendarCycleInstance(source.network, source.orders, policy, dict(batch_count_candidates=[3]),
                                   source.cost_profile.config, model=7)
     child = equal.for_count(3)

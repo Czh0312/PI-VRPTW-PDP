@@ -1,0 +1,36 @@
+..F........                                                              [100%]
+=================================== FAILURES ===================================
+____ test_consolidation_at_pool_lower_bound_remains_available_and_auditable ____
+
+    def test_consolidation_at_pool_lower_bound_remains_available_and_auditable():
+        p, state = consolidation_fixture()
+        saved = deepcopy(state)
+        cost, decoded, issues = evaluate(p, state)
+        assert not issues and decoded['container_pool_size'] == 2
+        repair = CostAwareStockRepair(p, lower_bound=2)
+        proposed = repair.propose(state, decoded, lambda s: evaluate(p, s), time.perf_counter() + 2)
+>       value, result, issues = evaluate(p, proposed)
+
+tests/routing/test_model5_cost_chain.py:80: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+problem = <models.common.cycle.fixed_pool.FixedBatchPoolInstance object at 0x107f87370>
+state = None
+
+    def evaluate(problem, state, *, _memo=None, _prepared=None):
+        """Return (penalized score, result, violations), never silently relax a rule."""
+        p, f = problem.operating_policy, problem.fleet
+        result = empty_result(problem, "alns")
+        violations, goods_ready = [], {}
+        if problem._availability_codes:
+            return 1e12, result, list(problem._availability_codes)
+        # E1 deliveries do not depend on reverse flow; delivery times are explicit.
+        for b in p.batches:
+            seen = []
+>           for k, sites in enumerate(state["deliveries"][b.id]):
+E           TypeError: 'NoneType' object is not subscriptable
+
+models/routing/model_5/alns/evaluator.py:292: TypeError
+=========================== short test summary info ============================
+FAILED tests/routing/test_model5_cost_chain.py::test_consolidation_at_pool_lower_bound_remains_available_and_auditable
+1 failed, 10 passed in 0.18s

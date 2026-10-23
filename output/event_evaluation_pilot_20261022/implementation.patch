@@ -1,0 +1,730 @@
+diff --git a/docs/alns_model_layout.md b/docs/alns_model_layout.md
+index fec3a7670..f25182b9a 100644
+--- a/docs/alns_model_layout.md
++++ b/docs/alns_model_layout.md
+@@ -76,6 +76,11 @@ M8 的“固定日历”指批次起止边界固定，订单归属、批内分
+ 候选与解，因此保留在顶层，不把它们仅描述为计算加速。
+ 
+ M5 的 `pool_moves.py` 补充允许距离增加的早回仓候选，以含箱池的总成本验证。
++M5 多批次入口的试验参数 `cache_e2_schedule=True` 启用
++`performance/e2_schedule_cache.py`：仅在全部二级路线、车辆、等待和一级到货时间
++相同时复用二级事件日程；截点归属、一级回收、清洗库存及独立审计仍照常计算。
++该参数默认关闭，不跨实例、日历或模型共用缓存；小范围对照入口为
++`experiments/runs/pilot_m5_event_cache.py`，一次最多两个算例。
+ M5–M8 的 E1 回收插入复用固定配送前缀及路线弧，最终完整解码保持不变。
+ 联合结果构建复用刚完成的两周期物理重放来检查联合契约，避免对相同方案再次重放；
+ 公开审计入口仍独立重建并核对时间表、箱池和费用，不信任结果中保存的审计。
+diff --git a/models/routing/model_5/alns/evaluator.py b/models/routing/model_5/alns/evaluator.py
+index 2db6beeb3..a28f308be 100644
+--- a/models/routing/model_5/alns/evaluator.py
++++ b/models/routing/model_5/alns/evaluator.py
+@@ -1,4 +1,4 @@
+-"""ALNS schedule decoder. Entire downstream state is rebuilt on every move."""
++"""ALNS schedule decoder with optional exact reuse of E2 event schedules."""
+ from __future__ import annotations
+ 
+ from collections import OrderedDict, defaultdict
+@@ -150,33 +150,12 @@ def _e1_returns(problem, state, quantities):
+     return trips, violations, releases
+ 
+ 
+-def evaluate(problem, state, *, _memo=None, _prepared=None):
+-    """Return (penalized score, result, violations), never silently relax a rule."""
++def _e2_schedule(problem, state, goods_ready, *, _prepared=None):
++    """Decode coupled E2 event times; cutoff assignment stays in evaluate."""
+     p, f = problem.operating_policy, problem.fleet
+     task = problem.task if _prepared is None else _prepared.task
+     summary_of = getattr(_prepared, "load_summary", None)
+-    result = empty_result(problem, "alns")
+-    violations, goods_ready = [], {}
+-    if problem._availability_codes:
+-        return 1e12, result, list(problem._availability_codes)
+-    # E1 deliveries do not depend on reverse flow; delivery times are explicit.
+-    for b in p.batches:
+-        seen = []
+-        for k, sites in enumerate(state["deliveries"][b.id]):
+-            trip, issues = _e1_trip(problem, b, k, sites, [], {}, p.cycle_start)
+-            # A delivery-only return may be late whereas the eventual mixed
+-            # route fits. Validate final return only after inserting pickups.
+-            violations.extend(
+-                x for x in issues if x not in ("E1_RETURN_DEADLINE", "E1_TERMINAL_VEHICLE")
+-            )
+-            if trip:
+-                for e in trip["events"]:
+-                    goods_ready[e["site_id"], b.id] = e["start"] + problem.service(e["site_id"])
+-            seen.extend(sites)
+-        expected = [s for s in problem.satellites if problem.demands[s, b.id]]
+-        if sorted(seen) != sorted(expected):
+-            return 1e12, result, ["E1_DELIVERY_COVERAGE"]
+-
++    trips, violations = [], []
+     # Difference constraints propagate cross-route customer precedence and
+     # physical-vehicle reuse; deliberate departure/return waits are preserved.
+     bounds, edges, upper, tasks = {}, [], {}, {}
+@@ -186,7 +165,7 @@ def evaluate(problem, state, *, _memo=None, _prepared=None):
+     for ri, r in enumerate(plans):
+         s, v = r["satellite"], r["vehicle"]
+         if s not in problem.satellites or not 0 <= v < f.e2_per_sat_count:
+-            return 1e12, result, ["INVALID_E2_VEHICLE"]
++            return [], True, ["INVALID_E2_VEHICLE"]
+         key = (s, v)
+         slot = slots[key]
+         slots[key] += 1
+@@ -203,7 +182,7 @@ def evaluate(problem, state, *, _memo=None, _prepared=None):
+             else loads[0]
+         )
+         if len(dbatches) > 1:
+-            return 1e12, result, ["MIXED_DELIVERY_BATCHES"]
++            return [], True, ["MIXED_DELIVERY_BATCHES"]
+         if key in previous_vehicle:
+             edges.append(
+                 (
+@@ -227,7 +206,7 @@ def evaluate(problem, state, *, _memo=None, _prepared=None):
+         for j, (oid, kind) in enumerate(r["tasks"]):
+             o, w, vol = task(oid, kind)
+             if o.satellite != s or (oid, kind) in tasks:
+-                return 1e12, result, ["E2_TASK_COVERAGE"]
++                return [], True, ["E2_TASK_COVERAGE"]
+             node = (ri, j)
+             tasks[oid, kind] = node
+             tw = o.delivery_window if kind == "d" else o.pickup_window
+@@ -254,7 +233,7 @@ def evaluate(problem, state, *, _memo=None, _prepared=None):
+         else _prepared.expected_tasks
+     )
+     if set(tasks) != expected:
+-        return 1e12, result, ["E2_TASK_COVERAGE"]
++        return [], True, ["E2_TASK_COVERAGE"]
+     for o in problem.orders if problem.reusable else ():
+         edges.append((tasks[o.id, "d"], tasks[o.id, "p"], o.service_time + o.min_use_time))
+     if _prepared is not None and problem.reusable:
+@@ -277,24 +256,16 @@ def evaluate(problem, state, *, _memo=None, _prepared=None):
+                     queue.append(child)
+         acyclic = visited == len(bounds)
+     if not acyclic:
+-        return 1e12, result, ["TIMING_CYCLE"]
++        return [], True, ["TIMING_CYCLE"]
+     if any(t > upper.get(node, p.cycle_end) for node, t in bounds.items()):
+         violations.append("E2_TIME_WINDOW")
+-    quantities = {b.id: {s: 0 for s in problem.satellites} for b in p.batches}
+     for r, ri, slot in parsed:
+         u = bounds["end", ri]
+-        returned = sum(problem.order_map[o].count for o, k in r["tasks"] if k == "p")
+-        batch = next((b for b in p.batches if u <= b.cutoff), None)
+-        if returned:
+-            if batch:
+-                quantities[batch.id][r["satellite"]] += returned
+-            else:
+-                violations.append("TERMINAL_OUTSTANDING")
+         events = [
+             dict(order_id=o, kind=k, start=bounds[ri, j], quantity=problem.order_map[o].count)
+             for j, (o, k) in enumerate(r["tasks"])
+         ]
+-        result["e2_trips"].append(
++        trips.append(
+             dict(
+                 trip_id=f'e2_{r["satellite"]}_{r["vehicle"]}_{slot}',
+                 satellite_id=r["satellite"],
+@@ -305,6 +276,53 @@ def evaluate(problem, state, *, _memo=None, _prepared=None):
+                 events=events,
+             )
+         )
++    return trips, False, violations
++
++
++def evaluate(problem, state, *, _memo=None, _prepared=None):
++    """Return (penalized score, result, violations), never silently relax a rule."""
++    p, f = problem.operating_policy, problem.fleet
++    result = empty_result(problem, "alns")
++    violations, goods_ready = [], {}
++    if problem._availability_codes:
++        return 1e12, result, list(problem._availability_codes)
++    # E1 deliveries do not depend on reverse flow; delivery times are explicit.
++    for b in p.batches:
++        seen = []
++        for k, sites in enumerate(state["deliveries"][b.id]):
++            trip, issues = _e1_trip(problem, b, k, sites, [], {}, p.cycle_start)
++            # A delivery-only return may be late whereas the eventual mixed
++            # route fits. Validate final return only after inserting pickups.
++            violations.extend(
++                x for x in issues if x not in ("E1_RETURN_DEADLINE", "E1_TERMINAL_VEHICLE")
++            )
++            if trip:
++                for e in trip["events"]:
++                    goods_ready[e["site_id"], b.id] = e["start"] + problem.service(e["site_id"])
++            seen.extend(sites)
++        expected = [s for s in problem.satellites if problem.demands[s, b.id]]
++        if sorted(seen) != sorted(expected):
++            return 1e12, result, ["E1_DELIVERY_COVERAGE"]
++
++    e2_cache = getattr(_memo, "e2_cache", None)
++    trips, failed, e2_issues = (
++        e2_cache.decode(state, goods_ready) if e2_cache is not None
++        else _e2_schedule(problem, state, goods_ready, _prepared=_prepared)
++    )
++    if failed:
++        return 1e12, result, e2_issues
++    result["e2_trips"] = trips
++    violations.extend(e2_issues)
++    # Reclassify returns against the fixed cutoff calendar on every evaluation.
++    quantities = {b.id: {s: 0 for s in problem.satellites} for b in p.batches}
++    for trip in trips:
++        returned = sum(e["quantity"] for e in trip["events"] if e["kind"] == "p")
++        batch = next((b for b in p.batches if trip["return_complete"] <= b.cutoff), None)
++        if returned:
++            if batch:
++                quantities[batch.id][trip["satellite_id"]] += returned
++            else:
++                violations.append("TERMINAL_OUTSTANDING")
+     result["e1_trips"], e1_issues, releases = (
+         _memo.returns(state, quantities)
+         if _memo is not None
+diff --git a/models/routing/model_5/alns/performance/cycle_cache.py b/models/routing/model_5/alns/performance/cycle_cache.py
+index 4590d5df1..7c5583454 100644
+--- a/models/routing/model_5/alns/performance/cycle_cache.py
++++ b/models/routing/model_5/alns/performance/cycle_cache.py
+@@ -1,7 +1,7 @@
+-"""Solve-local memoization of the deterministic E1 return decoder.
++"""Solve-local memoization of deterministic cycle schedule components.
+ 
+-E2 timing, cutoff quantities, stock releases and full feasibility are still
+-recomputed by evaluate. Only identical E1 inputs can reuse a decoded schedule.
++E2 event caching is opt-in. Cutoff quantities, stock releases and full
++feasibility are still recomputed by evaluate.
+ """
+ from collections import OrderedDict
+ 
+@@ -15,12 +15,17 @@ def _copy_schedule(value):
+ 
+ 
+ class CycleEvaluator:
+-    def __init__(self, problem, capacity=256):
++    def __init__(self, problem, capacity=256, *, cache_e2_schedule=False):
+         if capacity < 1:
+             raise ValueError('Cycle cache capacity must be positive')
+         self.problem, self.capacity = problem, capacity
+         self.entries = OrderedDict()
+         self.hits = self.misses = 0
++        self.e2_cache = None
++        if cache_e2_schedule:
++            from models.routing.model_5.alns.performance.e2_schedule_cache import E2ScheduleCache
++
++            self.e2_cache = E2ScheduleCache(problem)
+ 
+     def __call__(self, problem, state):
+         if problem is not self.problem:
+diff --git a/models/routing/model_5/alns/search.py b/models/routing/model_5/alns/search.py
+index c7574bf95..3d02fd24b 100644
+--- a/models/routing/model_5/alns/search.py
++++ b/models/routing/model_5/alns/search.py
+@@ -39,8 +39,11 @@ def solve_alns(
+     _travel_bounds=None,
+     *,
+     cache_descent_distances=False,
++    cache_e2_schedule=False,
+ ):
+     if len(problem.operating_policy.batches) == 1:
++        if cache_e2_schedule:
++            raise ValueError("E2 schedule cache is an experimental multi-batch option")
+         if cache_descent_distances:
+             raise ValueError("Descent distance cache is an experimental multi-batch option")
+         from models.routing.model_5.alns.single_batch_search import solve_alns as solve_single_batch
+@@ -66,7 +69,7 @@ def solve_alns(
+     rng = random.Random(seed)
+     from models.routing.model_5.alns.performance.cycle_cache import CycleEvaluator
+ 
+-    cycle_evaluator = CycleEvaluator(problem)
++    cycle_evaluator = CycleEvaluator(problem, cache_e2_schedule=cache_e2_schedule)
+     cached = EvaluationCache(problem, cycle_evaluator)
+     current = initial_state(problem, rng)
+     score, decoded, issues = cached(current)
+@@ -275,6 +278,9 @@ def solve_alns(
+             descent_arc_cache_misses=arc_cache.misses if arc_cache else 0,
+             e1_schedule_cache_hits=cycle_evaluator.hits,
+             e1_schedule_cache_misses=cycle_evaluator.misses,
++            e2_schedule_cache_enabled=bool(cache_e2_schedule),
++            e2_schedule_cache_hits=cycle_evaluator.e2_cache.hits if cache_e2_schedule else 0,
++            e2_schedule_cache_misses=cycle_evaluator.e2_cache.misses if cache_e2_schedule else 0,
+             shared_search_seed=0,
+             shared_search_iterations=anchor_iterations,
+         )
+diff --git a/models/routing/model_5/alns/solver.py b/models/routing/model_5/alns/solver.py
+index 028c07869..383bf4bec 100644
+--- a/models/routing/model_5/alns/solver.py
++++ b/models/routing/model_5/alns/solver.py
+@@ -3,7 +3,8 @@ from models.common.cycle.scope import validate_problem, finish_result
+ 
+ 
+ def solve_alns(
+-    problem, max_time=10, max_iterations=5000, seed=42, *, cache_descent_distances=False
++    problem, max_time=10, max_iterations=5000, seed=42, *, cache_descent_distances=False,
++    cache_e2_schedule=False,
+ ):
+     validate_problem(problem, 5)
+     from models.routing.model_5.alns.search import solve_alns as solve_local
+@@ -11,5 +12,7 @@ def solve_alns(
+     options = dict(max_time=max_time, max_iterations=max_iterations, seed=seed)
+     if cache_descent_distances:
+         options["cache_descent_distances"] = True
++    if cache_e2_schedule:
++        options["cache_e2_schedule"] = True
+     result = solve_local(problem, **options)
+     return finish_result(problem, result, solver_module=solve_local.__module__)
+diff --git a/experiments/runs/pilot_m5_event_cache.py b/experiments/runs/pilot_m5_event_cache.py
+new file mode 100644
+index 000000000..0169acb80
+--- /dev/null
++++ b/experiments/runs/pilot_m5_event_cache.py
+@@ -0,0 +1,258 @@
++"""Small M5 event-cache pilot: frozen-source parity, replay and timed solves.
++
++At most two cases; one seed; no exact solver or other numbered models. Replay
++uses the same early candidate stream from the original baseline. Timed solves
++do not carry trace instrumentation. All workers run serially in fresh processes.
++"""
++from __future__ import annotations
++
++import argparse
++from datetime import datetime, timezone
++import gc
++import gzip
++import hashlib
++import json
++import os
++from pathlib import Path
++import platform
++import resource
++import shutil
++import subprocess
++import sys
++import time
++import zipfile
++
++
++ROOT = Path(__file__).resolve().parents[2]
++DATASET = Path('data/formal_benchmark27_spacetime_v2')
++
++
++def write(path, value):
++    path.parent.mkdir(parents=True, exist_ok=True)
++    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n')
++
++
++def digest(value):
++    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'),
++                                     ensure_ascii=False, allow_nan=False).encode()).hexdigest()
++
++
++def case_path(name):
++    size = dict(S='small', M='medium', L='large')[name[0]]
++    return DATASET / 'model_5' / size / name / 'case.json'
++
++
++def freeze(source, destination, cases):
++    paths = [p for folder in ('models', 'tools') for p in (source / folder).rglob('*.py')]
++    for name in cases:
++        relative = case_path(name)
++        paths.extend((source / relative.parent).glob('*.json'))
++        shared = source / DATASET / 'shared' / relative.parts[-3] / name
++        paths.extend(p for p in shared.iterdir() if p.suffix in ('.json', '.csv'))
++    hashes = {}
++    for path in sorted(set(paths)):
++        relative = path.relative_to(source)
++        target = destination / relative
++        target.parent.mkdir(parents=True, exist_ok=True)
++        shutil.copy2(path, target)
++        hashes[str(relative)] = hashlib.sha256(target.read_bytes()).hexdigest()
++    return hashes
++
++
++def worker(args):
++    sys.path.insert(0, str(args.source))
++    from models.common.cycle import load_instance
++    from models.common.cycle.audit import audit_solution
++    from models.routing.model_5.alns.performance.cycle_cache import CycleEvaluator
++    from models.routing.model_5.alns.solver import solve_alns
++    from tools.configuration.loader import load_routing_case
++
++    problem = load_instance(*load_routing_case(args.source / case_path(args.case)))
++    enabled = args.variant == 'candidate'
++    row = dict(mode=args.worker, case=args.case, variant=args.variant, seed=args.seed,
++               customers=len({o.customer for o in problem.orders}), orders=len(problem.orders),
++               satellites=len(problem.satellites), k=len(problem.operating_policy.batches),
++               q=problem.total)
++    if args.worker == 'trace':
++        from copy import deepcopy
++        states, expected = [], []
++        valid = 0
++        original = CycleEvaluator.__call__
++
++        class CapturedEnough(Exception):
++            pass
++
++        def capture(self, p, state):
++            nonlocal valid
++            result = original(self, p, state)
++            states.append(deepcopy(state))
++            expected.append(digest(result))
++            valid += not result[2]
++            if len(states) >= args.trace_limit:
++                raise CapturedEnough()
++            return result
++
++        CycleEvaluator.__call__ = capture
++        begun = time.perf_counter()
++        try:
++            solve_alns(problem, max_time=10, max_iterations=1000000, seed=args.seed)
++        except CapturedEnough:
++            pass
++        finally:
++            CycleEvaluator.__call__ = original
++        row.update(candidates=len(states), feasible_candidates=valid,
++                   wall_seconds=time.perf_counter() - begun, diagnostic_only=True)
++        if not states:
++            raise RuntimeError('Baseline produced no evaluation trace')
++        args.output.mkdir(parents=True, exist_ok=True)
++        (args.output / 'trace.json.gz').write_bytes(gzip.compress(
++            json.dumps(dict(states=states, expected_sha256=expected)).encode(), mtime=0))
++    elif args.worker == 'replay':
++        trace = json.loads(gzip.decompress(args.trace.read_bytes()))
++        evaluator = (CycleEvaluator(problem, cache_e2_schedule=True) if enabled
++                     else CycleEvaluator(problem))
++        gc.collect()
++        cpu_begun = time.process_time()
++        begun = time.perf_counter()
++        values = [evaluator(problem, state) for state in trace['states']]
++        elapsed = time.perf_counter() - begun
++        cpu_elapsed = time.process_time() - cpu_begun
++        mismatches = [i for i, (value, expected) in enumerate(zip(values, trace['expected_sha256']))
++                      if digest(value) != expected]
++        row.update(candidates=len(values), wall_seconds=elapsed, cpu_seconds=cpu_elapsed,
++                   mismatches=mismatches,
++                   identical=not mismatches, round=args.round,
++                   e1_hits=evaluator.hits, e1_misses=evaluator.misses,
++                   e2_hits=evaluator.e2_cache.hits if enabled else 0,
++                   e2_misses=evaluator.e2_cache.misses if enabled else 0)
++    else:
++        options = dict(max_time=args.seconds, max_iterations=10**9, seed=args.seed)
++        if enabled:
++            options['cache_e2_schedule'] = True
++        begun = time.perf_counter()
++        result = solve_alns(problem, **options)
++        elapsed = time.perf_counter() - begun
++        audit = audit_solution(problem, result)  # External double-cycle check, outside timer.
++        write(args.output / 'result.json', result)
++        write(args.output / 'audit.json', audit)
++        info = result['info']
++        row.update(seconds=args.seconds, iterations=info.get('iterations'),
++                   objective=info.get('objective'), pool=result.get('container_pool_size'),
++                   status=info.get('status'), valid=audit['valid'],
++                   periodic_valid=audit.get('periodic_replay', {}).get('valid', False),
++                   wall_seconds=elapsed, solver_seconds=info.get('runtime'),
++                   evaluations=info.get('evaluation_cache_misses'),
++                   e1_hits=info.get('e1_schedule_cache_hits', 0),
++                   e1_misses=info.get('e1_schedule_cache_misses', 0),
++                   e2_hits=info.get('e2_schedule_cache_hits', 0),
++                   e2_misses=info.get('e2_schedule_cache_misses', 0),
++                   distance_e1=audit.get('distances', {}).get('e1'),
++                   distance_e2=audit.get('distances', {}).get('e2'))
++    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
++    row['peak_rss_bytes'] = rss if sys.platform == 'darwin' else rss * 1024
++    write(args.output / 'summary.json', row)
++    print(json.dumps(row), flush=True)
++    if row.get('identical') is False:
++        raise RuntimeError('Candidate evaluation differs from frozen baseline; stop pilot')
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--output', type=Path, required=True)
++    parser.add_argument('--baseline-source', type=Path)
++    parser.add_argument('--source', type=Path, default=ROOT)
++    parser.add_argument('--cases', nargs='+', default=['M02', 'L06'])
++    parser.add_argument('--seconds', type=float, default=30)
++    parser.add_argument('--seed', type=int, default=42)
++    parser.add_argument('--trace-limit', type=int, default=600)
++    parser.add_argument('--replay-rounds', type=int, default=3)
++    parser.add_argument('--worker', choices=['trace', 'replay', 'solve'], help=argparse.SUPPRESS)
++    parser.add_argument('--variant', choices=['baseline', 'candidate'], default='baseline', help=argparse.SUPPRESS)
++    parser.add_argument('--case', help=argparse.SUPPRESS)
++    parser.add_argument('--trace', type=Path, help=argparse.SUPPRESS)
++    parser.add_argument('--round', type=int, default=0, help=argparse.SUPPRESS)
++    args = parser.parse_args()
++    for field in ('output', 'source', 'baseline_source', 'trace'):
++        value = getattr(args, field)
++        if value is not None:
++            setattr(args, field, value.resolve())
++    if (args.seconds <= 0 or args.trace_limit < 1 or args.replay_rounds < 1
++            or not 1 <= len(args.cases) <= 2 or len(set(args.cases)) != len(args.cases)):
++        parser.error('Require positive budgets and one or two distinct cases')
++    if args.worker:
++        worker(args)
++        return
++    if args.baseline_source is None:
++        parser.error('--baseline-source must name the original frozen source tree')
++    if args.output.exists() and any(args.output.iterdir()):
++        parser.error('Use a new or empty output directory')
++    args.output.mkdir(parents=True, exist_ok=True)
++    sources = {}
++    hashes = {}
++    for variant, source in [('baseline', args.baseline_source), ('candidate', args.source)]:
++        sources[variant] = args.output / 'sources' / variant
++        hashes[variant] = freeze(source, sources[variant], args.cases)
++    shutil.copy2(__file__, args.output / 'driver.py')
++    archive = args.output / 'sources.zip'
++    with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as z:
++        for path in sorted((args.output / 'sources').rglob('*')):
++            if path.is_file():
++                z.write(path, path.relative_to(args.output))
++    manifest = dict(kind='two_case_pilot_not_formal_benchmark',
++        created_at=datetime.now(timezone.utc).isoformat(), command=sys.argv,
++        base_commit=subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
++        branch=subprocess.check_output(['git', 'branch', '--show-current'], cwd=ROOT, text=True).strip(),
++        cases=args.cases, seconds=args.seconds, seed=args.seed, iteration_limit=10**9,
++        trace_limit=args.trace_limit, replay_rounds=args.replay_rounds,
++        python=sys.version, executable=sys.executable, platform=platform.platform(),
++        concurrency=1, python_hash_seed=0, thread_limits=1,
++        source_and_input_sha256=hashes,
++        source_archive_sha256=hashlib.sha256(archive.read_bytes()).hexdigest(),
++        driver_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest())
++    write(args.output / 'manifest.json', manifest)
++    dependencies = subprocess.run([sys.executable, '-m', 'pip', 'freeze'],
++                                   capture_output=True, text=True, timeout=30)
++    (args.output / 'dependencies.txt').write_text(dependencies.stdout + dependencies.stderr)
++    environment = {**os.environ, 'PYTHONHASHSEED': '0', **{name: '1' for name in
++        ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS', 'NUMEXPR_NUM_THREADS')}}
++    rows = []
++
++    def run(mode, variant, case, round_number=0):
++        destination = args.output / mode / case / (f'{round_number}_{variant}' if mode == 'replay' else variant)
++        command = [sys.executable, str(Path(__file__).resolve()), '--worker', mode,
++            '--variant', variant, '--case', case, '--source', str(sources[variant]),
++            '--output', str(destination), '--seed', str(args.seed), '--seconds', str(args.seconds),
++            '--trace-limit', str(args.trace_limit), '--round', str(round_number)]
++        if mode == 'replay':
++            command += ['--trace', str(args.output / 'trace' / case / 'baseline' / 'trace.json.gz')]
++        destination.mkdir(parents=True, exist_ok=True)
++        print(f'START {mode} {case} {variant} round={round_number}', flush=True)
++        with (destination / 'worker.log').open('w') as log:
++            completed = subprocess.run(command, cwd=ROOT, env=environment, stdout=log,
++                                       stderr=subprocess.STDOUT, timeout=max(60, args.seconds + 30))
++        if completed.returncode:
++            raise RuntimeError(f'Worker failed: {destination / "worker.log"}')
++        row = json.loads((destination / 'summary.json').read_text())
++        rows.append(row)
++        write(args.output / 'results.json', rows)
++        print(f'DONE {mode} {case} {variant}: {row}', flush=True)
++
++    for index, case in enumerate(args.cases):
++        run('trace', 'baseline', case)
++        for round_number in range(args.replay_rounds):
++            variants = ['baseline', 'candidate']
++            for variant in variants if (index + round_number) % 2 == 0 else variants[::-1]:
++                run('replay', variant, case, round_number + 1)
++    # Only after both cases pass exact replay equality, run the quality comparison.
++    for index, case in enumerate(args.cases):
++        variants = ['baseline', 'candidate']
++        for variant in variants if index % 2 == 0 else variants[::-1]:
++            run('solve', variant, case)
++    write(args.output / 'completion.json', dict(status='COMPLETED', workers=len(rows),
++          completed_at=datetime.now(timezone.utc).isoformat(),
++          all_replays_identical=all(r['identical'] for r in rows if r['mode'] == 'replay'),
++          all_solutions_valid=all(r['valid'] and r['periodic_valid'] for r in rows if r['mode'] == 'solve')))
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/models/routing/model_5/alns/performance/e2_schedule_cache.py b/models/routing/model_5/alns/performance/e2_schedule_cache.py
+new file mode 100644
+index 000000000..c00cd5f96
+--- /dev/null
++++ b/models/routing/model_5/alns/performance/e2_schedule_cache.py
+@@ -0,0 +1,49 @@
++"""Exact E2 event reuse within one immutable M5 problem and fixed calendar."""
++from collections import OrderedDict
++
++from models.routing.model_5.alns.evaluator import _e2_schedule
++
++
++def _copy(value):
++    trips, failed, issues = value
++    return ([dict(trip, events=[dict(event) for event in trip['events']])
++             for trip in trips], failed, list(issues))
++
++
++class E2ScheduleCache:
++    """Cache the entire coupled E2 graph, including waits and supply times.
++
++    Customer precedence and vehicle reuse couple E2 routes. Reusing an isolated
++    route would be unsafe; this first pilot therefore keys all nonempty routes.
++    E1 reverse routes and pickup hints cannot affect E2 times under M5's fixed
++    delivery calendar. Their changes may reuse E2, but downstream cutoff,
++    cleaning, stock and cost calculations still run in the full evaluator.
++    """
++
++    def __init__(self, problem, capacity=128):
++        if capacity < 1:
++            raise ValueError('E2 schedule cache capacity must be positive')
++        if problem.model_number != 5 or len(problem.operating_policy.batches) < 2:
++            raise ValueError('E2 schedule cache requires multi-batch M5')
++        self.problem, self.capacity = problem, capacity
++        self.entries = OrderedDict()
++        self.hits = self.misses = 0
++
++    def decode(self, state, goods_ready):
++        start = self.problem.operating_policy.cycle_start
++        key = (
++            tuple((r['satellite'], r['vehicle'], tuple(map(tuple, r['tasks'])),
++                   r.get('depart_after', start), r.get('return_after', start))
++                  for r in state['e2'] if r['tasks']),
++            tuple(sorted(goods_ready.items())),
++        )
++        if key in self.entries:
++            self.hits += 1
++            self.entries.move_to_end(key)
++            return _copy(self.entries[key])
++        self.misses += 1
++        value = _e2_schedule(self.problem, state, goods_ready)
++        self.entries[key] = _copy(value)
++        if len(self.entries) > self.capacity:
++            self.entries.popitem(last=False)
++        return value
+diff --git a/tests/routing/test_model5_e2_schedule_cache.py b/tests/routing/test_model5_e2_schedule_cache.py
+new file mode 100644
+index 000000000..d5f71018d
+--- /dev/null
++++ b/tests/routing/test_model5_e2_schedule_cache.py
+@@ -0,0 +1,134 @@
++"""E2 event reuse must preserve timing boundaries and all downstream costs."""
++from copy import deepcopy
++import random
++
++import pytest
++
++from models.common.cycle.audit import audit_solution
++from models.common.cycle.fixed_pool import FixedBatchPoolInstance
++from models.routing.model_5.alns.evaluator import _e2_schedule, evaluate, initial_state
++from models.routing.model_5.alns.performance.cycle_cache import CycleEvaluator
++from models.routing.model_5.alns.performance.e2_schedule_cache import E2ScheduleCache
++from models.routing.model_5.alns.search import _move
++from models.routing.model_5.alns.solver import solve_alns
++from tests.routing.test_model5_intensification import directed_cycle
++from tests.routing.test_multibatch_cycle import fixture
++from tools.configuration.loader import load_json
++
++
++def pool_problem():
++    base = fixture(pool=2, cleaning=5)
++    return FixedBatchPoolInstance(base.network, base.orders, base.operating_policy, {},
++        load_json('config/experiments/benchmark27_v1/economic.json'))
++
++
++def test_cache_matches_full_decoder_for_feasible_and_invalid_moves():
++    problem, original = directed_cycle()
++    cached = CycleEvaluator(problem, cache_e2_schedule=True)
++    cached.e2_cache.capacity = 8
++    rng = random.Random(1701)
++    state = original
++    operators = ['relocate', 'pair', 'reverse', 'vehicle', 'split_merge',
++                 'cutoff', 'e1_delivery', 'e1_pickup']
++    valid = invalid = 0
++    for step in range(240):
++        if step % 8 == 0:
++            state = deepcopy(original)
++        state = _move(problem, state, rng, operators[step % len(operators)])
++        expected = evaluate(problem, state)
++        assert cached(problem, state) == expected
++        assert cached(problem, state) == expected
++        valid += not expected[2]
++        invalid += bool(expected[2])
++    assert valid and invalid and cached.e2_cache.hits and cached.e2_cache.misses
++    assert len(cached.e2_cache.entries) <= 8
++    with pytest.raises(ValueError, match='one problem'):
++        cached(directed_cycle()[0], state)
++
++
++def test_supply_times_and_both_waits_invalidate_cached_events():
++    problem, state = directed_cycle()
++    cached = E2ScheduleCache(problem)
++    goods = {('S', b.id): b.start + 1 for b in problem.operating_policy.batches}
++    first = cached.decode(state, goods)
++    saved = deepcopy(first)
++    first[0][0]['events'].clear()
++    first[2].append('CALLER_MUTATION')
++    assert cached.decode(state, goods) == saved
++    assert cached.hits == 1
++    late_goods = {**goods, ('S', 'b1'): 15}
++    late = cached.decode(state, late_goods)
++    assert late == _e2_schedule(problem, state, late_goods)
++    assert late[0][0]['departure'] > saved[0][0]['departure']
++    for field in ('depart_after', 'return_after'):
++        changed = deepcopy(state)
++        changed['e2'][0][field] = 29
++        assert cached.decode(changed, goods) == _e2_schedule(problem, changed, goods)
++    assert cached.misses == 4
++
++
++def test_cutoff_equality_and_one_tick_late_change_pool_and_cost():
++    problem = pool_problem()
++    original = initial_state(problem, random.Random(42))
++    cached = CycleEvaluator(problem, cache_e2_schedule=True)
++    outputs = []
++    for delay in (0, 1):
++        state = deepcopy(original)
++        state['e2'][0]['return_after'] = problem.operating_policy.batches[0].cutoff + delay
++        actual = cached(problem, state)
++        assert actual == evaluate(problem, state)
++        assert not actual[2]
++        assert audit_solution(problem, actual[1])['periodic_replay']['valid']
++        outputs.append(actual)
++    assert [x[1]['container_pool_size'] for x in outputs] == [1, 2]
++    assert outputs[1][0] - outputs[0][0] == pytest.approx(5)
++    assert cached.e2_cache.misses == 2
++
++
++def test_e1_reverse_changes_reuse_events_but_recheck_downstream_schedule():
++    problem, state = directed_cycle()
++    cached = CycleEvaluator(problem, cache_e2_schedule=True)
++    first = cached(problem, state)
++    changed = deepcopy(state)
++    changed['pickup_order']['b1'] = []
++    actual = cached(problem, changed)
++    assert actual == evaluate(problem, changed)
++    assert actual[1]['e2_trips'] == first[1]['e2_trips']
++    assert actual[1]['e1_trips'] != first[1]['e1_trips']
++    assert 'CLEAN_STOCK_SHORTAGE' in actual[2]
++    assert cached.e2_cache.hits == 1
++
++
++@pytest.mark.parametrize('mutation,code', [
++    ('vehicle', 'INVALID_E2_VEHICLE'), ('duplicate', 'E2_TASK_COVERAGE'),
++    ('cycle', 'TIMING_CYCLE'),
++])
++def test_hard_failures_survive_cache_hits(mutation, code):
++    problem, state = directed_cycle()
++    if mutation == 'vehicle':
++        state['e2'][0]['vehicle'] = 999
++    elif mutation == 'duplicate':
++        state['e2'][0]['tasks'].append(state['e2'][0]['tasks'][0])
++    else:
++        # Pickup before its own delivery creates a customer precedence cycle.
++        state['e2'][0]['tasks'].reverse()
++    cached = CycleEvaluator(problem, cache_e2_schedule=True)
++    expected = evaluate(problem, state)
++    assert expected[2] == [code]
++    assert cached(problem, state) == expected
++    assert cached(problem, state) == expected
++    assert cached.e2_cache.hits == 1
++
++
++def test_public_switch_and_fixed_iteration_search_preserve_audited_result():
++    problem = pool_problem()
++    results = [solve_alns(problem, max_time=10, max_iterations=80, seed=42,
++                          cache_e2_schedule=flag) for flag in (False, True)]
++    assert results[0]['info']['objective'] == results[1]['info']['objective']
++    assert results[0]['e1_trips'] == results[1]['e1_trips']
++    assert results[0]['e2_trips'] == results[1]['e2_trips']
++    for flag, result in zip((False, True), results):
++        assert result['info']['e2_schedule_cache_enabled'] is flag
++        assert result['info']['iterations'] == 80
++        assert audit_solution(problem, result)['periodic_replay']['valid']
++    assert results[1]['info']['e2_schedule_cache_hits'] > 0

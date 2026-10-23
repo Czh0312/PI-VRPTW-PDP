@@ -12,6 +12,12 @@ def multibatch_add_availability_constraints(parameters, variables):
         variables.model.addConstr(
             gp.LinExpr() >= 1, name=f'fixed_availability_{index}_{issue["code"]}'
         )
+    if getattr(parameters.problem, 'require_productive_batches', False):
+        for batch in parameters.policy.batches:
+            if not parameters.problem.batch_demands[batch.id]:
+                variables.model.addConstr(
+                    gp.LinExpr() >= 1, name=f'batch_delivery_active_{batch.id}'
+                )
 
 
 

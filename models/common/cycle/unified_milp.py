@@ -10,10 +10,13 @@ from models.common.solver_config import MilpOptions, validate_budget, read_milp_
 from models.common.cycle.joint import joint_empty_result
 
 
-def build_unified_model(problem, *, build_fixed, verbose=False, deadline=None, compact_e2=False):
+def build_unified_model(problem, *, build_fixed, verbose=False, deadline=None, compact_e2=False,
+                        count_screening=False):
     import gurobipy as gp
     from gurobipy import GRB
 
+    if not isinstance(count_screening, bool):
+        raise ValueError('count_screening must be boolean')
     counts = tuple(problem.batch_count_candidates)
     if not counts or len(set(counts)) != len(counts):
         raise ValueError('Expected a nonempty unique batch-count domain')
@@ -28,10 +31,20 @@ def build_unified_model(problem, *, build_fixed, verbose=False, deadline=None, c
         model.addConstr(selectors.sum() == 1, name='select_one_count')
         count_var = model.addVar(vtype=GRB.INTEGER, lb=min(counts), ub=max(counts), name='batch_count')
         model.addConstr(count_var == gp.quicksum(k*selectors[k] for k in counts), name='chosen_batch_count')
-        blocks, objective = {}, gp.LinExpr()
+        blocks, objective, screened = {}, gp.LinExpr(), {}
         for count in counts:
             check_deadline(deadline)
             child = problem.for_count(count)
+            if count_screening:
+                from models.common.cycle.count_screening import infeasible_count_certificate
+                certificate = infeasible_count_certificate(child)
+                check_deadline(deadline)
+                if certificate is not None:
+                    # Keep the original K domain and its explicit proof. This
+                    # substitutes a known-infeasible block with selector=0.
+                    model.addConstr(selectors[count] == 0, name=f'K{count}_assignment_infeasible')
+                    screened[count] = certificate
+                    continue
             source, context = build_fixed(child, verbose=False, deadline=deadline,
                                           compact_e2=compact_e2)
             try:
@@ -49,7 +62,8 @@ def build_unified_model(problem, *, build_fixed, verbose=False, deadline=None, c
         model.update()
         check_deadline(deadline)
         return model, dict(problem=problem, selectors=selectors, batch_count=count_var,
-                           pool=pool, blocks=blocks, batch_count_candidates=counts)
+                           pool=pool, blocks=blocks, batch_count_candidates=counts,
+                           screened_counts=screened)
     except BaseException:
         model.dispose()
         raise
@@ -69,7 +83,7 @@ def _identity(problem, result):
 
 
 def solve_unified_milp(problem, *, build_fixed, extract_fixed, time_limit=60, seed=42,
-                       verbose=False, milp_options=None):
+                       verbose=False, milp_options=None, count_screening=False):
     validate_budget(time_limit, seed)
     options = MilpOptions.resolve(milp_options)
     begun = time.perf_counter()
@@ -77,7 +91,8 @@ def solve_unified_milp(problem, *, build_fixed, extract_fixed, time_limit=60, se
     config = options.metadata(time_limit, seed)
     config.update(batch_count_formulation='one_hot_disjunctive_MILP', k_search=None,
                   retained_model_bounds=False, formulation_options=dict(
-                      compact_e2=options.formulation == 'compact', strengthening=False))
+                      compact_e2=options.formulation == 'compact', strengthening=False,
+                      count_screening=count_screening))
     result = joint_empty_result(problem, 'exact')
     result['cycle_batch_count'] = None
     scope = f'full_model_{problem.model_number}_all_K_joint_cost_integer_time_MILP'
@@ -93,7 +108,8 @@ def solve_unified_milp(problem, *, build_fixed, extract_fixed, time_limit=60, se
     try:
         model, context = build_unified_model(problem, build_fixed=build_fixed, verbose=verbose,
                                              deadline=begun+time_limit,
-                                             compact_e2=options.formulation == 'compact')
+                                             compact_e2=options.formulation == 'compact',
+                                             count_screening=count_screening)
     except TimeoutError:
         result['info'].update(status='TIME_LIMIT_BUILD', objective=None, best_bound=None,
                               proven_optimal=False, proven_infeasible=False, mip_gap=None)
@@ -105,6 +121,8 @@ def solve_unified_milp(problem, *, build_fixed, extract_fixed, time_limit=60, se
         model.Params.TimeLimit = max(0., time_limit-build_time)
         model.optimize()
         info = read_milp_info(model, proof_scope=scope, build_time=build_time)
+        info.update(built_batch_counts=list(context['blocks']),
+                    screened_batch_counts=context['screened_counts'])
         result['info'] = info
         extraction_begun = time.perf_counter()
         if model.SolCount:

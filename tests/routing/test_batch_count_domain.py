@@ -45,7 +45,7 @@ def test_default_domain_uses_phase_constraint_instead_of_source_calendar(model):
         p.for_count(66)
 
 
-@pytest.mark.parametrize('model', [6, 7])
+@pytest.mark.parametrize('model', [6, 7, 8])
 def test_equal_partition_refines_clock_without_changing_physical_times(model):
     p = instance(model, [3, 7])
     child = p.for_count(3)
@@ -62,7 +62,7 @@ def test_equal_partition_refines_clock_without_changing_physical_times(model):
     assert child.service('S') == 3*p.service('S')
 
 
-@pytest.mark.parametrize('model', [6, 7])
+@pytest.mark.parametrize('model', [6, 7, 8])
 @pytest.mark.parametrize('method', ['alns', 'exact'])
 def test_nondivisible_count_solves_and_independently_replays_cost(model, method, request):
     if method == 'exact':

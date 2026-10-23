@@ -1,7 +1,7 @@
-"""Solve-local memoization of the deterministic E1 return decoder.
+"""Solve-local memoization of deterministic cycle schedule components.
 
-E2 timing, cutoff quantities, stock releases and full feasibility are still
-recomputed by evaluate. Only identical E1 inputs can reuse a decoded schedule.
+E2 event caching is opt-in. Cutoff quantities, stock releases and full
+feasibility are still recomputed by evaluate.
 """
 from collections import OrderedDict
 
@@ -15,12 +15,17 @@ def _copy_schedule(value):
 
 
 class CycleEvaluator:
-    def __init__(self, problem, capacity=256):
+    def __init__(self, problem, capacity=256, *, cache_e2_schedule=False):
         if capacity < 1:
             raise ValueError('Cycle cache capacity must be positive')
         self.problem, self.capacity = problem, capacity
         self.entries = OrderedDict()
         self.hits = self.misses = 0
+        self.e2_cache = None
+        if cache_e2_schedule:
+            from models.routing.model_5.alns.performance.e2_schedule_cache import E2ScheduleCache
+
+            self.e2_cache = E2ScheduleCache(problem)
 
     def __call__(self, problem, state):
         if problem is not self.problem:

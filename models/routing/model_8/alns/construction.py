@@ -490,7 +490,7 @@ def initial_calendars(variable):
     parent, k = variable.parent, variable.count
     balanced = parent.balanced_boundaries(k)
     yield balanced
-    minimum = 2 * parent.minimum_phase_ticks
+    minimum = 2 * variable.minimum_phase_ticks
     # Event-aligned seeds can cross a release-time barrier even when every
     # assignment in the reference equal calendar is impossible.
     events = boundary_events(variable)
