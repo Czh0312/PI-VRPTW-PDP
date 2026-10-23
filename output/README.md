@@ -3,7 +3,7 @@
 本目录是唯一成果入口，按实验主题保存正式结果、图片、报告和 Excel。
 实验程序在 `experiments/`，实验参数在 `config/experiments/`。
 与结果配套的冻结输入、源码、原始方案和审计用于复现，随对应实验保存。
-当前正式输入为“一客一箱” `formal_benchmark27_one_box_v1`，验证和重跑状态见[阶段记录](inspections/one_box_validation_20261019_v1/report.md)。原 `formal_benchmark27_v1` 及其冻结结果属于“多箱需求情景”。下列既有结果按各自冻结输入保留，不能直接作为新情景结论。
+当前正式输入为 `formal_benchmark27_spacetime_v3`，小规模9例统一10位顾客；见[新版数据说明](../data/formal_benchmark27_spacetime_v3/README.md)。输入修订和新一轮求解分别记录。旧 `spacetime_v2`、`one_box_v1`、多箱版本及其冻结结果保留，下列既有结果按各自冻结输入保留，不能直接作为新情景结论。
 
 ## 主要入口
 

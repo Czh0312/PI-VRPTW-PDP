@@ -1,0 +1,159 @@
+{
+  "base_case_id": "S09",
+  "family_id": "zhou_Set1_12-2-2_subset10_first",
+  "source_block": "zhou:Set1_12-2-2",
+  "source_dataset": "data/formal_benchmark27_spacetime_v2",
+  "customer_selection": {
+    "source_base_case_id": "S09",
+    "mode": "first",
+    "customer_count": 10,
+    "selected_customer_ids": [
+      "C0",
+      "C1",
+      "C2",
+      "C3",
+      "C4",
+      "C5",
+      "C6",
+      "C7",
+      "C8",
+      "C9"
+    ],
+    "rule": "Numeric customer IDs; first/last ten of the twelve-customer source. Native ten-customer cases are retained."
+  },
+  "demand_contract": {
+    "id": "one_customer_one_box_v1",
+    "boxes_per_customer": 1,
+    "orders_per_customer": 1,
+    "goods_weight": "Preserve the complete original customer goods weight.",
+    "delivery_weight": "goods_weight + container_weight",
+    "pickup_weight": "container_weight",
+    "task_volume": "container_volume",
+    "assumption": "Each customer demand fits one standard box; no bin-packing optimization."
+  },
+  "source_files": {
+    "data": "data/formal_benchmark27_spacetime_v2/shared/small/S09/network.csv",
+    "orders": "data/formal_benchmark27_spacetime_v2/shared/small/S09/reference_orders.json",
+    "routing_config": "data/formal_benchmark27_spacetime_v2/shared/small/S09/fleet.json",
+    "operating_policy": "data/formal_benchmark27_spacetime_v2/shared/small/S09/reference_policy.json",
+    "economic_config": "data/formal_benchmark27_spacetime_v2/shared/small/S09/economic.json"
+  },
+  "preserved_orders_sha256": "ce8b2741402ff4faaaf1f324603a9292d93c04a78a955df3179fad98ea33048b",
+  "preserved_policy_sha256": "abba982aadbc98412c1cf4914ef2c4b37b04fef7ad7bafd2866cc2f979abdd95",
+  "preserved_hash_scope": "Frozen selected reference orders; independently checked against the named source subset.",
+  "design": {
+    "id": "S09",
+    "size": "small",
+    "customers": 10,
+    "Q": 10,
+    "source_block": "zhou:Set1_12-2-2",
+    "satellites": 2,
+    "requested_satellites": 2,
+    "external_periods": 4,
+    "profile": "balanced",
+    "target_period_shares": [
+      0.25,
+      0.25,
+      0.25,
+      0.25
+    ],
+    "period_totals": [
+      3,
+      3,
+      2,
+      2
+    ],
+    "selected_satellites": [
+      "S0",
+      "S1"
+    ],
+    "customers_per_site": {
+      "S0": 5,
+      "S1": 5
+    },
+    "warehouse_period_quantities": {
+      "S0": [
+        1,
+        2,
+        1,
+        1
+      ],
+      "S1": [
+        2,
+        1,
+        1,
+        1
+      ]
+    },
+    "mean_warehouse_period_demand": 1.25,
+    "minimum_warehouse_period_demand": 1,
+    "share_one_or_two": 1.0,
+    "share_empty": 0.0,
+    "daily_site_count_range": 0,
+    "period_site_count_ranges": [
+      1,
+      1,
+      0,
+      0
+    ],
+    "period_imbalance_cv": 0.2,
+    "E1_vehicles": 2,
+    "E1_volume": 10,
+    "E1_weight": 200,
+    "E2_vehicles_total": 4,
+    "E2_per_site": 2,
+    "E2_volume": 3,
+    "E2_weight": 60,
+    "reference_cutoff_minutes": 140.0,
+    "old_satellites": 2,
+    "old_period_totals": [
+      3,
+      3,
+      2,
+      2
+    ],
+    "old_minimum_warehouse_period_demand": 0,
+    "old_share_one_or_two": 0.875,
+    "spatial_selection": {
+      "distance_sum": 209.43634093468245,
+      "maximum_distance": 53.48831648126533,
+      "candidate_subsets": 1,
+      "balanced_assignments_evaluated": 1,
+      "objective": "Minimum sum customer-satellite distance with each selected site serving floor/ceil(N/S) customers; independent of routing costs or relative model results"
+    },
+    "appointment_period_by_order": {
+      "C4_order": 1,
+      "C2_order": 2,
+      "C0_order": 2,
+      "C8_order": 3,
+      "C9_order": 4,
+      "C7_order": 1,
+      "C5_order": 1,
+      "C3_order": 2,
+      "C1_order": 3,
+      "C6_order": 4
+    },
+    "original_source_file": "reference/zhou_2E_VRPTWSPD_input/Set1/12-2-2.txt",
+    "original_source_sha256": "a91621a206e19f0d330ea148ee424854ee5e93a694ca7ac1fc97ccbadb452cd5",
+    "coordinate_preservation": "Selected customer/depot coordinates and goods weights preserved from the declared twelve-customer parent; no invented customers.",
+    "warehouse_count_adjustment": "At least one order per site-period requires S*T<=Q; no new orders or coordinates are invented",
+    "customer_selection": {
+      "source_base_case_id": "S09",
+      "mode": "first",
+      "customer_count": 10,
+      "selected_customer_ids": [
+        "C0",
+        "C1",
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6",
+        "C7",
+        "C8",
+        "C9"
+      ],
+      "rule": "Numeric customer IDs; first/last ten of the twelve-customer source. Native ten-customer cases are retained."
+    }
+  }
+}

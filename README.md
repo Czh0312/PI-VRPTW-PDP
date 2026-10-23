@@ -82,11 +82,13 @@ make test
 
 其他电脑的拉取、安装与运行步骤见 [正式数据远程运行说明](docs/benchmark27_remote_run.md)。
 
-现行物理算例使用 [formal_benchmark27_spacetime_v2](data/formal_benchmark27_spacetime_v2/README.md)：小、中、大各9个，共27个基础算例。两、三、四个外部需求时段各9例，卫星站数量覆盖1—5个；三种需求分布在这27例中安排，不扩展额外组合。每位顾客仍一个订单、一个标准箱，顾客与中央仓坐标及完整货物重量保留。8个模型读取同一批27个基础算例，对应216份运行配置。旧 [formal_benchmark27_one_box_v1](data/formal_benchmark27_one_box_v1/README.md) 及其结果保留为历史版本；[formal_benchmark27_v1](data/formal_benchmark27_v1/README.md) 保留为多箱需求情景。
+现行物理算例使用 [formal_benchmark27_spacetime_v3](data/formal_benchmark27_spacetime_v3/README.md)：小、中、大各9个，共27个基础算例。小规模9例统一为10位顾客；中规模仍为20/30位，大规模仍为50/100位。两、三、四个外部需求时段各9例，卫星站数量覆盖1—5个；三种需求分布在这27例中安排，不扩展额外组合。每位顾客仍一个订单、一个标准箱，所选顾客与中央仓坐标及完整货物重量保留。8个模型读取同一批27个基础算例，对应216份运行配置。小规模保留原3个10顾客算例，另从3个12顾客来源各取前10位与末10位，形成6个不同子集；同源子集重叠8位顾客，不能当作独立来源。旧 [spacetime_v2](data/formal_benchmark27_spacetime_v2/README.md)、[one_box_v1](data/formal_benchmark27_one_box_v1/README.md) 及其结果保留；[formal_benchmark27_v1](data/formal_benchmark27_v1/README.md) 保留为多箱需求情景。
 
 后续ALNS默认每个模型、每个算例只运行一个种子42；额外种子需明确指定。
 
-当前容量修订2：一级载重为体积容量×20；小规模二级3箱／60，中大规模二级6箱／120，车辆数量保持。本轮只设计空间、时段和运力，不调整成本、不评价经济优势。新版economic.json逐字节保留原费用模板，等待另行设计。模型1—4保持距离目标，模型5—8保持现有成本目标。27例全部216个模型配置已有独立两周期可行调度见证；见证不自动作为ALNS初解，也不代表已完成新一轮正式最优求解。每例的需求密度、仓—时段数量和来源见[设计总表](data/formal_benchmark27_spacetime_v2/design_summary.csv)。
+本版算例已于2026-10-23经用户确认固定，后续实验统一使用 `formal_benchmark27_spacetime_v3`。版本哈希和规模配额见[冻结登记](config/experiments/benchmark27_spacetime_v3/frozen.json)；调整顾客集合或规模须另建版本，不覆盖本版输入。
+
+容量沿用修订2规则：一级载重为体积容量×20；小规模统一一级2辆、容量10／载重200，二级共4辆、每辆3箱／60；中大规模沿用原配置、二级每辆6箱／120。本次修订只统一小规模顾客数，不调整成本、不评价经济优势。新版economic.json保留对应来源的原费用字节。模型1—4保持距离目标，模型5—8保持现有成本目标。输入可行性以新版validation中的独立两周期见证为准；见证不自动作为ALNS初解，也不代表已完成新一轮正式最优求解。每例的需求密度、仓—时段数量和来源见[设计总表](data/formal_benchmark27_spacetime_v3/design_summary.csv)。
 
 费用包含合成情景和有来源说明的参考参数，各自适用范围见[费用复核](docs/cost_calibration_review_20261006.md)。真实配送基础不等于完整真实闭环数据，已保存方案重计价也不等于按新目标重新求解。
 
