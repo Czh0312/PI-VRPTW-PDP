@@ -156,8 +156,8 @@ def original_candidates(base):
     return parsed, [r for r in parsed['nodes'] if r['node_type']=='s']
 
 
-def make_reference(base,index,size_index,target):
-    old=PROJECT_ROOT/SOURCE/'shared'/base['size']/base['id']
+def make_reference(base,index,size_index,target,*,source_root=None):
+    old=(Path(source_root) if source_root is not None else PROJECT_ROOT/SOURCE)/'shared'/base['size']/base['id']
     with (old/'network.csv').open(encoding='utf-8-sig',newline='') as f:
         reader=csv.DictReader(f);fields=reader.fieldnames;nodes=list(reader)
     customers=sorted((r for r in nodes if r['node_type']=='c'),key=lambda r:r['node_id'])

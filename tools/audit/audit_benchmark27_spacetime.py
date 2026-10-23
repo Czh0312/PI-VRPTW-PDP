@@ -34,13 +34,32 @@ def audit_design(dataset):
     require(not standard['fixed_model_necessary_condition_failures'],'Fixed model failed necessary physical conditions')
     source=resolve_project_path(manifest['source_dataset']);original=read(source/'manifest.json')
     require({b['id'] for b in original['base_cases']}=={b['id'] for b in manifest['base_cases']},'Changed original 27 IDs')
+    original_bases={b['id']:b for b in original['base_cases']}
+    if manifest['dataset_revision']>=3:
+        require(all(b['customer_count']==10 for b in manifest['base_cases'] if b['size']=='small'),
+                'Revision 3 requires ten customers in every small case')
+        require(hashlib.sha256((source/'manifest.json').read_bytes()).hexdigest()==manifest['source_dataset_manifest_sha256'],
+                'Source manifest changed')
+    small_networks=set()
     metrics={r['id']:r for r in design['cases']};fleet_by_n=defaultdict(set);report=[]
     require(Counter(r['external_periods'] for r in metrics.values())=={2:9,3:9,4:9},'Unbalanced period count coverage')
     require(Counter(r['profile'] for r in metrics.values())==dict(balanced=9,peak=9,front_loaded=9),'Unbalanced demand profile coverage')
     for base in manifest['base_cases']:
-        name,size=base['id'],base['size'];a=source/'shared'/size/name;b=root/'shared'/size/name
+        name,size=base['id'],base['size']
+        selection=base.get('customer_selection')
+        parent=selection['source_base_case_id'] if selection else name
+        require(parent in original_bases and original_bases[parent]['size']==size,f'{name}: invalid source parent')
+        require(base['source_block']==original_bases[parent]['source_block'],f'{name}: incorrect source block')
+        a=source/'shared'/size/parent;b=root/'shared'/size/name
         before,after=nodes(a/'network.csv'),nodes(b/'network.csv');stats=metrics[name]
         fixed={k:r for k,r in before.items() if r['node_type'] in ('c','d')}
+        if selection:
+            customer_ids=sorted((k for k,r in fixed.items() if r['node_type']=='c'),key=lambda k:int(k.removeprefix('C')))
+            mode=selection['mode']
+            require(mode in ('all','first','last'),f'{name}: invalid subset rule')
+            expected=customer_ids if mode=='all' else customer_ids[:10] if mode=='first' else customer_ids[-10:]
+            require(len(expected)==10 and selection['selected_customer_ids']==expected,f'{name}: non-deterministic customer subset')
+            fixed={k:r for k,r in fixed.items() if r['node_type']=='d' or k in expected}
         require(set(fixed)=={k for k,r in after.items() if r['node_type'] in ('c','d')},f'{name}: customer/depot IDs changed')
         for key,node in fixed.items():
             require((float(node['x']),float(node['y']))==(float(after[key]['x']),float(after[key]['y'])),f'{name}: coordinate moved: {key}')
@@ -82,6 +101,14 @@ def audit_design(dataset):
         require(fleet['E1_Ck']>=max(counts.values()),f'{name}: unsplit single-batch site volume exceeds E1 capacity')
         require(fleet['E1_Qk']>=max(sum(o['goods_weight']+2 for o in orders if o['satellite_id']==s) for s in sites),f'{name}: unsplit site weight exceeds E1 capacity')
         require((a/'economic.json').read_bytes()==(b/'economic.json').read_bytes(),f'{name}: costs changed despite physical-only scope')
+        if manifest['dataset_revision']>=3:
+            if size=='small':
+                signature=tuple(sorted((k,float(r['x']),float(r['y'])) for k,r in after.items() if r['node_type'] in ('c','d')))
+                require(signature not in small_networks,f'{name}: duplicated small customer network')
+                small_networks.add(signature)
+            if size!='small' or (selection and selection['mode']=='all'):
+                for filename in ('network.csv','fleet.json','reference_orders.json','reference_policy.json','economic.json','batch_count_certificate.json'):
+                    require((a/filename).read_bytes()==(b/filename).read_bytes(),f'{name}: retained physical input changed: {filename}')
         report.append(dict(id=name,customers=n,satellites=len(sites),external_periods=t,profile=stats['profile'],
             coordinate_preserved=True,goods_weight_preserved=True,daily_demand_balanced=True,
             within_period_demand_balanced=True,legacy_costs_unchanged=True,
@@ -95,7 +122,7 @@ def audit_design(dataset):
 
 
 if __name__=='__main__':
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--dataset',default='data/formal_benchmark27_spacetime_v2');parser.add_argument('--output')
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--dataset',default='data/formal_benchmark27_spacetime_v3');parser.add_argument('--output')
     args=parser.parse_args();result=audit_design(args.dataset)
     if args.output:
         target=resolve_project_path(args.output);target.parent.mkdir(parents=True,exist_ok=True)

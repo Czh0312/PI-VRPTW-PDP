@@ -577,7 +577,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=('prepare', 'run', 'worker', 'status'))
     parser.add_argument('--output', required=True)
-    parser.add_argument('--dataset', default='data/formal_benchmark27_spacetime_v2')
+    parser.add_argument('--dataset', default='data/formal_benchmark27_spacetime_v3')
     parser.add_argument('--pilot', action='store_true')
     parser.add_argument('--job')
     parser.add_argument('--attempt', type=int)

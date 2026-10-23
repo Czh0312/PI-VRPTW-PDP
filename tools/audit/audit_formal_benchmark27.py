@@ -213,8 +213,8 @@ def audit_dataset(dataset):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--dataset', default='data/formal_benchmark27_spacetime_v2')
-    parser.add_argument('--output', default='output/inspections/formal_benchmark27_spacetime_v2/input_audit.json')
+    parser.add_argument('--dataset', default='data/formal_benchmark27_spacetime_v3')
+    parser.add_argument('--output', default='output/inspections/formal_benchmark27_spacetime_v3/input_audit.json')
     args = parser.parse_args()
     result = audit_dataset(args.dataset)
     output = resolve_project_path(args.output)

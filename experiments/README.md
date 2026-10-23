@@ -2,7 +2,7 @@
 
 这里存放实验程序：`runs/` 负责批量运行，`analysis/` 负责分析汇总。
 实验参数位于 `config/experiments/`，生成的结果、图片、报告和 Excel 统一保存到 `output/`。
-正式27例驱动默认使用“一客一箱” `formal_benchmark27_one_box_v1`；旧“多箱需求情景”的冻结目录继续使用其原输入。新情景须在独立目录重新prepare，按[阶段验收](../docs/benchmark27_one_box_20261019.md)推进。
+正式27例驱动默认使用 `formal_benchmark27_spacetime_v3`：小规模9例统一10位顾客，中大规模沿用修订2。旧冻结目录继续使用其原输入；新版须在独立目录重新prepare，见[数据说明](../data/formal_benchmark27_spacetime_v3/README.md)。
 例如 `experiments/runs/run_single_batch_benchmark.py` 是程序，
 `output/experiments/m1_m4_comparison_20261004/` 是一次实验的成果。
 
@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | 正式27例八模型、精确与多种子ALNS | `experiments.runs.run_formal_benchmark27` | [冻结、恢复与结果口径](../docs/benchmark27_remote_run.md) |
 | M6–M8 求解改进的同机成对诊断 | `experiments.runs.compare_joint_refinement` | [有限预算验证（选例）](../output/inspections/solver_improvement_20261017/report.md) |
-| ALNS 解码耗时与当前数据配对诊断 | `experiments.runs.profile_alns_evaluation` | 默认 spacetime_v2，显式选例；支持 cProfile 和冻结源码对照 |
+| ALNS 解码耗时与当前数据配对诊断 | `experiments.runs.profile_alns_evaluation` | 默认 spacetime_v3，显式选例；支持 cProfile 和冻结源码对照 |
 | 单批四模型机制与经济对照 | `experiments.runs.run_single_batch_comparison` | [四模型说明](../docs/single_batch_comparison.md) |
 | M1–M4 全规模算法比较 | `experiments.runs.run_single_batch_benchmark` | [预算与结果](../output/experiments/m1_m4_comparison_20261004/m1_m4_solver_comparison_20261004.md) |
 | 固定批次与池规模扫描 | `experiments.runs.run_multibatch_cycle` | [使用说明](../docs/static_multibatch_implementation.md) |

@@ -1,0 +1,84 @@
+{
+  "model": 7,
+  "base_case_id": "S05",
+  "source_family": "zhou_Set1_10-2-1b",
+  "demand_container_uses": 10,
+  "objective": "cost",
+  "fixed_parameters": {
+    "packaging": "reusable",
+    "cycle_start": 480,
+    "cycle_end": 1260,
+    "customer_satellite_assignment": {
+      "C0": "S1",
+      "C1": "S0",
+      "C2": "S1",
+      "C3": "S0",
+      "C4": "S1",
+      "C5": "S0",
+      "C6": "S0",
+      "C7": "S0",
+      "C8": "S1",
+      "C9": "S1"
+    },
+    "schedule_mode": "uniform_independent_cutoffs",
+    "batch_length_rule": "cycle_length / selected_batch_count"
+  },
+  "optimized_decisions": [
+    "routes",
+    "vehicle_assignment",
+    "service_times",
+    "batch_count",
+    "order_batch_assignment",
+    "container_pool_size",
+    "independent_batch_cutoffs"
+  ],
+  "inactive_components": [],
+  "decision_bounds": {
+    "schedule_mode": "uniform_independent_cutoffs",
+    "batch_count_candidates": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "min_phase_minutes": 1,
+    "pool_min": 1,
+    "pool_max": 10
+  },
+  "reference_only": {
+    "customer_satellite_assignment": {
+      "C0": "S1",
+      "C1": "S0",
+      "C2": "S1",
+      "C3": "S0",
+      "C4": "S1",
+      "C5": "S0",
+      "C6": "S0",
+      "C7": "S0",
+      "C8": "S1",
+      "C9": "S1"
+    },
+    "container_pool_size": 10
+  },
+  "notes": [
+    "The model number activates packaging and free-assignment semantics in the solver.",
+    "For M6-M8, policy.container_pool_size is a reference; pool_min/pool_max define the decision.",
+    "For M2/M4, satellite_id is the initial/reference assignment and is not fixed.",
+    "Shared economic coefficients do not change the native distance objective of M1-M4.",
+    "M5 fixes dispatch slots but does not enforce positive recovery in each slot; M6-M8 do. An ablation attributing differences only to released decisions must harmonize this rule."
+  ],
+  "demand_contract": {
+    "id": "one_customer_one_box_v1",
+    "boxes_per_customer": 1,
+    "orders_per_customer": 1,
+    "goods_weight": "Preserve the complete original customer goods weight.",
+    "delivery_weight": "goods_weight + container_weight",
+    "pickup_weight": "container_weight",
+    "task_volume": "container_volume",
+    "assumption": "Each customer demand fits one standard box; no bin-packing optimization."
+  },
+  "external_appointment_period_count": 3,
+  "economics_status": "Existing economic files retained byte-for-byte as runtime placeholders; costs are outside this physical redesign"
+}
