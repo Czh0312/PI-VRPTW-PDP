@@ -40,4 +40,9 @@ def extract_solution(problem, model, ctx, result):
                 event['site_id' if layer == 'e1' else 'order_id'] = n['site'] if layer == 'e1' else n['order'].id
                 trip['events'].append(event)
             result[layer+'_trips'].append(trip)
+    if getattr(problem, 'cost_objective', False):
+        from models.common.cycle.single_batch_cost import attach_single_batch_cost
+        # The physical auditor checks distance independently of the cost MILP.
+        result['info']['objective'] = None
+        attach_single_batch_cost(problem, result)
     return result

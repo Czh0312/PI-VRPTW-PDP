@@ -86,7 +86,7 @@ def worker(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--cases', nargs='+', required=True, help='MODEL:CASE, e.g. 5:S01 8:L01')
-    parser.add_argument('--dataset', type=Path, default=ROOT / 'data/formal_benchmark27_spacetime_v3')
+    parser.add_argument('--dataset', type=Path, default=ROOT / 'data/formal_benchmark27_spacetime_v4_1')
     parser.add_argument('--source', type=Path, default=ROOT)
     parser.add_argument('--baseline-source', type=Path,
                         help='Alternate serial baseline/candidate pairs using these frozen sources')

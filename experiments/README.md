@@ -2,7 +2,7 @@
 
 这里存放实验程序：`runs/` 负责批量运行，`analysis/` 负责分析汇总。
 实验参数位于 `config/experiments/`，生成的结果、图片、报告和 Excel 统一保存到 `output/`。
-正式27例驱动默认使用 `formal_benchmark27_spacetime_v3`：小规模9例统一10位顾客，中大规模沿用修订2。旧冻结目录继续使用其原输入；新版须在独立目录重新prepare，见[数据说明](../data/formal_benchmark27_spacetime_v3/README.md)。
+正式27例驱动默认使用 `formal_benchmark27_spacetime_v4_1`：小规模9例统一7位顾客，中大规模沿用修订2。旧冻结目录继续使用其原输入；新版须在独立目录重新prepare，见[数据说明](../data/formal_benchmark27_spacetime_v4_1/README.md)。
 例如 `experiments/runs/run_single_batch_benchmark.py` 是程序，
 `output/experiments/m1_m4_comparison_20261004/` 是一次实验的成果。
 
@@ -11,8 +11,11 @@
 | 任务 | 运行模块 | 结果 / 说明 |
 | --- | --- | --- |
 | 正式27例八模型、精确与多种子ALNS | `experiments.runs.run_formal_benchmark27` | [冻结、恢复与结果口径](../docs/benchmark27_remote_run.md) |
+| 冻结7顾客M1—M4、36次300秒冷启动 | `experiments.runs.run_small7_exact_check` | 使用当前v4_1冻结登记；prepare到新目录后run，compact、单线程、种子42、M4强化关闭 |
+| 冻结7顾客M4、ALNS初解与强化组合 | `experiments.runs.run_small7_m4_combined_check` | ALNS30秒与MILP共享每例300秒，统一capacity_activation；[9例全部最优的复测](../output/experiments/small7_solver_comparison_20261023_v1.md) |
+| 冻结7顾客、10分钟精确补测与1分钟ALNS | `experiments.runs.run_small7_efficiency_check` | 3次600秒原式冷启动、36次60秒ALNS，串行、种子42；[最优值匹配与实际耗时](../output/experiments/small7_exact600_alns60_20261023_v1/comparison.md) |
 | M6–M8 求解改进的同机成对诊断 | `experiments.runs.compare_joint_refinement` | [有限预算验证（选例）](../output/inspections/solver_improvement_20261017/report.md) |
-| ALNS 解码耗时与当前数据配对诊断 | `experiments.runs.profile_alns_evaluation` | 默认 spacetime_v3，显式选例；支持 cProfile 和冻结源码对照 |
+| ALNS 解码耗时与当前数据配对诊断 | `experiments.runs.profile_alns_evaluation` | 默认 spacetime_v4_1，显式选例；支持 cProfile 和冻结源码对照 |
 | 单批四模型机制与经济对照 | `experiments.runs.run_single_batch_comparison` | [四模型说明](../docs/single_batch_comparison.md) |
 | M1–M4 全规模算法比较 | `experiments.runs.run_single_batch_benchmark` | [预算与结果](../output/experiments/m1_m4_comparison_20261004/m1_m4_solver_comparison_20261004.md) |
 | 固定批次与池规模扫描 | `experiments.runs.run_multibatch_cycle` | [使用说明](../docs/static_multibatch_implementation.md) |

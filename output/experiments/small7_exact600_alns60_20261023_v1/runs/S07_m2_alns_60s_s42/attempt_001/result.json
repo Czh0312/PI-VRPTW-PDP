@@ -1,0 +1,353 @@
+{
+  "schema_version": 2,
+  "policy_version": "multi_batch_cutoff_v1",
+  "time_unit": "ticks",
+  "model": 2,
+  "packaging": "single_use",
+  "time_tick_seconds": 1,
+  "objective_mode": "distance",
+  "operating_policy": {
+    "cycle_start": 28800,
+    "cycle_end": 75600,
+    "batches": [
+      {
+        "id": "b1",
+        "start": 28800,
+        "cutoff": 69030,
+        "end": 75600
+      }
+    ],
+    "container_pool_size": 7,
+    "cleaning_duration": 900,
+    "e2_max_trips_per_vehicle": 12,
+    "time_tick_seconds": 1,
+    "e1_load_time": 120,
+    "e2_dispatch_prep_time": 60,
+    "e2_return_unload_time": 60,
+    "depot_return_unload_time": 60,
+    "e1_turnaround_time": 0,
+    "e2_turnaround_time": 60,
+    "policy_version": "multi_batch_cutoff_v1",
+    "terminal_policy": "all_clean_at_depot",
+    "time_unit": "ticks",
+    "pickup_policy": "cutoff_all_available",
+    "batch_overlap": false,
+    "allow_transfers": false,
+    "input_time_unit": "minutes",
+    "objective_mode": "distance"
+  },
+  "solver": "alns",
+  "batches": [
+    {
+      "id": "b1",
+      "start": 28800,
+      "cutoff": 69030,
+      "end": 75600,
+      "container_demand": 7
+    }
+  ],
+  "e1_trips": [
+    {
+      "trip_id": "e1_b1_0",
+      "batch_id": "b1",
+      "vehicle_id": 0,
+      "departure": 28920,
+      "events": [
+        {
+          "kind": "d",
+          "site_id": "S0",
+          "start": 29350,
+          "quantity": 7
+        }
+      ],
+      "return_complete": 30020
+    }
+  ],
+  "e2_trips": [
+    {
+      "trip_id": "e2_S0_1_0",
+      "satellite_id": "S0",
+      "vehicle_id": 1,
+      "trip_index": 0,
+      "departure": 29590,
+      "return_complete": 34903,
+      "events": [
+        {
+          "order_id": "C6_order",
+          "kind": "d",
+          "start": 31260,
+          "quantity": 1
+        },
+        {
+          "order_id": "C1_order",
+          "kind": "d",
+          "start": 32419,
+          "quantity": 1
+        },
+        {
+          "order_id": "C4_order",
+          "kind": "d",
+          "start": 33351,
+          "quantity": 1
+        }
+      ]
+    },
+    {
+      "trip_id": "e2_S0_0_0",
+      "satellite_id": "S0",
+      "vehicle_id": 0,
+      "trip_index": 0,
+      "departure": 29590,
+      "return_complete": 31920,
+      "events": [
+        {
+          "order_id": "C5_order",
+          "kind": "d",
+          "start": 31080,
+          "quantity": 1
+        }
+      ]
+    },
+    {
+      "trip_id": "e2_S0_1_1",
+      "satellite_id": "S0",
+      "vehicle_id": 1,
+      "trip_index": 1,
+      "departure": 35023,
+      "return_complete": 57966,
+      "events": [
+        {
+          "order_id": "C3_order",
+          "kind": "d",
+          "start": 54480,
+          "quantity": 1
+        },
+        {
+          "order_id": "C0_order",
+          "kind": "d",
+          "start": 55517,
+          "quantity": 1
+        },
+        {
+          "order_id": "C2_order",
+          "kind": "d",
+          "start": 56687,
+          "quantity": 1
+        }
+      ]
+    }
+  ],
+  "info": {
+    "status": "FEASIBLE",
+    "proven_optimal": false,
+    "proven_infeasible": false,
+    "objective": 197.24681890135946,
+    "best_bound": null,
+    "mip_gap": null,
+    "proof_scope": null,
+    "runtime": 60.00670240004547,
+    "seed": 42,
+    "iterations": 45649,
+    "initial_strategy": "repaired_assignment_routes",
+    "initial_objective": 341.83855538613693,
+    "incumbent_history": [
+      {
+        "time": 0.026836000033654273,
+        "iteration": 2666,
+        "objective": 281.1139935816299
+      },
+      {
+        "time": 3.04769070004113,
+        "iteration": 5419,
+        "objective": 257.8056977974885
+      },
+      {
+        "time": 9.86143449996598,
+        "iteration": 10241,
+        "objective": 197.24681890135946
+      }
+    ],
+    "time_to_first_feasible": 0.0017126001184806228,
+    "time_to_best": 9.86143449996598,
+    "algorithm": "customer_assignment_search_with_cycle_alns",
+    "cooling_schedule": "max_time_and_iteration_progress",
+    "late_pickup_policy": "original",
+    "late_pickup_checks": 0,
+    "late_pickup_uphill": 0,
+    "late_pickup_vetoes": 0,
+    "evaluation_cache_hits": 490,
+    "evaluation_cache_misses": 1008,
+    "descent_seconds": 0.9836234011454508,
+    "descent_enabled": true,
+    "descent_budget_policy": "last_20pct_of_either_budget",
+    "descent_candidates": 182,
+    "descent_filtered": 144,
+    "descent_site_cache_hits": 0,
+    "descent_site_enumerations": 26,
+    "descent_deferred": 132,
+    "descent_recovered": 0,
+    "operator_statistics_scope": "all_partition_subsolves",
+    "operator_noops": {
+      "relocate": 505,
+      "split_merge": 241,
+      "vehicle": 2450,
+      "e1_delivery": 4274,
+      "reverse": 1872,
+      "destroy_random": 2801,
+      "destroy_related": 2894,
+      "descent": 0
+    },
+    "operator_attempts": {
+      "relocate": 5433,
+      "split_merge": 4971,
+      "vehicle": 9825,
+      "e1_delivery": 9474,
+      "reverse": 5740,
+      "destroy_random": 4785,
+      "destroy_related": 5383,
+      "descent": 38
+    },
+    "operator_improvements": {
+      "relocate": 3,
+      "split_merge": 0,
+      "vehicle": 0,
+      "e1_delivery": 5,
+      "reverse": 1,
+      "destroy_random": 14,
+      "destroy_related": 4,
+      "descent": 0
+    },
+    "encountered_violations": [
+      "E2_CAPACITY",
+      "E2_TIME_WINDOW"
+    ],
+    "audit_rejections": 0,
+    "e2_max_trips_per_vehicle": 12,
+    "assignment_attempts": 20,
+    "assignment_warm_starts": 13,
+    "assignment_route_projections": 6,
+    "history_scope": "best_at_completed_partition_subsolve",
+    "assignment_budget_policy": "coordinated_starts_5pct_partition_visits"
+  },
+  "precheck": {
+    "passed": true,
+    "proven_infeasible": false,
+    "proof_scope": "static_necessary_conditions_v1",
+    "time_unit": "ticks",
+    "time_tick_seconds": 1,
+    "time_tick_subdivision": 1,
+    "pool_lower_bound": 0,
+    "stock_bounds": [],
+    "order_bounds": [],
+    "errors": [],
+    "limitation": "Passing necessary conditions does not prove feasibility or a minimum pool."
+  },
+  "assignment": {
+    "C0": "S0",
+    "C1": "S0",
+    "C2": "S0",
+    "C3": "S0",
+    "C4": "S0",
+    "C5": "S0",
+    "C6": "S0"
+  },
+  "schedule_convention": "earliest_feasible_fixed_route_B1",
+  "audit": {
+    "valid": true,
+    "errors": [],
+    "objective": 197.2468189013595,
+    "distances": {
+      "e1": 28.635642126552707,
+      "e2": 168.61117677480678
+    },
+    "cutoff_snapshots": [
+      {
+        "satellite_id": "S0",
+        "batch_id": "b1",
+        "cutoff": 69030,
+        "quantity": 0,
+        "eligible_events": [],
+        "pickup_trip": null,
+        "pickup_time": null
+      },
+      {
+        "satellite_id": "S1",
+        "batch_id": "b1",
+        "cutoff": 69030,
+        "quantity": 0,
+        "eligible_events": [],
+        "pickup_trip": null,
+        "pickup_time": null
+      }
+    ],
+    "depot_releases": [],
+    "clean_stock": [],
+    "minimum_pool_for_schedule": 0,
+    "container_ledger": [],
+    "terminal_state": {
+      "clean": 0,
+      "forward": 0,
+      "customer": 0,
+      "e2_empty": 0,
+      "e1_empty": 0,
+      "dirty": 0,
+      "sat:S0": 0,
+      "sat:S1": 0
+    },
+    "periodic_replay": {
+      "valid": true,
+      "cycles": 2,
+      "terminal_state": {
+        "clean": 0,
+        "forward": 0,
+        "customer": 0,
+        "e2_empty": 0,
+        "e1_empty": 0,
+        "dirty": 0,
+        "sat:S0": 0,
+        "sat:S1": 0
+      },
+      "scope": "vehicles_and_delivery_service_with_fresh_single_use_packages_each_cycle"
+    },
+    "satellite_peak_inventory": {
+      "S0": 0,
+      "S1": 0
+    },
+    "container_balance": {
+      "issued": 7,
+      "e2_unloaded": 0,
+      "returned_to_depot": 0,
+      "pool": 0
+    },
+    "time_metrics": {
+      "waiting_ticks": {
+        "e1": 0,
+        "e2": 21144
+      },
+      "working_ticks": {
+        "e1": 1220,
+        "e2": 30766
+      },
+      "working_minutes": {
+        "e1": 20.333333333333332,
+        "e2": 512.7666666666667
+      }
+    },
+    "e1_vehicle_count": 1,
+    "e2_vehicle_count": 2,
+    "e1_trip_count": 1,
+    "e2_trip_count": 3,
+    "assignment": {
+      "C0": "S0",
+      "C1": "S0",
+      "C2": "S0",
+      "C3": "S0",
+      "C4": "S0",
+      "C5": "S0",
+      "C6": "S0"
+    }
+  },
+  "batch_mode": "single_batch",
+  "model_module": "models.routing.model_2.alns",
+  "solver_module": "models.routing.model_2.alns.assignment.continuous_search"
+}

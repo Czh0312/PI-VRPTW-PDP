@@ -20,7 +20,10 @@ def require_scope(problem, model, batch_mode):
 
 def finish_result(problem, result, *, solver_module=None):
     mode = batch_mode_for(problem)
-    if mode == 'single_batch' and result.get('audit', {}).get('valid'):
+    # Earliest-route normalization can change priced occupied time. Preserve
+    # the cost solver's explicit schedule and its incumbent/bound contract.
+    if (mode == 'single_batch' and result.get('audit', {}).get('valid')
+            and not getattr(problem, 'cost_objective', False)):
         from models.common.cycle.timing import normalize_schedule
         result = normalize_schedule(problem, result)
     result['batch_mode'] = mode

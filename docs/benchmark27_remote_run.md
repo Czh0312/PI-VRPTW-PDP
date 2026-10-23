@@ -1,8 +1,10 @@
 # 正式数据在其他电脑上的运行方法
 
-仓库：`git@gitlab.com:pi-vrptw/PI-VRPTW_PDP.git`，分支：`main`。当前物理数据为 `data/formal_benchmark27_spacetime_v3/`：小、中、大各9例，总计27个基础算例；每个模型读取相同27例，共216份模型配置。两、三、四个外部需求时段各9例，卫星站数1—5个。设计与27例总表见[新版说明](../data/formal_benchmark27_spacetime_v3/README.md)。旧one_box_v1与multi-box版本及其冻结结果保持不变。
+仓库：`git@gitlab.com:pi-vrptw/PI-VRPTW_PDP.git`，分支：`main`。当前物理数据为 `data/formal_benchmark27_spacetime_v4_1/`：小、中、大各9例，总计27个基础算例；每个模型读取相同27例，共216份模型配置。两、三、四个外部需求时段各9例，卫星站数1—5个。设计与27例总表见[新版说明](../data/formal_benchmark27_spacetime_v4_1/README.md)。旧one_box_v1与multi-box版本及其冻结结果保持不变。
 
-当前为物理数据修订3：小规模9例均为10位顾客，一级2辆、容量10/载重200，二级共4辆、每辆3箱/60。中规模仍为20/30位，大规模仍为50/100位，保留修订2的输入和运力。旧输入快照保留，使用新版应prepare到新目录。小规模子集的来源配对见新版selection.json。
+当前为物理数据修订4：小规模9例均为7位顾客，一级2辆、容量10/载重200，二级共4辆、每辆3箱/60。中规模仍为20/30位，大规模仍为50/100位，保留修订2的输入和运力。旧输入快照保留，使用新版应prepare到新目录。小规模子集的来源配对见新版selection.json。
+
+小规模从v3同编号10顾客算例按数值顾客编号取前7位，保留订单时间窗、分仓、全部仓点和车队；部分仓—时段单元可为空，每个外部时段总需求仍非空。冻结哈希见[修订4登记](../config/experiments/benchmark27_spacetime_v4_1/frozen.json)。
 
 本轮仅更新物理算例，不设计费用，不报告经济优劣。每份economic.json保留旧费用字节，供运行兼容；开展正式成本比较时应另行冻结选定的费用参数。M1—M4原生优化距离，M5—M8使用现有成本目标。生成/可行性见证与正式ALNS性能实验分开记录。
 
@@ -47,11 +49,11 @@ python3 -m venv .venv
 下面是两条运行入口示例，预算仅用于检查环境，不能直接作为已确定的论文实验方案。每次使用新的输出目录：
 
 ```sh
-.venv/bin/python main.py route --case data/formal_benchmark27_spacetime_v3/model_1/small/S01/case.json --solver alns --time 30 --iterations 1000000000 --seed 42 --output output/experiments/benchmark27_spacetime_smoke/M1_S01_s42
-.venv/bin/python main.py route --case data/formal_benchmark27_spacetime_v3/model_8/small/S01/case.json --solver alns --time 30 --iterations 1000000000 --seed 42 --output output/experiments/benchmark27_spacetime_smoke/M8_S01_s42
+.venv/bin/python main.py route --case data/formal_benchmark27_spacetime_v4_1/model_1/small/S01/case.json --solver alns --time 30 --iterations 1000000000 --seed 42 --output output/experiments/benchmark27_spacetime_smoke/M1_S01_s42
+.venv/bin/python main.py route --case data/formal_benchmark27_spacetime_v4_1/model_8/small/S01/case.json --solver alns --time 30 --iterations 1000000000 --seed 42 --output output/experiments/benchmark27_spacetime_smoke/M8_S01_s42
 ```
 
-精确求解使用 `--solver exact --exact-time 300`。全部案例路径见 `data/formal_benchmark27_spacetime_v3/case_index.csv`。各例的 `parameters.json` 标明固定项和优化项；同编号配对时不要额外更改需求、费用或K候选域。
+精确求解使用 `--solver exact --exact-time 300`。全部案例路径见 `data/formal_benchmark27_spacetime_v4_1/case_index.csv`。各例的 `parameters.json` 标明固定项和优化项；同编号配对时不要额外更改需求、费用或K候选域。
 
 ## 正式论文结果的记录口径
 
@@ -59,7 +61,7 @@ python3 -m venv .venv
 
 正式结果单独保存在新的 `output/experiments/` 目录，保留全部首次尝试及失败状态。修订2正式结果在 `output/experiments/benchmark27_20261015_formal_v1/`，使用旧费用；`output/inspections/` 保存数据检查和短时试跑记录。历史多箱费用修订和当前顾客数量修订分别记录；顾客集合变化的新版算例需要重新求解，旧结果不能直接改标签复用。`tools.audit.review_formal_benchmark27` 是诊断驱动。
 
-M1–M4原生目标是距离，M5–M8原生目标是成本，不能直接把两种目标值相减计算改进率。统一评价、同源分组及模型语义边界见 [正式对比协议](../data/formal_benchmark27_spacetime_v3/comparison_protocol.json) 和 [空间时段设计说明](../data/formal_benchmark27_spacetime_v3/README.md)。
+M1–M4原生目标是距离，M5–M8原生目标是成本，不能直接把两种目标值相减计算改进率。统一评价、同源分组及模型语义边界见 [正式对比协议](../data/formal_benchmark27_spacetime_v4_1/comparison_protocol.json) 和 [空间时段设计说明](../data/formal_benchmark27_spacetime_v4_1/README.md)。
 
 ## 全量冻结实验入口
 

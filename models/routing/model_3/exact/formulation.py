@@ -23,7 +23,7 @@ from models.routing.model_3.exact.constraints import (
     add_task_and_return_coverage_constraints,
     add_inventory_constraints,
 )
-from models.routing.model_3.exact.objective import set_distance_objective
+from models.routing.model_3.exact.objective import set_distance_objective, set_cost_objective
 
 
 def build_model(
@@ -237,7 +237,10 @@ def build_model(
         check_budget=check_budget,
     )
     add_inventory_constraints(parameters, variables)
-    set_distance_objective(m, objective)
+    if getattr(problem, 'cost_objective', False):
+        set_cost_objective(parameters, variables)
+    else:
+        set_distance_objective(m, objective)
     m.update()
     return m, dict(
         parameters=parameters,

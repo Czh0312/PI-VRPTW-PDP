@@ -13,7 +13,7 @@ from models.common.cycle.precheck import check_necessary_conditions, rejected_re
 from models.routing.model_4.exact.formulation import build_model
 
 
-def solve_milp(problem, time_limit=60, seed=42, verbose=False, *, milp_options=None):
+def solve_milp(problem, time_limit=60, seed=42, verbose=False, *, milp_options=None, strengthening='none'):
     """Solve the complete model, including free assignment where applicable."""
     validate_problem(problem, 4)
     validate_budget(time_limit, seed)
@@ -37,7 +37,7 @@ def solve_milp(problem, time_limit=60, seed=42, verbose=False, *, milp_options=N
         return finish(rejected_result(problem, 'exact', precheck, time.perf_counter()-begun))
     result = empty_result(problem, 'exact')
     result['precheck'] = precheck
-    formulation = dict(compress_routes=options.formulation == 'compact')
+    formulation = dict(compress_routes=options.formulation == 'compact', strengthening=strengthening)
     config['formulation_options'] = formulation
     try:
         model, ctx = build_model(problem, verbose=verbose, deadline=begun+time_limit,
@@ -55,6 +55,7 @@ def solve_milp(problem, time_limit=60, seed=42, verbose=False, *, milp_options=N
         result['info'] = read_milp_info(model, build_time=build_time,
             proof_scope='full_model_4_integer_time_MILP')
         config['compressed_routes'] = bool(ctx.get('compressed_e2_routes'))
+        config['strengthening'] = ctx['strengthening']
         extraction_begun = time.perf_counter()
         if model.SolCount:
             extract_solution(problem, model, ctx, result)

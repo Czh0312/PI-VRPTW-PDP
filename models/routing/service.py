@@ -13,13 +13,15 @@ def _load_solver(model, method):
 def solve_routing(*, model, method, problem, e1_tasks=None, e2_tasks_by_sat=None,
                   alns_iter=5000, alns_time=120, seed=42, TFp=9999.0,
                   exact_time=None, exact_backend=None, allow_baseline=False, initial_result=None,
-                  exact_strategy=None, milp_options=None):
+                  exact_strategy=None, milp_options=None, m4_strengthening=None):
     model = require_model_number(int(model))
     policy = policy_for(problem)
     policy.require_model(model)
     method = str(method).lower()
     if method not in {"exact", "alns"}:
         raise ValueError(f"Expected exact or alns, got {method}")
+    if m4_strengthening is not None and (model != 4 or method != 'exact' or not getattr(policy, 'multi_batch', False)):
+        raise ValueError('M4 strengthening requires the current M4 exact solver')
     if method != 'exact' and (exact_strategy is not None or milp_options is not None):
         raise ValueError('Exact strategy/options require method="exact"')
     if milp_options is not None and exact_strategy not in (None, 'auto', 'milp'):
@@ -44,6 +46,8 @@ def solve_routing(*, model, method, problem, e1_tasks=None, e2_tasks_by_sat=None
                 kwargs['strategy'] = exact_strategy
             if milp_options is not None:
                 kwargs['milp_options'] = milp_options
+            if m4_strengthening is not None:
+                kwargs['strengthening'] = m4_strengthening
             return module.solve_exact(problem, **kwargs)
         kwargs=dict(max_time=alns_time,max_iterations=alns_iter,seed=seed)
         if initial_result is not None:

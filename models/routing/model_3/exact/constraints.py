@@ -544,6 +544,7 @@ def add_second_echelon_constraints(
                 previous = r
                 batches = {o.batch for o in orders}
                 selects = {b: variables.create_r() for b in batches}
+                r['has_delivery'] = gp.quicksum(selects.values())
                 variables.model.addConstr(gp.quicksum(selects.values()) <= 1)
                 # Dispatch preparation for a loaded trip occupies its vehicle.
                 # It starts after both inbound goods and the previous trip are ready.

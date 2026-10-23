@@ -85,6 +85,17 @@ def prepare(args):
         key = f'{record["base_case_id"]}_m{record["model"]}'
         cfg, original = freeze_case(record['case_path'], out, key)
         evidence.update(original)
+        if record['model'] == 3 and getattr(args, 'm3_objective_mode', 'distance') == 'cost':
+            cfg['objective_mode'] = 'cost'
+            contract = d.read(cfg['parameter_contract'])
+            contract['objective'] = 'cost'
+            contract['notes'] = [note for note in contract.get('notes', [])
+                                 if 'native distance objective of M1-M4' not in note]
+            contract['notes'].append('M3 cost comparison uses the same economic profile as M5–M8; '
+                                     'assignment, single-batch calendar and pool remain fixed.')
+            contract_path = out/'inputs'/f'{key}_cost_parameters.json'
+            d.write(contract_path, contract)
+            cfg['parameter_contract'] = str(contract_path)
         if record['model'] == 5:
             # Old immutable datasets document a fixed-Q distance baseline.
             # Freeze a separate, explicit current M5 contract for this run.
@@ -109,6 +120,8 @@ def prepare(args):
                      time_tick_seconds=problem.operating_policy.time_tick_seconds)
         if getattr(problem, 'optimize_pool', False):
             check.update(objective_mode='cost', pool_min=problem.pool_min, pool_max=problem.pool_max)
+        if getattr(problem, 'cost_objective', False):
+            check.update(objective_mode='cost', economic_profile_hash=problem.cost_profile.hash)
         configs[record['case_path']] = check
         checks.append(check)
     for job in jobs:
@@ -175,7 +188,8 @@ def prepare(args):
         alns_seeds=args.seeds, exact_seed=42, exact_seconds=args.exact_seconds, alns_seconds=args.alns_seconds,
         witness_initialization=False, source_block_count=len({r['source_block'] for r in records}),
         full_dataset=len(records) == 216,
-        objective_by_model={str(m): 'distance' if m <= 4 else 'cost' for m in range(1, 9)},
+        objective_by_model={str(m): (getattr(args, 'm3_objective_mode', 'distance') if m == 3
+                                    else 'distance' if m <= 4 else 'cost') for m in range(1, 9)},
         limitations=d.read(dataset/'comparison_protocol.json')['scope_limits'])
     d.write(out/'manifest.json', manifest)
     d.write(out/'manifest.sha256.json', dict(sha256=d.sha(out/'manifest.json')))
@@ -455,8 +469,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['prepare','run','worker','status','analyze','pack'])
     parser.add_argument('--output', required=True)
-    parser.add_argument('--dataset', default='data/formal_benchmark27_spacetime_v3')
+    parser.add_argument('--dataset', default='data/formal_benchmark27_spacetime_v4_1')
     parser.add_argument('--models', nargs='+', type=int, choices=range(1,9), default=list(range(1,9)))
+    parser.add_argument('--m3-objective-mode', choices=('distance', 'cost'), default='distance',
+                        help='Use cost for matched M3/M5–M8 optimization; distance preserves packaging baselines')
     parser.add_argument('--bases', nargs='+')
     parser.add_argument('--exact-seconds', type=float, default=300)
     parser.add_argument('--alns-seconds', type=float, default=30)

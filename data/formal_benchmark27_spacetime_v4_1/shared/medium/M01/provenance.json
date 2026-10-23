@@ -1,0 +1,127 @@
+{
+  "base_case_id": "M01",
+  "family_id": "zhou_Set2_100-10-1_subset20",
+  "source_block": "zhou:Set2_100-10-1",
+  "source_dataset": "data/formal_benchmark27_one_box_v1",
+  "source_files": {
+    "data": "data/formal_benchmark27_one_box_v1/shared/medium/M01/network.csv",
+    "orders": "data/formal_benchmark27_one_box_v1/shared/medium/M01/reference_orders.json",
+    "routing_config": "data/formal_benchmark27_one_box_v1/shared/medium/M01/fleet.json",
+    "operating_policy": "data/formal_benchmark27_one_box_v1/shared/medium/M01/reference_policy.json",
+    "economic_config": "data/formal_benchmark27_one_box_v1/shared/medium/M01/economic.json"
+  },
+  "demand_contract": {
+    "id": "one_customer_one_box_v1",
+    "boxes_per_customer": 1,
+    "orders_per_customer": 1,
+    "goods_weight": "Preserve the complete original customer goods weight.",
+    "delivery_weight": "goods_weight + container_weight",
+    "pickup_weight": "container_weight",
+    "task_volume": "container_volume",
+    "assumption": "Each customer demand fits one standard box; no bin-packing optimization."
+  },
+  "preserved_orders_sha256": "55b01af8d3b50619ac2aed07f84a229e84c1fb1bfa2d4920d30508bf996e76e7",
+  "preserved_policy_sha256": "ba35c28df47f9f2f1604f28cf585f8da3209753586faaff4702b283e0eec6a86",
+  "preserved_hash_scope": "Frozen newly designed reference fields; original coordinate/weight preservation is independently checked against source_dataset.",
+  "design": {
+    "id": "M01",
+    "size": "medium",
+    "customers": 20,
+    "Q": 20,
+    "source_block": "zhou:Set2_100-10-1",
+    "satellites": 2,
+    "requested_satellites": 2,
+    "external_periods": 3,
+    "profile": "peak",
+    "target_period_shares": [
+      0.2,
+      0.5,
+      0.3
+    ],
+    "period_totals": [
+      4,
+      10,
+      6
+    ],
+    "selected_satellites": [
+      "S5",
+      "S7"
+    ],
+    "customers_per_site": {
+      "S5": 10,
+      "S7": 10
+    },
+    "warehouse_period_quantities": {
+      "S5": [
+        2,
+        5,
+        3
+      ],
+      "S7": [
+        2,
+        5,
+        3
+      ]
+    },
+    "mean_warehouse_period_demand": 3.3333333333333335,
+    "minimum_warehouse_period_demand": 2,
+    "share_one_or_two": 0.3333333333333333,
+    "share_empty": 0.0,
+    "daily_site_count_range": 0,
+    "period_site_count_ranges": [
+      0,
+      0,
+      0
+    ],
+    "period_imbalance_cv": 0.3741657386773941,
+    "E1_vehicles": 3,
+    "E1_volume": 20,
+    "E1_weight": 400,
+    "E2_vehicles_total": 6,
+    "E2_per_site": 3,
+    "E2_volume": 6,
+    "E2_weight": 120,
+    "reference_cutoff_minutes": 187.0,
+    "old_satellites": 3,
+    "old_period_totals": [
+      8,
+      9,
+      3
+    ],
+    "old_minimum_warehouse_period_demand": 1,
+    "old_share_one_or_two": 0.5555555555555556,
+    "spatial_selection": {
+      "distance_sum": 299.2711246364774,
+      "maximum_distance": 26.92582403567252,
+      "candidate_subsets": 45,
+      "balanced_assignments_evaluated": 1,
+      "objective": "Minimum sum customer-satellite distance with each selected site serving floor/ceil(N/S) customers; independent of routing costs or relative model results"
+    },
+    "appointment_period_by_order": {
+      "C16_order": 1,
+      "C43_order": 1,
+      "C4_order": 2,
+      "C52_order": 2,
+      "C14_order": 2,
+      "C59_order": 2,
+      "C88_order": 2,
+      "C48_order": 3,
+      "C33_order": 3,
+      "C82_order": 3,
+      "C56_order": 1,
+      "C67_order": 1,
+      "C93_order": 2,
+      "C96_order": 2,
+      "C76_order": 2,
+      "C23_order": 2,
+      "C80_order": 2,
+      "C60_order": 3,
+      "C27_order": 3,
+      "C72_order": 3
+    },
+    "original_source_file": "reference/zhou_2E_VRPTWSPD_input/Set2/100-10-1/Set5_100-10-1.dat",
+    "original_source_sha256": "42b75d8958f788a75ef9a386772d345070ac1adb26fc83a2bd547bc522dbeebb",
+    "coordinate_preservation": "Customer IDs, all customer/depot x/y and original goods weights unchanged; satellite x/y chosen from the same original Zhou block",
+    "warehouse_count_adjustment": "At least one order per site-period requires S*T<=Q; no new orders or coordinates are invented"
+  }
+}

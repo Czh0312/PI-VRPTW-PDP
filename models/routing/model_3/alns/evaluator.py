@@ -284,6 +284,15 @@ def evaluate(problem, state, *, _memo=None, _prepared=None):
         distance_of(problem, r, layer) for layer in ("e1", "e2") for r in result[layer + "_trips"]
     )
     result["info"]["objective"] = distance
+    if getattr(problem, 'cost_objective', False) and not violations:
+        from models.common.cycle.single_batch_cost import attach_single_batch_cost
+        try:
+            physical = attach_single_batch_cost(problem, result)
+        except ValueError:
+            return 1e12, result, ['INVALID_SCHEDULE']
+        if not physical['valid']:
+            violations.extend(e['code'] for e in physical['errors'])
+        return result['info']['objective'] + len(violations) * 1e6, result, violations
     return distance + len(violations) * 1e6 + shortage * 1e5, result, violations
 
 

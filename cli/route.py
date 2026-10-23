@@ -17,9 +17,9 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--case", default=str(DEFAULT_CASE))
     parser.add_argument("--model", type=int, choices=range(1, 9), help="M1–M5 原模型；M6 统一分界；M7 独立分界；M8 不等长批次")
-    parser.add_argument("--economic-config", help="M5–M8 成本参数与证据配置")
+    parser.add_argument("--economic-config", help="M3 成本对照及 M5–M8 成本参数与证据配置")
     parser.add_argument('--objective-mode', choices=('cost', 'distance'),
-                        help='M5 默认成本目标；distance 仅用于历史固定池诊断')
+                        help='M3 可选 distance/cost（默认 distance）；M5 默认 cost')
     parser.add_argument('--pool-min', type=int, help='M5–M8 容器池决策下界')
     parser.add_argument('--pool-max', type=int, help='M5–M8 容器池决策上界')
     schedules=parser.add_mutually_exclusive_group()
@@ -44,6 +44,8 @@ def main(argv=None):
     parser.add_argument("--milp-threads", type=int, help="直接MILP基线的线程数，默认1")
     parser.add_argument("--milp-formulation", choices=("expanded", "compact"),
                         help="直接MILP基线的等价表达，默认expanded")
+    parser.add_argument('--m4-strengthening', choices=('none','bounds','capacity','combined','activation','capacity_activation'),
+                        help='M4精确MILP的有效约束强化；默认none，其余为显式对照选项')
     parser.add_argument("--time", type=float)
     parser.add_argument("--iterations", type=int)
     parser.add_argument("--seed", type=int)
@@ -71,11 +73,15 @@ def main(argv=None):
         if value is not None:
             config[key] = value
     if args.objective_mode is not None:
-        if config['model'] != 5:
-            raise ValueError('--objective-mode is only supported for M5')
+        if config['model'] not in (3, 5):
+            raise ValueError('--objective-mode is only supported for M3 and M5')
         config['objective_mode'] = args.objective_mode
-    elif args.economic_config and config['model'] == 5:
+    elif args.economic_config and config['model'] in (3, 5):
         config['objective_mode'] = 'cost'
+    if args.m4_strengthening is not None:
+        if config['model'] != 4 or config.get('solver') != 'exact':
+            raise ValueError('--m4-strengthening requires M4 --solver exact')
+        config['m4_strengthening'] = args.m4_strengthening
     milp_options = dict(config.get('milp_options') or {})
     if args.milp_threads is not None:
         milp_options['threads'] = args.milp_threads

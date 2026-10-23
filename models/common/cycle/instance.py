@@ -242,6 +242,14 @@ def load_instance(config, fleet_config):
         factory = UniformCycleInstance if options.get('schedule_mode') == 'uniform_cycle' else JointBatchInstance
         return factory(network, orders, policy, options,
                                   config['economic_config'])
+    if config['model'] == 3:
+        if config.get('objective_mode', 'distance') not in ('cost', 'distance'):
+            raise ValueError('M3 objective_mode must be cost or distance')
+        if config.get('objective_mode') == 'cost':
+            if not config.get('economic_config'):
+                raise ValueError('M3 cost objective requires economic_config shared with M5–M8')
+            from models.common.cycle.single_batch_cost import SingleBatchCostInstance
+            return SingleBatchCostInstance(network, orders, policy, config['economic_config'])
     if config['model'] == 5 and config.get('objective_mode', 'cost') not in ('cost', 'distance'):
         raise ValueError('M5 objective_mode must be cost or historical distance')
     if config['model'] == 5 and config.get('objective_mode') != 'distance':

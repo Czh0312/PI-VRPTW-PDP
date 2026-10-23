@@ -114,6 +114,8 @@ def run_case(config, fleet, *, case_path=None, output=None):
         input_paths.append(resolve_project_path(instance.cost_profile.config['evidence_file']))
     if getattr(instance, 'optimize_pool', False) and instance.cost_profile.config.get('evidence_file'):
         input_paths.append(resolve_project_path(instance.cost_profile.config['evidence_file']))
+    if getattr(instance, 'cost_objective', False) and instance.cost_profile.config.get('evidence_file'):
+        input_paths.append(resolve_project_path(instance.cost_profile.config['evidence_file']))
     input_paths = sorted({dependency for path in input_paths for dependency in config_sources(path)})
     sources = [path for name in ('models/routing', 'models/common', 'models/cost', 'tools/configuration', 'cli')
                for path in (PROJECT_ROOT/name).rglob('*.py')]
@@ -159,6 +161,12 @@ def run_case(config, fleet, *, case_path=None, output=None):
                         pool_options=instance.options,
                         pool_bounds=dict(min=instance.pool_min, max=instance.pool_max),
                         objective_mode='cost')
+    if getattr(instance, 'cost_objective', False):
+        manifest.update(economic_profile=instance.cost_profile.config,
+                        economic_profile_hash=instance.cost_profile.hash,
+                        evidence_hash=instance.cost_profile.evidence_hash,
+                        objective_mode='cost',
+                        container_pool_size=instance.operating_policy.container_pool_size)
     _json(out/'manifest.json', manifest)
     print(f'M{instance.model_number} {"single_batch" if len(instance.operating_policy.batches) == 1 else "multi_batch"} {config["solver"]}: {out}')
     log, begun = io.StringIO(), time.perf_counter()
@@ -169,6 +177,7 @@ def run_case(config, fleet, *, case_path=None, output=None):
                                    exact_time=config.get('exact_time', 60),
                                    exact_backend=config.get('exact_backend'), seed=config.get('seed', 42),
                                    exact_strategy=config.get('exact_strategy'), milp_options=config.get('milp_options'),
+                                   m4_strengthening=config.get('m4_strengthening'),
                                    initial_result=load_json(config['initial_joint_result']) if config.get('initial_joint_result') else None)
         if result['info'].get('objective') is not None:
             result['audit'] = audit_solution(instance, result)
@@ -181,8 +190,9 @@ def run_case(config, fleet, *, case_path=None, output=None):
         audit = result.get('audit', {})
         joint = getattr(instance, 'joint_batch', False)
         pool_optimized = getattr(instance, 'optimize_pool', False)
+        fixed_cost = getattr(instance, 'cost_objective', False)
         pool = result.get('container_pool_size', instance.operating_policy.container_pool_size)
-        objective_label = '总成本' if joint or pool_optimized else '距离'
+        objective_label = '总成本' if joint or pool_optimized or fixed_cost else '距离'
         lines = [f'M{instance.model_number} {"联合分批成本" if joint else "固定批次"}运行结果', '',
                  f"包装：{'循环' if instance.reusable else '一次性'}；批次数：{result.get('cycle_batch_count',len(instance.operating_policy.batches))}。",
                  f"状态：{result['info']['status']}。",
@@ -201,6 +211,10 @@ def run_case(config, fleet, *, case_path=None, output=None):
             lines += ['一次性包装的重放检查车辆与配送服务；每个周期重新购入包装，不声明容器闭环。']
         if instance.free_assignment:
             lines += ['自由分仓按顾客选择，每个顾客的全部订单保持同仓。完整模型的全局证明状态以 info 为准。']
+        if fixed_cost:
+            lines += ['', 'M3 成本对照：固定分仓、单批次日历和箱池，按 M5–M8 相同费用口径直接优化。',
+                      f'总距离：{result.get("total_distance")}；费用配置哈希：{instance.cost_profile.hash}。']
+            lines.extend(f'- {key}: {value}' for key, value in result.get('cost_components', {}).items())
         if pool_optimized:
             lines += ['', '固定订单分批和批次日历，联合优化箱池规模、两级路线与调度。',
                       f'箱池决策范围：{instance.pool_min}–{instance.pool_max}；总距离：{result.get("total_distance")}。',

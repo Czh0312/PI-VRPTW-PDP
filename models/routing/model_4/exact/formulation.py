@@ -37,6 +37,7 @@ def build_model(
     compress_routes=None,
     linear_e2_links=None,
     factor_e2_loads=None,
+    strengthening='none',
 ):
     import gurobipy as gp
 
@@ -239,7 +240,7 @@ def build_model(
     add_inventory_constraints(parameters, variables)
     set_distance_objective(m, objective)
     m.update()
-    return m, dict(
+    context = dict(
         parameters=parameters,
         variables=variables,
         e1=routes1,
@@ -263,3 +264,9 @@ def build_model(
         trip_count_symmetry=True,
         single_batch_bounds=True,
     )
+    from models.routing.model_4.exact.strengthening import strengthen
+    context['strengthening'] = strengthen(problem, context, strengthening, check_budget)
+    context['e2_causal_step_bounds'] = strengthening in ('bounds', 'combined')
+    context['tight_e2_route_bounds'] = strengthening in ('bounds', 'combined')
+    m.update()
+    return m, context

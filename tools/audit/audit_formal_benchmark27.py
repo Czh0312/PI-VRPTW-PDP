@@ -184,7 +184,8 @@ def audit_dataset(dataset):
                 expected_k = tuple(certificate['candidates_by_model'][str(model)])
                 require(tuple(problem.batch_count_candidates) == expected_k, f'Unexpected K bounds: {path}')
                 domains.append(tuple(problem.batch_count_candidates))
-                child = problem.for_count(1)
+                projection_k = 3 if 3 in problem.batch_count_candidates else max(problem.batch_count_candidates)
+                child = problem.for_count(projection_k)
                 require(child.require_productive_batches, f'Projection lost productive-batch semantics: {path}')
                 if model == 6:
                     require(child.shared_cutoff, f'M6 must share the cutoff: {path}')
@@ -213,8 +214,8 @@ def audit_dataset(dataset):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--dataset', default='data/formal_benchmark27_spacetime_v3')
-    parser.add_argument('--output', default='output/inspections/formal_benchmark27_spacetime_v3/input_audit.json')
+    parser.add_argument('--dataset', default='data/formal_benchmark27_spacetime_v4_1')
+    parser.add_argument('--output', default='output/inspections/formal_benchmark27_spacetime_v4_1/input_audit.json')
     args = parser.parse_args()
     result = audit_dataset(args.dataset)
     output = resolve_project_path(args.output)

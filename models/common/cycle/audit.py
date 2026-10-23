@@ -38,6 +38,9 @@ def replay_ledger(events, pool, satellites, repetitions=1, period=0):
 
 def audit_solution(problem, result, repeat=True):
     try:
+        if getattr(problem, 'cost_objective', False):
+            from models.common.cycle.single_batch_cost import audit_single_batch_cost
+            return audit_single_batch_cost(problem, result, repeat)
         if getattr(problem, 'optimize_pool', False):
             from models.common.cycle.fixed_pool import audit_pool_solution
             return audit_pool_solution(problem, result, repeat)

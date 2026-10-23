@@ -8,7 +8,8 @@ def empty_result(problem, method):
                 schema_version=2, policy_version=VERSION, time_unit='ticks',
                 model=problem.model_number, packaging='reusable' if problem.reusable else 'single_use',
                 time_tick_seconds=p.time_tick_seconds,
-                objective_mode='cost' if getattr(problem, 'optimize_pool', False) else 'distance',
+                objective_mode='cost' if (getattr(problem, 'optimize_pool', False)
+                                         or getattr(problem, 'cost_objective', False)) else 'distance',
                 operating_policy=p.as_dict(), solver=method,
                 batches=[dict(id=b.id, start=b.start, cutoff=b.cutoff, end=b.end,
                               container_demand=problem.batch_demands[b.id]) for b in p.batches],

@@ -1,14 +1,17 @@
 # 数据集入口
 
-当前正式输入为 [formal_benchmark27_spacetime_v3](formal_benchmark27_spacetime_v3/README.md)：小规模9例均为10位顾客；中规模20位4例、30位5例，大规模50位4例、100位5例。每客一个标准箱，保留所选顾客全部货重，不进行装箱优化。旧 [spacetime_v2](formal_benchmark27_spacetime_v2/README.md)、[one_box_v1](formal_benchmark27_one_box_v1/README.md)、[多箱版本](formal_benchmark27_v1/README.md) 及冻结结果保留。新旧结果分别报告。
+当前正式输入为 [formal_benchmark27_spacetime_v4_1](formal_benchmark27_spacetime_v4_1/README.md)：小规模9例均为7位顾客；中规模20位4例、30位5例，大规模50位4例、100位5例。每客一个标准箱，保留所选顾客全部货重，不进行装箱优化。旧 [spacetime_v3](formal_benchmark27_spacetime_v3/README.md)、[spacetime_v2](formal_benchmark27_spacetime_v2/README.md)、[one_box_v1](formal_benchmark27_one_box_v1/README.md)、[多箱版本](formal_benchmark27_v1/README.md) 及冻结结果保留。新旧结果分别报告。
 
 - **27个基础算例、216份模型配置**：model_1～model_8，各有small / medium / large，每档9例。
 - 同一编号的需求、坐标、车队、绝对送取窗与适用费用保持一致；固定／优化项见各例parameters.json。
-- 新版独立可行性见证见 [validation](formal_benchmark27_spacetime_v3/validation/README.md)。可行不等于算法运行成功或最优。
+- 新版独立可行性见证见 [validation](formal_benchmark27_spacetime_v4_1/validation/README.md)。可行不等于算法运行成功或最优。
 - 外部需求时段为2/3/4；M5使用固定参考，M6–M8仅剔除有不可行性证明的K。费用保留来源字节，本次不重新定价。
-- 小规模9例来自6个原始来源；3对10位顾客子集各重叠8位顾客。中大规模也存在同源嵌套，不能当作27个独立来源。
+- 小规模9例来自6个原始来源；3对7位顾客子集各重叠5位顾客。中大规模也存在同源嵌套，不能当作27个独立来源。
+- 小规模取v3同编号算例的前7个数值顾客编号；保留全部仓点、车队和所选订单字段，仓—时段可能变空，不重新分配订单。冻结登记见[修订4](../config/experiments/benchmark27_spacetime_v4_1/frozen.json)。
 
-[216项入口清单](formal_benchmark27_spacetime_v3/case_index.csv) · [小规模选例清单](formal_benchmark27_spacetime_v3/selection.json) · [旧版设计说明](../docs/benchmark27_design_20261015.md)
+[216项入口清单](formal_benchmark27_spacetime_v4_1/case_index.csv) · [小规模选例清单](formal_benchmark27_spacetime_v4_1/selection.json) · [旧版设计说明](../docs/benchmark27_design_20261015.md)
+
+7顾客的36次M1—M4冷启动与9次M4组合补测见[重测报告](../output/experiments/small7_solver_comparison_20261023_v1.md)；后续[600秒精确与60秒ALNS报告](../output/experiments/small7_exact600_alns60_20261023_v1/comparison.md)补齐了原3次未证最优调用的直接MILP证明。全部36个距离最优值见[当前M1—M4参考表](../output/experiments/small7_exact600_alns60_20261023_v1/optimal_references.json)。此前跨模型证明及所有原调用状态保留。
 
 ## 目录整理
 

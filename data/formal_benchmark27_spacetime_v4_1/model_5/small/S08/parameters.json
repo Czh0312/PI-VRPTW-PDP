@@ -1,0 +1,90 @@
+{
+  "model": 5,
+  "base_case_id": "S08",
+  "source_family": "zhou_Set1_12-2-1b_subset10_first_subset7_first",
+  "demand_container_uses": 7,
+  "objective": "cost",
+  "fixed_parameters": {
+    "packaging": "reusable",
+    "cycle_start": 480,
+    "cycle_end": 1260,
+    "customer_satellite_assignment": {
+      "C0": "S0",
+      "C1": "S0",
+      "C2": "S0",
+      "C3": "S0",
+      "C4": "S0",
+      "C5": "S0",
+      "C6": "S0"
+    },
+    "batch_count": 3,
+    "calendar": [
+      {
+        "id": "b1",
+        "delivery_duration": 187.0,
+        "return_duration": 73.0
+      },
+      {
+        "id": "b2",
+        "delivery_duration": 187.0,
+        "return_duration": 73.0
+      },
+      {
+        "id": "b3",
+        "delivery_duration": 187.0,
+        "return_duration": 73.0
+      }
+    ],
+    "order_batch_assignment": {
+      "C0_order": "b3",
+      "C1_order": "b2",
+      "C2_order": "b1",
+      "C3_order": "b1",
+      "C4_order": "b2",
+      "C5_order": "b2",
+      "C6_order": "b2"
+    }
+  },
+  "optimized_decisions": [
+    "routes",
+    "vehicle_assignment",
+    "service_times",
+    "container_pool_size"
+  ],
+  "inactive_components": [],
+  "decision_bounds": {
+    "pool_min": 1,
+    "pool_max": 7
+  },
+  "reference_only": {
+    "customer_satellite_assignment": {
+      "C0": "S0",
+      "C1": "S0",
+      "C2": "S0",
+      "C3": "S0",
+      "C4": "S0",
+      "C5": "S0",
+      "C6": "S0"
+    },
+    "container_pool_size": 7
+  },
+  "notes": [
+    "The model number activates packaging and free-assignment semantics in the solver.",
+    "For M6-M8, policy.container_pool_size is a reference; pool_min/pool_max define the decision.",
+    "For M2/M4, satellite_id is the initial/reference assignment and is not fixed.",
+    "Shared economic coefficients do not change the native distance objective of M1-M4.",
+    "M5 fixes dispatch slots but does not enforce positive recovery in each slot; M6-M8 do. An ablation attributing differences only to released decisions must harmonize this rule."
+  ],
+  "demand_contract": {
+    "id": "one_customer_one_box_v1",
+    "boxes_per_customer": 1,
+    "orders_per_customer": 1,
+    "goods_weight": "Preserve the complete original customer goods weight.",
+    "delivery_weight": "goods_weight + container_weight",
+    "pickup_weight": "container_weight",
+    "task_volume": "container_volume",
+    "assumption": "Each customer demand fits one standard box; no bin-packing optimization."
+  },
+  "external_appointment_period_count": 3,
+  "economics_status": "v3 cost bytes unchanged; seven-customer filtering only."
+}
