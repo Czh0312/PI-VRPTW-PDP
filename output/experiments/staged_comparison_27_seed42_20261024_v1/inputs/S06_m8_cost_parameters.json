@@ -1,0 +1,75 @@
+{
+  "model": 8,
+  "base_case_id": "S06",
+  "source_family": "zhou_Set1_10-2-2_subset7_first",
+  "demand_container_uses": 7,
+  "objective": "cost",
+  "fixed_parameters": {
+    "packaging": "reusable",
+    "cycle_start": 480,
+    "cycle_end": 1260,
+    "customer_satellite_assignment": {
+      "C0": "S1",
+      "C1": "S1",
+      "C2": "S1",
+      "C3": "S1",
+      "C4": "S1",
+      "C5": "S1",
+      "C6": "S1"
+    },
+    "schedule_mode": "flexible_cycle"
+  },
+  "optimized_decisions": [
+    "routes",
+    "vehicle_assignment",
+    "service_times",
+    "batch_count",
+    "order_batch_assignment",
+    "container_pool_size",
+    "independent_batch_cutoffs",
+    "batch_lengths"
+  ],
+  "inactive_components": [],
+  "decision_bounds": {
+    "schedule_mode": "flexible_cycle",
+    "batch_count_candidates": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "min_phase_minutes": 1,
+    "pool_min": 1,
+    "pool_max": 7,
+    "calendar_decision_grid_seconds": 60
+  },
+  "reference_only": {
+    "customer_satellite_assignment": {
+      "C0": "S1",
+      "C1": "S1",
+      "C2": "S1",
+      "C3": "S1",
+      "C4": "S1",
+      "C5": "S1",
+      "C6": "S1"
+    },
+    "container_pool_size": 7
+  },
+  "notes": [
+    "The model number activates packaging and free-assignment semantics in the solver.",
+    "For M6-M8, policy.container_pool_size is a reference; pool_min/pool_max define the decision.",
+    "For M2/M4, satellite_id is the initial/reference assignment and is not fixed.",
+    "M5 fixes dispatch slots but does not enforce positive recovery in each slot; M6-M8 do. An ablation attributing differences only to released decisions must harmonize this rule."
+  ],
+  "demand_contract": {
+    "id": "one_customer_one_box_v1",
+    "boxes_per_customer": 1,
+    "orders_per_customer": 1,
+    "goods_weight": "Preserve the complete original customer goods weight.",
+    "delivery_weight": "goods_weight + container_weight",
+    "pickup_weight": "container_weight",
+    "task_volume": "container_volume",
+    "assumption": "Each customer demand fits one standard box; no bin-packing optimization."
+  },
+  "external_appointment_period_count": 4
+}
