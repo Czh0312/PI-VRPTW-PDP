@@ -1,0 +1,708 @@
+--- baseline/models/routing/model_8/alns/calendar_polish.py
++++ bounded/models/routing/model_8/alns/calendar_polish.py
+@@ -15,6 +15,9 @@
+     feasibility. No saved solution or case identifier participates.
+     """
+     p, parent = variable.operating_policy, variable.parent
++    if len(variable.orders) <= 9:
++        from models.routing.model_8.alns.temporal_domains import proposal_view
++        variable, _ = proposal_view(variable)
+     for assignment in balanced_assignments(variable, limit=16, width=64):
+         latest, reuse = {}, {}
+         for order in variable.orders:
+--- baseline/models/routing/model_8/alns/chain_repair.py
++++ bounded/models/routing/model_8/alns/chain_repair.py
+@@ -0,0 +1,288 @@
++"""Bounded complete-plan moves ranked by audited total cost, without a solver."""
++from itertools import combinations
++import math
++import time
++
++from models.routing.model_8.alns.evaluator import evaluate
++from models.routing.model_8.alns.neighborhoods import _goods_ready, _route_score
++from models.routing.model_8.alns.state import clone_joint_state, state_key
++
++
++def _key(state):
++    return state_key(state), tuple(sorted(state['cutoffs'].items()))
++
++
++def _physical(child, evaluator, assignment, state):
++    fixed = evaluator.fixed(assignment, state['cutoffs'])
++    _, raw, _ = evaluate(fixed, state)
++    return raw
++
++
++def _profiles(child, raw, old):
++    """All bounded productive splits of this schedule's distinct return events.
++
++    These are proposals, not restrictions on the physical search domain.
++    Full audit still checks vehicles, E1 routes, cleaning and cyclic inventory.
++    """
++    batches = child.operating_policy.batches
++    events = sorted({trip['return_complete'] for trip in raw['e2_trips']
++                     if any(event['kind'] == 'p' for event in trip['events'])})
++    k = len(batches)
++    if len(events) < k:
++        return []
++    delivery_floor = {b.id: b.start for b in batches}
++    for trip in raw['e1_trips']:
++        for event in trip['events']:
++            if event['kind'] == 'd':
++                delivery_floor[trip['batch_id']] = max(delivery_floor[trip['batch_id']],
++                    event['start']+child.service(event['site_id']))
++    if k == 1:
++        delivery_floor[batches[0].id] = max(delivery_floor[batches[0].id],
++            max((event['start']+child.order_map[event['order_id']].service_time
++                 for trip in raw['e2_trips'] for event in trip['events'] if event['kind'] == 'd'),
++                default=batches[0].start))
++    step = child.calendar_decision_step
++    rows = []
++    for cuts in combinations(range(1, len(events)), k-1):
++        ends = cuts+(len(events),)
++        proposed = {}
++        for batch, end in zip(batches, ends):
++            lo, hi = child.cutoff_bounds[batch.id]
++            required = max(lo, events[end-1], delivery_floor[batch.id])
++            selected = -(-required//step)*step
++            if selected > hi or (end < len(events) and selected >= events[end]):
++                break
++            proposed[batch.id] = selected
++        if len(proposed) == k:
++            rows.append(proposed)
++    return sorted(rows, key=lambda row: (sum(abs(row[bid]-old[bid]) for bid in row), tuple(row.values())))
++
++
++def _chain_shapes(child, state, raw, deadline, max_shapes=10):
++    original = clone_joint_state(state)
++    shapes = [original]
++    for bid, rows in state['deliveries'].items():
++        for vehicle, sites in enumerate(rows):
++            if len(sites) > 1 and len(shapes) < 3:
++                trial = clone_joint_state(state)
++                trial['deliveries'][bid][vehicle] = list(reversed(sites))
++                shapes.append(trial)
++    if time.perf_counter() >= deadline:
++        return shapes
++    batches = child.operating_policy.batches
++    plans = [i for i, route in enumerate(state['e2']) if route['tasks']]
++    if len(plans) != len(raw['e2_trips']):
++        return shapes
++    groups = {}
++    for index, trip in zip(plans, raw['e2_trips']):
++        if not any(event['kind'] == 'p' for event in trip['events']):
++            continue
++        batch_index = next((i for i, batch in enumerate(batches)
++                            if trip['return_complete'] <= state['cutoffs'][batch.id]), None)
++        if batch_index is not None and batch_index < len(batches)-1:
++            groups.setdefault((batch_index, trip['satellite_id']), []).append((index, trip['return_complete']))
++    for (batch_index, site), members in sorted(groups.items()):
++        if time.perf_counter() >= deadline or len(shapes) >= max_shapes:
++            break
++        last_return = max(value for _, value in members)
++        other_returns = sorted({trip['return_complete']+1 for trip in raw['e2_trips']
++            if trip['satellite_id'] != site and trip['return_complete'] >= last_return
++            and any(event['kind'] == 'p' for event in trip['events'])})
++        targets = [state['cutoffs'][batches[batch_index].id]+1]+other_returns[:1]
++        for target in dict.fromkeys(targets):
++            if target > child.cutoff_bounds[batches[-1].id][1] or len(shapes) >= max_shapes:
++                continue
++            trial = clone_joint_state(state)
++            for index, _ in members:
++                route = trial['e2'][index]
++                route['return_after'] = max(target, route.get('return_after', 0))
++            shapes.append(trial)
++            for vehicle, sites in enumerate(trial['deliveries'][batches[batch_index].id]):
++                if len(sites) > 1 and len(shapes) < max_shapes:
++                    paired = clone_joint_state(trial)
++                    paired['deliveries'][batches[batch_index].id][vehicle] = list(reversed(sites))
++                    shapes.append(paired)
++    return shapes
++
++
++def recovery_frontier(child, evaluator, assignment, state, deadline, max_evaluations=96):
++    """Move the entire cutoff profile with E1 prefixes and return waits."""
++    best = clone_joint_state(state)
++    score, result, _ = evaluator(assignment, best)
++    best_cost = score if result is not None else math.inf
++    evaluations = improvements = 0
++    if (len(child.orders) > 9 or not child.optimize_cutoffs or child.shared_cutoff
++            or time.perf_counter() >= deadline):
++        return best, evaluations, improvements
++    raw = _physical(child, evaluator, assignment, state)
++    if not raw['e2_trips']:
++        return best, evaluations, improvements
++    iterators, seen = [], {_key(state)}
++    for shape in _chain_shapes(child, state, raw, deadline):
++        if time.perf_counter() >= deadline:
++            break
++        physical = raw if shape == state else _physical(child, evaluator, assignment, shape)
++        candidates = [dict(shape['cutoffs'])]+_profiles(child, physical, shape['cutoffs'])
++        iterators.append((shape, iter(candidates)))
++    while iterators and evaluations < max_evaluations and time.perf_counter() < deadline:
++        remaining = []
++        for shape, profiles in iterators:
++            if evaluations >= max_evaluations or time.perf_counter() >= deadline:
++                break
++            try:
++                cutoffs = next(profiles)
++            except StopIteration:
++                continue
++            remaining.append((shape, profiles))
++            trial = clone_joint_state(shape)
++            trial['cutoffs'] = cutoffs
++            key = _key(trial)
++            if key in seen:
++                continue
++            seen.add(key)
++            value, candidate, _ = evaluator(assignment, trial)
++            evaluations += 1
++            if candidate is not None and value < best_cost-1e-8:
++                best, best_cost = trial, value
++                improvements += 1
++        iterators = remaining
++    return best, evaluations, improvements
++
++
++def _distance(problem, routes):
++    value = 0.
++    for route in routes:
++        nodes = [route['satellite']]+[problem.order_map[o].customer for o, _ in route['tasks']]+[route['satellite']]
++        value += sum(problem.distance(a, b) for a, b in zip(nodes, nodes[1:]))
++    return value
++
++
++def _insertions(problem, routes, task):
++    oid, kind = task
++    order = problem.order_map[oid]
++    delivery = next(((i, row['vehicle'], row['tasks'].index((oid, 'd')))
++                     for i, row in enumerate(routes) if (oid, 'd') in row['tasks']), None)
++    options = []
++    for index, row in enumerate(routes):
++        if row['satellite'] != order.satellite:
++            continue
++        if kind == 'd' and any(k == 'd' and problem.order_map[o].batch != order.batch for o, k in row['tasks']):
++            continue
++        if kind == 'p' and delivery is not None and row['vehicle'] == delivery[1] and index < delivery[0]:
++            continue
++        for pos in range(len(row['tasks'])+1):
++            if kind == 'p' and delivery is not None and index == delivery[0] and pos <= delivery[2]:
++                continue
++            changed = [{**route, 'tasks': list(route['tasks'])} for route in routes]
++            changed[index]['tasks'].insert(pos, task)
++            changed[index].pop('depart_after', None)
++            changed[index].pop('return_after', None)
++            options.append(changed)
++    for vehicle in range(problem.fleet.e2_per_sat_count):
++        used = sum(row['satellite'] == order.satellite and row['vehicle'] == vehicle for row in routes)
++        if used >= problem.operating_policy.e2_max_trips_per_vehicle:
++            continue
++        window = order.delivery_window if kind == 'd' else order.pickup_window
++        pos = next((i for i, row in enumerate(routes) if row['satellite'] == order.satellite and row['vehicle'] == vehicle
++                    and min((problem.order_map[o].delivery_window if k == 'd' else problem.order_map[o].pickup_window)[0]
++                            for o, k in row['tasks']) > window[0]), len(routes))
++        if kind == 'p' and delivery is not None and vehicle == delivery[1]:
++            pos = max(pos, delivery[0]+1)
++        changed = [{**route, 'tasks': list(route['tasks'])} for route in routes]
++        changed.insert(pos, dict(satellite=order.satellite, vehicle=vehicle, tasks=[task]))
++        options.append(changed)
++    return sorted(options, key=lambda rows: _distance(problem, rows))
++
++
++def _merge_candidates(problem, state, deadline):
++    """Offer whole-trip joins that need no feasible single-task intermediate."""
++    rows, ranked = state['e2'], []
++    goods = _goods_ready(problem, state)
++    for i, left in enumerate(rows):
++        for j in range(i+1, len(rows)):
++            if time.perf_counter() >= deadline:
++                return [row[3] for row in sorted(ranked, key=lambda row: row[:3])]
++            right = rows[j]
++            if left['satellite'] != right['satellite']:
++                continue
++            tasks = left['tasks']+right['tasks']
++            if len({problem.order_map[oid].batch for oid, kind in tasks if kind == 'd'}) > 1:
++                continue
++            sequences = {tuple(tasks), tuple(right['tasks']+left['tasks']),
++                         tuple([task for task in tasks if task[1] == 'd']+[task for task in tasks if task[1] == 'p'])}
++            for sequence in sequences:
++                for vehicle in sorted({left['vehicle'], right['vehicle']}):
++                    trial = clone_joint_state(state)
++                    trial['e2'] = [row for index, row in enumerate(trial['e2']) if index not in (i, j)]
++                    merged = dict(satellite=left['satellite'], vehicle=vehicle, tasks=list(sequence))
++                    trial['e2'].insert(i, merged)
++                    local_value, _ = _route_score(problem, merged, goods, problem.operating_policy.cycle_start,
++                                                  supply_aware=True)
++                    nodes = [left['satellite']]+[problem.order_map[oid].customer for oid, _ in sequence]+[left['satellite']]
++                    distance = sum(problem.distance(a, b) for a, b in zip(nodes, nodes[1:]))
++                    ranked.append((max(0., local_value-distance), _distance(problem, trial['e2']), repr(_key(trial)), trial))
++    return [row[3] for row in sorted(ranked, key=lambda row: row[:3])]
++
++
++def complete_request_repair(child, evaluator, assignment, state, order_ids, deadline, max_evaluations=72):
++    """Insert D/P independently, but compare only complete audited schedules."""
++    best = clone_joint_state(state)
++    value, result, _ = evaluator(assignment, best)
++    best_cost = value if result is not None else math.inf
++    evaluations = improvements = 0
++    if len(child.orders) > 9 or time.perf_counter() >= deadline:
++        return best, evaluations, improvements
++    fixed = evaluator.fixed(assignment, state['cutoffs'])
++    seen = {_key(best)}
++    for trial in _merge_candidates(fixed, state, deadline)[:min(12, max_evaluations//4)]:
++        if evaluations >= max_evaluations or time.perf_counter() >= deadline:
++            break
++        key = _key(trial)
++        if key in seen:
++            continue
++        seen.add(key)
++        score, candidate, _ = evaluator(assignment, trial)
++        evaluations += 1
++        if candidate is not None and score < best_cost-1e-8:
++            best, best_cost = trial, score
++            improvements += 1
++    for number, oid in enumerate(order_ids):
++        if time.perf_counter() >= deadline or evaluations >= max_evaluations:
++            break
++        trial_base = clone_joint_state(best)
++        for route in trial_base['e2']:
++            tasks = [task for task in route['tasks'] if task[0] != oid]
++            if tasks != route['tasks']:
++                route.pop('depart_after', None)
++                route.pop('return_after', None)
++            route['tasks'] = tasks
++        trial_base['e2'] = [row for row in trial_base['e2'] if row['tasks']]
++        deliveries = _insertions(fixed, trial_base['e2'], (oid, 'd'))
++        # Keep independent new-trip alternatives even when they add distance.
++        deliveries = deliveries[:6]+[rows for rows in deliveries[6:]
++                                     if any(row['tasks'] == [(oid, 'd')] for row in rows)][:2]
++        streams = [iter(_insertions(fixed, rows, (oid, 'p'))) for rows in deliveries]
++        allowance = evaluations+max(1, (max_evaluations-evaluations)//max(1, len(order_ids)-number))
++        while streams and evaluations < allowance and time.perf_counter() < deadline:
++            pending = []
++            for stream in streams:
++                if evaluations >= allowance or time.perf_counter() >= deadline:
++                    break
++                try:
++                    rows = next(stream)
++                except StopIteration:
++                    continue
++                pending.append(stream)
++                trial = clone_joint_state(trial_base)
++                trial['e2'] = rows
++                key = _key(trial)
++                if key in seen:
++                    continue
++                seen.add(key)
++                score, candidate, _ = evaluator(assignment, trial)
++                evaluations += 1
++                if candidate is not None and score < best_cost-1e-8:
++                    best, best_cost = trial, score
++                    improvements += 1
++            streams = pending
++    return best, evaluations, improvements
+--- baseline/models/routing/model_8/alns/fixed_calendar_search.py
++++ bounded/models/routing/model_8/alns/fixed_calendar_search.py
+@@ -67,6 +67,8 @@
+     ):
+         raise ValueError("Invalid ALNS time or iteration budget")
+     begun = time.perf_counter()
++    repair_stats = dict(timing_repair_attempts=0, timing_repair_successes=0,
++                        chain_candidates=0, chain_improvements=0)
+     deadline = begun + max_time
+     parameters = ALNSParameters(max_time, max_iterations, seed)
+     control = SearchControl(parameters, begun, time.perf_counter)
+@@ -75,7 +77,17 @@
+     # route/batch exploration while rewarding repeated no-op descents.
+     route_polish_share = .2 if len(problem.orders) <= 16 else 0.
+     search_deadline = deadline - (route_polish_share + (.1 if problem.optimize_cutoffs else 0.))*max_time
+-    missing = [oid for oid, choices in problem.legal_batches.items() if not choices]
++    proposal_problem = problem
++    if len(problem.orders) <= 9:
++        from models.routing.model_8.alns.temporal_domains import proposal_view
++        proposal_problem, bounds = proposal_view(problem)
++        if bounds['certificate'] is not None:
++            result = joint_empty_result(problem, 'alns')
++            result['info'].update(status='INFEASIBLE', proven_infeasible=True,
++                proof_scope='necessary_temporal_assignment_domain', domain_certificate=bounds['certificate'],
++                runtime=time.perf_counter()-begun, iterations=0)
++            return result
++    missing = [oid for oid, choices in proposal_problem.legal_batches.items() if not choices]
+     if missing:
+         result = joint_empty_result(problem, "alns")
+         result["info"].update(
+@@ -95,28 +107,28 @@
+     rng = random.Random(seed)
+     evaluator = JointEvaluator(problem)
+     original = {
+-        o.id: o.batch if o.batch in problem.legal_batches[o.id] else problem.legal_batches[o.id][0]
++        o.id: o.batch if o.batch in proposal_problem.legal_batches[o.id] else proposal_problem.legal_batches[o.id][0]
+         for o in problem.orders
+     }
+     earliest = {
+         oid: min(bs, key=lambda b: problem.batch_index[b])
+-        for oid, bs in problem.legal_batches.items()
++        for oid, bs in proposal_problem.legal_batches.items()
+     }
+     latest = {
+         oid: max(bs, key=lambda b: problem.batch_index[b])
+-        for oid, bs in problem.legal_batches.items()
++        for oid, bs in proposal_problem.legal_batches.items()
+     }
+     from models.routing.model_8.alns.batch_initialization import balanced_assignments
+-    seeds = balanced_assignments(problem) + [original, earliest, latest]
++    seeds = balanced_assignments(proposal_problem) + [original, earliest, latest]
+     for b in problem.operating_policy.batches:
+         seeds.append(
+             {
+                 oid: b.id if b.id in bs else earliest[oid]
+-                for oid, bs in problem.legal_batches.items()
++                for oid, bs in proposal_problem.legal_batches.items()
+             }
+         )
+     seeds = [covered for assignment in seeds
+-             if (covered := cover_delivery_batches(problem, assignment)) is not None]
++             if (covered := cover_delivery_batches(proposal_problem, assignment)) is not None]
+     if not seeds:
+         result = joint_empty_result(problem, "alns")
+         result["info"].update(
+@@ -191,7 +203,6 @@
+     attempts = {op: 0 for op in operators}
+     improvements = {op: 0 for op in operators}
+     accepted = iterations = restarts = 0
+-    repair_stats = dict(timing_repair_attempts=0, timing_repair_successes=0)
+     score, assignment, state = current
+     for iteration in range(max_iterations):
+         if time.perf_counter() >= search_deadline:
+@@ -208,7 +219,7 @@
+         proposed_assignment = dict(assignment)
+         if "batch" in op:
+             proposed_assignment, proposed = _batch_move(
+-                problem, evaluator, assignment, rng, op, search_deadline, state.get("cutoffs")
++                proposal_problem, evaluator, assignment, rng, op, search_deadline, state.get("cutoffs")
+             )
+         elif op in ("shift_cutoff", "align_cutoff"):
+             proposed = _cutoff_move(
+@@ -263,6 +274,32 @@
+     if route_polish_share and best is not None:
+         from models.routing.model_8.alns.polish import polish_routes
+         route_deadline = deadline - (.1*max_time if problem.optimize_cutoffs else 0.)
++        if len(problem.orders) <= 9:
++            from models.routing.model_8.alns.chain_repair import recovery_frontier, complete_request_repair, _distance
++            fixed = evaluator.fixed(best_assignment, best_state['cutoffs'])
++            ranking = []
++            for oid in best_assignment:
++                removed = [{**row, 'tasks': [task for task in row['tasks'] if task[0] != oid]} for row in best_state['e2']]
++                ranking.append((_distance(fixed, removed), oid))
++            polished, calls, gains = complete_request_repair(problem, evaluator, best_assignment, best_state,
++                [oid for _, oid in sorted(ranking)[:2]],
++                time.perf_counter()+.4*max(0., route_deadline-time.perf_counter()), max_evaluations=72)
++            repair_stats['chain_candidates'] += calls
++            repair_stats['chain_improvements'] += gains
++            value, candidate, _ = evaluator(best_assignment, polished)
++            if candidate is not None and value < best_cost-1e-8:
++                best, best_cost, best_state = deepcopy(candidate), value, polished
++                history.append(dict(iteration=iterations, objective=value,
++                    time=time.perf_counter()-begun, source='complete_cost_route_repair'))
++            polished, calls, gains = recovery_frontier(problem, evaluator, best_assignment, best_state,
++                time.perf_counter()+.25*max(0., route_deadline-time.perf_counter()), max_evaluations=32)
++            repair_stats['chain_candidates'] += calls
++            repair_stats['chain_improvements'] += gains
++            value, candidate, _ = evaluator(best_assignment, polished)
++            if candidate is not None and value < best_cost-1e-8:
++                best, best_cost, best_state = deepcopy(candidate), value, polished
++                history.append(dict(iteration=iterations, objective=value,
++                    time=time.perf_counter()-begun, source='joint_recovery_profile'))
+         polished, route_polish_evaluations, route_polish_improvements = polish_routes(
+             evaluator.fixed(best_assignment, best_state.get("cutoffs")), evaluator,
+             best_assignment, best_state, route_deadline)
+--- baseline/models/routing/model_8/alns/search.py
++++ bounded/models/routing/model_8/alns/search.py
+@@ -49,7 +49,17 @@
+             initial_result=initial_result,
+         )
+     begun = time.perf_counter()
+-    repair_stats = dict(timing_repair_attempts=0, timing_repair_successes=0)
++    repair_stats = dict(timing_repair_attempts=0, timing_repair_successes=0,
++                        chain_candidates=0, chain_improvements=0)
++    if len(parent.orders) <= 9:
++        from models.routing.model_8.alns.temporal_domains import temporal_assignment_bounds
++        certificate = temporal_assignment_bounds(variable)['certificate']
++        if certificate is not None:
++            result = joint_empty_result(variable, 'alns')
++            result['info'].update(status='INFEASIBLE', proven_infeasible=True,
++                proof_scope='necessary_temporal_assignment_domain', domain_certificate=certificate,
++                runtime=time.perf_counter()-begun, iterations=0)
++            return result
+     warm_iterations = 0
+     if initial_result is None and len(parent.orders) <= 16 and max_iterations > 0:
+         from models.routing.model_8.alns.fixed_calendar_search import solve_alns as solve_fixed_calendar
+@@ -106,18 +116,25 @@
+             calendar_stats['calendar_cache_hits'] += 1
+         evaluators.move_to_end(boundaries)
+         evaluator = evaluators[boundaries]
++        if not hasattr(evaluator, 'proposal_problem'):
++            if len(parent.orders) <= 9:
++                from models.routing.model_8.alns.temporal_domains import proposal_view
++                evaluator.proposal_problem, _ = proposal_view(evaluator.problem)
++            else:
++                evaluator.proposal_problem = evaluator.problem
+         return evaluator.problem, evaluator
+ 
+     def repair(boundaries, assignment=None, state=None, *, profile=None):
+         child, evaluator = context(boundaries)
+-        missing = sum(not bs for bs in child.legal_batches.values())
++        proposal_problem = evaluator.proposal_problem
++        missing = sum(not bs for bs in proposal_problem.legal_batches.values())
+         if missing:
+             return penalty * (10 + missing), None, None, None
+         proposed = {
+             oid: assignment[oid] if assignment is not None and assignment[oid] in bs else bs[-1]
+-            for oid, bs in child.legal_batches.items()
++            for oid, bs in proposal_problem.legal_batches.items()
+         }
+-        proposed = cover_delivery_batches(child, proposed)
++        proposed = cover_delivery_batches(proposal_problem, proposed)
+         if proposed is None:
+             return penalty * 10, None, None, None
+         cuts = profile or (state.get("cutoffs") if state is not None else child.default_cutoffs)
+@@ -212,18 +229,28 @@
+     for bounds, preferred_assignment, preferred_cutoffs in plans:
+         if current is not None and time.perf_counter() >= init_deadline:
+             break
+-        child, _ = context(bounds)
++        child, initializer = context(bounds)
+         profiles = _initial_cutoff_profiles(child)
+         if preferred_cutoffs is not None:
+             profiles.insert(0, {bid: min(hi, max(lo, preferred_cutoffs[bid]))
+                                for bid, (lo, hi) in child.cutoff_bounds.items()})
+         starts = ([preferred_assignment] if preferred_assignment is not None
+-                  else balanced_assignments(child, limit=4) + [None])
++                  else balanced_assignments(initializer.proposal_problem, limit=4) + [None])
+         for profile, seed_assignment in [(profiles[0], a) for a in starts] + [
+                 (profile, starts[0]) for profile in profiles[1:]]:
+             if current is not None and time.perf_counter() >= init_deadline:
+                 break
+             score, assignment, state, candidate = repair(bounds, assignment=seed_assignment, profile=profile)
++            if len(parent.orders) <= 9 and state is not None and time.perf_counter() < init_deadline:
++                from models.routing.model_8.alns.chain_repair import recovery_frontier
++                child, evaluator = context(bounds)
++                polished, calls, gains = recovery_frontier(child, evaluator, assignment, state,
++                    min(init_deadline, time.perf_counter()+.05*max_time), max_evaluations=24)
++                repair_stats['chain_candidates'] += calls
++                repair_stats['chain_improvements'] += gains
++                value, decoded, _ = evaluator(assignment, polished)
++                if decoded is not None and value < score:
++                    score, state, candidate = value, polished, decoded
+             if current is None or score < current[0]:
+                 current = score, bounds, assignment, state
+             remember(score, bounds, assignment, state, candidate, 0, "calendar_construction")
+@@ -286,7 +313,7 @@
+             proposed_assignment = dict(assignment)
+             if "batch" in op:
+                 proposed_assignment, proposed = _batch_move(
+-                    child, evaluator, assignment, rng, op, search_deadline, state["cutoffs"]
++                    evaluator.proposal_problem, evaluator, assignment, rng, op, search_deadline, state["cutoffs"]
+                 )
+             elif op in ("shift_cutoff", "align_cutoff"):
+                 proposed = _cutoff_move(
+@@ -329,6 +356,27 @@
+     if best is not None and len(parent.orders) <= 16:
+         from models.routing.model_8.alns.polish import polish_routes
+         child, evaluator = context(best_boundaries)
++        if len(parent.orders) <= 9:
++            from models.routing.model_8.alns.chain_repair import recovery_frontier, complete_request_repair, _distance
++            route_deadline = deadline-.12*max_time
++            fixed = evaluator.fixed(best_assignment, best_state['cutoffs'])
++            ranking = []
++            for oid in best_assignment:
++                removed = [{**row, 'tasks': [task for task in row['tasks'] if task[0] != oid]} for row in best_state['e2']]
++                ranking.append((_distance(fixed, removed), oid))
++            polished, calls, gains = complete_request_repair(child, evaluator, best_assignment, best_state,
++                [oid for _, oid in sorted(ranking)[:2]],
++                time.perf_counter()+.4*max(0., route_deadline-time.perf_counter()), max_evaluations=72)
++            repair_stats['chain_candidates'] += calls
++            repair_stats['chain_improvements'] += gains
++            value, candidate, _ = evaluator(best_assignment, polished)
++            remember(value, best_boundaries, best_assignment, polished, candidate, iterations, 'complete_cost_route_repair')
++            polished, calls, gains = recovery_frontier(child, evaluator, best_assignment, best_state,
++                time.perf_counter()+.25*max(0., route_deadline-time.perf_counter()), max_evaluations=32)
++            repair_stats['chain_candidates'] += calls
++            repair_stats['chain_improvements'] += gains
++            value, candidate, _ = evaluator(best_assignment, polished)
++            remember(value, best_boundaries, best_assignment, polished, candidate, iterations, 'joint_recovery_profile')
+         polished, route_polish_evaluations, route_polish_improvements = polish_routes(
+             evaluator.fixed(best_assignment, best_state["cutoffs"]), evaluator,
+             best_assignment, best_state, deadline-.12*max_time)
+--- baseline/models/routing/model_8/alns/temporal_domains.py
++++ bounded/models/routing/model_8/alns/temporal_domains.py
+@@ -0,0 +1,149 @@
++"""Pure necessary time bounds for ALNS proposals; no optimization backend.
++
++These input-only implications mirror the mathematical model. Domain narrowing
++uses certificates, never an incumbent or an objective reference.
++"""
++
++def necessary_time_bounds(problem):
++    """Mandatory container occupancy and first-batch assignment implications.
++
++    Shortest-path travel relaxations remain safe for nonmetric matrices.
++    Order i holds its boxes throughout [latest_loading_i, earliest_clean_i).
++    If i is loaded in a later batch, some other order must finish the first
++    batch's productive depot recovery before i is loaded. When even the
++    earliest such return exceeds latest_loading_i, i must be in batch 1.
++    These implications cover continuous physical time, hence all refined
++    integer clocks, and do not depend on an incumbent or a chosen calendar.
++    """
++    policy = problem.operating_policy
++    outward, inward = problem.travel_bounds['outward'], problem.travel_bounds['inward']
++    intervals, events = [], {}
++    for order in problem.orders:
++        site = order.satellite
++        supply = (policy.e1_load_time + outward[problem.depot][site] + problem.service(site)
++                  + policy.e2_dispatch_prep_time + outward[site][order.customer])
++        latest_loading = order.delivery_window[1] - supply
++        delivery = max(order.delivery_window[0], order.release_time+supply, policy.cycle_start+supply)
++        pickup = max(order.pickup_window[0], delivery+order.service_time+order.min_use_time)
++        clean = (pickup + order.service_time + inward[site][order.customer] + policy.e2_return_unload_time
++                 + problem.service(site) + outward[site][problem.depot] + policy.depot_return_unload_time
++                 + policy.cleaning_duration)
++        intervals.append(dict(order=order.id, count=order.count,
++                              latest_loading=latest_loading, earliest_clean=clean))
++        if latest_loading < clean:
++            events[latest_loading] = events.get(latest_loading, 0) + order.count
++            events[clean] = events.get(clean, 0) - order.count
++    active, lower, witness = 0, 0, None
++    for tick, delta in sorted(events.items()):
++        active += delta
++        if active > lower:
++            lower, witness = active, tick
++    forced = []
++    if problem.require_productive_batches:
++        for row in intervals:
++            other_returns = [r['earliest_clean']-policy.cleaning_duration
++                             for r in intervals if r['order'] != row['order']]
++            if other_returns and min(other_returns) > row['latest_loading']:
++                forced.append(dict(order=row['order'], latest_loading=row['latest_loading'],
++                                   earliest_other_order_depot_return=min(other_returns)))
++    return dict(pool_lower_bound=lower, witness_tick=witness, intervals=intervals,
++                forced_first_batch=forced)
++
++
++def productive_matching_certificate(domains, batches):
++    """Find a covering matching, or return an explicit deficient Hall set."""
++    owners = {}
++    neighbors = {b: [o for o, choices in domains.items() if b in choices] for b in batches}
++
++    def augment(batch, seen_orders, seen_batches):
++        seen_batches.add(batch)
++        for order in neighbors[batch]:
++            if order in seen_orders:
++                continue
++            seen_orders.add(order)
++            if order not in owners or augment(owners[order], seen_orders, seen_batches):
++                owners[order] = batch
++                return True
++        return False
++
++    for batch in sorted(batches, key=lambda b: len(neighbors[b])):
++        seen_orders, seen_batches = set(), set()
++        if not augment(batch, seen_orders, seen_batches):
++            witness_batches = [b for b in batches if b in seen_batches]
++            witness_orders = [o for o, choices in domains.items()
++                              if any(b in choices for b in witness_batches)]
++            assert len(witness_orders) < len(witness_batches)
++            return dict(reason='productive_batch_hall_deficiency',
++                        batches=witness_batches, neighboring_orders=witness_orders,
++                        batch_count=len(witness_batches), order_count=len(witness_orders))
++    return None
++
++
++def temporal_assignment_bounds(problem):
++    batches = [b.id for b in problem.operating_policy.batches]
++    position = {b: i for i, b in enumerate(batches, 1)}
++    domains = {o.id: list(problem.legal_batches[o.id]) for o in problem.orders}
++    if any(b not in position for choices in domains.values() for b in choices):
++        raise ValueError('Legal assignment domains contain an unknown batch')
++    bounds = necessary_time_bounds(problem)
++    intervals = {row['order']: row for row in bounds['intervals']}
++    quantities = {o.id: o.count for o in problem.orders}
++    eligible = {o: [j for j, row in intervals.items() if j != o and
++                   row['earliest_clean']-problem.operating_policy.cleaning_duration
++                   <= intervals[o]['latest_loading']] for o in domains}
++    removed = []
++    if problem.require_productive_batches:
++        changed = True
++        while changed:
++            changed = False
++            for order in domains:
++                for batch in list(domains[order]):
++                    index = position[batch]
++                    available = sum(quantities[j] for j in eligible[order]
++                                    if any(position[h] < index for h in domains[j]))
++                    if available < index-1:
++                        domains[order].remove(batch)
++                        removed.append(dict(order=order, batch=batch, required_returns=index-1,
++                                            optimistic_available_returns=available))
++                        changed = True
++    certificate = None
++    empty = [o for o in domains if not domains[o]]
++    if empty:
++        certificate = dict(reason='temporal_assignment_domain_empty', orders=empty)
++    elif problem.require_productive_batches:
++        certificate = productive_matching_certificate(domains, batches)
++    total = sum(quantities.values())
++    lower = max(problem.pool_min, bounds['pool_lower_bound'], max(quantities.values(), default=0),
++                (total+len(batches)-1)//len(batches))
++    prefix_bounds = []
++    for index in range(1, len(batches)+1):
++        prefix = set(batches[:index])
++        demand = sum(quantities[o] for o, choices in domains.items() if choices and set(choices) <= prefix)
++        bound = (demand+index-1)//index
++        lower = max(lower, bound)
++        prefix_bounds.append(dict(batches=batches[:index], mandatory_demand=demand, pool_lower_bound=bound))
++    if certificate is None and lower > problem.pool_max:
++        certificate = dict(reason='necessary_pool_exceeds_maximum', lower_bound=lower,
++                           maximum=problem.pool_max)
++    if certificate is not None:
++        certificate.update(source='model_8_necessary_temporal_assignment',
++                           domains=domains, removed=removed,
++                           time_tick_seconds=problem.operating_policy.time_tick_seconds)
++    return dict(domains=domains, eligible_predecessors=eligible, removed=removed,
++                pool_lower_bound=lower, prefix_bounds=prefix_bounds, certificate=certificate,
++                productive=problem.require_productive_batches)
++
++
++class DomainView:
++    """Narrow heuristic proposal domains without mutating the public instance."""
++    def __init__(self, source, domains):
++        self.source = source
++        self.legal_batches = {oid: tuple(choices) for oid, choices in domains.items()}
++
++    def __getattr__(self, name):
++        return getattr(self.source, name)
++
++
++def proposal_view(problem):
++    bounds = temporal_assignment_bounds(problem)
++    return DomainView(problem, bounds['domains']), bounds
+--- baseline/models/routing/model_8/alns/k_search/scheduler.py
++++ bounded/models/routing/model_8/alns/k_search/scheduler.py
+@@ -19,7 +19,7 @@
+                     'calendar_reconstructions', 'calendar_reconstruction_improvements',
+                     'calendar_retiming_seconds', 'calendar_reconstruction_seconds',
+                     'calendar_cache_hits', 'calendar_cache_misses', 'calendar_cache_evictions')
+-REPAIR_METRICS = ('timing_repair_attempts', 'timing_repair_successes')
++REPAIR_METRICS = ('timing_repair_attempts', 'timing_repair_successes', 'chain_candidates', 'chain_improvements')
+ 
+ 
+ def _audit(problem, result):
+@@ -212,7 +212,7 @@
+                          proven_infeasible=bool(info.get('proven_infeasible')),
+                          restart='audited_incumbent' if method == 'alns' and seed_result is not None else 'cold',
+                          local_history=deepcopy(info.get('history', [])))
+-            for key in ('proof_scope', 'build_time', 'variables', 'constraints', 'node_count',
++            for key in ('proof_scope', 'domain_certificate', 'build_time', 'variables', 'constraints', 'node_count',
+                         'sol_count', 'evaluations', 'cache_hits', 'calendar_evaluations',
+                         'operator_attempts', 'operator_improvements', 'operator_noops', 'cutoff_polish_calls',
+                         'cutoff_polish_improvements', 'cutoff_polish_evaluations',

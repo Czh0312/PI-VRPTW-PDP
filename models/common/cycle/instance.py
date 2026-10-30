@@ -40,8 +40,8 @@ class MultiBatchInstance:
             model = 3 if len(self.operating_policy.batches) == 1 else 5
         self.operating_policy.require_model(model)
         self.model_number = int(model)
-        self.reusable = self.model_number in (3, 4, 5, 6, 7, 8)
-        self.free_assignment = self.model_number in (2, 4)
+        self.reusable = self.model_number in (3, 4, 5, 6, 7, 8, 9)
+        self.free_assignment = self.model_number in (2, 4, 9)
         self.task_kinds = ('d', 'p') if self.reusable else ('d',)
         # Direct Python callers can supply an integral float, just as JSON/CSV
         # loaders accept 1.0. Canonicalize it before quantities enter schedules
@@ -229,14 +229,14 @@ def load_instance(config, fleet_config):
         raise ValueError('duration_matrix requires distance_matrix')
     network = ProblemInstance(nodes, {k: v for k, v in fleet_config.items() if k != 'operating_policy'},
                               speed=speed, distance_matrix=distance, travel_time_matrix=duration)
-    orders = load_orders(resolve_project_path(config['orders']), policy, joint=config['model'] in (6, 7, 8))
-    if config['model'] in (6, 7, 8):
+    orders = load_orders(resolve_project_path(config['orders']), policy, joint=config['model'] in (6, 7, 8, 9))
+    if config['model'] in (6, 7, 8, 9):
         from models.common.cycle.joint import JointBatchInstance
         from models.common.cycle.uniform import UniformCycleInstance
         if not config.get('economic_config'):
-            raise ValueError('M6–M8 require economic_config')
+            raise ValueError('M6–M9 require economic_config')
         options = config.get('joint_batch_options', {})
-        if config['model'] in (7, 8):
+        if config['model'] in (7, 8, 9):
             from models.common.cycle.calendar import CalendarCycleInstance
             return CalendarCycleInstance(network, orders, policy, options, config['economic_config'], model=config['model'])
         factory = UniformCycleInstance if options.get('schedule_mode') == 'uniform_cycle' else JointBatchInstance

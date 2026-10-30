@@ -1,0 +1,22 @@
+{
+  "design_version": "customer_interleaved_windows_v1",
+  "seed": 20261019,
+  "source_dataset": "data/formal_benchmark27_one_box_v1",
+  "output_dataset": "data/formal_benchmark27_interleaved_v1",
+  "construction_use_buffer_minutes": 2,
+  "pickup_relocation_probability": 0.6,
+  "pickup_move_attempts_per_order": 6,
+  "maximum_event_jitter_minutes": 18,
+  "maximum_departure_jitter_minutes": 35,
+  "delivery_early_slack_minutes": [8, 35],
+  "delivery_late_slack_minutes": [4, 22],
+  "pickup_early_slack_minutes": [5, 25],
+  "pickup_late_slack_minutes": [12, 55],
+  "preserve": [
+    "customers", "network", "goods_weight", "container_count", "satellite_id",
+    "delivery_batch_id", "release_time", "service_time", "min_use_time",
+    "fleet", "operating_policy", "economic_coefficients"
+  ],
+  "method": "Fixed-seed feasibility construction with cross-customer pickup relocations, independently keyed event slack and independently keyed window widths. No route objective, optimizer, runtime, gap or model ranking is used to select inputs.",
+  "dependence_disclosure": "Appointments are synthetic and conditioned on an explicit feasible physical schedule, not independent empirical observations. Vehicle and route assignments in the witness are not binding input decisions and are not supplied as solver starts."
+}

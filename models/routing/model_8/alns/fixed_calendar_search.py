@@ -67,6 +67,8 @@ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_resul
     ):
         raise ValueError("Invalid ALNS time or iteration budget")
     begun = time.perf_counter()
+    repair_stats = dict(timing_repair_attempts=0, timing_repair_successes=0,
+                        chain_candidates=0, chain_improvements=0)
     deadline = begun + max_time
     parameters = ALNSParameters(max_time, max_iterations, seed)
     control = SearchControl(parameters, begun, time.perf_counter)
@@ -75,7 +77,17 @@ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_resul
     # route/batch exploration while rewarding repeated no-op descents.
     route_polish_share = .2 if len(problem.orders) <= 16 else 0.
     search_deadline = deadline - (route_polish_share + (.1 if problem.optimize_cutoffs else 0.))*max_time
-    missing = [oid for oid, choices in problem.legal_batches.items() if not choices]
+    proposal_problem = problem
+    if len(problem.orders) <= 9:
+        from models.routing.model_8.alns.temporal_domains import proposal_view
+        proposal_problem, bounds = proposal_view(problem)
+        if bounds['certificate'] is not None:
+            result = joint_empty_result(problem, 'alns')
+            result['info'].update(status='INFEASIBLE', proven_infeasible=True,
+                proof_scope='necessary_temporal_assignment_domain', domain_certificate=bounds['certificate'],
+                runtime=time.perf_counter()-begun, iterations=0)
+            return result
+    missing = [oid for oid, choices in proposal_problem.legal_batches.items() if not choices]
     if missing:
         result = joint_empty_result(problem, "alns")
         result["info"].update(
@@ -95,28 +107,28 @@ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_resul
     rng = random.Random(seed)
     evaluator = JointEvaluator(problem)
     original = {
-        o.id: o.batch if o.batch in problem.legal_batches[o.id] else problem.legal_batches[o.id][0]
+        o.id: o.batch if o.batch in proposal_problem.legal_batches[o.id] else proposal_problem.legal_batches[o.id][0]
         for o in problem.orders
     }
     earliest = {
         oid: min(bs, key=lambda b: problem.batch_index[b])
-        for oid, bs in problem.legal_batches.items()
+        for oid, bs in proposal_problem.legal_batches.items()
     }
     latest = {
         oid: max(bs, key=lambda b: problem.batch_index[b])
-        for oid, bs in problem.legal_batches.items()
+        for oid, bs in proposal_problem.legal_batches.items()
     }
     from models.routing.model_8.alns.batch_initialization import balanced_assignments
-    seeds = balanced_assignments(problem) + [original, earliest, latest]
+    seeds = balanced_assignments(proposal_problem) + [original, earliest, latest]
     for b in problem.operating_policy.batches:
         seeds.append(
             {
                 oid: b.id if b.id in bs else earliest[oid]
-                for oid, bs in problem.legal_batches.items()
+                for oid, bs in proposal_problem.legal_batches.items()
             }
         )
     seeds = [covered for assignment in seeds
-             if (covered := cover_delivery_batches(problem, assignment)) is not None]
+             if (covered := cover_delivery_batches(proposal_problem, assignment)) is not None]
     if not seeds:
         result = joint_empty_result(problem, "alns")
         result["info"].update(
@@ -207,7 +219,7 @@ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_resul
         proposed_assignment = dict(assignment)
         if "batch" in op:
             proposed_assignment, proposed = _batch_move(
-                problem, evaluator, assignment, rng, op, search_deadline, state.get("cutoffs")
+                proposal_problem, evaluator, assignment, rng, op, search_deadline, state.get("cutoffs")
             )
         elif op in ("shift_cutoff", "align_cutoff"):
             proposed = _cutoff_move(
@@ -224,6 +236,9 @@ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_resul
                     rng.choice(["random", "related"]),
                     search_deadline,
                     scorer=_local_cost_scorer,
+                    validator=(lambda trial: evaluator(assignment, {**trial, 'cutoffs': state['cutoffs']}))
+                        if len(problem.orders) <= 9 else None,
+                    repair_stats=repair_stats,
                 )
                 proposed["cutoffs"] = dict(state["cutoffs"])
             else:
@@ -259,6 +274,32 @@ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_resul
     if route_polish_share and best is not None:
         from models.routing.model_8.alns.polish import polish_routes
         route_deadline = deadline - (.1*max_time if problem.optimize_cutoffs else 0.)
+        if len(problem.orders) <= 9:
+            from models.routing.model_8.alns.chain_repair import recovery_frontier, complete_request_repair, _distance
+            fixed = evaluator.fixed(best_assignment, best_state['cutoffs'])
+            ranking = []
+            for oid in best_assignment:
+                removed = [{**row, 'tasks': [task for task in row['tasks'] if task[0] != oid]} for row in best_state['e2']]
+                ranking.append((_distance(fixed, removed), oid))
+            polished, calls, gains = complete_request_repair(problem, evaluator, best_assignment, best_state,
+                [oid for _, oid in sorted(ranking)[:2]],
+                time.perf_counter()+.4*max(0., route_deadline-time.perf_counter()), max_evaluations=72)
+            repair_stats['chain_candidates'] += calls
+            repair_stats['chain_improvements'] += gains
+            value, candidate, _ = evaluator(best_assignment, polished)
+            if candidate is not None and value < best_cost-1e-8:
+                best, best_cost, best_state = deepcopy(candidate), value, polished
+                history.append(dict(iteration=iterations, objective=value,
+                    time=time.perf_counter()-begun, source='complete_cost_route_repair'))
+            polished, calls, gains = recovery_frontier(problem, evaluator, best_assignment, best_state,
+                time.perf_counter()+.25*max(0., route_deadline-time.perf_counter()), max_evaluations=32)
+            repair_stats['chain_candidates'] += calls
+            repair_stats['chain_improvements'] += gains
+            value, candidate, _ = evaluator(best_assignment, polished)
+            if candidate is not None and value < best_cost-1e-8:
+                best, best_cost, best_state = deepcopy(candidate), value, polished
+                history.append(dict(iteration=iterations, objective=value,
+                    time=time.perf_counter()-begun, source='joint_recovery_profile'))
         polished, route_polish_evaluations, route_polish_improvements = polish_routes(
             evaluator.fixed(best_assignment, best_state.get("cutoffs")), evaluator,
             best_assignment, best_state, route_deadline)
@@ -307,6 +348,7 @@ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_resul
         seed=seed,
         accepted_moves=accepted,
         restarts=restarts,
+        **repair_stats,
         operator_attempts=attempts,
         operator_improvements=improvements,
         operator_weights=dict(zip(operators, weights)),

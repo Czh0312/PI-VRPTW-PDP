@@ -17,8 +17,12 @@ class JointBatchInstance(MultiBatchInstance):
     joint_batch = True
     require_productive_batches = True
 
-    def __init__(self, network, orders, policy, options, economic_config, *, _physical_source=None):
+    def __init__(self, network, orders, policy, options, economic_config, *, _physical_source=None,
+                 _calendar_grid_seconds=None):
         super().__init__(network, orders, policy, model=6, _physical_source=_physical_source)
+        from models.common.cycle.decision_grid import decision_step
+        self.calendar_decision_grid_seconds = _calendar_grid_seconds
+        self.calendar_decision_step = decision_step(self.operating_policy, _calendar_grid_seconds)
         if not self.orders:
             raise ValueError('M6 requires at least one order')
         self.options = deepcopy(options)
@@ -77,6 +81,8 @@ class JointBatchInstance(MultiBatchInstance):
             self.default_cutoffs = {b.id:b.start+offset for b in self.operating_policy.batches}
         elif 'shared_min_phase_ticks' in options:
             raise ValueError('shared_min_phase_ticks requires shared_cutoff')
+        if self.calendar_decision_step > 1:
+            self.default_cutoffs = self.proposed_cutoffs(self.default_cutoffs)
         self.pool_min = integer(options.get('pool_min', 1), 'pool_min', 1)
         self.pool_max = integer(options.get('pool_max', self.total), 'pool_max', 1)
         if not self.pool_min <= self.pool_max <= self.total:
@@ -125,9 +131,20 @@ class JointBatchInstance(MultiBatchInstance):
             lo,hi = self.cutoff_bounds[bid]
             if not lo <= value <= hi:
                 raise ValueError(f'{bid}: cutoff outside configured bounds')
+            if value % self.calendar_decision_step:
+                raise ValueError(f'{bid}: cutoff outside the calendar decision grid')
         if self.shared_cutoff and len({checked[b.id]-b.start for b in self.operating_policy.batches}) != 1:
             raise ValueError('All batches must share the same relative cutoff')
         return checked
+
+    def proposed_cutoffs(self, cutoffs=None):
+        """Quantize heuristic proposals; saved results use strict validation."""
+        if self.calendar_decision_step == 1:
+            return self.validated_cutoffs(cutoffs)
+        from models.common.cycle.decision_grid import snap_decision
+        cutoffs = self.default_cutoffs if cutoffs is None else cutoffs
+        return self.validated_cutoffs({bid: snap_decision(integer(value, 'batch_cutoff', 1),
+            *self.cutoff_bounds[bid], self.calendar_decision_step) for bid, value in cutoffs.items()})
 
     def validated_loading_starts(self, assignment, cutoffs, loading_starts=None):
         """One physical loading event per batch, strictly inside its calendar.

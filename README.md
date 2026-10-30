@@ -5,11 +5,24 @@
 
 [文档导航](docs/README.md) · [开发指南](docs/development.md) · [模型布局](docs/model_layout.md) · [数据说明](data/README.md) · [实验入口](experiments/README.md) · [结果索引](output/README.md)
 
+当前数值实验统一使用[小7、中20、大50顾客的数据集](data/formal_benchmark27_uniform_7_20_50_v1/README.md)，
+每档9例，共27例、216个模型入口。模型3与模型8的ALNS实验先选每档3例，
+以[当前实验方案](config/experiments/m3_m8_uniform_7_20_50_v1/README.md)为准；目前保持停止。
+其他历史算例与旧配置已移入[归档](archive/datasets/retired_20261024/README.md)。
+
 ## 研究主线
 
 1. **M1、M3 基础模型与经济成本模型：验证可循环容器的长期经济可行性。** 在固定分仓、单批次及相同需求和服务条件下，M1 求一次性纸箱的配送路径，M3 求循环容器的配送与回收路径。将两者的路径、工时和车辆等结果输入经济成本模型，加入包装购买、清洗、追踪及寿命补购费用，计算未来重复运营的累计成本，识别何时回本、何时开始节省，以及哪些价格和寿命条件能够支持长期使用循环容器。
 2. **M2、M4 自由选仓扩展：探索分仓决策的进一步优化。** M2 在 M1 基础上允许自由选仓，M4 在 M3 基础上允许自由选仓。通过 M1/M2、M3/M4 分别识别纸箱和循环容器方案中的选仓价值；再将 M2/M4 的结果输入同一经济成本模型，评价自由选仓是否改善循环容器的回本周期和累计节省。
 3. **M8 一般模型及 M5、M6、M7 受限特例：探索多批次的优化潜力。** 在固定分仓下，以 M3 为单批次循环基线，比较预设多批制度 M5、等长共同分界 M6、等长独立分界 M7 与不等长独立分界 M8。重点分析周期内回收、清洗后再次投用能否减少实体箱池，以及这种节省与运输、车辆和作业代价之间的取舍；通过受限模型识别订单分批、批次数、批内分界和批次长度各自带来的改善。多批次是否更经济由结果判断。
+
+最终联合模型为 **M9：在 M8 上加入 M4 的顾客级自由选仓**，统一决策分仓、分批、
+不等长日历、逐批截点、箱池和两级路线。当前先完成精确求解，数学公式与 M8 特例关系见
+[模型9](docs/model9_free_multibatch.md)，已完成[单种子小算例](output/experiments/model9_small_exact_20261030/README.md)。
+另已测试[现有7顾客S02](output/experiments/model89_S02_exact_20261030_v1/README.md)：
+固定K=2诊断找到较M8最优值低8.3683%的M9可行方案；M9全域最优性尚未证明。
+已补测[现有S03/S04](output/experiments/model89_other_small_exact_20261030_v1/README.md)：
+双方固定K=2的限时可行方案成本分别降低29.7758%、29.9282%；M9全域最优性仍未证明。
 
 ## 模型及其用途
 
@@ -23,6 +36,7 @@
 | M6 | 固定分仓；优化订单分批、批次数、箱池和路线，等长批次、共同分界 | 评价均匀分批与共同分界制度 | MILP / ALNS |
 | M7 | 固定分仓；优化订单分批、批次数、箱池和路线，等长批次、逐批独立分界 | 与 M6 比较逐批独立分界的价值 | MILP / ALNS |
 | M8 | 固定分仓；联合优化订单分批、批次数、批次长度、分界、箱池和路线 | 作为一般模型，与 M3/M5/M6/M7 比较多批次及日历优化的潜力 | MILP / ALNS |
+| M9 | 自由选仓；联合优化分仓、订单分批、批次数、批次长度、分界、箱池和路线 | 统一自由选仓与多批次，固定顾客分仓可得到相应 M8 | 联合 MILP（当前先做精确） |
 
 在相同物理数据、费用、时间刻度和允许域下，M8 固定订单分批、批次数、起止及批内分界可得到 M5；限制各批等长可得到 M7，进一步令各批共用相对分界可得到 M6。M3 对应固定单批次的基线；检验其与 M8 的特例关系时，还须固定相同的批内分界和箱池。M5 的给定日历应属于 M8 的允许域，但不必满足 M6 的等长规则。详见 [M5 决策边界](docs/model5_pool_optimization.md)和[日历设计](docs/model7_model8_calendar_design.md)。
 
@@ -57,14 +71,17 @@ M4 精确求解另支持显式 `--m4-strengthening capacity_activation`，加入
 在仓库根目录执行。新环境的安装步骤见[开发指南](docs/development.md)。
 
 ```sh
-# 默认单批机制例（M3，ALNS）
+# 当前S01单批示例（7顾客，M3，ALNS）
 .venv/bin/python main.py route --time 2
 
-# 多批机制例（M5，ALNS）
+# 当前S01多批示例（7顾客，M5，ALNS）
 .venv/bin/python main.py route --case config/experiments/examples/multibatch_demo.json --time 2
 
 # M8 日历优化示例；使用案例中声明的费用与允许域
 .venv/bin/python main.py route --case config/experiments/examples/model8_demo.json --time 2
+
+# M9 自由选仓多批次精确小例；人工参数、完整 K 域和一个种子
+.venv/bin/python main.py route --case config/experiments/examples/model9_demo.json --solver exact --seed 42
 
 # 单批四模型：M1/M3 基础经济性、M2/M4 自由选仓扩展及累计回本（示例费用）
 .venv/bin/python main.py compare-single-batch --time 1 --exact-time 10
@@ -91,7 +108,7 @@ make test
 | --- | --- |
 | `main.py`、`cli/` | 命令分发、单次执行与结果输出 |
 | `pyproject.toml`、`Makefile` | 依赖、测试配置与日常检查命令 |
-| `models/routing/model_1/`～`model_8/` | 每个模型独立拥有 `alns/`、`exact/`，见[逐文件说明](models/routing/README.md) |
+| `models/routing/model_1/`～`model_9/` | M1–M8 各有独立 `alns/`、`exact/`；M9 当前有独立 `exact/`，见[逐文件说明](models/routing/README.md) |
 | `models/common/` | 两种算法共用的数据、业务规则、结果与独立审计 |
 | `archive/routing_baselines/` | 显式调用的历史 M1–M4 及旧搜索组件 |
 | `models/cost/` | 路径结果的费用核算、生命周期累计回本，以及多批次优化使用的费用定义 |

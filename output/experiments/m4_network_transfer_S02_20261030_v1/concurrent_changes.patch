@@ -1,0 +1,227 @@
+--- baseline/models/common/cycle/calendar.py
++++ network/models/common/cycle/calendar.py
+@@ -14,8 +14,9 @@
+ from models.common.cycle.policy import Batch, integer, nonnegative
+ from models.common.cycle.batch_counts import batch_count_domain, equal_batch_clock
+ 
+-SCHEDULE_MODES = {7: 'uniform_independent_cutoffs', 8: 'flexible_cycle'}
+-STRATEGIES = {7: 'independent_cutoff_cost_v1', 8: 'flexible_batch_cost_v1'}
++SCHEDULE_MODES = {7: 'uniform_independent_cutoffs', 8: 'flexible_cycle', 9: 'flexible_cycle'}
++STRATEGIES = {7: 'independent_cutoff_cost_v1', 8: 'flexible_batch_cost_v1',
++              9: 'free_flexible_batch_cost_v1'}
+ 
+ 
+ class CalendarCycleInstance(JointBatchInstance):
+@@ -23,14 +24,16 @@
+ 
+     def __init__(self, network, orders, policy, options, economic_config, *, model):
+         if model not in SCHEDULE_MODES:
+-            raise ValueError('CalendarCycleInstance requires model 7 or 8')
++            raise ValueError('CalendarCycleInstance requires model 7, 8 or 9')
+         allowed = {'schedule_mode', 'batch_count_candidates', 'min_phase_minutes', 'pool_min', 'pool_max',
+                    'loading_mode', 'calendar_decision_grid_seconds'}
++        if model == 9:
++            allowed.add('fixed_customer_assignment')
+         if not isinstance(options, dict) or set(options)-allowed:
+-            raise ValueError('Unknown M7/M8 joint_batch_options')
++            raise ValueError('Unknown calendar joint_batch_options')
+         grid = options.get('calendar_decision_grid_seconds')
+-        if grid is not None and model != 8:
+-            raise ValueError('A calendar decision grid is supported only by M8')
++        if grid is not None and model not in (8, 9):
++            raise ValueError('A calendar decision grid is supported only by M8/M9')
+         mode = SCHEDULE_MODES[model]
+         loading_mode = options.get('loading_mode', 'batch_start')
+         if loading_mode not in ('batch_start', 'optimized') or (model != 7 and loading_mode != 'batch_start'):
+@@ -53,6 +56,11 @@
+         self.minimum_phase_ticks = self.operating_policy.ticks(minimum)
+         self.cycle_duration = self.operating_policy.cycle_end-self.operating_policy.cycle_start
+         self.model_number = model
++        self.free_assignment = model == 9
++        if self.free_assignment:
++            from models.common.cycle.free_calendar import assignment_domains
++            self.customer_assignment_domains = assignment_domains(
++                self, options.get('fixed_customer_assignment'))
+         self.schedule_mode = mode
+         self.batch_count_candidates = batch_count_domain(options, self.cycle_duration, self.minimum_phase_ticks)
+         self.options = deepcopy({**options, 'schedule_mode': mode})
+@@ -68,12 +76,16 @@
+                     cycle_end=p.cycle_end, time_tick_seconds=p.time_tick_seconds)
+         if self.optimize_loading:
+             contract['loading_mode'] = self.loading_mode
+-        if self.model_number == 8:
++        if self.model_number in (8, 9):
+             # The old M8 grid omitted equal partitions at nondivisible K.
+             # Identify the expanded domain in saved results and proof inputs.
+             contract['count_clock_rule'] = 'equal_partition_refinement_v1'
+             if self.calendar_decision_grid_seconds is not None:
+                 contract['calendar_decision_grid_seconds'] = self.calendar_decision_grid_seconds
++        if self.free_assignment:
++            contract['assignment_rule'] = 'one_satellite_per_customer_all_orders_v1'
++            contract['customer_assignment_domains'] = {
++                customer: list(sites) for customer, sites in self.customer_assignment_domains.items()}
+         return contract
+ 
+     def balanced_boundaries(self, count):
+@@ -136,11 +148,16 @@
+                             for i, (a, b) in enumerate(zip(key, key[1:])))
+             ids = tuple(b.id for b in batches)
+             orders = [replace(o, batch=ids[0], allowed_batch_ids=ids) for o in source_orders]
+-            child = JointBatchInstance(self.network, orders, replace(p, batches=batches),
++            factory, extra = JointBatchInstance, {}
++            if self.free_assignment:
++                from models.common.cycle.free_calendar import FreeJointBatchInstance
++                factory = FreeJointBatchInstance
++                extra['customer_assignment_domains'] = self.customer_assignment_domains
++            child = factory(self.network, orders, replace(p, batches=batches),
+                         dict(pool_min=self.pool_min, pool_max=self.pool_max, optimize_cutoffs=True,
+                              min_phase_ticks=minimum, loading_mode=self.loading_mode),
+                         self.cost_profile.config, _physical_source=self,
+-                        _calendar_grid_seconds=self.calendar_decision_grid_seconds)
++                        _calendar_grid_seconds=self.calendar_decision_grid_seconds, **extra)
+             child.calendar_model_number = self.model_number
+             self._calendars[key] = child
+             if len(self._calendars) > 64:
+@@ -160,7 +177,8 @@
+         return self._counts[count]
+ 
+     def selected_problem(self, result):
+-        return self.fixed_calendar(result['cycle_batch_count'], result['batch_boundaries'])
++        child = self.fixed_calendar(result['cycle_batch_count'], result['batch_boundaries'])
++        return child.assigned(result.get('assignment')) if self.free_assignment else child
+ 
+ 
+ class VariableCalendarInstance(JointBatchInstance):
+@@ -173,7 +191,10 @@
+                          reference.options, reference.cost_profile.config, _physical_source=parent,
+                          _calendar_grid_seconds=parent.calendar_decision_grid_seconds)
+         self.parent, self.count = parent, count
+-        self.calendar_model_number = 8
++        self.calendar_model_number = parent.model_number
++        self.free_assignment = parent.free_assignment
++        if self.free_assignment:
++            self.customer_assignment_domains = parent.customer_assignment_domains
+         factor = (reference.operating_policy.time_tick_subdivision
+                   // parent.operating_policy.time_tick_subdivision)
+         self.minimum_phase_ticks = minimum = parent.minimum_phase_ticks * factor
+--- baseline/models/common/cycle/instance.py
++++ network/models/common/cycle/instance.py
+@@ -229,14 +229,14 @@
+         raise ValueError('duration_matrix requires distance_matrix')
+     network = ProblemInstance(nodes, {k: v for k, v in fleet_config.items() if k != 'operating_policy'},
+                               speed=speed, distance_matrix=distance, travel_time_matrix=duration)
+-    orders = load_orders(resolve_project_path(config['orders']), policy, joint=config['model'] in (6, 7, 8))
+-    if config['model'] in (6, 7, 8):
++    orders = load_orders(resolve_project_path(config['orders']), policy, joint=config['model'] in (6, 7, 8, 9))
++    if config['model'] in (6, 7, 8, 9):
+         from models.common.cycle.joint import JointBatchInstance
+         from models.common.cycle.uniform import UniformCycleInstance
+         if not config.get('economic_config'):
+-            raise ValueError('M6–M8 require economic_config')
++            raise ValueError('M6–M9 require economic_config')
+         options = config.get('joint_batch_options', {})
+-        if config['model'] in (7, 8):
++        if config['model'] in (7, 8, 9):
+             from models.common.cycle.calendar import CalendarCycleInstance
+             return CalendarCycleInstance(network, orders, policy, options, config['economic_config'], model=config['model'])
+         factory = UniformCycleInstance if options.get('schedule_mode') == 'uniform_cycle' else JointBatchInstance
+--- baseline/models/common/cycle/policy.py
++++ network/models/common/cycle/policy.py
+@@ -60,7 +60,7 @@
+ 
+     def require_model(self, model):
+         number = integer(model, 'model', 1)
+-        if number in (6, 7, 8):
++        if number in (6, 7, 8, 9):
+             return
+         if len(self.batches) == 1 and number in (1, 2, 3, 4):
+             return
+--- baseline/models/common/cycle/scope.py
++++ network/models/common/cycle/scope.py
+@@ -40,7 +40,7 @@
+     elif model == 6:
+         if problem.model_number != 6 or not getattr(problem, 'joint_batch', False):
+             raise ValueError('Model 6 requires a JointBatchInstance')
+-    elif model in (7, 8):
++    elif model in (7, 8, 9):
+         if problem.model_number != model or not getattr(problem, 'calendar_cycle', False):
+             raise ValueError(f'Model {model} requires its CalendarCycleInstance')
+     else:
+--- baseline/models/cost/comparison.py
++++ network/models/cost/comparison.py
+@@ -7,8 +7,8 @@
+ 
+ 
+ def evaluate_comparison_cost(problem, result, parameters, *, audit=None):
+-    if problem.model_number not in (3, 5, 6, 7, 8):
+-        raise ValueError('Matched joint-cost comparison requires M3 or M5–M8')
++    if problem.model_number not in (3, 5, 6, 7, 8, 9):
++        raise ValueError('Matched joint-cost comparison requires M3 or M5–M9')
+     joint = getattr(problem, 'joint_batch', False)
+     optimized = joint or getattr(problem, 'optimize_pool', False)
+     cost_optimized = optimized or getattr(problem, 'cost_objective', False)
+--- baseline/models/routing/catalog.py
++++ network/models/routing/catalog.py
+@@ -8,15 +8,18 @@
+     description: str
+     supports_cutoff: bool = False
+     supports_multi_batch: bool = False
++    supported_solvers: tuple = ('exact', 'alns')
+ 
+     def module_path(self, batch_mode, method):
+         if batch_mode not in ('single_batch', 'multi_batch'):
+             raise ValueError(f'Unknown batch mode: {batch_mode}')
+         expected = 'multi_batch' if self.supports_multi_batch else 'single_batch'
+-        if self.number not in (6, 7, 8) and batch_mode != expected:
++        if self.number not in (6, 7, 8, 9) and batch_mode != expected:
+             raise ValueError(f'M{self.number} requires {expected}')
+         if method not in ('exact', 'alns'):
+             raise ValueError(f'Unknown solver method: {method}')
++        if method not in self.supported_solvers:
++            raise ValueError(f'M{self.number} currently supports only: {", ".join(self.supported_solvers)}')
+         return f'models.routing.model_{self.number}.{method}'
+ 
+ MODEL_SPECS = {
+@@ -28,9 +31,10 @@
+     6: ModelSpec(6, "joint_batch_pool_cost", "均匀周期分批、统一分界与容器路径成本优化；支持历史候选时段", True, True),
+     7: ModelSpec(7, "independent_cutoff_cost", "等长批次、逐批独立分界与容器路径成本优化", True, True),
+     8: ModelSpec(8, "flexible_batch_cost", "不等长批次、逐批独立分界与容器路径成本优化", True, True),
++    9: ModelSpec(9, "free_flexible_batch_cost", "自由分仓、不等长多批次与容器路径成本联合优化", True, True, ('exact',)),
+ }
+ 
+ def require_model_number(number):
+     if number not in MODEL_SPECS:
+-        raise ValueError(f"当前模型编号必须为 1–8；M6–M8 是联合分批成本模型，收到: {number}")
++        raise ValueError(f"当前模型编号必须为 1–9；M9 当前先支持精确求解，收到: {number}")
+     return number
+--- baseline/models/routing/service.py
++++ network/models/routing/service.py
+@@ -35,7 +35,7 @@
+             raise ValueError("Requested model does not match the loaded instance")
+         if e1_tasks or e2_tasks_by_sat:
+             raise ValueError("Multibatch quantities must be derived from return events, not static tasks")
+-        expected_backend = 'joint_batch_indexed' if model in (6, 7, 8) else 'multibatch_indexed'
++        expected_backend = 'joint_batch_indexed' if model in (6, 7, 8, 9) else 'multibatch_indexed'
+         if exact_backend not in (None, expected_backend):
+             raise ValueError(f'Model {model} requires {expected_backend}; incompatible or legacy backend: {exact_backend}')
+         from models.common.cycle.scope import batch_mode_for
+@@ -57,7 +57,7 @@
+         raise ValueError('Exact strategies require the current cycle policy, not the historical baseline')
+     if model == 5:
+         raise ValueError('Current M5 requires multi_batch_cutoff_v1 with B>1; historical M5 was retired')
+-    if model in (6, 7, 8):
++    if model in (6, 7, 8, 9):
+         raise ValueError(f'Current M{model} requires multi_batch_cutoff_v1 and explicit joint batch/cost inputs')
+     if not allow_baseline:
+         raise ValueError("Historical policy: use route --baseline / allow_baseline=True explicitly. "
+--- baseline/tools/configuration/loader.py
++++ network/tools/configuration/loader.py
+@@ -132,7 +132,7 @@
+             raise ValueError('Multibatch cases require schema_version=2 and orders')
+     elif case.get('schema_version', 1) != 1 or case.get('orders'):
+         raise ValueError('schema_version=2/orders requires multi_batch_cutoff_v1')
+-    fixed_pool = case['model'] not in (5, 6, 7, 8) or (
++    fixed_pool = case['model'] not in (5, 6, 7, 8, 9) or (
+         case['model'] == 5 and run_config.get('objective_mode') == 'distance')
+     if version == 'multi_batch_cutoff_v1' and use_pool_config and fixed_pool:
+         from .container_pools import apply_pool_config

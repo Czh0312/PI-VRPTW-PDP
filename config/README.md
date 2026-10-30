@@ -18,6 +18,12 @@
 
 ## 常用入口
 
+当前正式数据集固定为小7、中20、大50顾客，每档9例，见
+[当前登记](experiments/current.json)。M3/M8先各取每档3例，见
+[实验方案](experiments/m3_m8_uniform_7_20_50_v1/README.md)。
+`examples/`仅引用该数据集的S01，不另建机制算例；旧实验组合与数据生成配置见
+[历史归档](../archive/datasets/retired_20261024/README.md)。
+
 ```sh
 # 单批 M3 默认示例
 .venv/bin/python main.py route --case config/experiments/examples/single_batch_demo.json

@@ -469,9 +469,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['prepare','run','worker','status','analyze','pack'])
     parser.add_argument('--output', required=True)
-    parser.add_argument('--dataset', default='data/formal_benchmark27_spacetime_v4_1')
+    parser.add_argument('--dataset', default='data/formal_benchmark27_uniform_7_20_50_v1')
     parser.add_argument('--models', nargs='+', type=int, choices=range(1,9), default=list(range(1,9)))
-    parser.add_argument('--m3-objective-mode', choices=('distance', 'cost'), default='distance',
+    parser.add_argument('--m3-objective-mode', choices=('distance', 'cost'), default='cost',
                         help='Use cost for matched M3/M5–M8 optimization; distance preserves packaging baselines')
     parser.add_argument('--bases', nargs='+')
     parser.add_argument('--exact-seconds', type=float, default=300)

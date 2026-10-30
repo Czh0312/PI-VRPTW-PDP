@@ -1,6 +1,6 @@
 # 精确模型的参数、变量、约束与目标函数
 
-M1–M8 的精确模型按数学职责组织。每个模型独立拥有下列文件，继续复用
+M1–M9 的精确模型按数学职责组织。每个模型独立拥有下列文件，继续复用
 `models/common/` 中的业务实例、订单、运行规则和车队，以及 `models/cost/` 中的成本口径。
 
 | 文件 | 数学职责 | 阅读重点 |
@@ -32,6 +32,7 @@ M6–M8 的可变批次数输入现由 `model.py` 返回统一模型，`context`
 | M6 | [formulation.py](../models/routing/model_6/exact/formulation.py) |
 | M7 | [formulation.py](../models/routing/model_7/exact/formulation.py) |
 | M8 | [formulation.py](../models/routing/model_8/exact/formulation.py) |
+| M9 | [formulation.py](../models/routing/model_9/exact/formulation.py)；[自由选仓多批次数学模型](model9_free_multibatch.md) |
 
 组装过程准备参数、创建一个 Gurobi 模型与 `ModelVariables`，按业务顺序调用约束组，
 最后设置目标函数。主流程的变量创建表达位于 `variables.py` 内，辅助变量按其所需约束分阶段创建，
@@ -44,6 +45,7 @@ M6–M8 的可变批次数输入现由 `model.py` 返回统一模型，`context`
 | `add_assignment_constraints` | M1–M5 的顾客分仓、仓点启用和一级供货容量 |
 | `add_calendar_constraints` | M6–M8 的批次边界与分界时刻 |
 | `add_order_batch_constraints` | M6–M8 的订单分批、批次启用及订单释放时刻 |
+| `add_customer_assignment_constraints` | M9 的顾客同仓与订单“仓×批次”联动 |
 | `add_supply_time_constraints` | 一级供货完成时刻及其安全上下界 |
 | `add_route_constraints` | 路径流平衡、访问启用、载荷、时间窗和弧传播 |
 | `add_first_echelon_constraints` | 一级装货、配送与回运、同车连续作业 |

@@ -1,0 +1,88 @@
+{
+  "incumbent_cost": 34.905055668684454,
+  "pool_at_least": 4,
+  "pool_at_most_in_optimum": 4,
+  "TSP_permutations": 5040,
+  "TSP_distance_lower_bound": 94.32237807494273,
+  "TSP_tour": [
+    "S0",
+    "C2",
+    "C7",
+    "C4",
+    "C8",
+    "C6",
+    "C3",
+    "C5",
+    "S0"
+  ],
+  "E1_distance_lower_bound": 57.271284253105414,
+  "constant_cost": 0.14,
+  "N_ge_5_total_cost_lower_bound": 35.58324732905768,
+  "metric_triangle_inequality_checked": true,
+  "travel_triangle_inequality_checked": true,
+  "returns_needed_before_second_batch": 3,
+  "optimistic_order_returns": {
+    "C2_order": 33979,
+    "C3_order": 58470,
+    "C4_order": 34252,
+    "C5_order": 33720,
+    "C6_order": 58683,
+    "C7_order": 34385,
+    "C8_order": 57543
+  },
+  "first_cutoff_lower_bound": 34260,
+  "clean_delay_after_cutoff": 1570,
+  "second_batch_start_lower_bound": 35880,
+  "second_batch_earliest_deliveries": {
+    "C2_order": {
+      "earliest": 37289,
+      "due": 35400
+    },
+    "C3_order": {
+      "earliest": 37240,
+      "due": 59340
+    },
+    "C4_order": {
+      "earliest": 37562,
+      "due": 35400
+    },
+    "C5_order": {
+      "earliest": 36850,
+      "due": 35580
+    },
+    "C6_order": {
+      "earliest": 37393,
+      "due": 59400
+    },
+    "C7_order": {
+      "earliest": 37335,
+      "due": 35760
+    },
+    "C8_order": {
+      "earliest": 37453,
+      "due": 58800
+    }
+  },
+  "forced_first_batch_orders": [
+    "C2_order",
+    "C4_order",
+    "C5_order",
+    "C7_order"
+  ],
+  "forced_second_batch_orders": [
+    "C3_order",
+    "C6_order",
+    "C8_order"
+  ],
+  "scope": "Optimality-preserving for S01 K=2 minute calendar, using audited incumbent; excludes only dominated or impossible cases",
+  "proof_steps": [
+    "D_b<=N and D1+D2=7 imply N>=4.",
+    "Every productive E1 batch visits the sole satellite and returns, giving two depot-satellite round trips.",
+    "Concatenate all E2 tours at the sole satellite and shortcut duplicates; metricity gives a Hamiltonian tour no longer than their sum.",
+    "Even relaxed transport plus N>=5 costs more than the audited incumbent; hence an optimum must have N=4.",
+    "Issuing 7 boxes from N=4 requires at least 3 first-batch boxes cleaned before the second batch starts.",
+    "There is exactly one E1 recovery visit per batch; its clean release is no earlier than cutoff+site service+depot travel+unload+cleaning.",
+    "At least 3 customer boxes must reach the satellite by cutoff1, bounding cutoff1 by the third earliest optimistic individual return.",
+    "Four early orders cannot meet delivery due dates if assigned to batch2; they fill all four batch1 boxes, forcing remaining three to batch2."
+  ]
+}

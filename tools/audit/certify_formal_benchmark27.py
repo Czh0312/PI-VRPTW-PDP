@@ -156,7 +156,7 @@ def certify(root):
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--dataset',default='data/formal_benchmark27_spacetime_v4_1')
+    parser.add_argument('--dataset',default='data/formal_benchmark27_uniform_7_20_50_v1')
     parser.add_argument('--verify',action='store_true')
     args=parser.parse_args()
     result=verify_witnesses(args.dataset) if args.verify else certify(args.dataset)

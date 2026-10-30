@@ -49,7 +49,7 @@ def _with_cutoff(problem, state, bid, selected):
         cuts = {b.id: b.start + offset for b in problem.operating_policy.batches}
     else:
         cuts[bid] = selected
-    proposed["cutoffs"] = cuts
+    proposed["cutoffs"] = problem.proposed_cutoffs(cuts)
     return proposed
 
 

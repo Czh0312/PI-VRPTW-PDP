@@ -49,6 +49,17 @@ def solve_variable_count(variable, *, max_time, max_iterations, seed, initial_re
             initial_result=initial_result,
         )
     begun = time.perf_counter()
+    repair_stats = dict(timing_repair_attempts=0, timing_repair_successes=0,
+                        chain_candidates=0, chain_improvements=0)
+    if len(parent.orders) <= 9:
+        from models.routing.model_8.alns.temporal_domains import temporal_assignment_bounds
+        certificate = temporal_assignment_bounds(variable)['certificate']
+        if certificate is not None:
+            result = joint_empty_result(variable, 'alns')
+            result['info'].update(status='INFEASIBLE', proven_infeasible=True,
+                proof_scope='necessary_temporal_assignment_domain', domain_certificate=certificate,
+                runtime=time.perf_counter()-begun, iterations=0)
+            return result
     warm_iterations = 0
     if initial_result is None and len(parent.orders) <= 16 and max_iterations > 0:
         from models.routing.model_8.alns.fixed_calendar_search import solve_alns as solve_fixed_calendar
@@ -56,6 +67,8 @@ def solve_variable_count(variable, *, max_time, max_iterations, seed, initial_re
         warm = solve_fixed_calendar(parent.fixed_calendar(k), max_time=.35*max_time,
             max_iterations=max(1, max_iterations//3), seed=seed)
         warm_iterations = warm['info'].get('iterations', 0)
+        for key in repair_stats:
+            repair_stats[key] += warm['info'].get(key, 0)
         if warm.get('audit', {}).get('valid'):
             attach_calendar_decisions(parent, warm, k, parent.balanced_boundaries(k))
             initial_result = warm
@@ -103,22 +116,30 @@ def solve_variable_count(variable, *, max_time, max_iterations, seed, initial_re
             calendar_stats['calendar_cache_hits'] += 1
         evaluators.move_to_end(boundaries)
         evaluator = evaluators[boundaries]
+        if not hasattr(evaluator, 'proposal_problem'):
+            if len(parent.orders) <= 9:
+                from models.routing.model_8.alns.temporal_domains import proposal_view
+                evaluator.proposal_problem, _ = proposal_view(evaluator.problem)
+            else:
+                evaluator.proposal_problem = evaluator.problem
         return evaluator.problem, evaluator
 
     def repair(boundaries, assignment=None, state=None, *, profile=None):
         child, evaluator = context(boundaries)
-        missing = sum(not bs for bs in child.legal_batches.values())
+        proposal_problem = evaluator.proposal_problem
+        missing = sum(not bs for bs in proposal_problem.legal_batches.values())
         if missing:
             return penalty * (10 + missing), None, None, None
         proposed = {
             oid: assignment[oid] if assignment is not None and assignment[oid] in bs else bs[-1]
-            for oid, bs in child.legal_batches.items()
+            for oid, bs in proposal_problem.legal_batches.items()
         }
-        proposed = cover_delivery_batches(child, proposed)
+        proposed = cover_delivery_batches(proposal_problem, proposed)
         if proposed is None:
             return penalty * 10, None, None, None
         cuts = profile or (state.get("cutoffs") if state is not None else child.default_cutoffs)
         cuts = {bid: min(hi, max(lo, cuts[bid])) for bid, (lo, hi) in child.cutoff_bounds.items()}
+        cuts = child.proposed_cutoffs(cuts)
         chosen = None
         diversify = False
         if state is not None and proposed == assignment:
@@ -208,18 +229,28 @@ def solve_variable_count(variable, *, max_time, max_iterations, seed, initial_re
     for bounds, preferred_assignment, preferred_cutoffs in plans:
         if current is not None and time.perf_counter() >= init_deadline:
             break
-        child, _ = context(bounds)
+        child, initializer = context(bounds)
         profiles = _initial_cutoff_profiles(child)
         if preferred_cutoffs is not None:
             profiles.insert(0, {bid: min(hi, max(lo, preferred_cutoffs[bid]))
                                for bid, (lo, hi) in child.cutoff_bounds.items()})
         starts = ([preferred_assignment] if preferred_assignment is not None
-                  else balanced_assignments(child, limit=4) + [None])
+                  else balanced_assignments(initializer.proposal_problem, limit=4) + [None])
         for profile, seed_assignment in [(profiles[0], a) for a in starts] + [
                 (profile, starts[0]) for profile in profiles[1:]]:
             if current is not None and time.perf_counter() >= init_deadline:
                 break
             score, assignment, state, candidate = repair(bounds, assignment=seed_assignment, profile=profile)
+            if len(parent.orders) <= 9 and state is not None and time.perf_counter() < init_deadline:
+                from models.routing.model_8.alns.chain_repair import recovery_frontier
+                child, evaluator = context(bounds)
+                polished, calls, gains = recovery_frontier(child, evaluator, assignment, state,
+                    min(init_deadline, time.perf_counter()+.05*max_time), max_evaluations=24)
+                repair_stats['chain_candidates'] += calls
+                repair_stats['chain_improvements'] += gains
+                value, decoded, _ = evaluator(assignment, polished)
+                if decoded is not None and value < score:
+                    score, state, candidate = value, polished, decoded
             if current is None or score < current[0]:
                 current = score, bounds, assignment, state
             remember(score, bounds, assignment, state, candidate, 0, "calendar_construction")
@@ -282,7 +313,7 @@ def solve_variable_count(variable, *, max_time, max_iterations, seed, initial_re
             proposed_assignment = dict(assignment)
             if "batch" in op:
                 proposed_assignment, proposed = _batch_move(
-                    child, evaluator, assignment, rng, op, search_deadline, state["cutoffs"]
+                    evaluator.proposal_problem, evaluator, assignment, rng, op, search_deadline, state["cutoffs"]
                 )
             elif op in ("shift_cutoff", "align_cutoff"):
                 proposed = _cutoff_move(
@@ -299,6 +330,9 @@ def solve_variable_count(variable, *, max_time, max_iterations, seed, initial_re
                         rng.choice(["random", "related"]),
                         search_deadline,
                         scorer=_local_cost_scorer,
+                        validator=(lambda trial: evaluator(assignment, {**trial, 'cutoffs': state['cutoffs']}))
+                            if len(parent.orders) <= 9 else None,
+                        repair_stats=repair_stats,
                     )
                     proposed["cutoffs"] = dict(state["cutoffs"])
                 else:
@@ -322,6 +356,27 @@ def solve_variable_count(variable, *, max_time, max_iterations, seed, initial_re
     if best is not None and len(parent.orders) <= 16:
         from models.routing.model_8.alns.polish import polish_routes
         child, evaluator = context(best_boundaries)
+        if len(parent.orders) <= 9:
+            from models.routing.model_8.alns.chain_repair import recovery_frontier, complete_request_repair, _distance
+            route_deadline = deadline-.12*max_time
+            fixed = evaluator.fixed(best_assignment, best_state['cutoffs'])
+            ranking = []
+            for oid in best_assignment:
+                removed = [{**row, 'tasks': [task for task in row['tasks'] if task[0] != oid]} for row in best_state['e2']]
+                ranking.append((_distance(fixed, removed), oid))
+            polished, calls, gains = complete_request_repair(child, evaluator, best_assignment, best_state,
+                [oid for _, oid in sorted(ranking)[:2]],
+                time.perf_counter()+.4*max(0., route_deadline-time.perf_counter()), max_evaluations=72)
+            repair_stats['chain_candidates'] += calls
+            repair_stats['chain_improvements'] += gains
+            value, candidate, _ = evaluator(best_assignment, polished)
+            remember(value, best_boundaries, best_assignment, polished, candidate, iterations, 'complete_cost_route_repair')
+            polished, calls, gains = recovery_frontier(child, evaluator, best_assignment, best_state,
+                time.perf_counter()+.25*max(0., route_deadline-time.perf_counter()), max_evaluations=32)
+            repair_stats['chain_candidates'] += calls
+            repair_stats['chain_improvements'] += gains
+            value, candidate, _ = evaluator(best_assignment, polished)
+            remember(value, best_boundaries, best_assignment, polished, candidate, iterations, 'joint_recovery_profile')
         polished, route_polish_evaluations, route_polish_improvements = polish_routes(
             evaluator.fixed(best_assignment, best_state["cutoffs"]), evaluator,
             best_assignment, best_state, deadline-.12*max_time)
@@ -359,6 +414,7 @@ def solve_variable_count(variable, *, max_time, max_iterations, seed, initial_re
         evaluations=evicted_misses + sum(e.misses for e in evaluators.values()),
         cache_hits=evicted_hits + sum(e.hits for e in evaluators.values()),
         operator_noops=noops,
+        **repair_stats,
         calendar_reconstruction_period=parameters.calendar_reconstruction_period,
         **calendar_stats,
     )

@@ -94,11 +94,21 @@ def test_unrestricted_search_keeps_all_counts_in_proof_scope(model):
 
 def test_cli_all_counts_overrides_an_existing_restricted_case(tmp_path):
     from cli.route import main
-    r = main(['--case', 'config/experiments/examples/model7_demo.json', '--all-batch-counts',
+    from tools.configuration.loader import load_routing_case
+    from models.common.cycle.policy import MultiBatchPolicy
+    case = 'config/experiments/examples/model7_demo.json'
+    config, fleet = load_routing_case(case)
+    policy = MultiBatchPolicy.from_config(fleet['operating_policy'])
+    minimum = policy.ticks(config['joint_batch_options'].get('min_phase_minutes', 1))
+    expected = list(range(1, (policy.cycle_end-policy.cycle_start)//(2*minimum)+1))
+    # This example now follows the current benchmark. Its horizon is an input,
+    # not the historical 130-minute synthetic fixture used by other tests here.
+    assert config['joint_batch_options']['batch_count_candidates'] != expected
+    r = main(['--case', case, '--all-batch-counts',
               '--solver', 'alns', '--time', '1', '--iterations', '200',
               '--output', str(tmp_path/'all_counts')])
-    assert r['info']['batch_count_candidates'] == list(range(1, 66))
-    assert [row['batch_count'] for row in r['count_search']] == list(range(1, 66))
+    assert r['info']['batch_count_candidates'] == expected
+    assert [row['batch_count'] for row in r['count_search']] == expected
     assert r['audit']['valid'] and r['audit']['periodic_replay']['valid']
 
 

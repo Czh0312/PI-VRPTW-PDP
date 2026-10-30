@@ -15,6 +15,9 @@ def deadline_calendar_seeds(variable):
     feasibility. No saved solution or case identifier participates.
     """
     p, parent = variable.operating_policy, variable.parent
+    if len(variable.orders) <= 9:
+        from models.routing.model_8.alns.temporal_domains import proposal_view
+        variable, _ = proposal_view(variable)
     for assignment in balanced_assignments(variable, limit=16, width=64):
         latest, reuse = {}, {}
         for order in variable.orders:
@@ -36,7 +39,7 @@ def deadline_calendar_seeds(variable):
             boundaries[index] = min(latest[bid], boundaries[index+1]
                 -max(2*variable.minimum_phase_ticks, reuse[bid]))
         try:
-            boundaries = parent.validated_boundaries(variable.count, boundaries)
+            boundaries = parent.proposed_boundaries(variable.count, boundaries)
         except ValueError:
             continue
         cuts = {}
@@ -78,6 +81,7 @@ def polish_calendar(variable, context, boundaries, assignment, state, result, de
                 changed[index] = min(high, max(low, changed[index]))
             elif changed[0] < order.release_time or changed[0] > latest:
                 continue
+            changed = variable.parent.proposed_boundaries(variable.count, changed)
             proposed = {**assignment, order.id: batch.id}
             loads = Counter()
             for other in variable.orders:

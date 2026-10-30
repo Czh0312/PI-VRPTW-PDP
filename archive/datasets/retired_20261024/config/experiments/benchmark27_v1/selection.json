@@ -1,0 +1,907 @@
+{
+  "schema_version": 1,
+  "design_id": "benchmark27_v1",
+  "date": "2026-10-15",
+  "status": "generated_reviewed_revision_3_basic_costs",
+  "user_requirement": "Exactly nine base instances in each of small, medium and large; shared demand and physical inputs across eight model configurations.",
+  "base_case_count": 27,
+  "model_configuration_count": 216,
+  "source_manifest": "data/model5_model6/shared_v1_20261005/manifest.json",
+  "source_manifest_sha256": "ab3a0e9c4f5cedfea29041cf7a708fa80bec316b8fbe8e34fb2fdffa008aa778",
+  "source_block_count": 14,
+  "selection_rule": "Within each declared customer-count stratum, retain the first listed number of family IDs in lexicographic order, profile 1 only, spread_medium only; do not inspect solver results. All core cases use Zhou coordinate units.",
+  "customer_count_quotas": {
+    "small": {
+      "7": 3,
+      "10": 3,
+      "12": 3
+    },
+    "medium": {
+      "20": 4,
+      "30": 5
+    },
+    "large": {
+      "50": 4,
+      "100": 5
+    }
+  },
+  "model_profiles": {
+    "1": {
+      "packaging": "single_use",
+      "assignment": "fixed_reference",
+      "batch_count": 1,
+      "pool": "not_applicable",
+      "objective": "distance"
+    },
+    "2": {
+      "packaging": "single_use",
+      "assignment": "optimized",
+      "batch_count": 1,
+      "pool": "not_applicable",
+      "objective": "distance"
+    },
+    "3": {
+      "packaging": "reusable",
+      "assignment": "fixed_reference",
+      "batch_count": 1,
+      "pool": "Q",
+      "objective": "distance"
+    },
+    "4": {
+      "packaging": "reusable",
+      "assignment": "optimized",
+      "batch_count": 1,
+      "pool": "Q",
+      "objective": "distance"
+    },
+    "5": {
+      "packaging": "reusable",
+      "assignment": "fixed_reference",
+      "batch_count": 3,
+      "order_batches": "fixed_reference",
+      "calendar": "fixed_equal_length_common_cutoff_0.70",
+      "pool": "Q",
+      "objective": "distance"
+    },
+    "6": {
+      "packaging": "reusable",
+      "assignment": "fixed_reference",
+      "batch_count": "optimized_common_admissible_domain",
+      "order_batches": "optimized",
+      "calendar": "equal_length_common_cutoff_optimized",
+      "pool": "optimized_1_to_Q",
+      "objective": "cost"
+    },
+    "7": {
+      "packaging": "reusable",
+      "assignment": "fixed_reference",
+      "batch_count": "optimized_common_admissible_domain",
+      "order_batches": "optimized",
+      "calendar": "equal_length_independent_cutoffs_optimized",
+      "pool": "optimized_1_to_Q",
+      "objective": "cost"
+    },
+    "8": {
+      "packaging": "reusable",
+      "assignment": "fixed_reference",
+      "batch_count": "optimized_common_admissible_domain",
+      "order_batches": "optimized",
+      "calendar": "variable_lengths_independent_cutoffs_optimized",
+      "pool": "optimized_1_to_Q",
+      "objective": "cost"
+    }
+  },
+  "comparison_rules": [
+    "Same absolute demand, locations, windows, releases, service/use times, network, fleet, cycle and applicable economic rates within a base instance.",
+    "B1 adapters may change batch bindings/calendar only; use the same final return cutoff as the reference multibatch calendar.",
+    "Do not fix optimized decisions to a model-specific best solution or alter physical inputs to force feasibility.",
+    "M6-M8 use the same exogenous K domain, minimum phase duration, nonempty delivery-and-return rule and explicitly checked time representation.",
+    "Current M1-M5 optimize distance; use common post-evaluation and a fixed-policy cost control to separate objective changes from expanded decisions.",
+    "Nine cases per size does not imply nine independent source instances; preserve source-block pairing in summaries.",
+    "Equal seeds and total-call budgets within a matched model/algorithm comparison; no solver execution is part of this design.",
+    "The underlying positive-integer K domain is common; model-specific exclusions require input-derived impossibility certificates and must preserve every feasible solution."
+  ],
+  "cases": [
+    {
+      "id": "S01",
+      "size": "small",
+      "customer_count": 7,
+      "family_id": "zhou_Set1_7-2-1",
+      "source_block": "zhou:Set1_7-2-1",
+      "variant": "spread_medium",
+      "total_container_uses": 12,
+      "common_reference_files": {
+        "data": "data/shared/small/zhou_Set1_7-2-1/network.csv",
+        "orders": "data/model5_model6/shared_v1_20261005/zhou_Set1_7-2-1/spread_medium/orders.json",
+        "routing_config": "data/model6/uniform_v2_20261005/zhou_Set1_7-2-1/spread_medium/fleet.json",
+        "operating_policy": "data/model5_model6/shared_v1_20261005/zhou_Set1_7-2-1/spread_medium/policy.json",
+        "economic_config": "data/model6/uniform_v2_20261005/zhou_Set1_7-2-1/spread_medium/economic.json"
+      },
+      "reference_sha256": {
+        "data": "6fac14e623a613b420a6c5150e3846943f44654459c2dddc2b52024e5dfd0877",
+        "orders": "8825f018bee897bc22dc873c108a94b96e0369d6521264588b03c3b146682236",
+        "routing_config": "601ec9cdd406f73db34437f1eba3c672356f3f3491d8d526f70d95fc054e45f5",
+        "operating_policy": "e9ab9381b0cabbc14e2d782bbb55b577829381d114e2a05dabc2a7da4bc33c9a",
+        "economic_config": "baca32d62d75ee028596325a5d62df254d1e7b6d60f8d7f7fb126b0b0a4f472b"
+      },
+      "spatial_sha256": "42cd9dec2b02a4ba0179228efb2d4d72e217bc0f646a9db2d2042db83bd49c79",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_7-2-1/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_7-2-1/spread_medium/m6_case.json",
+      "adaptation_status": "model_1_to_8_adapters_not_generated"
+    },
+    {
+      "id": "S02",
+      "size": "small",
+      "customer_count": 7,
+      "family_id": "zhou_Set1_7-2-1b",
+      "source_block": "zhou:Set1_7-2-1b",
+      "variant": "spread_medium",
+      "total_container_uses": 11,
+      "common_reference_files": {
+        "data": "data/shared/small/zhou_Set1_7-2-1b/network.csv",
+        "orders": "data/model5_model6/shared_v1_20261005/zhou_Set1_7-2-1b/spread_medium/orders.json",
+        "routing_config": "data/model6/uniform_v2_20261005/zhou_Set1_7-2-1b/spread_medium/fleet.json",
+        "operating_policy": "data/model5_model6/shared_v1_20261005/zhou_Set1_7-2-1b/spread_medium/policy.json",
+        "economic_config": "data/model6/uniform_v2_20261005/zhou_Set1_7-2-1b/spread_medium/economic.json"
+      },
+      "reference_sha256": {
+        "data": "abac9c81d3bf51c9f7ed0e0f2231e81e5b9302acdb2d75d860ac047345cac94f",
+        "orders": "52c4893bb470f55c3e1d55c5f0f44ba6cf775a1c0e7e45cd7ec89076dec10815",
+        "routing_config": "601ec9cdd406f73db34437f1eba3c672356f3f3491d8d526f70d95fc054e45f5",
+        "operating_policy": "c36a3fb7b1ffaef566a5eaae61e62f7c67dea5228558905c91fc6d080e797a08",
+        "economic_config": "baca32d62d75ee028596325a5d62df254d1e7b6d60f8d7f7fb126b0b0a4f472b"
+      },
+      "spatial_sha256": "1f53aaff4a7f7114290b4707b97340ceca432db92a9fa3f0ab908470798773f5",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_7-2-1b/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_7-2-1b/spread_medium/m6_case.json",
+      "adaptation_status": "model_1_to_8_adapters_not_generated"
+    },
+    {
+      "id": "S03",
+      "size": "small",
+      "customer_count": 7,
+      "family_id": "zhou_Set1_7-2-2",
+      "source_block": "zhou:Set1_7-2-2",
+      "variant": "spread_medium",
+      "total_container_uses": 11,
+      "common_reference_files": {
+        "data": "data/shared/small/zhou_Set1_7-2-2/network.csv",
+        "orders": "data/model5_model6/shared_v1_20261005/zhou_Set1_7-2-2/spread_medium/orders.json",
+        "routing_config": "data/model6/uniform_v2_20261005/zhou_Set1_7-2-2/spread_medium/fleet.json",
+        "operating_policy": "data/model5_model6/shared_v1_20261005/zhou_Set1_7-2-2/spread_medium/policy.json",
+        "economic_config": "data/model6/uniform_v2_20261005/zhou_Set1_7-2-2/spread_medium/economic.json"
+      },
+      "reference_sha256": {
+        "data": "75de56099af86d9a957f7bcf03546977ca62e30a05868e813523e8d7e89eca3d",
+        "orders": "60ec19247fb4f9b90ce90c6aa490ab68d1ba388b7fba5009007dcfead819a46f",
+        "routing_config": "601ec9cdd406f73db34437f1eba3c672356f3f3491d8d526f70d95fc054e45f5",
+        "operating_policy": "c36a3fb7b1ffaef566a5eaae61e62f7c67dea5228558905c91fc6d080e797a08",
+        "economic_config": "baca32d62d75ee028596325a5d62df254d1e7b6d60f8d7f7fb126b0b0a4f472b"
+      },
+      "spatial_sha256": "7573ac5a37b4ab0170f532ad1198cf03dbb3f0056cce057663af57c521a715b3",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_7-2-2/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_7-2-2/spread_medium/m6_case.json",
+      "adaptation_status": "model_1_to_8_adapters_not_generated"
+    },
+    {
+      "id": "S04",
+      "size": "small",
+      "customer_count": 10,
+      "family_id": "zhou_Set1_10-2-1",
+      "source_block": "zhou:Set1_10-2-1",
+      "variant": "spread_medium",
+      "total_container_uses": 15,
+      "common_reference_files": {
+        "data": "data/shared/small/zhou_Set1_10-2-1/network.csv",
+        "orders": "data/model5_model6/shared_v1_20261005/zhou_Set1_10-2-1/spread_medium/orders.json",
+        "routing_config": "data/model6/uniform_v2_20261005/zhou_Set1_10-2-1/spread_medium/fleet.json",
+        "operating_policy": "data/model5_model6/shared_v1_20261005/zhou_Set1_10-2-1/spread_medium/policy.json",
+        "economic_config": "data/model6/uniform_v2_20261005/zhou_Set1_10-2-1/spread_medium/economic.json"
+      },
+      "reference_sha256": {
+        "data": "0f57cf3e3920a7fbc8e4d3c78fcb817eddefd5d134aef02995aae9674aab7848",
+        "orders": "1fbdc5024b2b8f2c122e91e2bf46a829e8d9e21c7fbc99b07fcd334970fd0483",
+        "routing_config": "c4062403e4888cb797f2d0eee624f8834055621fe128dbb4ffa447754532ac60",
+        "operating_policy": "9b2be9ccfb918d99a562326b7ca89db77a37614a3ff2c1b34d7a4e7d782b7704",
+        "economic_config": "baca32d62d75ee028596325a5d62df254d1e7b6d60f8d7f7fb126b0b0a4f472b"
+      },
+      "spatial_sha256": "065b96cdeb1faf87743cb6febd99103be0b4012b05ae6cf36217a98d125cb85a",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_10-2-1/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_10-2-1/spread_medium/m6_case.json",
+      "adaptation_status": "model_1_to_8_adapters_not_generated"
+    },
+    {
+      "id": "S05",
+      "size": "small",
+      "customer_count": 10,
+      "family_id": "zhou_Set1_10-2-1b",
+      "source_block": "zhou:Set1_10-2-1b",
+      "variant": "spread_medium",
+      "total_container_uses": 16,
+      "common_reference_files": {
+        "data": "data/shared/small/zhou_Set1_10-2-1b/network.csv",
+        "orders": "data/model5_model6/shared_v1_20261005/zhou_Set1_10-2-1b/spread_medium/orders.json",
+        "routing_config": "data/model6/uniform_v2_20261005/zhou_Set1_10-2-1b/spread_medium/fleet.json",
+        "operating_policy": "data/model5_model6/shared_v1_20261005/zhou_Set1_10-2-1b/spread_medium/policy.json",
+        "economic_config": "data/model6/uniform_v2_20261005/zhou_Set1_10-2-1b/spread_medium/economic.json"
+      },
+      "reference_sha256": {
+        "data": "dc9548b0e73050fb9e3fc2a1232e97130b0fbdbab3ce8a8dcba8f19975f5bfbf",
+        "orders": "d7378cf57e0bd8e615ba114897c25518442fc2355bb4b35fb2679bf7280045bd",
+        "routing_config": "c4062403e4888cb797f2d0eee624f8834055621fe128dbb4ffa447754532ac60",
+        "operating_policy": "4ff0b9e54e83e8aff24c8902094da028962b9deebc615d06b2d717b1cfb62490",
+        "economic_config": "baca32d62d75ee028596325a5d62df254d1e7b6d60f8d7f7fb126b0b0a4f472b"
+      },
+      "spatial_sha256": "e92367a74c35961479adf73f22bdff4555cbf095a39705736368ea9dff0c7f76",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_10-2-1b/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_10-2-1b/spread_medium/m6_case.json",
+      "adaptation_status": "model_1_to_8_adapters_not_generated"
+    },
+    {
+      "id": "S06",
+      "size": "small",
+      "customer_count": 10,
+      "family_id": "zhou_Set1_10-2-2",
+      "source_block": "zhou:Set1_10-2-2",
+      "variant": "spread_medium",
+      "total_container_uses": 17,
+      "common_reference_files": {
+        "data": "data/shared/small/zhou_Set1_10-2-2/network.csv",
+        "orders": "data/model5_model6/shared_v1_20261005/zhou_Set1_10-2-2/spread_medium/orders.json",
+        "routing_config": "data/model6/uniform_v2_20261005/zhou_Set1_10-2-2/spread_medium/fleet.json",
+        "operating_policy": "data/model5_model6/shared_v1_20261005/zhou_Set1_10-2-2/spread_medium/policy.json",
+        "economic_config": "data/model6/uniform_v2_20261005/zhou_Set1_10-2-2/spread_medium/economic.json"
+      },
+      "reference_sha256": {
+        "data": "3e4bf0ff384e92cfd5bedda9fd70e87360e2a8a240e2ce57de1220221159e464",
+        "orders": "1adb5fd232cfaa630045bd8594b546c2a1611f53412adbc8ffc3d4754808b95b",
+        "routing_config": "c4062403e4888cb797f2d0eee624f8834055621fe128dbb4ffa447754532ac60",
+        "operating_policy": "3e26c4366d75d3bc1e9b6d4a7beda4eac996049da25116b737ffd56781ae9773",
+        "economic_config": "baca32d62d75ee028596325a5d62df254d1e7b6d60f8d7f7fb126b0b0a4f472b"
+      },
+      "spatial_sha256": "4341fcd8b5184d131d02380fe64f2efe9f2c4f996aa5353ad5f24abfade8ec41",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_10-2-2/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_10-2-2/spread_medium/m6_case.json",
+      "adaptation_status": "model_1_to_8_adapters_not_generated"
+    },
+    {
+      "id": "S07",
+      "size": "small",
+      "customer_count": 12,
+      "family_id": "zhou_Set1_12-2-1",
+      "source_block": "zhou:Set1_12-2-1",
+      "variant": "spread_medium",
+      "total_container_uses": 18,
+      "common_reference_files": {
+        "data": "data/shared/small/zhou_Set1_12-2-1/network.csv",
+        "orders": "data/model5_model6/shared_v1_20261005/zhou_Set1_12-2-1/spread_medium/orders.json",
+        "routing_config": "data/model6/uniform_v2_20261005/zhou_Set1_12-2-1/spread_medium/fleet.json",
+        "operating_policy": "data/model5_model6/shared_v1_20261005/zhou_Set1_12-2-1/spread_medium/policy.json",
+        "economic_config": "data/model6/uniform_v2_20261005/zhou_Set1_12-2-1/spread_medium/economic.json"
+      },
+      "reference_sha256": {
+        "data": "6ab52eede04e6ad5a5c4229c9a5d71927e648697578b8417f71d7e0475380f4e",
+        "orders": "b4c56c8533c1318d51bc5bf6f757c127134e8867c24e802066479a8cb59b161c",
+        "routing_config": "23b2196c0ec48a30be493a17d7e2e30be728a1c3bab17ca4de9edb89ea619dd7",
+        "operating_policy": "4b6b150db1005bec513b6f42ed7e268fd35fcad332f9d4e79b29d18e980fa778",
+        "economic_config": "baca32d62d75ee028596325a5d62df254d1e7b6d60f8d7f7fb126b0b0a4f472b"
+      },
+      "spatial_sha256": "5d45999939f9e7133aa0f82185213dea45f373858522d77f218441c633c27466",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_12-2-1/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_12-2-1/spread_medium/m6_case.json",
+      "adaptation_status": "model_1_to_8_adapters_not_generated"
+    },
+    {
+      "id": "S08",
+      "size": "small",
+      "customer_count": 12,
+      "family_id": "zhou_Set1_12-2-1b",
+      "source_block": "zhou:Set1_12-2-1b",
+      "variant": "spread_medium",
+      "total_container_uses": 17,
+      "common_reference_files": {
+        "data": "data/shared/small/zhou_Set1_12-2-1b/network.csv",
+        "orders": "data/model5_model6/shared_v1_20261005/zhou_Set1_12-2-1b/spread_medium/orders.json",
+        "routing_config": "data/model6/uniform_v2_20261005/zhou_Set1_12-2-1b/spread_medium/fleet.json",
+        "operating_policy": "data/model5_model6/shared_v1_20261005/zhou_Set1_12-2-1b/spread_medium/policy.json",
+        "economic_config": "data/model6/uniform_v2_20261005/zhou_Set1_12-2-1b/spread_medium/economic.json"
+      },
+      "reference_sha256": {
+        "data": "5bb0efe13892273e8755303cac84bc86b8454bd04207fd28bbefe16e20f1d5a1",
+        "orders": "ae04bee5f19127cc18a110a4b0287ba8afd529fd854f36b1833e30ed45e7f5df",
+        "routing_config": "23b2196c0ec48a30be493a17d7e2e30be728a1c3bab17ca4de9edb89ea619dd7",
+        "operating_policy": "3e26c4366d75d3bc1e9b6d4a7beda4eac996049da25116b737ffd56781ae9773",
+        "economic_config": "baca32d62d75ee028596325a5d62df254d1e7b6d60f8d7f7fb126b0b0a4f472b"
+      },
+      "spatial_sha256": "10e396558b2e8136a328e5033b262dc97f8774cd977be270ee8883ee826acc41",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_12-2-1b/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_12-2-1b/spread_medium/m6_case.json",
+      "adaptation_status": "model_1_to_8_adapters_not_generated"
+    },
+    {
+      "id": "S09",
+      "size": "small",
+      "customer_count": 12,
+      "family_id": "zhou_Set1_12-2-2",
+      "source_block": "zhou:Set1_12-2-2",
+      "variant": "spread_medium",
+      "total_container_uses": 17,
+      "common_reference_files": {
+        "data": "data/shared/small/zhou_Set1_12-2-2/network.csv",
+        "orders": "data/model5_model6/shared_v1_20261005/zhou_Set1_12-2-2/spread_medium/orders.json",
+        "routing_config": "data/model6/uniform_v2_20261005/zhou_Set1_12-2-2/spread_medium/fleet.json",
+        "operating_policy": "data/model5_model6/shared_v1_20261005/zhou_Set1_12-2-2/spread_medium/policy.json",
+        "economic_config": "data/model6/uniform_v2_20261005/zhou_Set1_12-2-2/spread_medium/economic.json"
+      },
+      "reference_sha256": {
+        "data": "6cb479bd791a71a368ad5f694e94d63ec7c4abe8af0e70206ead9d25bb337896",
+        "orders": "32ad4162dce358a75787f73331249702ce9726a74f68f13a4250cec9fa0fcf9d",
+        "routing_config": "23b2196c0ec48a30be493a17d7e2e30be728a1c3bab17ca4de9edb89ea619dd7",
+        "operating_policy": "3e26c4366d75d3bc1e9b6d4a7beda4eac996049da25116b737ffd56781ae9773",
+        "economic_config": "baca32d62d75ee028596325a5d62df254d1e7b6d60f8d7f7fb126b0b0a4f472b"
+      },
+      "spatial_sha256": "36ed5d33649ee3f69d29a9419d03fed85c679b530bbffac33f90fb416c845519",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_12-2-2/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_12-2-2/spread_medium/m6_case.json",
+      "adaptation_status": "model_1_to_8_adapters_not_generated"
+    },
+    {
+      "id": "M01",
+      "size": "medium",
+      "customer_count": 20,
+      "family_id": "zhou_Set2_100-10-1_subset20",
+      "source_block": "zhou:Set2_100-10-1",
+      "variant": "spread_medium",
+      "total_container_uses": 32,
+      "common_reference_files": {
+        "data": "data/shared/medium/zhou_Set2_100-10-1_subset20/network.csv",
+        "orders": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-1_subset20/spread_medium/orders.json",
+        "routing_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-10-1_subset20/spread_medium/fleet.json",
+        "operating_policy": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-1_subset20/spread_medium/policy.json",
+        "economic_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-10-1_subset20/spread_medium/economic.json"
+      },
+      "reference_sha256": {
+        "data": "b64a76ed3dd8949771b29cb96e47627d042e7179b1bad49301b7141e246cb16a",
+        "orders": "294e74dd408573a050a4a83864b84d62e5629245c404beb2e01a127e8501ef3e",
+        "routing_config": "a242d1a10a2d405d4d6479c45a90b3e0f1831421104d2b6ed5f1cb2abf9f5144",
+        "operating_policy": "21075c0676a5ecd949a52fe980c387bcfa7ff47ff24e6f8304cbc28715ad5266",
+        "economic_config": "baca32d62d75ee028596325a5d62df254d1e7b6d60f8d7f7fb126b0b0a4f472b"
+      },
+      "spatial_sha256": "18a0beb999f0191bd741381b0d67642298c89385b14446f9a324205344e626ec",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-1_subset20/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-1_subset20/spread_medium/m6_case.json",
+      "adaptation_status": "model_1_to_8_adapters_not_generated"
+    },
+    {
+      "id": "M02",
+      "size": "medium",
+      "customer_count": 20,
+      "family_id": "zhou_Set2_100-10-2_subset20",
+      "source_block": "zhou:Set2_100-10-2",
+      "variant": "spread_medium",
+      "total_container_uses": 31,
+      "common_reference_files": {
+        "data": "data/shared/medium/zhou_Set2_100-10-2_subset20/network.csv",
+        "orders": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-2_subset20/spread_medium/orders.json",
+        "routing_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-10-2_subset20/spread_medium/fleet.json",
+        "operating_policy": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-2_subset20/spread_medium/policy.json",
+        "economic_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-10-2_subset20/spread_medium/economic.json"
+      },
+      "reference_sha256": {
+        "data": "a609c67e7060016327a0565a2ce375f38f469eaa9ddd8002783eebb192892cc1",
+        "orders": "ffa41d449b4121f58e359ae705907b6f0fd076105cb4788577193dffb5276843",
+        "routing_config": "a242d1a10a2d405d4d6479c45a90b3e0f1831421104d2b6ed5f1cb2abf9f5144",
+        "operating_policy": "00ffdaf6178b9001f61b84c0fdb9cb9803230fa061935609faca3e2eab6b2aad",
+        "economic_config": "baca32d62d75ee028596325a5d62df254d1e7b6d60f8d7f7fb126b0b0a4f472b"
+      },
+      "spatial_sha256": "38e565d7660d0ea68f77ebb3da06703bdd4b9c04931eecb3d6acc92e2e3e6607",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-2_subset20/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-2_subset20/spread_medium/m6_case.json",
+      "adaptation_status": "model_1_to_8_adapters_not_generated"
+    },
+    {
+      "id": "M03",
+      "size": "medium",
+      "customer_count": 20,
+      "family_id": "zhou_Set2_100-5-1b_subset20",
+      "source_block": "zhou:Set2_100-5-1b",
+      "variant": "spread_medium",
+      "total_container_uses": 33,
+      "common_reference_files": {
+        "data": "data/shared/medium/zhou_Set2_100-5-1b_subset20/network.csv",
+        "orders": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-1b_subset20/spread_medium/orders.json",
+        "routing_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-5-1b_subset20/spread_medium/fleet.json",
+        "operating_policy": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-1b_subset20/spread_medium/policy.json",
+        "economic_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-5-1b_subset20/spread_medium/economic.json"
+      },
+      "reference_sha256": {
+        "data": "37147cbee7a311574ffa4df6ed93e164f330cf508a98958dcc8f6a4ff27a8220",
+        "orders": "f99eff123a165f7c5f7c94595c8ef26b49a79761e78de2059b196884b74323d1",
+        "routing_config": "a242d1a10a2d405d4d6479c45a90b3e0f1831421104d2b6ed5f1cb2abf9f5144",
+        "operating_policy": "91d2eb8924be9c5fd1d077556f1b162d3c770e92e53c9987fb3829a8824535ec",
+        "economic_config": "baca32d62d75ee028596325a5d62df254d1e7b6d60f8d7f7fb126b0b0a4f472b"
+      },
+      "spatial_sha256": "e21edcdec203703e1bd02913efaac2498f9462a95aac9b31159f352de85cea25",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-1b_subset20/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-1b_subset20/spread_medium/m6_case.json",
+      "adaptation_status": "model_1_to_8_adapters_not_generated"
+    },
+    {
+      "id": "M04",
+      "size": "medium",
+      "customer_count": 20,
+      "family_id": "zhou_Set2_100-5-2_subset20",
+      "source_block": "zhou:Set2_100-5-2",
+      "variant": "spread_medium",
+      "total_container_uses": 28,
+      "common_reference_files": {
+        "data": "data/shared/medium/zhou_Set2_100-5-2_subset20/network.csv",
+        "orders": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-2_subset20/spread_medium/orders.json",
+        "routing_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-5-2_subset20/spread_medium/fleet.json",
+        "operating_policy": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-2_subset20/spread_medium/policy.json",
+        "economic_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-5-2_subset20/spread_medium/economic.json"
+      },
+      "reference_sha256": {
+        "data": "74c3214ea94a93f64aaa6b6ca4a0cdd397abcc866fd7f5f73e6ee225a69733b0",
+        "orders": "0fb1d9e3cbac2358bea9492ee70c58d96c0bd15084c24d2a0a0530b9aa920028",
+        "routing_config": "a242d1a10a2d405d4d6479c45a90b3e0f1831421104d2b6ed5f1cb2abf9f5144",
+        "operating_policy": "acecb6d26a89e7fc9978ebf22f3e0f0119352da916db3157f8ddc526a435449c",
+        "economic_config": "baca32d62d75ee028596325a5d62df254d1e7b6d60f8d7f7fb126b0b0a4f472b"
+      },
+      "spatial_sha256": "3bae98bcb06c7c979f6bb1280397d9aac7b1987abf8cb0f646a873c9df4f88e7",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-2_subset20/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-2_subset20/spread_medium/m6_case.json",
+      "adaptation_status": "model_1_to_8_adapters_not_generated"
+    },
+    {
+      "id": "M05",
+      "size": "medium",
+      "customer_count": 30,
+      "family_id": "zhou_Set2_100-10-1_subset30",
+      "source_block": "zhou:Set2_100-10-1",
+      "variant": "spread_medium",
+      "total_container_uses": 48,
+      "common_reference_files": {
+        "data": "data/shared/medium/zhou_Set2_100-10-1_subset30/network.csv",
+        "orders": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-1_subset30/spread_medium/orders.json",
+        "routing_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-10-1_subset30/spread_medium/fleet.json",
+        "operating_policy": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-1_subset30/spread_medium/policy.json",
+        "economic_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-10-1_subset30/spread_medium/economic.json"
+      },
+      "reference_sha256": {
+        "data": "82789a7336fed7e466dfd9b33b4a1005d0a453343470238db5263174791adbe3",
+        "orders": "77fd5f5d8fff0bbc5fb703e28911a9ed3381837c674aa974af6854150fcd2dac",
+        "routing_config": "05242655b5fe04001471df26cf4ff500ca3840184ece4273486612d68815f158",
+        "operating_policy": "12489cb2e22a2884b6ce46292551bae46f498e6b439ff5048ddaa33b4e7b0e4d",
+        "economic_config": "baca32d62d75ee028596325a5d62df254d1e7b6d60f8d7f7fb126b0b0a4f472b"
+      },
+      "spatial_sha256": "f362feac8365f74ee26d25d65471866a8c443c8b6ce13f0aaeaf6d7e60d73416",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-1_subset30/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-1_subset30/spread_medium/m6_case.json",
+      "adaptation_status": "model_1_to_8_adapters_not_generated"
+    },
+    {
+      "id": "M06",
+      "size": "medium",
+      "customer_count": 30,
+      "family_id": "zhou_Set2_100-10-2_subset30",
+      "source_block": "zhou:Set2_100-10-2",
+      "variant": "spread_medium",
+      "total_container_uses": 43,
+      "common_reference_files": {
+        "data": "data/shared/medium/zhou_Set2_100-10-2_subset30/network.csv",
+        "orders": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-2_subset30/spread_medium/orders.json",
+        "routing_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-10-2_subset30/spread_medium/fleet.json",
+        "operating_policy": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-2_subset30/spread_medium/policy.json",
+        "economic_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-10-2_subset30/spread_medium/economic.json"
+      },
+      "reference_sha256": {
+        "data": "0266e16ca97808160756fce843df3aa36758125915b50d33daf137316c816da3",
+        "orders": "93a98ec6f538e30b6b6933cf187015396813529fecde4c7a47b89fc691afc483",
+        "routing_config": "05242655b5fe04001471df26cf4ff500ca3840184ece4273486612d68815f158",
+        "operating_policy": "14814c22cb0613b0658466c24acffd7a8b240355e0a4fde1ecdab357300b83c2",
+        "economic_config": "baca32d62d75ee028596325a5d62df254d1e7b6d60f8d7f7fb126b0b0a4f472b"
+      },
+      "spatial_sha256": "93ab1f7544a6171ad45d167dd80ee0e91f3cb4952011da902c92fef17bea75e6",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-2_subset30/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-2_subset30/spread_medium/m6_case.json",
+      "adaptation_status": "model_1_to_8_adapters_not_generated"
+    },
+    {
+      "id": "M07",
+      "size": "medium",
+      "customer_count": 30,
+      "family_id": "zhou_Set2_100-5-1b_subset30",
+      "source_block": "zhou:Set2_100-5-1b",
+      "variant": "spread_medium",
+      "total_container_uses": 47,
+      "common_reference_files": {
+        "data": "data/shared/medium/zhou_Set2_100-5-1b_subset30/network.csv",
+        "orders": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-1b_subset30/spread_medium/orders.json",
+        "routing_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-5-1b_subset30/spread_medium/fleet.json",
+        "operating_policy": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-1b_subset30/spread_medium/policy.json",
+        "economic_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-5-1b_subset30/spread_medium/economic.json"
+      },
+      "reference_sha256": {
+        "data": "e7120d12e4ca6e64e89382f4e959ce9de7e61bc80b2ebf073ff8846c88663918",
+        "orders": "096056f549893baaad4e55f7de005cc984d64a6a80e27b50a5c5b69136a48071",
+        "routing_config": "05242655b5fe04001471df26cf4ff500ca3840184ece4273486612d68815f158",
+        "operating_policy": "2db3387bfc622e93b18b5b065305a1efc2d77c7aea3726d8ec5af28701fcd5ad",
+        "economic_config": "baca32d62d75ee028596325a5d62df254d1e7b6d60f8d7f7fb126b0b0a4f472b"
+      },
+      "spatial_sha256": "4c05e245b2c39de425321a0a6ec3652ce5d18c57bcf1dbbe4159263198c6f0e4",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-1b_subset30/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-1b_subset30/spread_medium/m6_case.json",
+      "adaptation_status": "model_1_to_8_adapters_not_generated"
+    },
+    {
+      "id": "M08",
+      "size": "medium",
+      "customer_count": 30,
+      "family_id": "zhou_Set2_100-5-2_subset30",
+      "source_block": "zhou:Set2_100-5-2",
+      "variant": "spread_medium",
+      "total_container_uses": 41,
+      "common_reference_files": {
+        "data": "data/shared/medium/zhou_Set2_100-5-2_subset30/network.csv",
+        "orders": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-2_subset30/spread_medium/orders.json",
+        "routing_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-5-2_subset30/spread_medium/fleet.json",
+        "operating_policy": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-2_subset30/spread_medium/policy.json",
+        "economic_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-5-2_subset30/spread_medium/economic.json"
+      },
+      "reference_sha256": {
+        "data": "62f3fbc1968d702f9f662d3d013414a81f859c6bee20a98785985f318d80fd79",
+        "orders": "bf99197f8462bc72f56e75e354c301b3b897c5b4405ecab4dadc3ce4961dc8b9",
+        "routing_config": "05242655b5fe04001471df26cf4ff500ca3840184ece4273486612d68815f158",
+        "operating_policy": "c2d5a7e04d455c1071793082c0c0887f75bf3a68a1b9fde2df93dc99d8ba5c7e",
+        "economic_config": "baca32d62d75ee028596325a5d62df254d1e7b6d60f8d7f7fb126b0b0a4f472b"
+      },
+      "spatial_sha256": "18572e194b80a514615d75d3b9bcf67f3bb1a564402199546104658a90b2c747",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-2_subset30/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-2_subset30/spread_medium/m6_case.json",
+      "adaptation_status": "model_1_to_8_adapters_not_generated"
+    },
+    {
+      "id": "M09",
+      "size": "medium",
+      "customer_count": 30,
+      "family_id": "zhou_Set2_100-5-3_subset30",
+      "source_block": "zhou:Set2_100-5-3",
+      "variant": "spread_medium",
+      "total_container_uses": 43,
+      "common_reference_files": {
+        "data": "data/shared/medium/zhou_Set2_100-5-3_subset30/network.csv",
+        "orders": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-3_subset30/spread_medium/orders.json",
+        "routing_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-5-3_subset30/spread_medium/fleet.json",
+        "operating_policy": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-3_subset30/spread_medium/policy.json",
+        "economic_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-5-3_subset30/spread_medium/economic.json"
+      },
+      "reference_sha256": {
+        "data": "b70b893b9a90bda7e26f515b3be81eafff977e74bd558f368a8ed6614c0dd235",
+        "orders": "85872a48bd6e7961910da1ad27e5a5cba45c8b760a1fd805f858e95e337d5746",
+        "routing_config": "05242655b5fe04001471df26cf4ff500ca3840184ece4273486612d68815f158",
+        "operating_policy": "14814c22cb0613b0658466c24acffd7a8b240355e0a4fde1ecdab357300b83c2",
+        "economic_config": "baca32d62d75ee028596325a5d62df254d1e7b6d60f8d7f7fb126b0b0a4f472b"
+      },
+      "spatial_sha256": "5051b2fbd95b5ab27099deefadc3eeba9456d25b3b4b44eca52d586232befdf1",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-3_subset30/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-3_subset30/spread_medium/m6_case.json",
+      "adaptation_status": "model_1_to_8_adapters_not_generated"
+    },
+    {
+      "id": "L01",
+      "size": "large",
+      "customer_count": 50,
+      "family_id": "zhou_Set2_100-10-1_subset50",
+      "source_block": "zhou:Set2_100-10-1",
+      "variant": "spread_medium",
+      "total_container_uses": 78,
+      "common_reference_files": {
+        "data": "data/shared/large/zhou_Set2_100-10-1_subset50/network.csv",
+        "orders": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-1_subset50/spread_medium/orders.json",
+        "routing_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-10-1_subset50/spread_medium/fleet.json",
+        "operating_policy": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-1_subset50/spread_medium/policy.json",
+        "economic_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-10-1_subset50/spread_medium/economic.json"
+      },
+      "reference_sha256": {
+        "data": "6189f79c6ba51dce72cc927a718a7da7365d672529ad8fa3415148669b782481",
+        "orders": "ee97640df86f5ff683a278ab84961ee9bca8da9c64fee5cfda0349dbdc654d4c",
+        "routing_config": "a7b1e7dfee448b7eed1ca6b7faddad979fcb01aad26784732e98780dff7c9896",
+        "operating_policy": "2631159ca5eb00e11ad18dd77f925d41305cc9e22446c9d0dea8180898db3cc8",
+        "economic_config": "baca32d62d75ee028596325a5d62df254d1e7b6d60f8d7f7fb126b0b0a4f472b"
+      },
+      "spatial_sha256": "b29ccbd350923f7ef9e22c1edad95f194060be3253c30e57e26a82096e5f422c",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-1_subset50/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-1_subset50/spread_medium/m6_case.json",
+      "adaptation_status": "model_1_to_8_adapters_not_generated"
+    },
+    {
+      "id": "L02",
+      "size": "large",
+      "customer_count": 50,
+      "family_id": "zhou_Set2_100-10-2_subset50",
+      "source_block": "zhou:Set2_100-10-2",
+      "variant": "spread_medium",
+      "total_container_uses": 74,
+      "common_reference_files": {
+        "data": "data/shared/large/zhou_Set2_100-10-2_subset50/network.csv",
+        "orders": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-2_subset50/spread_medium/orders.json",
+        "routing_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-10-2_subset50/spread_medium/fleet.json",
+        "operating_policy": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-2_subset50/spread_medium/policy.json",
+        "economic_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-10-2_subset50/spread_medium/economic.json"
+      },
+      "reference_sha256": {
+        "data": "21658eb255ad7a7c3afe7338fd9caa7b735c4059f9c4dc6e2a32071d2e119ec6",
+        "orders": "651c8c6becaecc3e7ee8e0ad04664f565a27b23cdb61e5f20e4487932b6f7708",
+        "routing_config": "a7b1e7dfee448b7eed1ca6b7faddad979fcb01aad26784732e98780dff7c9896",
+        "operating_policy": "62d3e0addc43d0538ec01d958169213cf6fd244f50fc9fbe32f87cc8956233a3",
+        "economic_config": "baca32d62d75ee028596325a5d62df254d1e7b6d60f8d7f7fb126b0b0a4f472b"
+      },
+      "spatial_sha256": "59ebadadad8dd992238aec7f23699aa4f3d6eecc152dd84217d9ca1805b75860",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-2_subset50/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-2_subset50/spread_medium/m6_case.json",
+      "adaptation_status": "model_1_to_8_adapters_not_generated"
+    },
+    {
+      "id": "L03",
+      "size": "large",
+      "customer_count": 50,
+      "family_id": "zhou_Set2_100-5-1b_subset50",
+      "source_block": "zhou:Set2_100-5-1b",
+      "variant": "spread_medium",
+      "total_container_uses": 77,
+      "common_reference_files": {
+        "data": "data/shared/large/zhou_Set2_100-5-1b_subset50/network.csv",
+        "orders": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-1b_subset50/spread_medium/orders.json",
+        "routing_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-5-1b_subset50/spread_medium/fleet.json",
+        "operating_policy": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-1b_subset50/spread_medium/policy.json",
+        "economic_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-5-1b_subset50/spread_medium/economic.json"
+      },
+      "reference_sha256": {
+        "data": "625190a3ab667ef77262b75ab0761d1fd714a3a37a4b968f1de6d4e3e92a21bf",
+        "orders": "803f2e8dbcde93e47d8cd21d033123142ef0e7bc36e6cdace8a0b76015c294bf",
+        "routing_config": "a7b1e7dfee448b7eed1ca6b7faddad979fcb01aad26784732e98780dff7c9896",
+        "operating_policy": "71eae15cf56c78797e77b232a2eb3ab6129af5b94710befda0fed1449e8f003d",
+        "economic_config": "baca32d62d75ee028596325a5d62df254d1e7b6d60f8d7f7fb126b0b0a4f472b"
+      },
+      "spatial_sha256": "1077c563005c5101b488fc99c0e53ebea697a9e0398024ebf82dff1cc21aaf37",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-1b_subset50/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-1b_subset50/spread_medium/m6_case.json",
+      "adaptation_status": "model_1_to_8_adapters_not_generated"
+    },
+    {
+      "id": "L04",
+      "size": "large",
+      "customer_count": 50,
+      "family_id": "zhou_Set2_100-5-2_subset50",
+      "source_block": "zhou:Set2_100-5-2",
+      "variant": "spread_medium",
+      "total_container_uses": 72,
+      "common_reference_files": {
+        "data": "data/shared/large/zhou_Set2_100-5-2_subset50/network.csv",
+        "orders": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-2_subset50/spread_medium/orders.json",
+        "routing_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-5-2_subset50/spread_medium/fleet.json",
+        "operating_policy": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-2_subset50/spread_medium/policy.json",
+        "economic_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-5-2_subset50/spread_medium/economic.json"
+      },
+      "reference_sha256": {
+        "data": "ccb15361d14bd74beeab7469a19fe0dab5a0f70e1237577f7ca8370306914c81",
+        "orders": "e0c21c02d467edb5390eb88632d6290d603e3b85fe8ef57b73769cd8550c78f8",
+        "routing_config": "a7b1e7dfee448b7eed1ca6b7faddad979fcb01aad26784732e98780dff7c9896",
+        "operating_policy": "e524dbb068a9159b5080d8ecfa89eaa384e0aa40ed90394f8bf534ce86eed20b",
+        "economic_config": "baca32d62d75ee028596325a5d62df254d1e7b6d60f8d7f7fb126b0b0a4f472b"
+      },
+      "spatial_sha256": "287c5e88d5d8deb9a00ad7a45a7f7ca6bf71cc5dcad2fe83e9e2d3e15f58e048",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-2_subset50/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-2_subset50/spread_medium/m6_case.json",
+      "adaptation_status": "model_1_to_8_adapters_not_generated"
+    },
+    {
+      "id": "L05",
+      "size": "large",
+      "customer_count": 100,
+      "family_id": "zhou_Set2_100-10-1",
+      "source_block": "zhou:Set2_100-10-1",
+      "variant": "spread_medium",
+      "total_container_uses": 161,
+      "common_reference_files": {
+        "data": "data/shared/large/zhou_Set2_100-10-1/network.csv",
+        "orders": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-1/spread_medium/orders.json",
+        "routing_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-10-1/spread_medium/fleet.json",
+        "operating_policy": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-1/spread_medium/policy.json",
+        "economic_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-10-1/spread_medium/economic.json"
+      },
+      "reference_sha256": {
+        "data": "670021f44b5c7aaffa4a9337cf52e8ee5c3a67c6b23d65d15ccf43e61fb91a8c",
+        "orders": "4ac20a8f7d2bd199fc79f4ca0fc154e22644b2c40e076e0c40e0434478ad188f",
+        "routing_config": "20022932bb3f5abf9a1fa18bef7ac7e6208e04d0a23bbefb2a39892465c4d633",
+        "operating_policy": "8886546a669539f789435c4d14c29144598d093f06f078c4bae0b7f620b55100",
+        "economic_config": "baca32d62d75ee028596325a5d62df254d1e7b6d60f8d7f7fb126b0b0a4f472b"
+      },
+      "spatial_sha256": "bbe965cabd1e519d442c49a4154ee43ea71b4e5305135a13bd633f51b5e9629a",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-1/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-1/spread_medium/m6_case.json",
+      "adaptation_status": "model_1_to_8_adapters_not_generated"
+    },
+    {
+      "id": "L06",
+      "size": "large",
+      "customer_count": 100,
+      "family_id": "zhou_Set2_100-10-2",
+      "source_block": "zhou:Set2_100-10-2",
+      "variant": "spread_medium",
+      "total_container_uses": 149,
+      "common_reference_files": {
+        "data": "data/shared/large/zhou_Set2_100-10-2/network.csv",
+        "orders": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-2/spread_medium/orders.json",
+        "routing_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-10-2/spread_medium/fleet.json",
+        "operating_policy": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-2/spread_medium/policy.json",
+        "economic_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-10-2/spread_medium/economic.json"
+      },
+      "reference_sha256": {
+        "data": "254670cab8de54a7a69638e00ecb61ae49aad964d1d06ccc113e15652205a60b",
+        "orders": "a8f837468de856267226c3bc7fb8a1f395a4c8608c62dbdfde9ba9baa4b0aa19",
+        "routing_config": "20022932bb3f5abf9a1fa18bef7ac7e6208e04d0a23bbefb2a39892465c4d633",
+        "operating_policy": "43ffc1107f602ac0b9193f8c816e9c9075c40f065b77c51724b863e527f29f24",
+        "economic_config": "baca32d62d75ee028596325a5d62df254d1e7b6d60f8d7f7fb126b0b0a4f472b"
+      },
+      "spatial_sha256": "c6f671f94f672dece47dad526dae7e06e3b150b924b148898da5ddbb5d6505af",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-2/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-2/spread_medium/m6_case.json",
+      "adaptation_status": "model_1_to_8_adapters_not_generated"
+    },
+    {
+      "id": "L07",
+      "size": "large",
+      "customer_count": 100,
+      "family_id": "zhou_Set2_100-5-1b",
+      "source_block": "zhou:Set2_100-5-1b",
+      "variant": "spread_medium",
+      "total_container_uses": 155,
+      "common_reference_files": {
+        "data": "data/shared/large/zhou_Set2_100-5-1b/network.csv",
+        "orders": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-1b/spread_medium/orders.json",
+        "routing_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-5-1b/spread_medium/fleet.json",
+        "operating_policy": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-1b/spread_medium/policy.json",
+        "economic_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-5-1b/spread_medium/economic.json"
+      },
+      "reference_sha256": {
+        "data": "b425243a638f5aee197e89a9fdb3bfc3c23e51b3c3077d0e73f251e764504054",
+        "orders": "671bca1976648ce55ff23a5db85b82f24783b03bd0e798ebf5153ff8e22c31c2",
+        "routing_config": "20022932bb3f5abf9a1fa18bef7ac7e6208e04d0a23bbefb2a39892465c4d633",
+        "operating_policy": "219d120b9d3f340d1291f285a96c68913ebac2d1bc5d0de1ab71c1c4ca2fecd6",
+        "economic_config": "baca32d62d75ee028596325a5d62df254d1e7b6d60f8d7f7fb126b0b0a4f472b"
+      },
+      "spatial_sha256": "88ddd587c61cb5d26d35ad61d3487619c85ddba8c01a3cf685dd34938c8a2753",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-1b/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-1b/spread_medium/m6_case.json",
+      "adaptation_status": "model_1_to_8_adapters_not_generated"
+    },
+    {
+      "id": "L08",
+      "size": "large",
+      "customer_count": 100,
+      "family_id": "zhou_Set2_100-5-2",
+      "source_block": "zhou:Set2_100-5-2",
+      "variant": "spread_medium",
+      "total_container_uses": 154,
+      "common_reference_files": {
+        "data": "data/shared/large/zhou_Set2_100-5-2/network.csv",
+        "orders": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-2/spread_medium/orders.json",
+        "routing_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-5-2/spread_medium/fleet.json",
+        "operating_policy": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-2/spread_medium/policy.json",
+        "economic_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-5-2/spread_medium/economic.json"
+      },
+      "reference_sha256": {
+        "data": "22a14c25baa164159a9ab6db73bfd7e38bd61bf6a657ff2b0a989303c843d246",
+        "orders": "0359ae942addbd7dfd1ad8b52cbff983b8012e69982d19e3b7916447401b38d9",
+        "routing_config": "20022932bb3f5abf9a1fa18bef7ac7e6208e04d0a23bbefb2a39892465c4d633",
+        "operating_policy": "3a61d877fe07df5e2a44c45dfe33e6ea7a19d1bf992f2184e730676fba9d1f84",
+        "economic_config": "baca32d62d75ee028596325a5d62df254d1e7b6d60f8d7f7fb126b0b0a4f472b"
+      },
+      "spatial_sha256": "d02afdf21d7c240e23a350f4be6ee8c7d1c52ffae098f1cbacae07367eb2f5bb",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-2/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-2/spread_medium/m6_case.json",
+      "adaptation_status": "model_1_to_8_adapters_not_generated"
+    },
+    {
+      "id": "L09",
+      "size": "large",
+      "customer_count": 100,
+      "family_id": "zhou_Set2_100-5-3",
+      "source_block": "zhou:Set2_100-5-3",
+      "variant": "spread_medium",
+      "total_container_uses": 156,
+      "common_reference_files": {
+        "data": "data/shared/large/zhou_Set2_100-5-3/network.csv",
+        "orders": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-3/spread_medium/orders.json",
+        "routing_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-5-3/spread_medium/fleet.json",
+        "operating_policy": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-3/spread_medium/policy.json",
+        "economic_config": "data/model6/uniform_v2_20261005/zhou_Set2_100-5-3/spread_medium/economic.json"
+      },
+      "reference_sha256": {
+        "data": "94106ce8c768f90ab732f7780d4ad4bfc729bd0de87522ca7c30249c1e29a9f7",
+        "orders": "a98878cec59fbdd21e9fa2ef17d27eaa7b2f05ef14dbadf14f9c39f400310f83",
+        "routing_config": "20022932bb3f5abf9a1fa18bef7ac7e6208e04d0a23bbefb2a39892465c4d633",
+        "operating_policy": "df028c924b329e2778ae1901068d3a9eb6d1becc1a7a01afa9aa768ce05e6da6",
+        "economic_config": "baca32d62d75ee028596325a5d62df254d1e7b6d60f8d7f7fb126b0b0a4f472b"
+      },
+      "spatial_sha256": "743aef38e2a2bf35c2299d900f3652e00fa6c3beff9a1bd39dc12653d1f61aef",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-3/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-3/spread_medium/m6_case.json",
+      "adaptation_status": "model_1_to_8_adapters_not_generated"
+    }
+  ],
+  "reviewed_reference_calendar": {
+    "batch_count": 3,
+    "cutoff_ratio": 0.7,
+    "original_cutoff_ratio": 0.75,
+    "reason": "Uniform feasibility repair after M03/M5 exact infeasibility and M03/L09 terminal-cleaning conflicts. Retain all 27 cases and physical demand; do not select by relative model performance.",
+    "review_date": "2026-10-15"
+  },
+  "review_protocol": {
+    "dataset_revision": 3,
+    "experimental_unit": "27 matched base cases; 14 original source blocks; seeds are repeated runs",
+    "primary_cost_policy": "User-defined basic coefficients confirmed 2026-10-16, shared across all 27 bases and eight projections",
+    "container_pool_cost_per_period": 5,
+    "pool_charge_definition": "One-time synthetic acquisition cost 5*N for the configured stock; reusing a box does not buy it again",
+    "economic_fields_used_in_joint_cost": [
+      "container_pool_cost_per_period",
+      "e1_distance_cost_per_km",
+      "e2_distance_cost_per_km",
+      "cleaning_cost_per_return",
+      "container_wear_cost_per_use"
+    ],
+    "cost_sensitivity": "Freeze any coefficient variants explicitly in new studies; retain original attempts and inputs. Revision 3 is an explicit user-authorized primary-profile change.",
+    "metrics": [
+      "independently audited feasibility",
+      "distance in benchmark coordinate units",
+      "comparable cost for reusable models only",
+      "N",
+      "Q",
+      "K",
+      "vehicles",
+      "trips",
+      "bound and proof scope",
+      "wall time",
+      "visited and unvisited K candidates"
+    ],
+    "native_objectives": {
+      "1-5": "distance",
+      "6-8": "cost"
+    },
+    "objective_control": "A common cost recalculation is not a fixed-policy cost optimization control. Do not attribute M5/M6 differences solely to additional decisions without that control.",
+    "reporting": "Report each size separately, pair by base case, retain source_block for block-balanced summaries; never treat all runs as independent cases.",
+    "feasibility_denominator": "All planned runs, including timeouts, heuristic no-solution and audit failures",
+    "witness_policy": "216 independently replayed schedules certify feasibility; they are not optimal and are not loaded automatically by benchmark solvers.",
+    "k_domain_policy": "Start with the common positive-integer domain. Remove only input-proven impossible counts; each exclusion is recorded and recomputed.",
+    "scope_limits": [
+      "One synthetic appointment and economic regime; not a representative empirical population",
+      "E1 capacity is deliberately loose; not an E1 scarcity benchmark",
+      "All orders released at cycle start; not a late-release stress benchmark",
+      "Most fixed assignments are already nearest-satellite assignments",
+      "A low-cost single-batch optimum is an admissible finding; do not tune prices to guarantee M8 wins",
+      "M5 fixes dispatch slots but does not require positive recovery in each slot; M6-M8 require productive delivery and recovery. Without harmonizing this rule, M5 is not automatically a strict subset control for M6."
+    ],
+    "formal_experiment_status": "Revision-2 formal results are historical. Revision-3 costs require a new prepared study and fresh optimization.",
+    "separate_purchase_and_wear_accounting": {
+      "pool_charge": "5*N one-time acquisition cost within the optimization",
+      "wear_in_objective": "0.01*Q explicit per-use wear; independent of purchase price, no lifetime depreciation",
+      "cleaning_and_tracking": "One combined fee 0.01*Q, stored as cleaning; tracking coefficient is zero",
+      "initial_investment_reported_separately": "5*N informational purchase metric; same purchase charge, not added a second time",
+      "implication": "For fixed demand and complete recovery, per-use fees sum to constant 0.02*Q; stock and weighted distances drive the decision."
+    },
+    "objective_formula": "0.1*D1 + 0.05*D2 + 5*N + 0.01*Q cleaning/traceability + 0.01*Q wear",
+    "zero_cost_fields": [
+      "e1_work_cost_per_minute",
+      "e2_work_cost_per_minute",
+      "e1_vehicle_cost_per_cycle",
+      "e2_vehicle_cost_per_cycle",
+      "e1_trip_cost",
+      "e2_trip_cost",
+      "tracking_cost_per_use"
+    ]
+  },
+  "economic_profile": "config/experiments/benchmark27_v1/economic.json",
+  "economic_profile_sha256": "543b6b8eb1ba4982ac3e0212eb9f07a55bbab091ed74f546c8f876b9c7cdfd1f"
+}

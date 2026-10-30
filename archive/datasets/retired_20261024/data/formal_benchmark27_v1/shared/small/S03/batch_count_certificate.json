@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "proof": "productive_order_count_and_first_return_v1",
+  "original_positive_integer_domain": [
+    1,
+    390
+  ],
+  "order_count": 7,
+  "minimum_phase_ticks": 60,
+  "cycle_duration_ticks": 46800,
+  "time_tick_seconds": 1,
+  "time_tick_subdivision": 1,
+  "first_return_elapsed_lower_bound_ticks": 9824,
+  "equal_calendar_upper_bound": 4,
+  "upper_bound_by_model": {
+    "6": 4,
+    "7": 4,
+    "8": 7
+  },
+  "candidates_by_model": {
+    "6": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "7": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "8": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ]
+  },
+  "assumptions": [
+    "Every counted batch has positive delivery and depot-return quantities.",
+    "Each positive-demand order is assigned to exactly one batch; orders are not split.",
+    "The cycle starts with clean stock and no outstanding previous-cycle orders.",
+    "M6/M7 have equal batch lengths; M8 may use unequal lengths.",
+    "Refined clocks preserve already rounded physical durations."
+  ],
+  "proof_steps": [
+    "K cannot exceed the number of orders because every batch delivers at least one order.",
+    "The first batch must return a current-cycle order before its end.",
+    "Each listed return time is optimistic: competition, capacity and cutoff waiting are ignored.",
+    "For M6/M7, H/K is at least the earliest optimistic return elapsed time.",
+    "For M8, the first batch consumes at least that time; other batches need two minimum phases."
+  ],
+  "scope": "Excluded counts are infeasible; retained counts are not certified feasible or optimal.",
+  "solver_calls": 0,
+  "order_return_bounds": [
+    {
+      "order_id": "C0_order",
+      "earliest_delivery_ticks": 39120,
+      "earliest_pickup_ticks": 43320,
+      "depot_return_lower_bound_ticks": 45333
+    },
+    {
+      "order_id": "C1_order",
+      "earliest_delivery_ticks": 50880,
+      "earliest_pickup_ticks": 57780,
+      "depot_return_lower_bound_ticks": 59171
+    },
+    {
+      "order_id": "C2_order",
+      "earliest_delivery_ticks": 31500,
+      "earliest_pickup_ticks": 36000,
+      "depot_return_lower_bound_ticks": 38624
+    },
+    {
+      "order_id": "C3_order",
+      "earliest_delivery_ticks": 32760,
+      "earliest_pickup_ticks": 37260,
+      "depot_return_lower_bound_ticks": 39024
+    },
+    {
+      "order_id": "C4_order",
+      "earliest_delivery_ticks": 45780,
+      "earliest_pickup_ticks": 50880,
+      "depot_return_lower_bound_ticks": 53127
+    },
+    {
+      "order_id": "C5_order",
+      "earliest_delivery_ticks": 57300,
+      "earliest_pickup_ticks": 60900,
+      "depot_return_lower_bound_ticks": 62798
+    },
+    {
+      "order_id": "C6_order",
+      "earliest_delivery_ticks": 58500,
+      "earliest_pickup_ticks": 64800,
+      "depot_return_lower_bound_ticks": 67065
+    }
+  ]
+}

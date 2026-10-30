@@ -1,0 +1,55 @@
+{
+  "scenario_id": "continuous_flow_100_v1",
+  "date": "2026-10-20",
+  "seed": 20261020,
+  "base_case": "L05",
+  "source_dataset": "data/formal_benchmark27_interleaved_v1",
+  "customers": 100,
+  "business": "All 100 orders remain ready at 08:00. Only customer delivery/pickup appointment endpoints change; service demand is more evenly spread across the working day.",
+  "time_distribution": "Five balanced appointment cohorts, independently shuffled within satellites; feasible randomized appointment widths. Reference dispatch calendar is not binding for M8.",
+  "reference_load_minutes": [
+    480,
+    600,
+    720,
+    840,
+    960
+  ],
+  "reference_demands": [
+    20,
+    20,
+    20,
+    20,
+    20
+  ],
+  "changed_fields": [
+    "delivery_ready",
+    "delivery_due",
+    "pickup_ready",
+    "pickup_due"
+  ],
+  "preserved_fields": [
+    "order_id",
+    "customer_id",
+    "satellite_id",
+    "container_count",
+    "goods_weight",
+    "service_time",
+    "min_use_time",
+    "delivery_batch_id",
+    "release_time",
+    "allowed_batch_ids",
+    "coordinates",
+    "fixed satellite ownership",
+    "fleet",
+    "cycle",
+    "cleaning duration",
+    "economic coefficients"
+  ],
+  "opening_return_rule": "First appointment includes a short physically possible return to satisfy current M8 productive-first-batch contract.",
+  "distribution_disclosure": "Synthetic and feasibility-conditioned; not independent empirical sampling or a claim of exact uniformity.",
+  "selection": "No ALNS, MILP, costs, desired model ranking or seed screening used to select the instance.",
+  "source_orders_sha256": "6316d66de391d85276ba596839b3580f7f734ce508ea3d95eaedba3243248c09",
+  "generator": "tools/data/build_continuous_flow_100.py",
+  "generator_sha256": "966229f36467adb63e879122782fecbe61efaff5c0ae9cd4e342c875cff82e84",
+  "m3_scope": "M3 remains a valid matched single-batch baseline: all goods ready at opening. No rolling release or required business dispatches are introduced."
+}

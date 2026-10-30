@@ -45,8 +45,9 @@ print('IMPORTED', count)
 '''
 
 
-@pytest.mark.parametrize('number', range(1, 9))
-@pytest.mark.parametrize('method', ['exact', 'alns'])
+@pytest.mark.parametrize('number,method',
+                         [(n, method) for n in range(1, 9) for method in ('exact', 'alns')]
+                         + [(9, 'exact')])
 def test_all_components_are_owned_and_importable(number, method):
     folder = ROOT/f'models/routing/model_{number}/{method}'
     assert CORE[method] <= {p.stem for p in folder.glob('*.py')}
@@ -60,7 +61,7 @@ def test_all_components_are_owned_and_importable(number, method):
     assert 'IMPORTED' in completed.stdout
 
 
-@pytest.mark.parametrize('number', range(1, 9))
+@pytest.mark.parametrize('number', range(1, 10))
 def test_exact_layout_has_no_retired_directories_or_forwarders(number):
     folder = ROOT/f'models/routing/model_{number}/exact'
     for name in ('accelerators', 'formulations', 'search'):

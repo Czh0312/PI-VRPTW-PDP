@@ -35,7 +35,7 @@ def solve_routing(*, model, method, problem, e1_tasks=None, e2_tasks_by_sat=None
             raise ValueError("Requested model does not match the loaded instance")
         if e1_tasks or e2_tasks_by_sat:
             raise ValueError("Multibatch quantities must be derived from return events, not static tasks")
-        expected_backend = 'joint_batch_indexed' if model in (6, 7, 8) else 'multibatch_indexed'
+        expected_backend = 'joint_batch_indexed' if model in (6, 7, 8, 9) else 'multibatch_indexed'
         if exact_backend not in (None, expected_backend):
             raise ValueError(f'Model {model} requires {expected_backend}; incompatible or legacy backend: {exact_backend}')
         from models.common.cycle.scope import batch_mode_for
@@ -57,7 +57,7 @@ def solve_routing(*, model, method, problem, e1_tasks=None, e2_tasks_by_sat=None
         raise ValueError('Exact strategies require the current cycle policy, not the historical baseline')
     if model == 5:
         raise ValueError('Current M5 requires multi_batch_cutoff_v1 with B>1; historical M5 was retired')
-    if model in (6, 7, 8):
+    if model in (6, 7, 8, 9):
         raise ValueError(f'Current M{model} requires multi_batch_cutoff_v1 and explicit joint batch/cost inputs')
     if not allow_baseline:
         raise ValueError("Historical policy: use route --baseline / allow_baseline=True explicitly. "

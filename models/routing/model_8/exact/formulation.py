@@ -24,11 +24,18 @@ from models.routing.model_8.exact.constraints import (
     add_task_and_return_coverage_constraints,
     add_inventory_constraints,
     add_vehicle_activation_constraints,
+    add_physical_bounds,
+    add_physical_time_bounds,
+    validate_strengthening,
 )
 from models.routing.model_8.exact.objective import set_cost_objective
 
 
-def build_model(problem, *, verbose=False, deadline=None, compact_e2=None):
+def build_model(problem, *, verbose=False, deadline=None, compact_e2=None, strengthening='physical_time',
+                preprocessing=False, vehicle_symmetry=False):
+    validate_strengthening(strengthening)
+    from models.routing.model_8.exact.preprocessing import validate_preprocessing_options
+    validate_preprocessing_options(preprocessing, vehicle_symmetry)
     validate_problem(problem, 6)
     if getattr(problem, "uniform_cycle", False):
         raise ValueError(
@@ -127,11 +134,12 @@ def build_model(problem, *, verbose=False, deadline=None, compact_e2=None):
         returned, q_expected = add_cutoff_quantity_constraints(parameters, variables)
         variables.pickup_returns = returned
         variables.expected_returns = q_expected
-        add_second_echelon_constraints(
+        symmetry_rows = add_second_echelon_constraints(
             parameters,
             variables,
             causal_limit=causal_limit,
             make_route=make_route,
+            vehicle_symmetry=vehicle_symmetry,
         )
         add_task_and_return_coverage_constraints(parameters, variables)
         add_inventory_constraints(
@@ -139,6 +147,14 @@ def build_model(problem, *, verbose=False, deadline=None, compact_e2=None):
             variables,
             budget=budget,
         )
+        physical_bounds = (add_physical_bounds(parameters, variables)
+                           if strengthening != 'none' else dict(profile='none'))
+        if strengthening == 'physical_time':
+            add_physical_time_bounds(parameters, variables, physical_bounds)
+        temporal_bounds = None
+        if preprocessing:
+            from models.routing.model_8.exact.preprocessing import add_temporal_assignment_constraints
+            temporal_bounds = add_temporal_assignment_constraints(problem, variables)
         physical_vehicles = add_vehicle_activation_constraints(parameters, variables)
         variables.physical_vehicles = physical_vehicles
         parts = set_cost_objective(parameters, variables)
@@ -156,6 +172,9 @@ def build_model(problem, *, verbose=False, deadline=None, compact_e2=None):
             batch_starts=starts,
             batch_ends=ends,
             physical_vehicles=physical_vehicles,
+            physical_bounds=physical_bounds,
+            temporal_bounds=temporal_bounds,
+            vehicle_symmetry_rows=symmetry_rows,
         )
     except BaseException:
         m.dispose()

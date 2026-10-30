@@ -13,11 +13,17 @@ from models.common.cycle.precheck import check_necessary_conditions, rejected_re
 from models.routing.model_4.exact.formulation import build_model
 
 
-def solve_milp(problem, time_limit=60, seed=42, verbose=False, *, milp_options=None, strengthening='none'):
+def solve_milp(problem, time_limit=60, seed=42, verbose=False, *, milp_options=None, strengthening='none',
+               network_strengthening=True):
     """Solve the complete model, including free assignment where applicable."""
     validate_problem(problem, 4)
     validate_budget(time_limit, seed)
     options = MilpOptions.resolve(milp_options)
+    if not isinstance(network_strengthening, bool):
+        raise ValueError('network_strengthening must be boolean')
+    if network_strengthening and (milp_options is None or
+            isinstance(milp_options, dict) and 'formulation' not in milp_options):
+        options = MilpOptions(threads=options.threads, formulation='compact')
     begun = time.perf_counter()
     config = options.metadata(time_limit, seed)
 
@@ -37,7 +43,8 @@ def solve_milp(problem, time_limit=60, seed=42, verbose=False, *, milp_options=N
         return finish(rejected_result(problem, 'exact', precheck, time.perf_counter()-begun))
     result = empty_result(problem, 'exact')
     result['precheck'] = precheck
-    formulation = dict(compress_routes=options.formulation == 'compact', strengthening=strengthening)
+    formulation = dict(compress_routes=options.formulation == 'compact', strengthening=strengthening,
+                       network_strengthening=network_strengthening)
     config['formulation_options'] = formulation
     try:
         model, ctx = build_model(problem, verbose=verbose, deadline=begun+time_limit,
@@ -56,6 +63,9 @@ def solve_milp(problem, time_limit=60, seed=42, verbose=False, *, milp_options=N
             proof_scope='full_model_4_integer_time_MILP')
         config['compressed_routes'] = bool(ctx.get('compressed_e2_routes'))
         config['strengthening'] = ctx['strengthening']
+        config['network_strengthening'] = ctx['network_strengthening']
+        if network_strengthening:
+            config['model_preprocessing'] = 'safe_bounds_assignment_load_flows_precedence_and_symmetry'
         extraction_begun = time.perf_counter()
         if model.SolCount:
             extract_solution(problem, model, ctx, result)

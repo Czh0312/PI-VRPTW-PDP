@@ -1,0 +1,619 @@
+{
+  "schema_version": 2,
+  "policy_version": "multi_batch_cutoff_v1",
+  "time_unit": "ticks",
+  "model": 8,
+  "packaging": "reusable",
+  "time_tick_seconds": 1,
+  "objective_mode": "cost",
+  "operating_policy": {
+    "cycle_start": 28800,
+    "cycle_end": 75600,
+    "batches": [
+      {
+        "id": "b1",
+        "start": 28800,
+        "cutoff": 37200,
+        "end": 40500
+      },
+      {
+        "id": "b2",
+        "start": 40500,
+        "cutoff": 48900,
+        "end": 52200
+      },
+      {
+        "id": "b3",
+        "start": 52200,
+        "cutoff": 60600,
+        "end": 63900
+      },
+      {
+        "id": "b4",
+        "start": 63900,
+        "cutoff": 72300,
+        "end": 75600
+      }
+    ],
+    "container_pool_size": 7,
+    "cleaning_duration": 900,
+    "e2_max_trips_per_vehicle": 12,
+    "time_tick_seconds": 1,
+    "e1_load_time": 120,
+    "e2_dispatch_prep_time": 60,
+    "e2_return_unload_time": 60,
+    "depot_return_unload_time": 60,
+    "e1_turnaround_time": 0,
+    "e2_turnaround_time": 60,
+    "policy_version": "multi_batch_cutoff_v1",
+    "terminal_policy": "all_clean_at_depot",
+    "time_unit": "ticks",
+    "pickup_policy": "cutoff_all_available",
+    "batch_overlap": false,
+    "allow_transfers": false,
+    "input_time_unit": "minutes",
+    "objective_mode": "distance"
+  },
+  "solver": "exact",
+  "batches": [
+    {
+      "id": "b1",
+      "start": 28800,
+      "cutoff": 37200,
+      "end": 40500,
+      "container_demand": 2
+    },
+    {
+      "id": "b2",
+      "start": 40500,
+      "cutoff": 48900,
+      "end": 52200,
+      "container_demand": 3
+    },
+    {
+      "id": "b3",
+      "start": 52200,
+      "cutoff": 60600,
+      "end": 63900,
+      "container_demand": 1
+    },
+    {
+      "id": "b4",
+      "start": 63900,
+      "cutoff": 72300,
+      "end": 75600,
+      "container_demand": 1
+    }
+  ],
+  "e1_trips": [],
+  "e2_trips": [],
+  "info": {
+    "status": "TIME_LIMIT",
+    "proven_optimal": false,
+    "proven_infeasible": false,
+    "objective": null,
+    "best_bound": null,
+    "gurobi_best_bound": null,
+    "best_bound_source": null,
+    "mip_gap": null,
+    "proof_scope": "full_model_8_all_K_joint_cost_integer_time_MILP",
+    "build_time": 11.745478600001661,
+    "mip_runtime": 18.16100001335144,
+    "mip_work": 3.37922197859765,
+    "node_count": 0.0,
+    "sol_count": 0,
+    "variables": 10069,
+    "binary_variables": 4997,
+    "constraints": 40701,
+    "mip_start_supplied": false,
+    "gurobi_version": "11.0.3",
+    "built_batch_counts": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "screened_batch_counts": {
+      "6": {
+        "reason": "productive_batch_hall_deficiency",
+        "batches": [
+          "b4",
+          "b5",
+          "b6"
+        ],
+        "neighboring_orders": [
+          "C4_order",
+          "C6_order"
+        ],
+        "batch_count": 3,
+        "order_count": 2,
+        "source": "model_8_necessary_temporal_assignment",
+        "domains": {
+          "C2_order": [
+            "b1",
+            "b2",
+            "b3"
+          ],
+          "C3_order": [
+            "b1",
+            "b2",
+            "b3"
+          ],
+          "C4_order": [
+            "b1",
+            "b2",
+            "b3",
+            "b4",
+            "b5",
+            "b6"
+          ],
+          "C5_order": [
+            "b1"
+          ],
+          "C6_order": [
+            "b1",
+            "b2",
+            "b3",
+            "b4",
+            "b5",
+            "b6"
+          ],
+          "C7_order": [
+            "b1",
+            "b2",
+            "b3"
+          ],
+          "C8_order": [
+            "b1"
+          ]
+        },
+        "removed": [
+          {
+            "order": "C2_order",
+            "batch": "b4",
+            "required_returns": 3,
+            "optimistic_available_returns": 2
+          },
+          {
+            "order": "C2_order",
+            "batch": "b5",
+            "required_returns": 4,
+            "optimistic_available_returns": 2
+          },
+          {
+            "order": "C2_order",
+            "batch": "b6",
+            "required_returns": 5,
+            "optimistic_available_returns": 2
+          },
+          {
+            "order": "C3_order",
+            "batch": "b4",
+            "required_returns": 3,
+            "optimistic_available_returns": 2
+          },
+          {
+            "order": "C3_order",
+            "batch": "b5",
+            "required_returns": 4,
+            "optimistic_available_returns": 2
+          },
+          {
+            "order": "C3_order",
+            "batch": "b6",
+            "required_returns": 5,
+            "optimistic_available_returns": 2
+          },
+          {
+            "order": "C5_order",
+            "batch": "b2",
+            "required_returns": 1,
+            "optimistic_available_returns": 0
+          },
+          {
+            "order": "C5_order",
+            "batch": "b3",
+            "required_returns": 2,
+            "optimistic_available_returns": 0
+          },
+          {
+            "order": "C5_order",
+            "batch": "b4",
+            "required_returns": 3,
+            "optimistic_available_returns": 0
+          },
+          {
+            "order": "C5_order",
+            "batch": "b5",
+            "required_returns": 4,
+            "optimistic_available_returns": 0
+          },
+          {
+            "order": "C5_order",
+            "batch": "b6",
+            "required_returns": 5,
+            "optimistic_available_returns": 0
+          },
+          {
+            "order": "C7_order",
+            "batch": "b4",
+            "required_returns": 3,
+            "optimistic_available_returns": 2
+          },
+          {
+            "order": "C7_order",
+            "batch": "b5",
+            "required_returns": 4,
+            "optimistic_available_returns": 2
+          },
+          {
+            "order": "C7_order",
+            "batch": "b6",
+            "required_returns": 5,
+            "optimistic_available_returns": 2
+          },
+          {
+            "order": "C8_order",
+            "batch": "b2",
+            "required_returns": 1,
+            "optimistic_available_returns": 0
+          },
+          {
+            "order": "C8_order",
+            "batch": "b3",
+            "required_returns": 2,
+            "optimistic_available_returns": 0
+          },
+          {
+            "order": "C8_order",
+            "batch": "b4",
+            "required_returns": 3,
+            "optimistic_available_returns": 0
+          },
+          {
+            "order": "C8_order",
+            "batch": "b5",
+            "required_returns": 4,
+            "optimistic_available_returns": 0
+          },
+          {
+            "order": "C8_order",
+            "batch": "b6",
+            "required_returns": 5,
+            "optimistic_available_returns": 0
+          }
+        ],
+        "time_tick_seconds": 1
+      },
+      "7": {
+        "reason": "productive_batch_hall_deficiency",
+        "batches": [
+          "b4",
+          "b5",
+          "b7"
+        ],
+        "neighboring_orders": [
+          "C4_order",
+          "C6_order"
+        ],
+        "batch_count": 3,
+        "order_count": 2,
+        "source": "model_8_necessary_temporal_assignment",
+        "domains": {
+          "C2_order": [
+            "b1",
+            "b2",
+            "b3"
+          ],
+          "C3_order": [
+            "b1",
+            "b2",
+            "b3"
+          ],
+          "C4_order": [
+            "b1",
+            "b2",
+            "b3",
+            "b4",
+            "b5",
+            "b6",
+            "b7"
+          ],
+          "C5_order": [
+            "b1"
+          ],
+          "C6_order": [
+            "b1",
+            "b2",
+            "b3",
+            "b4",
+            "b5",
+            "b6"
+          ],
+          "C7_order": [
+            "b1",
+            "b2",
+            "b3"
+          ],
+          "C8_order": [
+            "b1"
+          ]
+        },
+        "removed": [
+          {
+            "order": "C2_order",
+            "batch": "b4",
+            "required_returns": 3,
+            "optimistic_available_returns": 2
+          },
+          {
+            "order": "C2_order",
+            "batch": "b5",
+            "required_returns": 4,
+            "optimistic_available_returns": 2
+          },
+          {
+            "order": "C2_order",
+            "batch": "b6",
+            "required_returns": 5,
+            "optimistic_available_returns": 2
+          },
+          {
+            "order": "C2_order",
+            "batch": "b7",
+            "required_returns": 6,
+            "optimistic_available_returns": 2
+          },
+          {
+            "order": "C3_order",
+            "batch": "b4",
+            "required_returns": 3,
+            "optimistic_available_returns": 2
+          },
+          {
+            "order": "C3_order",
+            "batch": "b5",
+            "required_returns": 4,
+            "optimistic_available_returns": 2
+          },
+          {
+            "order": "C3_order",
+            "batch": "b6",
+            "required_returns": 5,
+            "optimistic_available_returns": 2
+          },
+          {
+            "order": "C3_order",
+            "batch": "b7",
+            "required_returns": 6,
+            "optimistic_available_returns": 2
+          },
+          {
+            "order": "C5_order",
+            "batch": "b2",
+            "required_returns": 1,
+            "optimistic_available_returns": 0
+          },
+          {
+            "order": "C5_order",
+            "batch": "b3",
+            "required_returns": 2,
+            "optimistic_available_returns": 0
+          },
+          {
+            "order": "C5_order",
+            "batch": "b4",
+            "required_returns": 3,
+            "optimistic_available_returns": 0
+          },
+          {
+            "order": "C5_order",
+            "batch": "b5",
+            "required_returns": 4,
+            "optimistic_available_returns": 0
+          },
+          {
+            "order": "C5_order",
+            "batch": "b6",
+            "required_returns": 5,
+            "optimistic_available_returns": 0
+          },
+          {
+            "order": "C5_order",
+            "batch": "b7",
+            "required_returns": 6,
+            "optimistic_available_returns": 0
+          },
+          {
+            "order": "C6_order",
+            "batch": "b7",
+            "required_returns": 6,
+            "optimistic_available_returns": 5
+          },
+          {
+            "order": "C7_order",
+            "batch": "b4",
+            "required_returns": 3,
+            "optimistic_available_returns": 2
+          },
+          {
+            "order": "C7_order",
+            "batch": "b5",
+            "required_returns": 4,
+            "optimistic_available_returns": 2
+          },
+          {
+            "order": "C7_order",
+            "batch": "b6",
+            "required_returns": 5,
+            "optimistic_available_returns": 2
+          },
+          {
+            "order": "C7_order",
+            "batch": "b7",
+            "required_returns": 6,
+            "optimistic_available_returns": 2
+          },
+          {
+            "order": "C8_order",
+            "batch": "b2",
+            "required_returns": 1,
+            "optimistic_available_returns": 0
+          },
+          {
+            "order": "C8_order",
+            "batch": "b3",
+            "required_returns": 2,
+            "optimistic_available_returns": 0
+          },
+          {
+            "order": "C8_order",
+            "batch": "b4",
+            "required_returns": 3,
+            "optimistic_available_returns": 0
+          },
+          {
+            "order": "C8_order",
+            "batch": "b5",
+            "required_returns": 4,
+            "optimistic_available_returns": 0
+          },
+          {
+            "order": "C8_order",
+            "batch": "b6",
+            "required_returns": 5,
+            "optimistic_available_returns": 0
+          },
+          {
+            "order": "C8_order",
+            "batch": "b7",
+            "required_returns": 6,
+            "optimistic_available_returns": 0
+          }
+        ],
+        "time_tick_seconds": 1
+      }
+    },
+    "extraction_audit_time": 2.4599998141638935e-05,
+    "solver_config": {
+      "threads": 1,
+      "formulation": "compact",
+      "time_limit": 29.881452500005253,
+      "seed": 42,
+      "mip_gap": 0.0,
+      "mip_gap_abs": 0.0,
+      "mip_start": false,
+      "custom_callback": false,
+      "external_certificate": false,
+      "gurobi_presolve": "default",
+      "gurobi_cuts": "default",
+      "gurobi_heuristics": "default",
+      "gurobi_mip_focus": 0,
+      "model_preprocessing": "safe_bounds_sparse_arcs_and_symmetry",
+      "budget_scope": "precheck_build_optimize_extract_audit",
+      "batch_count_formulation": "one_hot_disjunctive_MILP",
+      "k_search": null,
+      "retained_model_bounds": false,
+      "formulation_options": {
+        "compact_e2": true,
+        "strengthening": "physical_time",
+        "count_screening": true,
+        "count_certificate": "models.routing.model_8.exact.preprocessing.infeasible_time_domain_certificate",
+        "preprocessing": true,
+        "vehicle_symmetry": true
+      }
+    },
+    "runtime": 30.039188099995954,
+    "batch_count_candidates": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "complete_count_domain": true,
+    "model_size_scope": "all_counts",
+    "mip_runtime_scope": "single_unified_model",
+    "exact_strategy_requested": "milp",
+    "exact_strategy": "gurobi_unified_milp",
+    "solve_request": {
+      "time_limit": 29.881452500005253,
+      "seed": 42
+    }
+  },
+  "strategy": "flexible_batch_cost_v1",
+  "model_module": "models.routing.model_8.exact",
+  "candidate_schedule": [
+    {
+      "id": "b1",
+      "start": 28800,
+      "cutoff": 37200,
+      "end": 40500
+    },
+    {
+      "id": "b2",
+      "start": 40500,
+      "cutoff": 48900,
+      "end": 52200
+    },
+    {
+      "id": "b3",
+      "start": 52200,
+      "cutoff": 60600,
+      "end": 63900
+    },
+    {
+      "id": "b4",
+      "start": 63900,
+      "cutoff": 72300,
+      "end": 75600
+    }
+  ],
+  "economic_profile_hash": "5d8ee068f7a95bdfa73602453c1e0a6bc4c467781ef79677975fbb073320ebc6",
+  "evidence_hash": null,
+  "cutoff_mode": "fixed",
+  "shared_cutoff": false,
+  "cutoff_bounds": {
+    "b1": [
+      37200,
+      37200
+    ],
+    "b2": [
+      48900,
+      48900
+    ],
+    "b3": [
+      60600,
+      60600
+    ],
+    "b4": [
+      72300,
+      72300
+    ]
+  },
+  "cycle_batch_count": null,
+  "solver_module": "models.routing.model_8.exact.solver",
+  "schedule_mode": "flexible_cycle",
+  "batch_mode": "flexible_cycle",
+  "calendar_config": {
+    "model": 8,
+    "schedule_mode": "flexible_cycle",
+    "batch_count_candidates": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "minimum_phase_ticks": 60,
+    "cycle_start": 28800,
+    "cycle_end": 75600,
+    "time_tick_seconds": 1,
+    "count_clock_rule": "equal_partition_refinement_v1"
+  }
+}

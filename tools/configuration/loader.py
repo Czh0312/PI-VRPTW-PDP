@@ -10,6 +10,7 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 LEGACY_CONFIG_ROOT = PROJECT_ROOT / 'archive/config/20261007_before_classification'
 LEGACY_DATA_ROOT = PROJECT_ROOT / 'archive/datasets/legacy_20261015/data'
+RETIRED_CASE_ROOT = PROJECT_ROOT / 'archive/datasets/retired_20261024'
 
 
 def resolve_project_path(path: str | Path) -> Path:
@@ -21,6 +22,15 @@ def resolve_project_path(path: str | Path) -> Path:
     candidate = Path(path)
     candidate = candidate if candidate.is_absolute() else PROJECT_ROOT / candidate
     if not candidate.exists():
+        try:
+            relative = candidate.resolve().relative_to(PROJECT_ROOT)
+        except ValueError:
+            pass
+        else:
+            if relative.parts and relative.parts[0] in ('data', 'config'):
+                retired = RETIRED_CASE_ROOT / relative
+                if retired.exists():
+                    return retired
         try:
             relative = candidate.resolve().relative_to(PROJECT_ROOT / 'config')
         except ValueError:
@@ -122,7 +132,7 @@ def load_routing_case(path: str | Path, *, use_pool_config=True) -> tuple[dict[s
             raise ValueError('Multibatch cases require schema_version=2 and orders')
     elif case.get('schema_version', 1) != 1 or case.get('orders'):
         raise ValueError('schema_version=2/orders requires multi_batch_cutoff_v1')
-    fixed_pool = case['model'] not in (5, 6, 7, 8) or (
+    fixed_pool = case['model'] not in (5, 6, 7, 8, 9) or (
         case['model'] == 5 and run_config.get('objective_mode') == 'distance')
     if version == 'multi_batch_cutoff_v1' and use_pool_config and fixed_pool:
         from .container_pools import apply_pool_config

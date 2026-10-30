@@ -327,7 +327,7 @@ def cover_delivery_batches(problem, assignment):
 def _best_construction(
     problem, evaluator, assignment, rng, deadline, *, randomized=False, cutoffs=None
 ):
-    cutoffs = problem.validated_cutoffs(cutoffs)
+    cutoffs = problem.proposed_cutoffs(cutoffs)
     fixed = evaluator.fixed(assignment, cutoffs)
     best = None
     for construct in (initial_state, appointment_state, chronological_state):
@@ -395,7 +395,7 @@ def _initial_cutoff_profiles(problem):
         }
         if profile not in profiles:
             profiles.append(profile)
-    return profiles
+    return [problem.proposed_cutoffs(profile) for profile in profiles]
 
 
 def _seed_from_result(problem, initial_result):
@@ -503,7 +503,7 @@ def initial_calendars(variable):
         for t in targets[:6]:
             boundaries = list(balanced)
             boundaries[index] = t
-            key = tuple(boundaries)
+            key = parent.proposed_boundaries(k, boundaries)
             if key not in seen:
                 seen.add(key)
                 yield key

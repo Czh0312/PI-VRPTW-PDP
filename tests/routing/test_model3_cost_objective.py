@@ -160,7 +160,12 @@ def test_explicit_case_and_cli_cost_modes_preserve_the_distance_default(monkeypa
         load_instance({**cfg, 'objective_mode': 'other'}, fleet)
     monkeypatch.setattr(multibatch, 'run_case', lambda cfg, fleet, **kw: load_instance(cfg, fleet))
     base = ['--case', 'config/experiments/examples/single_batch_demo.json']
-    assert not getattr(main(base), 'cost_objective', False)
+    # The active demo may explicitly select cost. The API default without an
+    # objective flag and the CLI's explicit distance override remain distance.
+    default_cfg, default_fleet = load_routing_case(base[1])
+    default_cfg.pop('objective_mode', None)
+    assert not getattr(load_instance(default_cfg, default_fleet), 'cost_objective', False)
+    assert not getattr(main(base + ['--objective-mode', 'distance']), 'cost_objective', False)
     priced = base + ['--economic-config', 'config/experiments/benchmark27_v1/economic.json']
     assert main(priced).cost_objective
     assert not getattr(main(priced + ['--objective-mode', 'distance']), 'cost_objective', False)

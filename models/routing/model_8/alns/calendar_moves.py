@@ -51,4 +51,4 @@ def move_boundaries(variable, boundaries, rng, operator, result=None):
             changed[index] = min(hi, max(lo, changed[index] + rng.choice((-step, -1, 1, step))))
         else:
             changed[index] = rng.randint(lo, hi)
-    return variable.parent.validated_boundaries(k, changed)
+    return variable.parent.proposed_boundaries(k, changed)

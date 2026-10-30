@@ -1,0 +1,32 @@
+{
+  "date": "2026-10-30",
+  "task": "Compare M8 and M9 exact solvers on the same existing small benchmark instance",
+  "dataset": "formal_benchmark27_uniform_7_20_50_v1",
+  "case": "S02",
+  "selection_reason": "Existing 7-customer case with two satellites; S01 has only one satellite and cannot show free-assignment effects.",
+  "source_case": "data/formal_benchmark27_uniform_7_20_50_v1/model_8/small/S02/case.json",
+  "customers": 7,
+  "satellites": 2,
+  "models": [8, 9],
+  "solver": "exact",
+  "seeds": [42],
+  "budget_seconds_per_model": 300,
+  "threads_per_model": 1,
+  "formulation": "compact",
+  "batch_count_candidates": [1, 2, 3, 4, 5, 6, 7],
+  "calendar_domain": "native input clock with per-count equal-partition refinement; no extra decision grid",
+  "external_initial_solution": false,
+  "sequential_execution": true,
+  "preserve_inputs": ["network", "orders", "fleet", "policy", "economic_profile", "pool_bounds"],
+  "method_note": "Pure direct Gurobi unified MILP; compact is an equivalent expression. Do not infer optimality from a time-limited feasible result.",
+  "additional_diagnostic": {
+    "reason": "Native all-K M9 returned no incumbent within 300 seconds; M8 proved optimal with K=2.",
+    "model": 9,
+    "batch_count_candidates": [2],
+    "budget_seconds": 300,
+    "seed": 42,
+    "external_initial_solution": false,
+    "proof_scope": "K=2 only. Separately verify the obtained schedule is feasible in the native K=1..7 M9 domain."
+  },
+  "actual_solve_count": 3
+}

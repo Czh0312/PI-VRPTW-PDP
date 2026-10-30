@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites><testsuite name="pytest" errors="0" failures="7" skipped="0" tests="74" time="25.682" timestamp="2026-10-29T14:15:30.475206" hostname="czh-0312"><testcase classname="tests.routing.test_model8_evaluation_pool" name="test_valid_shortcut_matches_full_replay_and_keeps_one_two_cycle_audit" time="0.016"><failure message="assert [True, True] == [True]&#10;  Left contains one more item: True&#10;  Use -v to get more diff">monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x0000021058F1F790&gt;
+
+    def test_valid_shortcut_matches_full_replay_and_keeps_one_two_cycle_audit(monkeypatch):
+        from models.common.cycle import audit
+        p, assignment, state = sample()
+        expected = full_replay_oracle(p, assignment, deepcopy(state))
+        assert expected[1] is not None and expected[1]['container_pool_size'] == 1
+        calls = []
+        original = audit._audit
+        def observe(*args, **kwargs):
+            calls.append(args[2])
+            return original(*args, **kwargs)
+        monkeypatch.setattr(audit, '_audit', observe)
+        evaluator = ev.JointEvaluator(p)
+        actual = evaluator(assignment, state)
+        assert actual == expected
+&gt;       assert calls == [True]
+E       assert [True, True] == [True]
+E         Left contains one more item: True
+E         Use -v to get more diff
+
+tests\routing\test_model8_evaluation_pool.py:68: AssertionError</failure></testcase><testcase classname="tests.routing.test_model8_evaluation_pool" name="test_same_time_clean_release_is_available_for_loading[9-1]" time="0.001"><failure message="AttributeError: module 'models.routing.model_8.alns.evaluator' has no attribute '_required_pool'">ready = 9, expected = 1
+
+    @pytest.mark.parametrize('ready,expected', [(9, 1), (10, 1), (11, 2)])
+    def test_same_time_clean_release_is_available_for_loading(ready, expected):
+        p = SimpleNamespace(operating_policy=SimpleNamespace(cleaning_duration=3,
+            batches=[SimpleNamespace(id='b1', start=0), SimpleNamespace(id='b2', start=10)]),
+            batch_demands={'b1': 1, 'b2': 1})
+        raw = {'e1_trips': [{'return_complete': ready-3, 'events': [{'kind': 'p', 'quantity': 1}]}]}
+&gt;       assert ev._required_pool(p, raw) == expected
+E       AttributeError: module 'models.routing.model_8.alns.evaluator' has no attribute '_required_pool'
+
+tests\routing\test_model8_evaluation_pool.py:79: AttributeError</failure></testcase><testcase classname="tests.routing.test_model8_evaluation_pool" name="test_same_time_clean_release_is_available_for_loading[10-1]" time="0.001"><failure message="AttributeError: module 'models.routing.model_8.alns.evaluator' has no attribute '_required_pool'">ready = 10, expected = 1
+
+    @pytest.mark.parametrize('ready,expected', [(9, 1), (10, 1), (11, 2)])
+    def test_same_time_clean_release_is_available_for_loading(ready, expected):
+        p = SimpleNamespace(operating_policy=SimpleNamespace(cleaning_duration=3,
+            batches=[SimpleNamespace(id='b1', start=0), SimpleNamespace(id='b2', start=10)]),
+            batch_demands={'b1': 1, 'b2': 1})
+        raw = {'e1_trips': [{'return_complete': ready-3, 'events': [{'kind': 'p', 'quantity': 1}]}]}
+&gt;       assert ev._required_pool(p, raw) == expected
+E       AttributeError: module 'models.routing.model_8.alns.evaluator' has no attribute '_required_pool'
+
+tests\routing\test_model8_evaluation_pool.py:79: AttributeError</failure></testcase><testcase classname="tests.routing.test_model8_evaluation_pool" name="test_same_time_clean_release_is_available_for_loading[11-2]" time="0.001"><failure message="AttributeError: module 'models.routing.model_8.alns.evaluator' has no attribute '_required_pool'">ready = 11, expected = 2
+
+    @pytest.mark.parametrize('ready,expected', [(9, 1), (10, 1), (11, 2)])
+    def test_same_time_clean_release_is_available_for_loading(ready, expected):
+        p = SimpleNamespace(operating_policy=SimpleNamespace(cleaning_duration=3,
+            batches=[SimpleNamespace(id='b1', start=0), SimpleNamespace(id='b2', start=10)]),
+            batch_demands={'b1': 1, 'b2': 1})
+        raw = {'e1_trips': [{'return_complete': ready-3, 'events': [{'kind': 'p', 'quantity': 1}]}]}
+&gt;       assert ev._required_pool(p, raw) == expected
+E       AttributeError: module 'models.routing.model_8.alns.evaluator' has no attribute '_required_pool'
+
+tests\routing\test_model8_evaluation_pool.py:79: AttributeError</failure></testcase><testcase classname="tests.routing.test_model8_evaluation_pool" name="test_infeasible_neighbor_has_the_original_penalty[late_return]" time="0.005" /><testcase classname="tests.routing.test_model8_evaluation_pool" name="test_infeasible_neighbor_has_the_original_penalty[missing_task]" time="0.005" /><testcase classname="tests.routing.test_model8_evaluation_pool" name="test_infeasible_neighbor_has_the_original_penalty[duplicate_task]" time="0.005" /><testcase classname="tests.routing.test_model8_evaluation_pool" name="test_infeasible_neighbor_has_the_original_penalty[bad_vehicle]" time="0.003" /><testcase classname="tests.routing.test_model8_evaluation_pool" name="test_failed_sizing_proposal_uses_original_evaluation" time="0.005"><failure message="AttributeError: &lt;module 'models.routing.model_8.alns.evaluator' from 'C:\\Users\\猫的秋刀鱼\\Desktop\\毕业设计\\models\\routing\\model_8\\alns\\evaluator.py'&gt; has no attribute '_required_pool'">monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x0000021059D77010&gt;
+
+    def test_failed_sizing_proposal_uses_original_evaluation(monkeypatch):
+        p, assignment, state = sample()
+        expected = full_replay_oracle(p, assignment, deepcopy(state))
+&gt;       monkeypatch.setattr(ev, '_required_pool', lambda *args: 0)
+E       AttributeError: &lt;module 'models.routing.model_8.alns.evaluator' from 'C:\\Users\\猫的秋刀鱼\\Desktop\\毕业设计\\models\\routing\\model_8\\alns\\evaluator.py'&gt; has no attribute '_required_pool'
+
+tests\routing\test_model8_evaluation_pool.py:99: AttributeError</failure></testcase><testcase classname="tests.routing.test_model8_evaluation_pool" name="test_full_audit_rejects_bad_quantities_after_fast_sizing" time="0.004"><failure message="AttributeError: 'JointEvaluator' object has no attribute 'reference_fallbacks'">monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x0000021059AD0150&gt;
+
+    def test_full_audit_rejects_bad_quantities_after_fast_sizing(monkeypatch):
+        p, assignment, state = sample()
+        original = ev.evaluate
+        def corrupt(*args, **kwargs):
+            score, raw, issues = original(*args, **kwargs)
+            pickup = next(e for trip in raw['e1_trips'] for e in trip['events'] if e['kind'] == 'p')
+            pickup['quantity'] += 1
+            return score, raw, issues
+        monkeypatch.setattr(ev, 'evaluate', corrupt)
+        expected = full_replay_oracle(p, assignment, deepcopy(state))
+        evaluator = ev.JointEvaluator(p)
+        actual = evaluator(assignment, state)
+        assert actual == expected and actual[1] is None
+&gt;       assert evaluator.reference_fallbacks == 1
+E       AttributeError: 'JointEvaluator' object has no attribute 'reference_fallbacks'
+
+tests\routing\test_model8_evaluation_pool.py:118: AttributeError</failure></testcase><testcase classname="tests.routing.test_model8_evaluation_pool" name="test_configured_minimum_pool_is_preserved" time="0.006" /><testcase classname="tests.routing.test_model8_evaluation_pool" name="test_pool_upper_bound_keeps_original_penalized_response" time="0.004" /><testcase classname="tests.routing.test_model8_evaluation_pool" name="test_refined_physical_clock_preserves_cost_and_inventory" time="0.009" /><testcase classname="tests.routing.test_model8_evaluation_pool" name="test_larger_instances_keep_original_evaluation_path" time="0.007"><failure message="AttributeError: &lt;module 'models.routing.model_8.alns.evaluator' from 'C:\\Users\\猫的秋刀鱼\\Desktop\\毕业设计\\models\\routing\\model_8\\alns\\evaluator.py'&gt; has no attribute '_required_pool'">monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x0000021059D88250&gt;
+
+    def test_larger_instances_keep_original_evaluation_path(monkeypatch):
+        from dataclasses import replace
+        from models.common.cycle.joint import JointBatchInstance
+        p, _, _ = sample()
+        orders = [replace(p.orders[i % 2], id=f'many_{i}', batch='b1' if i &lt; 5 else 'b2')
+                  for i in range(10)]
+        many = JointBatchInstance(p.network, orders,
+            replace(p.operating_policy, container_pool_size=10), {}, p.cost_profile.config)
+        assignment = {o.id: o.batch for o in orders}
+        batches = many.operating_policy.batches
+        state = dict(deliveries={b.id: [['S']] for b in batches},
+            pickup_order={b.id: ['S'] for b in batches},
+            pickup_vehicle={b.id: {'S': 0} for b in batches}, e2=[], cutoffs=dict(many.default_cutoffs))
+        for batch in batches:
+            members = [o.id for o in orders if o.batch == batch.id]
+            state['e2'].append(dict(satellite='S', vehicle=0,
+                tasks=[(oid, kind) for kind in ['d', 'p'] for oid in members]))
+        expected = full_replay_oracle(many, assignment, deepcopy(state))
+        assert expected[1] is not None
+        def forbidden(*args):
+            raise AssertionError('Large-instance quality guard must bypass sizing shortcut')
+&gt;       monkeypatch.setattr(ev, '_required_pool', forbidden)
+E       AttributeError: &lt;module 'models.routing.model_8.alns.evaluator' from 'C:\\Users\\猫的秋刀鱼\\Desktop\\毕业设计\\models\\routing\\model_8\\alns\\evaluator.py'&gt; has no attribute '_required_pool'
+
+tests\routing\test_model8_evaluation_pool.py:192: AttributeError</failure></testcase><testcase classname="tests.routing.test_model8_fast_retiming" name="test_calendar_repair_retains_or_reconstructs_as_needed[1-feasible]" time="0.139" /><testcase classname="tests.routing.test_model8_fast_retiming" name="test_calendar_repair_retains_or_reconstructs_as_needed[8-feasible]" time="0.099" /><testcase classname="tests.routing.test_model8_fast_retiming" name="test_calendar_repair_retains_or_reconstructs_as_needed[8-failed]" time="0.105" /><testcase classname="tests.routing.test_model8_fast_retiming" name="test_calendar_repair_retains_or_reconstructs_as_needed[8-noop]" time="0.111" /><testcase classname="tests.routing.test_model8_fast_retiming" name="test_public_entry_rejects_invalid_reconstruction_period[0]" time="0.016" /><testcase classname="tests.routing.test_model8_fast_retiming" name="test_public_entry_rejects_invalid_reconstruction_period[-1]" time="0.002" /><testcase classname="tests.routing.test_model8_fast_retiming" name="test_public_entry_rejects_invalid_reconstruction_period[True]" time="0.003" /><testcase classname="tests.routing.test_model8_fast_retiming" name="test_public_entry_rejects_invalid_reconstruction_period[1.5]" time="0.002" /><testcase classname="tests.routing.test_model8_fast_retiming" name="test_public_fast_retiming_records_policy_and_aggregates_visit_metrics" time="0.302" /><testcase classname="tests.routing.test_model8_decision_grid" name="test_grid_is_strict_in_replay_but_proposals_are_quantized" time="0.005" /><testcase classname="tests.routing.test_model8_decision_grid" name="test_exact_and_alns_obey_same_grid_and_independent_two_cycle_audit[1]" time="0.660" /><testcase classname="tests.routing.test_model8_decision_grid" name="test_exact_and_alns_obey_same_grid_and_independent_two_cycle_audit[2]" time="0.733" /><testcase classname="tests.routing.test_model8_decision_grid" name="test_real_cases_keep_physical_times_and_accept_all_four_counts[small-S01]" time="0.038" /><testcase classname="tests.routing.test_model8_decision_grid" name="test_real_cases_keep_physical_times_and_accept_all_four_counts[medium-M01]" time="0.053" /><testcase classname="tests.routing.test_model8_decision_grid" name="test_real_cases_keep_physical_times_and_accept_all_four_counts[large-L01]" time="0.176" /><testcase classname="tests.routing.test_model8_decision_grid" name="test_default_domain_is_unchanged_and_grid_cannot_masquerade_as_m7" time="0.002" /><testcase classname="tests.routing.test_model8_decision_grid" name="test_milp_rejects_an_otherwise_feasible_time_between_minutes" time="0.136" /><testcase classname="tests.routing.test_productive_batches" name="test_independent_audit_rejects_a_completely_idle_calendar_batch[6]" time="0.003" /><testcase classname="tests.routing.test_productive_batches" name="test_independent_audit_rejects_a_completely_idle_calendar_batch[7]" time="0.003" /><testcase classname="tests.routing.test_productive_batches" name="test_independent_audit_rejects_a_completely_idle_calendar_batch[8]" time="0.003" /><testcase classname="tests.routing.test_productive_batches" name="test_delivery_without_any_recovery_does_not_count_as_a_productive_batch[6]" time="0.003" /><testcase classname="tests.routing.test_productive_batches" name="test_delivery_without_any_recovery_does_not_count_as_a_productive_batch[7]" time="0.003" /><testcase classname="tests.routing.test_productive_batches" name="test_delivery_without_any_recovery_does_not_count_as_a_productive_batch[8]" time="0.002" /><testcase classname="tests.routing.test_productive_batches" name="test_decoder_penalizes_empty_delivery_and_recovery_batches[6]" time="0.154" /><testcase classname="tests.routing.test_productive_batches" name="test_decoder_penalizes_empty_delivery_and_recovery_batches[7]" time="0.149" /><testcase classname="tests.routing.test_productive_batches" name="test_decoder_penalizes_empty_delivery_and_recovery_batches[8]" time="0.003" /><testcase classname="tests.routing.test_productive_batches" name="test_cross_batch_recovery_is_allowed_when_every_batch_performs_both_tasks[6]" time="0.003" /><testcase classname="tests.routing.test_productive_batches" name="test_cross_batch_recovery_is_allowed_when_every_batch_performs_both_tasks[7]" time="0.002" /><testcase classname="tests.routing.test_productive_batches" name="test_cross_batch_recovery_is_allowed_when_every_batch_performs_both_tasks[8]" time="0.003" /><testcase classname="tests.routing.test_productive_batches" name="test_cutoff_equality_and_next_cutoff_assignment_are_preserved[6]" time="0.003" /><testcase classname="tests.routing.test_productive_batches" name="test_cutoff_equality_and_next_cutoff_assignment_are_preserved[7]" time="0.003" /><testcase classname="tests.routing.test_productive_batches" name="test_cutoff_equality_and_next_cutoff_assignment_are_preserved[8]" time="0.003" /><testcase classname="tests.routing.test_productive_batches" name="test_covering_assignment_matches_independent_exhaustive_domain_check[6]" time="0.007" /><testcase classname="tests.routing.test_productive_batches" name="test_covering_assignment_matches_independent_exhaustive_domain_check[7]" time="0.006" /><testcase classname="tests.routing.test_productive_batches" name="test_covering_assignment_matches_independent_exhaustive_domain_check[8]" time="0.007" /><testcase classname="tests.routing.test_productive_batches" name="test_last_order_can_swap_batches_without_creating_an_empty_batch[6]" time="0.071" /><testcase classname="tests.routing.test_productive_batches" name="test_last_order_can_swap_batches_without_creating_an_empty_batch[7]" time="0.071" /><testcase classname="tests.routing.test_productive_batches" name="test_last_order_can_swap_batches_without_creating_an_empty_batch[8]" time="0.007" /><testcase classname="tests.routing.test_productive_batches" name="test_alns_returns_only_productive_batches[1-6]" time="0.212" /><testcase classname="tests.routing.test_productive_batches" name="test_alns_returns_only_productive_batches[1-7]" time="0.198" /><testcase classname="tests.routing.test_productive_batches" name="test_alns_returns_only_productive_batches[1-8]" time="0.082" /><testcase classname="tests.routing.test_productive_batches" name="test_alns_returns_only_productive_batches[2-6]" time="0.106" /><testcase classname="tests.routing.test_productive_batches" name="test_alns_returns_only_productive_batches[2-7]" time="0.174" /><testcase classname="tests.routing.test_productive_batches" name="test_alns_returns_only_productive_batches[2-8]" time="0.256" /><testcase classname="tests.routing.test_productive_batches" name="test_one_order_cannot_populate_two_actual_batches[alns-6]" time="0.003" /><testcase classname="tests.routing.test_productive_batches" name="test_one_order_cannot_populate_two_actual_batches[alns-7]" time="0.003" /><testcase classname="tests.routing.test_productive_batches" name="test_one_order_cannot_populate_two_actual_batches[alns-8]" time="0.003" /><testcase classname="tests.routing.test_productive_batches" name="test_one_order_cannot_populate_two_actual_batches[exact-6]" time="0.055" /><testcase classname="tests.routing.test_productive_batches" name="test_one_order_cannot_populate_two_actual_batches[exact-7]" time="0.057" /><testcase classname="tests.routing.test_productive_batches" name="test_one_order_cannot_populate_two_actual_batches[exact-8]" time="0.044" /><testcase classname="tests.routing.test_productive_batches" name="test_multiple_satellites_in_one_round_are_counted_once[6]" time="0.077" /><testcase classname="tests.routing.test_productive_batches" name="test_multiple_satellites_in_one_round_are_counted_once[7]" time="0.113" /><testcase classname="tests.routing.test_productive_batches" name="test_multiple_satellites_in_one_round_are_counted_once[8]" time="0.088" /><testcase classname="tests.routing.test_productive_batches" name="test_exact_solver_enforces_positive_delivery_and_recovery[6]" time="0.240" /><testcase classname="tests.routing.test_productive_batches" name="test_exact_solver_enforces_positive_delivery_and_recovery[7]" time="0.481" /><testcase classname="tests.routing.test_productive_batches" name="test_exact_solver_enforces_positive_delivery_and_recovery[8]" time="0.676" /><testcase classname="tests.routing.test_productive_batches" name="test_exact_solver_rejects_a_delivery_batch_with_no_possible_return[6]" time="2.587" /><testcase classname="tests.routing.test_productive_batches" name="test_exact_solver_rejects_a_delivery_batch_with_no_possible_return[7]" time="0.918" /><testcase classname="tests.routing.test_productive_batches" name="test_exact_solver_rejects_a_delivery_batch_with_no_possible_return[8]" time="1.118" /><testcase classname="tests.routing.test_solver_isolation" name="test_solver_runs_without_importing_the_other_algorithm[alns]" time="13.179" /></testsuite></testsuites>

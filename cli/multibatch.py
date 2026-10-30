@@ -153,7 +153,7 @@ def run_case(config, fleet, *, case_path=None, output=None):
         if getattr(instance, 'calendar_cycle', False):
             manifest.update(calendar_config=instance.calendar_contract,
                             cutoff_bounds_ticks=None, legal_order_batches=None,
-                            source_calendar_note='Reference only; M7/M8 optimize a new calendar over the entire cycle')
+                            source_calendar_note='Reference only; calendar models optimize the entire cycle')
     if getattr(instance, 'optimize_pool', False):
         manifest.update(economic_profile=instance.cost_profile.config,
                         economic_profile_hash=instance.cost_profile.hash,
@@ -211,6 +211,10 @@ def run_case(config, fleet, *, case_path=None, output=None):
             lines += ['一次性包装的重放检查车辆与配送服务；每个周期重新购入包装，不声明容器闭环。']
         if instance.free_assignment:
             lines += ['自由分仓按顾客选择，每个顾客的全部订单保持同仓。完整模型的全局证明状态以 info 为准。']
+            if result.get('assignment'):
+                lines += ['', '| 顾客 | 选定前置仓 |', '| --- | --- |']
+                lines.extend(f'| {customer} | {site} |'
+                             for customer, site in sorted(result['assignment'].items()))
         if fixed_cost:
             lines += ['', 'M3 成本对照：固定分仓、单批次日历和箱池，按 M5–M8 相同费用口径直接优化。',
                       f'总距离：{result.get("total_distance")}；费用配置哈希：{instance.cost_profile.hash}。']

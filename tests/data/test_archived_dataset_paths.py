@@ -52,3 +52,18 @@ def test_historical_generators_default_outside_formal_data():
         if not target.is_absolute():
             target = loader.PROJECT_ROOT / target
         assert target.is_relative_to(loader.PROJECT_ROOT / 'output/generated_datasets')
+
+
+def test_retired_cases_resolve_without_recreating_active_folders(tmp_path,monkeypatch):
+    project=tmp_path/'project'
+    retired=project/'archive/datasets/retired_20261024'
+    monkeypatch.setattr(loader,'PROJECT_ROOT',project)
+    monkeypatch.setattr(loader,'RETIRED_CASE_ROOT',retired)
+    for relative in ('data/old_dataset/case.json','config/experiments/old_case/case.json'):
+        path=retired/relative
+        path.parent.mkdir(parents=True,exist_ok=True)
+        path.write_text('{"archived":true}')
+        assert loader.load_json(relative)=={'archived':True}
+        assert loader.resolve_project_path(relative)==path
+        assert not (project/relative).exists()
+    assert loader.resolve_project_path('data/new_output.json')==project/'data/new_output.json'

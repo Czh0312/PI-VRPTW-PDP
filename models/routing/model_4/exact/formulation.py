@@ -38,6 +38,7 @@ def build_model(
     linear_e2_links=None,
     factor_e2_loads=None,
     strengthening='none',
+    network_strengthening=False,
 ):
     import gurobipy as gp
 
@@ -53,6 +54,7 @@ def build_model(
     f = parameters.fleet
     free = parameters.free_assignment
     compact = parameters.share_e2
+    flow_mode = network_strengthening and compact and problem.reusable
     linear_mode = parameters.linear_link_mode
     windows = parameters.task_windows
     site_windows = parameters.site_windows
@@ -199,6 +201,7 @@ def build_model(
             objective=objective,
             route_arcs=route_arcs,
             batch=batch,
+            resource_flows=flow_mode,
         )
         return result
 
@@ -231,6 +234,7 @@ def build_model(
         objective=objective,
         step_slack=step_slack,
         task_step_bounds=task_step_bounds,
+        resource_flows=flow_mode,
     )
     add_task_and_return_coverage_constraints(
         parameters,
@@ -268,5 +272,19 @@ def build_model(
     context['strengthening'] = strengthen(problem, context, strengthening, check_budget)
     context['e2_causal_step_bounds'] = strengthening in ('bounds', 'combined')
     context['tight_e2_route_bounds'] = strengthening in ('bounds', 'combined')
+    context['network_strengthening'] = dict(applied=False, reason='disabled')
+    if network_strengthening:
+        from models.routing.model_4.exact.network_strengthening import (
+            add_resource_flows, add_precedence_links, add_vehicle_symmetry,
+        )
+        from models.routing.model_4.exact.activation_capacity import add_activation_capacity
+        activation_rows = (0 if strengthening in ('activation', 'capacity_activation')
+                           else add_activation_capacity(problem, context))
+        context['network_strengthening'] = dict(
+            applied=True, resource_flows=add_resource_flows(parameters, variables, check_budget=check_budget),
+            precedence_links=add_precedence_links(parameters, variables, check_budget=check_budget),
+            vehicle_symmetry_rows=add_vehicle_symmetry(variables, check_budget=check_budget),
+            activation_capacity_rows=activation_rows,
+        )
     m.update()
     return m, context

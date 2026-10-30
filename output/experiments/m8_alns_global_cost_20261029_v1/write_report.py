@@ -1,0 +1,125 @@
+"""Publish the measured results and exact validation scope without rerunning search."""
+from collections import Counter
+import hashlib
+import json
+from pathlib import Path
+import statistics
+import xml.etree.ElementTree as ET
+
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parents[2]
+
+
+def read(path):
+    return json.loads(path.read_text(encoding='utf-8-sig'))
+
+
+def sha(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+analysis = read(HERE/'analysis.json')
+final = analysis['phases']['final']
+plan = read(HERE/'final_plan.json')
+promoted = read(HERE/'promotion.json')
+assert all(sha(ROOT/path) == digest for path, digest in promoted.items())
+assert all(sha(path) == digest for path, digest in plan['input_hashes'].items())
+assert sha(HERE/'bench.py') == plan['driver_sha256']
+xml = ET.parse(HERE/'production_checks.xml').getroot()
+suites = [xml] if xml.tag == 'testsuite' else list(xml.iter('testsuite'))
+counts = {key: sum(int(s.attrib.get(key, 0)) for s in suites)
+          for key in ('tests', 'failures', 'errors', 'skipped')}
+counts['passed'] = counts['tests']-sum(counts[k] for k in ('failures', 'errors', 'skipped'))
+assert counts['tests'] and counts['failures'] == counts['errors'] == counts['skipped'] == 0
+scope = Counter(t.attrib['classname'] for t in xml.iter('testcase'))
+validation = dict(counts=counts, scope=dict(sorted(scope.items())),
+                  runtime_preflight='READY; Python 3.11.3; Gurobi 11.0.3; integer solve OPTIMAL, objective 1',
+                  source_hashes=promoted, experiment_driver_sha256=sha(HERE/'bench.py'),
+                  test_xml_sha256=sha(HERE/'production_checks.xml'),
+                  readme_sha256=sha(ROOT/'models/routing/model_8/alns/README.md'))
+(HERE/'validation.json').write_text(json.dumps(validation, ensure_ascii=False, indent=2), encoding='utf-8')
+base, cand = final['variants']['baseline'], final['variants']['bounded']
+native = {variant: statistics.mean(row['native_gap_by_5s_percent'] for row in final['rows']
+                                 if row['variant'] == variant) for variant in ('baseline', 'bounded')}
+assert all(abs(native[v]-final['variants'][v]['mean_gap_percent']) <= 1e-8 for v in native)
+lines = [
+    '# 模型八 ALNS：必要分批域与完整费用修复', '',
+    '九例、根种子42、每次5秒预算的配对冷启动实验已完成，采用 `bounded` 候选。'
+    f"平均 GAP 从 **{base['mean_gap_percent']:.4f}% 降到 {cand['mean_gap_percent']:.4f}%**，"
+    f"下降 {base['mean_gap_percent']-cand['mean_gap_percent']:.4f} 个百分点；"
+    f"最差 GAP 从 **{base['worst_gap_percent']:.4f}% 降到 {cand['worst_gap_percent']:.4f}%**。"
+    '5例改善、2例持平、2例退步，双方均为9/9可行并通过两周期审计，最优值命中均为 **0/9**。', '',
+    '这是单种子、墙钟预算下的结果，不代表多种子稳定性。完整费用精修可保持传入解不变或改进，'
+    '但整段搜索重新分配了时间和提案，因此个别算例仍会退步。', '',
+    '## 同预算结果', '',
+    '| 算例 | 原版 GAP | 候选 GAP | 原版 K / N | 候选 K / N | 变化 |',
+    '| --- | ---: | ---: | ---: | ---: | --- |',
+]
+labels = {'better': '改善', 'tie': '持平', 'worse': '退步'}
+for pair in final['pairs']:
+    lines.append(f"| {pair['case']} | {pair['baseline_gap_percent']:.4f}% | {pair['candidate_gap_percent']:.4f}% "
+                 f"| {pair['baseline_K']} / {pair['baseline_N']} | {pair['candidate_K']} / {pair['candidate_N']} "
+                 f"| {labels[pair['change']]} |")
+lines.extend([
+    '', '| 指标 | 原版 | 候选 |', '| --- | ---: | ---: |',
+    f"| 平均 GAP | {base['mean_gap_percent']:.4f}% | {cand['mean_gap_percent']:.4f}% |",
+    f"| 中位 GAP | {base['median_gap_percent']:.4f}% | {cand['median_gap_percent']:.4f}% |",
+    f"| 最差 GAP | {base['worst_gap_percent']:.4f}% | {cand['worst_gap_percent']:.4f}% |",
+    '| 命中已证明的最优值 | 0 / 9 | 0 / 9 |',
+    '| GAP 不超过1% | 0 / 9 | 0 / 9 |',
+    f"| 平均实际返回时间 | {base['mean_wall_seconds']:.4f}s | {cand['mean_wall_seconds']:.4f}s |",
+    f"| 平均 CPU 时间 | {base['mean_cpu_seconds']:.4f}s | {cand['mean_cpu_seconds']:.4f}s |", '',
+    'GAP = 100 ×（独立审计的 ALNS 总费用 / 已证明的最优总费用 − 1）。'
+    '参考最优值只在全部搜索结束后的 `analyze.py` 中读取。', '',
+    f"原版实际返回范围 {base['wall_seconds_range'][0]:.4f}–{base['wall_seconds_range'][1]:.4f}s；"
+    f"候选 {cand['wall_seconds_range'][0]:.4f}–{cand['wall_seconds_range'][1]:.4f}s。"
+    '这是5秒求解预算，存在收尾超时；最终独立审计在计时结束后执行。'
+    '按原生各K访问的 `started + local_history.time` 截到5.000秒，双方上述费用、平均GAP和命中数均不变。'
+    '原生历史只记录已保存候选，不能充当连续时间的完备事件轨迹。', '',
+    '本轮原版平均GAP为6.0756%，与之前另一轮5秒实验的6.8787%不同；'
+    '以上只使用本轮配对原版作为分母比较，未择取旧轮较差结果。'
+    '同一种子仍会因墙钟截止位置和系统负载而出现差别。', '',
+    '## 已采用的改动', '',
+    '1. 不超过9单时，从时间窗、最短路行驶下界、最早回仓和最晚装载推导必要分批域，'
+    '结合前序回收箱量、非空批次匹配和箱池下界。仅有必要条件证书才终止对应K；'
+    '原始K=1…7和原始实例均保留，最终用原始物理域复核。固定日历证书不会排除整个可变日历K。',
+    '2. 在原有精修时间内，试完整订单D/P重插及整趟合并，直接按箱池、E1和E2完整总费用接受下降；'
+    '每个被评价状态均保有完整任务覆盖。复杂修复不替换每轮随机pair算子，以免压低正常搜索吞吐。',
+    '3. 联合提议整组回收截点、E1配送前缀和E2返回等待，跳过单点移动难以跨越的回收时序障碍。'
+    '候选遵守日历决策网格，并由原完整评价器决定可行性。',
+    '4. 候选次数及改进次数写入 `chain_candidates`、`chain_improvements`，汇总内部热启动及所有K访问；'
+    '逐次保留 `domain_certificate`。超过9单保持原有提案路径。', '',
+    '数学必要条件作为本模型本地纯函数实现；ALNS运行不导入exact模块或gurobipy，'
+    '不读取历史最优方案，也不把达到已知最优值用作停止条件。'
+    '精确端的参考求解器未修改。', '',
+    '## 过程与证据', '',
+    '先以已记录ALNS解做输入驱动的定工作量探针（`probe.json`，用于判断修复是否有效，'
+    '不计入冷启动命中率），再对S01–S03做原型配对（`pilot_plan.json`）。'
+    '较昂贵的原型替换pair算子后收益混合，未采用；最终候选把重修复限制到预留精修窗口，'
+    '再运行完整九例配对（`final_plan.json`）。所有阶段根种子均为42，没有增加实验种子。', '',
+    '最终运行共18次，串行执行，各算例交替原版/候选先后顺序，所有K共用5秒而不是每K5秒；'
+    '迭代上限10^9，避免旧的小迭代上限提前结束。输入读取与模块预导入在计时前，'
+    '构造、搜索、内部审计和精修均计入求解时间；无外部初解。'
+    '跨K重访沿用算法既有的子种子派生，不是新的实验根种子。', '',
+    '冻结了原版和候选源文件、81个物理输入文件的SHA256及实验驱动SHA256；'
+    '搜索结束复核均未改变。每例保留 `result.json`、原始域 `audit.json` 和 `summary.json`。'
+    '候选推广到正式代码前逐个检查基线，防止覆盖并行改动；只推广六个M8 ALNS文件。', '',
+    '可核查文件： [数值汇总](analysis.json)、[最终实验计划](final_plan.json)、'
+    '[完整差异](review.diff)、[推广记录](promotion.json)、[验证记录](validation.json)、'
+    '[原始结果](runs/final)、[实验脚本](bench.py)。', '',
+    '## 验证', '',
+    '使用项目 `tools/run.ps1` 复检环境，READY：Python3.11.3、Gurobi11.0.3，'
+    '许可初始化及实际整数优化通过。正式选定范围的严格测试结果：'
+    f"**{counts['passed']}通过、{counts['failures']}失败、{counts['errors']}错误、{counts['skipped']}跳过**。"
+    '这是以下选定范围，不是完整测试套件。', '',
+    '| 选定测试范围 | 项数 |', '| --- | ---: |',
+])
+for name, count in sorted(scope.items()):
+    lines.append(f'| `{name}` | {count} |')
+lines.extend(['', '新组件覆盖完整费用下降、两周期可行性、决策网格、超时保留原解、'
+    '任务覆盖、时间域不改变输入及三批次复用可行见证。已有测试覆盖时间环补救、'
+    '箱池评价、K预算回收、调度、快速重算、精确与ALNS共享网格，以及ALNS独立运行。', '',
+    '仍待解决的是S02、S03等例的分批、日历和多条路线同时改变的搜索障碍；'
+    '当前不能声称达到“多数小例5秒命中最优”或已验证运行稳定性。', ''])
+(HERE/'report.md').write_text('\n'.join(lines), encoding='utf-8')
+print(json.dumps(dict(validation=counts, scope=dict(scope), report=str(HERE/'report.md')), ensure_ascii=False))

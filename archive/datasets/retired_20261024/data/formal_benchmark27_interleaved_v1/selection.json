@@ -1,0 +1,1099 @@
+{
+  "schema_version": 1,
+  "design_id": "benchmark27_interleaved_v1",
+  "date": "2026-10-19",
+  "status": "physically_validated_new_windows",
+  "user_requirement": "Exactly nine base instances in each of small, medium and large; shared demand and physical inputs across eight model configurations.",
+  "base_case_count": 27,
+  "model_configuration_count": 216,
+  "source_manifest": "data/formal_benchmark27_one_box_v1/manifest.json",
+  "source_manifest_sha256": "adb7145dd95ef67889b9e5eedd7fdc1cf5dd0fc0bcbf2a85f6cb0dc00e2ccde6",
+  "source_block_count": 14,
+  "selection_rule": "Within each declared customer-count stratum, retain the first listed number of family IDs in lexicographic order, profile 1 only, spread_medium only; do not inspect solver results. All core cases use Zhou coordinate units.",
+  "customer_count_quotas": {
+    "small": {
+      "7": 3,
+      "10": 3,
+      "12": 3
+    },
+    "medium": {
+      "20": 4,
+      "30": 5
+    },
+    "large": {
+      "50": 4,
+      "100": 5
+    }
+  },
+  "model_profiles": {
+    "1": {
+      "packaging": "single_use",
+      "assignment": "fixed_reference",
+      "batch_count": 1,
+      "pool": "not_applicable",
+      "objective": "distance"
+    },
+    "2": {
+      "packaging": "single_use",
+      "assignment": "optimized",
+      "batch_count": 1,
+      "pool": "not_applicable",
+      "objective": "distance"
+    },
+    "3": {
+      "packaging": "reusable",
+      "assignment": "fixed_reference",
+      "batch_count": 1,
+      "pool": "Q",
+      "objective": "distance"
+    },
+    "4": {
+      "packaging": "reusable",
+      "assignment": "optimized",
+      "batch_count": 1,
+      "pool": "Q",
+      "objective": "distance"
+    },
+    "5": {
+      "packaging": "reusable",
+      "assignment": "fixed_reference",
+      "batch_count": 3,
+      "order_batches": "fixed_reference",
+      "calendar": "fixed_equal_length_common_cutoff_0.70",
+      "pool": "Q",
+      "objective": "distance"
+    },
+    "6": {
+      "packaging": "reusable",
+      "assignment": "fixed_reference",
+      "batch_count": "optimized_common_admissible_domain",
+      "order_batches": "optimized",
+      "calendar": "equal_length_common_cutoff_optimized",
+      "pool": "optimized_1_to_Q",
+      "objective": "cost"
+    },
+    "7": {
+      "packaging": "reusable",
+      "assignment": "fixed_reference",
+      "batch_count": "optimized_common_admissible_domain",
+      "order_batches": "optimized",
+      "calendar": "equal_length_independent_cutoffs_optimized",
+      "pool": "optimized_1_to_Q",
+      "objective": "cost"
+    },
+    "8": {
+      "packaging": "reusable",
+      "assignment": "fixed_reference",
+      "batch_count": "optimized_common_admissible_domain",
+      "order_batches": "optimized",
+      "calendar": "variable_lengths_independent_cutoffs_optimized",
+      "pool": "optimized_1_to_Q",
+      "objective": "cost"
+    }
+  },
+  "comparison_rules": [
+    "Same absolute demand, locations, windows, releases, service/use times, network, fleet, cycle and applicable economic rates within a base instance.",
+    "B1 adapters may change batch bindings/calendar only; use the same final return cutoff as the reference multibatch calendar.",
+    "Do not fix optimized decisions to a model-specific best solution or alter physical inputs to force feasibility.",
+    "M6-M8 use the same exogenous K domain, minimum phase duration, nonempty delivery-and-return rule and explicitly checked time representation.",
+    "Current M1-M5 optimize distance; use common post-evaluation and a fixed-policy cost control to separate objective changes from expanded decisions.",
+    "Nine cases per size does not imply nine independent source instances; preserve source-block pairing in summaries.",
+    "Equal seeds and total-call budgets within a matched model/algorithm comparison; no solver execution is part of this design.",
+    "The underlying positive-integer K domain is common; model-specific exclusions require input-derived impossibility certificates and must preserve every feasible solution."
+  ],
+  "cases": [
+    {
+      "id": "S01",
+      "size": "small",
+      "customer_count": 7,
+      "family_id": "zhou_Set1_7-2-1",
+      "source_block": "zhou:Set1_7-2-1",
+      "variant": "spread_medium",
+      "total_container_uses": 7,
+      "common_reference_files": {
+        "data": "data/formal_benchmark27_interleaved_v1/shared/small/S01/network.csv",
+        "orders": "data/formal_benchmark27_interleaved_v1/shared/small/S01/reference_orders.json",
+        "routing_config": "data/formal_benchmark27_interleaved_v1/shared/small/S01/fleet.json",
+        "operating_policy": "data/formal_benchmark27_interleaved_v1/shared/small/S01/reference_policy.json",
+        "economic_config": "data/formal_benchmark27_interleaved_v1/shared/small/S01/economic.json"
+      },
+      "reference_sha256": {
+        "data": "6fac14e623a613b420a6c5150e3846943f44654459c2dddc2b52024e5dfd0877",
+        "orders": "1e1c70523bb09722e3bb08f61a365a3015321a76a491f49cb4d82f554d2cfd8c",
+        "routing_config": "601ec9cdd406f73db34437f1eba3c672356f3f3491d8d526f70d95fc054e45f5",
+        "operating_policy": "96862c47f31bd81349ecd7980bfb6eafe6af8555c68641193529c75b19f5088b",
+        "economic_config": "543b6b8eb1ba4982ac3e0212eb9f07a55bbab091ed74f546c8f876b9c7cdfd1f"
+      },
+      "spatial_sha256": "42cd9dec2b02a4ba0179228efb2d4d72e217bc0f646a9db2d2042db83bd49c79",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_7-2-1/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_7-2-1/spread_medium/m6_case.json",
+      "adaptation_status": "four_window_endpoints_only; seeded_feasibility_conditioned_interleaving",
+      "source_total_container_uses": 12,
+      "preserved_orders_sha256": "c9577c71b5501dc83b3fcf52b122f941eb868060e752c8324fd76d157022b1af",
+      "preserved_policy_sha256": "dfb69694209948c4899ee11e7e09476ec431fb9df97286690aa793b556cc08ce",
+      "batch_count_certificate_sha256": "a75f5c157b2d9afc8e155f999b72dca11d134f9357866f03aabb4f719342f38c"
+    },
+    {
+      "id": "S02",
+      "size": "small",
+      "customer_count": 7,
+      "family_id": "zhou_Set1_7-2-1b",
+      "source_block": "zhou:Set1_7-2-1b",
+      "variant": "spread_medium",
+      "total_container_uses": 7,
+      "common_reference_files": {
+        "data": "data/formal_benchmark27_interleaved_v1/shared/small/S02/network.csv",
+        "orders": "data/formal_benchmark27_interleaved_v1/shared/small/S02/reference_orders.json",
+        "routing_config": "data/formal_benchmark27_interleaved_v1/shared/small/S02/fleet.json",
+        "operating_policy": "data/formal_benchmark27_interleaved_v1/shared/small/S02/reference_policy.json",
+        "economic_config": "data/formal_benchmark27_interleaved_v1/shared/small/S02/economic.json"
+      },
+      "reference_sha256": {
+        "data": "abac9c81d3bf51c9f7ed0e0f2231e81e5b9302acdb2d75d860ac047345cac94f",
+        "orders": "184e79c017763f1e384817acd364bce8c3f08e30c98070beed888b3fda487a30",
+        "routing_config": "601ec9cdd406f73db34437f1eba3c672356f3f3491d8d526f70d95fc054e45f5",
+        "operating_policy": "96862c47f31bd81349ecd7980bfb6eafe6af8555c68641193529c75b19f5088b",
+        "economic_config": "543b6b8eb1ba4982ac3e0212eb9f07a55bbab091ed74f546c8f876b9c7cdfd1f"
+      },
+      "spatial_sha256": "1f53aaff4a7f7114290b4707b97340ceca432db92a9fa3f0ab908470798773f5",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_7-2-1b/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_7-2-1b/spread_medium/m6_case.json",
+      "adaptation_status": "four_window_endpoints_only; seeded_feasibility_conditioned_interleaving",
+      "source_total_container_uses": 11,
+      "preserved_orders_sha256": "30732c9eea75028826e09ac80f33c8e1c12e4d0f7907c7e640168568d921885a",
+      "preserved_policy_sha256": "dfb69694209948c4899ee11e7e09476ec431fb9df97286690aa793b556cc08ce",
+      "batch_count_certificate_sha256": "690bc8a367ff9b97bbade2de10c15182fecf2c514be3a0a8dc1e551c756294b3"
+    },
+    {
+      "id": "S03",
+      "size": "small",
+      "customer_count": 7,
+      "family_id": "zhou_Set1_7-2-2",
+      "source_block": "zhou:Set1_7-2-2",
+      "variant": "spread_medium",
+      "total_container_uses": 7,
+      "common_reference_files": {
+        "data": "data/formal_benchmark27_interleaved_v1/shared/small/S03/network.csv",
+        "orders": "data/formal_benchmark27_interleaved_v1/shared/small/S03/reference_orders.json",
+        "routing_config": "data/formal_benchmark27_interleaved_v1/shared/small/S03/fleet.json",
+        "operating_policy": "data/formal_benchmark27_interleaved_v1/shared/small/S03/reference_policy.json",
+        "economic_config": "data/formal_benchmark27_interleaved_v1/shared/small/S03/economic.json"
+      },
+      "reference_sha256": {
+        "data": "75de56099af86d9a957f7bcf03546977ca62e30a05868e813523e8d7e89eca3d",
+        "orders": "41c33f55e84ec220845ddf3564f643baf83575574677cfae98dd0cf0f47e644a",
+        "routing_config": "601ec9cdd406f73db34437f1eba3c672356f3f3491d8d526f70d95fc054e45f5",
+        "operating_policy": "96862c47f31bd81349ecd7980bfb6eafe6af8555c68641193529c75b19f5088b",
+        "economic_config": "543b6b8eb1ba4982ac3e0212eb9f07a55bbab091ed74f546c8f876b9c7cdfd1f"
+      },
+      "spatial_sha256": "7573ac5a37b4ab0170f532ad1198cf03dbb3f0056cce057663af57c521a715b3",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_7-2-2/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_7-2-2/spread_medium/m6_case.json",
+      "adaptation_status": "four_window_endpoints_only; seeded_feasibility_conditioned_interleaving",
+      "source_total_container_uses": 11,
+      "preserved_orders_sha256": "c681ce47df118863f4af4559deea7f285e511c16fe7d2955e6571f63b3c534ee",
+      "preserved_policy_sha256": "dfb69694209948c4899ee11e7e09476ec431fb9df97286690aa793b556cc08ce",
+      "batch_count_certificate_sha256": "7d300697793a4181b5eee775770bb24c9c98a2ed19c6fc6c1c253d385082db07"
+    },
+    {
+      "id": "S04",
+      "size": "small",
+      "customer_count": 10,
+      "family_id": "zhou_Set1_10-2-1",
+      "source_block": "zhou:Set1_10-2-1",
+      "variant": "spread_medium",
+      "total_container_uses": 10,
+      "common_reference_files": {
+        "data": "data/formal_benchmark27_interleaved_v1/shared/small/S04/network.csv",
+        "orders": "data/formal_benchmark27_interleaved_v1/shared/small/S04/reference_orders.json",
+        "routing_config": "data/formal_benchmark27_interleaved_v1/shared/small/S04/fleet.json",
+        "operating_policy": "data/formal_benchmark27_interleaved_v1/shared/small/S04/reference_policy.json",
+        "economic_config": "data/formal_benchmark27_interleaved_v1/shared/small/S04/economic.json"
+      },
+      "reference_sha256": {
+        "data": "0f57cf3e3920a7fbc8e4d3c78fcb817eddefd5d134aef02995aae9674aab7848",
+        "orders": "5ac2d65b193b286941c43bada117980f0ddb28a50abe650b0e933f62db02f63f",
+        "routing_config": "c4062403e4888cb797f2d0eee624f8834055621fe128dbb4ffa447754532ac60",
+        "operating_policy": "d8222780e860670c3de582f49d2524ba5f1cad7a070b829f8a2b2f18429792ef",
+        "economic_config": "543b6b8eb1ba4982ac3e0212eb9f07a55bbab091ed74f546c8f876b9c7cdfd1f"
+      },
+      "spatial_sha256": "065b96cdeb1faf87743cb6febd99103be0b4012b05ae6cf36217a98d125cb85a",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_10-2-1/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_10-2-1/spread_medium/m6_case.json",
+      "adaptation_status": "four_window_endpoints_only; seeded_feasibility_conditioned_interleaving",
+      "source_total_container_uses": 15,
+      "preserved_orders_sha256": "ebb8dc8cacfffad30f66a3c3cf7b8c4eefc3a32250cb0d7ca90d89f3b2b0a16e",
+      "preserved_policy_sha256": "dfb69694209948c4899ee11e7e09476ec431fb9df97286690aa793b556cc08ce",
+      "batch_count_certificate_sha256": "b2a116f2e2f370ff2214b4cb865eb9de0bb1a5054daab996c437783a7c3ccad5"
+    },
+    {
+      "id": "S05",
+      "size": "small",
+      "customer_count": 10,
+      "family_id": "zhou_Set1_10-2-1b",
+      "source_block": "zhou:Set1_10-2-1b",
+      "variant": "spread_medium",
+      "total_container_uses": 10,
+      "common_reference_files": {
+        "data": "data/formal_benchmark27_interleaved_v1/shared/small/S05/network.csv",
+        "orders": "data/formal_benchmark27_interleaved_v1/shared/small/S05/reference_orders.json",
+        "routing_config": "data/formal_benchmark27_interleaved_v1/shared/small/S05/fleet.json",
+        "operating_policy": "data/formal_benchmark27_interleaved_v1/shared/small/S05/reference_policy.json",
+        "economic_config": "data/formal_benchmark27_interleaved_v1/shared/small/S05/economic.json"
+      },
+      "reference_sha256": {
+        "data": "dc9548b0e73050fb9e3fc2a1232e97130b0fbdbab3ce8a8dcba8f19975f5bfbf",
+        "orders": "2e8252be314e6e8b1eeaf54d2cb3b684770d676bf4416ccc37aa5e7275f6411e",
+        "routing_config": "c4062403e4888cb797f2d0eee624f8834055621fe128dbb4ffa447754532ac60",
+        "operating_policy": "d8222780e860670c3de582f49d2524ba5f1cad7a070b829f8a2b2f18429792ef",
+        "economic_config": "543b6b8eb1ba4982ac3e0212eb9f07a55bbab091ed74f546c8f876b9c7cdfd1f"
+      },
+      "spatial_sha256": "e92367a74c35961479adf73f22bdff4555cbf095a39705736368ea9dff0c7f76",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_10-2-1b/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_10-2-1b/spread_medium/m6_case.json",
+      "adaptation_status": "four_window_endpoints_only; seeded_feasibility_conditioned_interleaving",
+      "source_total_container_uses": 16,
+      "preserved_orders_sha256": "395457fe9ac9fde7309c78e9793f1cd210afb120f5ac0aeaa6d11ae01e174ed0",
+      "preserved_policy_sha256": "dfb69694209948c4899ee11e7e09476ec431fb9df97286690aa793b556cc08ce",
+      "batch_count_certificate_sha256": "3243891ca4ec16e886e4306ffd775bd1a2957a7439f92ae11e5f042ad31ee742"
+    },
+    {
+      "id": "S06",
+      "size": "small",
+      "customer_count": 10,
+      "family_id": "zhou_Set1_10-2-2",
+      "source_block": "zhou:Set1_10-2-2",
+      "variant": "spread_medium",
+      "total_container_uses": 10,
+      "common_reference_files": {
+        "data": "data/formal_benchmark27_interleaved_v1/shared/small/S06/network.csv",
+        "orders": "data/formal_benchmark27_interleaved_v1/shared/small/S06/reference_orders.json",
+        "routing_config": "data/formal_benchmark27_interleaved_v1/shared/small/S06/fleet.json",
+        "operating_policy": "data/formal_benchmark27_interleaved_v1/shared/small/S06/reference_policy.json",
+        "economic_config": "data/formal_benchmark27_interleaved_v1/shared/small/S06/economic.json"
+      },
+      "reference_sha256": {
+        "data": "3e4bf0ff384e92cfd5bedda9fd70e87360e2a8a240e2ce57de1220221159e464",
+        "orders": "408a534c2ffd49f10a4b12357d57828d4d352193732091a7a159ee792821f16d",
+        "routing_config": "c4062403e4888cb797f2d0eee624f8834055621fe128dbb4ffa447754532ac60",
+        "operating_policy": "d8222780e860670c3de582f49d2524ba5f1cad7a070b829f8a2b2f18429792ef",
+        "economic_config": "543b6b8eb1ba4982ac3e0212eb9f07a55bbab091ed74f546c8f876b9c7cdfd1f"
+      },
+      "spatial_sha256": "4341fcd8b5184d131d02380fe64f2efe9f2c4f996aa5353ad5f24abfade8ec41",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_10-2-2/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_10-2-2/spread_medium/m6_case.json",
+      "adaptation_status": "four_window_endpoints_only; seeded_feasibility_conditioned_interleaving",
+      "source_total_container_uses": 17,
+      "preserved_orders_sha256": "2bc150b79425615b7076e68bb7de302882c90c66ac97e16cb8762f93ae0854b8",
+      "preserved_policy_sha256": "dfb69694209948c4899ee11e7e09476ec431fb9df97286690aa793b556cc08ce",
+      "batch_count_certificate_sha256": "257a074824b03bb12863290749c25add0993a5827df93d225568deb70741c2d9"
+    },
+    {
+      "id": "S07",
+      "size": "small",
+      "customer_count": 12,
+      "family_id": "zhou_Set1_12-2-1",
+      "source_block": "zhou:Set1_12-2-1",
+      "variant": "spread_medium",
+      "total_container_uses": 12,
+      "common_reference_files": {
+        "data": "data/formal_benchmark27_interleaved_v1/shared/small/S07/network.csv",
+        "orders": "data/formal_benchmark27_interleaved_v1/shared/small/S07/reference_orders.json",
+        "routing_config": "data/formal_benchmark27_interleaved_v1/shared/small/S07/fleet.json",
+        "operating_policy": "data/formal_benchmark27_interleaved_v1/shared/small/S07/reference_policy.json",
+        "economic_config": "data/formal_benchmark27_interleaved_v1/shared/small/S07/economic.json"
+      },
+      "reference_sha256": {
+        "data": "6ab52eede04e6ad5a5c4229c9a5d71927e648697578b8417f71d7e0475380f4e",
+        "orders": "fb37eaa708bbd943eed744c40db7b8a5f6216da0e358d013a43f5c932eda88bf",
+        "routing_config": "23b2196c0ec48a30be493a17d7e2e30be728a1c3bab17ca4de9edb89ea619dd7",
+        "operating_policy": "ac03cd45c6073b7bce55da6c6602638af237e82fe84b930cd936d509f48eff6d",
+        "economic_config": "543b6b8eb1ba4982ac3e0212eb9f07a55bbab091ed74f546c8f876b9c7cdfd1f"
+      },
+      "spatial_sha256": "5d45999939f9e7133aa0f82185213dea45f373858522d77f218441c633c27466",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_12-2-1/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_12-2-1/spread_medium/m6_case.json",
+      "adaptation_status": "four_window_endpoints_only; seeded_feasibility_conditioned_interleaving",
+      "source_total_container_uses": 18,
+      "preserved_orders_sha256": "cae24e6f4e1a7140c73ce9f2b88517e5c7f4526dd2aac02be8fbd05a84c0508a",
+      "preserved_policy_sha256": "dfb69694209948c4899ee11e7e09476ec431fb9df97286690aa793b556cc08ce",
+      "batch_count_certificate_sha256": "42b973c60982edfadc690ebfb9cdcf7ecb4389fca87af1099b354573668cd6b3"
+    },
+    {
+      "id": "S08",
+      "size": "small",
+      "customer_count": 12,
+      "family_id": "zhou_Set1_12-2-1b",
+      "source_block": "zhou:Set1_12-2-1b",
+      "variant": "spread_medium",
+      "total_container_uses": 12,
+      "common_reference_files": {
+        "data": "data/formal_benchmark27_interleaved_v1/shared/small/S08/network.csv",
+        "orders": "data/formal_benchmark27_interleaved_v1/shared/small/S08/reference_orders.json",
+        "routing_config": "data/formal_benchmark27_interleaved_v1/shared/small/S08/fleet.json",
+        "operating_policy": "data/formal_benchmark27_interleaved_v1/shared/small/S08/reference_policy.json",
+        "economic_config": "data/formal_benchmark27_interleaved_v1/shared/small/S08/economic.json"
+      },
+      "reference_sha256": {
+        "data": "5bb0efe13892273e8755303cac84bc86b8454bd04207fd28bbefe16e20f1d5a1",
+        "orders": "4a3490913612345a4af7ef40a8f879f00e0f090860bf633238b8185d28632c56",
+        "routing_config": "23b2196c0ec48a30be493a17d7e2e30be728a1c3bab17ca4de9edb89ea619dd7",
+        "operating_policy": "ac03cd45c6073b7bce55da6c6602638af237e82fe84b930cd936d509f48eff6d",
+        "economic_config": "543b6b8eb1ba4982ac3e0212eb9f07a55bbab091ed74f546c8f876b9c7cdfd1f"
+      },
+      "spatial_sha256": "10e396558b2e8136a328e5033b262dc97f8774cd977be270ee8883ee826acc41",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_12-2-1b/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_12-2-1b/spread_medium/m6_case.json",
+      "adaptation_status": "four_window_endpoints_only; seeded_feasibility_conditioned_interleaving",
+      "source_total_container_uses": 17,
+      "preserved_orders_sha256": "f46b3c350461165dc3c2a552ff78b5bbc1f652edb70c277639e106feb2ee5c42",
+      "preserved_policy_sha256": "dfb69694209948c4899ee11e7e09476ec431fb9df97286690aa793b556cc08ce",
+      "batch_count_certificate_sha256": "03423c1db58c87056f4c3b166193a322c834212f3edb92d03d9add8096add8d6"
+    },
+    {
+      "id": "S09",
+      "size": "small",
+      "customer_count": 12,
+      "family_id": "zhou_Set1_12-2-2",
+      "source_block": "zhou:Set1_12-2-2",
+      "variant": "spread_medium",
+      "total_container_uses": 12,
+      "common_reference_files": {
+        "data": "data/formal_benchmark27_interleaved_v1/shared/small/S09/network.csv",
+        "orders": "data/formal_benchmark27_interleaved_v1/shared/small/S09/reference_orders.json",
+        "routing_config": "data/formal_benchmark27_interleaved_v1/shared/small/S09/fleet.json",
+        "operating_policy": "data/formal_benchmark27_interleaved_v1/shared/small/S09/reference_policy.json",
+        "economic_config": "data/formal_benchmark27_interleaved_v1/shared/small/S09/economic.json"
+      },
+      "reference_sha256": {
+        "data": "6cb479bd791a71a368ad5f694e94d63ec7c4abe8af0e70206ead9d25bb337896",
+        "orders": "a6fc31c8a3d4d56d8e4b8861183ac1734bed99b39c490cc64d783c8c1692c591",
+        "routing_config": "23b2196c0ec48a30be493a17d7e2e30be728a1c3bab17ca4de9edb89ea619dd7",
+        "operating_policy": "ac03cd45c6073b7bce55da6c6602638af237e82fe84b930cd936d509f48eff6d",
+        "economic_config": "543b6b8eb1ba4982ac3e0212eb9f07a55bbab091ed74f546c8f876b9c7cdfd1f"
+      },
+      "spatial_sha256": "36ed5d33649ee3f69d29a9419d03fed85c679b530bbffac33f90fb416c845519",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_12-2-2/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set1_12-2-2/spread_medium/m6_case.json",
+      "adaptation_status": "four_window_endpoints_only; seeded_feasibility_conditioned_interleaving",
+      "source_total_container_uses": 17,
+      "preserved_orders_sha256": "c725b44207f6fae2927c4d2f017317bb06031145fbbb450e2731104b2294d328",
+      "preserved_policy_sha256": "dfb69694209948c4899ee11e7e09476ec431fb9df97286690aa793b556cc08ce",
+      "batch_count_certificate_sha256": "0e207cad5c4a152e62927bdb217b3ee6f8f55967c6b7dec3b04aa748400b6d46"
+    },
+    {
+      "id": "M01",
+      "size": "medium",
+      "customer_count": 20,
+      "family_id": "zhou_Set2_100-10-1_subset20",
+      "source_block": "zhou:Set2_100-10-1",
+      "variant": "spread_medium",
+      "total_container_uses": 20,
+      "common_reference_files": {
+        "data": "data/formal_benchmark27_interleaved_v1/shared/medium/M01/network.csv",
+        "orders": "data/formal_benchmark27_interleaved_v1/shared/medium/M01/reference_orders.json",
+        "routing_config": "data/formal_benchmark27_interleaved_v1/shared/medium/M01/fleet.json",
+        "operating_policy": "data/formal_benchmark27_interleaved_v1/shared/medium/M01/reference_policy.json",
+        "economic_config": "data/formal_benchmark27_interleaved_v1/shared/medium/M01/economic.json"
+      },
+      "reference_sha256": {
+        "data": "b64a76ed3dd8949771b29cb96e47627d042e7179b1bad49301b7141e246cb16a",
+        "orders": "2beb0623be9d8e26d805816062d2fe3692f00e4ffeb4404bd8b2f30049a4d487",
+        "routing_config": "a242d1a10a2d405d4d6479c45a90b3e0f1831421104d2b6ed5f1cb2abf9f5144",
+        "operating_policy": "619e888749f21dd250260897527956a6e5b9b8ec3b48234f5dc857a41b8e3940",
+        "economic_config": "543b6b8eb1ba4982ac3e0212eb9f07a55bbab091ed74f546c8f876b9c7cdfd1f"
+      },
+      "spatial_sha256": "18a0beb999f0191bd741381b0d67642298c89385b14446f9a324205344e626ec",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-1_subset20/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-1_subset20/spread_medium/m6_case.json",
+      "adaptation_status": "four_window_endpoints_only; seeded_feasibility_conditioned_interleaving",
+      "source_total_container_uses": 32,
+      "preserved_orders_sha256": "69d3d56231af29878b85b5f4a55da864acb616c7dd30941d86192fc45c710857",
+      "preserved_policy_sha256": "dfb69694209948c4899ee11e7e09476ec431fb9df97286690aa793b556cc08ce",
+      "batch_count_certificate_sha256": "504a785e2843e227231a45210b580fdd9efcbb08648a0ec30d64be082d9993a0"
+    },
+    {
+      "id": "M02",
+      "size": "medium",
+      "customer_count": 20,
+      "family_id": "zhou_Set2_100-10-2_subset20",
+      "source_block": "zhou:Set2_100-10-2",
+      "variant": "spread_medium",
+      "total_container_uses": 20,
+      "common_reference_files": {
+        "data": "data/formal_benchmark27_interleaved_v1/shared/medium/M02/network.csv",
+        "orders": "data/formal_benchmark27_interleaved_v1/shared/medium/M02/reference_orders.json",
+        "routing_config": "data/formal_benchmark27_interleaved_v1/shared/medium/M02/fleet.json",
+        "operating_policy": "data/formal_benchmark27_interleaved_v1/shared/medium/M02/reference_policy.json",
+        "economic_config": "data/formal_benchmark27_interleaved_v1/shared/medium/M02/economic.json"
+      },
+      "reference_sha256": {
+        "data": "a609c67e7060016327a0565a2ce375f38f469eaa9ddd8002783eebb192892cc1",
+        "orders": "72ea8522f8d807c464662f18280a236ce1ba09c73d25f5ced75c1695f9e0567e",
+        "routing_config": "a242d1a10a2d405d4d6479c45a90b3e0f1831421104d2b6ed5f1cb2abf9f5144",
+        "operating_policy": "619e888749f21dd250260897527956a6e5b9b8ec3b48234f5dc857a41b8e3940",
+        "economic_config": "543b6b8eb1ba4982ac3e0212eb9f07a55bbab091ed74f546c8f876b9c7cdfd1f"
+      },
+      "spatial_sha256": "38e565d7660d0ea68f77ebb3da06703bdd4b9c04931eecb3d6acc92e2e3e6607",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-2_subset20/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-2_subset20/spread_medium/m6_case.json",
+      "adaptation_status": "four_window_endpoints_only; seeded_feasibility_conditioned_interleaving",
+      "source_total_container_uses": 31,
+      "preserved_orders_sha256": "8fc8abfc8eead54f817b021c28a3ed32fe2afe50423f5bff408c79f89c2dde18",
+      "preserved_policy_sha256": "dfb69694209948c4899ee11e7e09476ec431fb9df97286690aa793b556cc08ce",
+      "batch_count_certificate_sha256": "635ec15d36cfc8f763534c3ce31c28bb4f521bd3f6ecbe544636f179b51bc975"
+    },
+    {
+      "id": "M03",
+      "size": "medium",
+      "customer_count": 20,
+      "family_id": "zhou_Set2_100-5-1b_subset20",
+      "source_block": "zhou:Set2_100-5-1b",
+      "variant": "spread_medium",
+      "total_container_uses": 20,
+      "common_reference_files": {
+        "data": "data/formal_benchmark27_interleaved_v1/shared/medium/M03/network.csv",
+        "orders": "data/formal_benchmark27_interleaved_v1/shared/medium/M03/reference_orders.json",
+        "routing_config": "data/formal_benchmark27_interleaved_v1/shared/medium/M03/fleet.json",
+        "operating_policy": "data/formal_benchmark27_interleaved_v1/shared/medium/M03/reference_policy.json",
+        "economic_config": "data/formal_benchmark27_interleaved_v1/shared/medium/M03/economic.json"
+      },
+      "reference_sha256": {
+        "data": "37147cbee7a311574ffa4df6ed93e164f330cf508a98958dcc8f6a4ff27a8220",
+        "orders": "ee25961ec6085c191c1332706551fb4b1c6775de21428c2aa78e9995e464dcc8",
+        "routing_config": "a242d1a10a2d405d4d6479c45a90b3e0f1831421104d2b6ed5f1cb2abf9f5144",
+        "operating_policy": "619e888749f21dd250260897527956a6e5b9b8ec3b48234f5dc857a41b8e3940",
+        "economic_config": "543b6b8eb1ba4982ac3e0212eb9f07a55bbab091ed74f546c8f876b9c7cdfd1f"
+      },
+      "spatial_sha256": "e21edcdec203703e1bd02913efaac2498f9462a95aac9b31159f352de85cea25",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-1b_subset20/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-1b_subset20/spread_medium/m6_case.json",
+      "adaptation_status": "four_window_endpoints_only; seeded_feasibility_conditioned_interleaving",
+      "source_total_container_uses": 33,
+      "preserved_orders_sha256": "8079caf22a07ea9ac12b610bfd5fa806a0033f16a9bedfcc57ee8c95143e900d",
+      "preserved_policy_sha256": "dfb69694209948c4899ee11e7e09476ec431fb9df97286690aa793b556cc08ce",
+      "batch_count_certificate_sha256": "b727e395a13e3bc3009704aa508a8627ce22bb8213a3b2a44f2ba3c42555adae"
+    },
+    {
+      "id": "M04",
+      "size": "medium",
+      "customer_count": 20,
+      "family_id": "zhou_Set2_100-5-2_subset20",
+      "source_block": "zhou:Set2_100-5-2",
+      "variant": "spread_medium",
+      "total_container_uses": 20,
+      "common_reference_files": {
+        "data": "data/formal_benchmark27_interleaved_v1/shared/medium/M04/network.csv",
+        "orders": "data/formal_benchmark27_interleaved_v1/shared/medium/M04/reference_orders.json",
+        "routing_config": "data/formal_benchmark27_interleaved_v1/shared/medium/M04/fleet.json",
+        "operating_policy": "data/formal_benchmark27_interleaved_v1/shared/medium/M04/reference_policy.json",
+        "economic_config": "data/formal_benchmark27_interleaved_v1/shared/medium/M04/economic.json"
+      },
+      "reference_sha256": {
+        "data": "74c3214ea94a93f64aaa6b6ca4a0cdd397abcc866fd7f5f73e6ee225a69733b0",
+        "orders": "e510f836ca9aef87593bc36f407e00dc569b2009362323ecbaacd5f768b30924",
+        "routing_config": "a242d1a10a2d405d4d6479c45a90b3e0f1831421104d2b6ed5f1cb2abf9f5144",
+        "operating_policy": "619e888749f21dd250260897527956a6e5b9b8ec3b48234f5dc857a41b8e3940",
+        "economic_config": "543b6b8eb1ba4982ac3e0212eb9f07a55bbab091ed74f546c8f876b9c7cdfd1f"
+      },
+      "spatial_sha256": "3bae98bcb06c7c979f6bb1280397d9aac7b1987abf8cb0f646a873c9df4f88e7",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-2_subset20/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-2_subset20/spread_medium/m6_case.json",
+      "adaptation_status": "four_window_endpoints_only; seeded_feasibility_conditioned_interleaving",
+      "source_total_container_uses": 28,
+      "preserved_orders_sha256": "fd6bf63fa69f9e7b75523a31637caca5c608ef56c694b45607d35a83c75dd456",
+      "preserved_policy_sha256": "dfb69694209948c4899ee11e7e09476ec431fb9df97286690aa793b556cc08ce",
+      "batch_count_certificate_sha256": "0d62a1041eb3099f9a9c759e2574db7f31a2f0ad0d9c92f6fe7ce205091e0b11"
+    },
+    {
+      "id": "M05",
+      "size": "medium",
+      "customer_count": 30,
+      "family_id": "zhou_Set2_100-10-1_subset30",
+      "source_block": "zhou:Set2_100-10-1",
+      "variant": "spread_medium",
+      "total_container_uses": 30,
+      "common_reference_files": {
+        "data": "data/formal_benchmark27_interleaved_v1/shared/medium/M05/network.csv",
+        "orders": "data/formal_benchmark27_interleaved_v1/shared/medium/M05/reference_orders.json",
+        "routing_config": "data/formal_benchmark27_interleaved_v1/shared/medium/M05/fleet.json",
+        "operating_policy": "data/formal_benchmark27_interleaved_v1/shared/medium/M05/reference_policy.json",
+        "economic_config": "data/formal_benchmark27_interleaved_v1/shared/medium/M05/economic.json"
+      },
+      "reference_sha256": {
+        "data": "82789a7336fed7e466dfd9b33b4a1005d0a453343470238db5263174791adbe3",
+        "orders": "8589724f183b0c8420d82e75a1eea7c7af75334589a7a47f644060354f2c8f96",
+        "routing_config": "05242655b5fe04001471df26cf4ff500ca3840184ece4273486612d68815f158",
+        "operating_policy": "9fbeeb493892dae4410b02a72c1ec03fc2337569088aff3d37437b36edc58bc8",
+        "economic_config": "543b6b8eb1ba4982ac3e0212eb9f07a55bbab091ed74f546c8f876b9c7cdfd1f"
+      },
+      "spatial_sha256": "f362feac8365f74ee26d25d65471866a8c443c8b6ce13f0aaeaf6d7e60d73416",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-1_subset30/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-1_subset30/spread_medium/m6_case.json",
+      "adaptation_status": "four_window_endpoints_only; seeded_feasibility_conditioned_interleaving",
+      "source_total_container_uses": 48,
+      "preserved_orders_sha256": "cde1870538d61bcf69adcd35b1ece6b8b33f96f250715f7f8fd7bcaa7d9d1106",
+      "preserved_policy_sha256": "dfb69694209948c4899ee11e7e09476ec431fb9df97286690aa793b556cc08ce",
+      "batch_count_certificate_sha256": "b8c634523c808fe2dc02899a8621bddc73fd62a0d30a06ff994968341db13db8"
+    },
+    {
+      "id": "M06",
+      "size": "medium",
+      "customer_count": 30,
+      "family_id": "zhou_Set2_100-10-2_subset30",
+      "source_block": "zhou:Set2_100-10-2",
+      "variant": "spread_medium",
+      "total_container_uses": 30,
+      "common_reference_files": {
+        "data": "data/formal_benchmark27_interleaved_v1/shared/medium/M06/network.csv",
+        "orders": "data/formal_benchmark27_interleaved_v1/shared/medium/M06/reference_orders.json",
+        "routing_config": "data/formal_benchmark27_interleaved_v1/shared/medium/M06/fleet.json",
+        "operating_policy": "data/formal_benchmark27_interleaved_v1/shared/medium/M06/reference_policy.json",
+        "economic_config": "data/formal_benchmark27_interleaved_v1/shared/medium/M06/economic.json"
+      },
+      "reference_sha256": {
+        "data": "0266e16ca97808160756fce843df3aa36758125915b50d33daf137316c816da3",
+        "orders": "bf6bbb4d6b711f5716db7be6f8029598d8b4f11d3cc2f4db8b0de56f2dfed798",
+        "routing_config": "05242655b5fe04001471df26cf4ff500ca3840184ece4273486612d68815f158",
+        "operating_policy": "9fbeeb493892dae4410b02a72c1ec03fc2337569088aff3d37437b36edc58bc8",
+        "economic_config": "543b6b8eb1ba4982ac3e0212eb9f07a55bbab091ed74f546c8f876b9c7cdfd1f"
+      },
+      "spatial_sha256": "93ab1f7544a6171ad45d167dd80ee0e91f3cb4952011da902c92fef17bea75e6",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-2_subset30/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-2_subset30/spread_medium/m6_case.json",
+      "adaptation_status": "four_window_endpoints_only; seeded_feasibility_conditioned_interleaving",
+      "source_total_container_uses": 43,
+      "preserved_orders_sha256": "b23e369e5ca53822c31874ab2f54bdde26aa40dcf676e8ab46d6ecb556f5bceb",
+      "preserved_policy_sha256": "dfb69694209948c4899ee11e7e09476ec431fb9df97286690aa793b556cc08ce",
+      "batch_count_certificate_sha256": "8e7f47cca85723997a9a55b422a89f836f77fde17f52ce5a51b598f6d9f8113f"
+    },
+    {
+      "id": "M07",
+      "size": "medium",
+      "customer_count": 30,
+      "family_id": "zhou_Set2_100-5-1b_subset30",
+      "source_block": "zhou:Set2_100-5-1b",
+      "variant": "spread_medium",
+      "total_container_uses": 30,
+      "common_reference_files": {
+        "data": "data/formal_benchmark27_interleaved_v1/shared/medium/M07/network.csv",
+        "orders": "data/formal_benchmark27_interleaved_v1/shared/medium/M07/reference_orders.json",
+        "routing_config": "data/formal_benchmark27_interleaved_v1/shared/medium/M07/fleet.json",
+        "operating_policy": "data/formal_benchmark27_interleaved_v1/shared/medium/M07/reference_policy.json",
+        "economic_config": "data/formal_benchmark27_interleaved_v1/shared/medium/M07/economic.json"
+      },
+      "reference_sha256": {
+        "data": "e7120d12e4ca6e64e89382f4e959ce9de7e61bc80b2ebf073ff8846c88663918",
+        "orders": "c9d3b119426fe88de12b064db16d19324af5b41f2c18b7e8ffd7fe9f9a38cd21",
+        "routing_config": "05242655b5fe04001471df26cf4ff500ca3840184ece4273486612d68815f158",
+        "operating_policy": "9fbeeb493892dae4410b02a72c1ec03fc2337569088aff3d37437b36edc58bc8",
+        "economic_config": "543b6b8eb1ba4982ac3e0212eb9f07a55bbab091ed74f546c8f876b9c7cdfd1f"
+      },
+      "spatial_sha256": "4c05e245b2c39de425321a0a6ec3652ce5d18c57bcf1dbbe4159263198c6f0e4",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-1b_subset30/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-1b_subset30/spread_medium/m6_case.json",
+      "adaptation_status": "four_window_endpoints_only; seeded_feasibility_conditioned_interleaving",
+      "source_total_container_uses": 47,
+      "preserved_orders_sha256": "b41a641a3256687edb4f56853ca4855ee4bb39d84f64fb57fc232ae4e87ec111",
+      "preserved_policy_sha256": "dfb69694209948c4899ee11e7e09476ec431fb9df97286690aa793b556cc08ce",
+      "batch_count_certificate_sha256": "bc5cecd15e54f6353beac6506c8f7aceb368e865d3ee857b361973f27ea3efd8"
+    },
+    {
+      "id": "M08",
+      "size": "medium",
+      "customer_count": 30,
+      "family_id": "zhou_Set2_100-5-2_subset30",
+      "source_block": "zhou:Set2_100-5-2",
+      "variant": "spread_medium",
+      "total_container_uses": 30,
+      "common_reference_files": {
+        "data": "data/formal_benchmark27_interleaved_v1/shared/medium/M08/network.csv",
+        "orders": "data/formal_benchmark27_interleaved_v1/shared/medium/M08/reference_orders.json",
+        "routing_config": "data/formal_benchmark27_interleaved_v1/shared/medium/M08/fleet.json",
+        "operating_policy": "data/formal_benchmark27_interleaved_v1/shared/medium/M08/reference_policy.json",
+        "economic_config": "data/formal_benchmark27_interleaved_v1/shared/medium/M08/economic.json"
+      },
+      "reference_sha256": {
+        "data": "62f3fbc1968d702f9f662d3d013414a81f859c6bee20a98785985f318d80fd79",
+        "orders": "03a79cd54bc2a6ba2455f1169af4f215f5c2dc18ea8e9b029b8cd79463b1ae00",
+        "routing_config": "05242655b5fe04001471df26cf4ff500ca3840184ece4273486612d68815f158",
+        "operating_policy": "9fbeeb493892dae4410b02a72c1ec03fc2337569088aff3d37437b36edc58bc8",
+        "economic_config": "543b6b8eb1ba4982ac3e0212eb9f07a55bbab091ed74f546c8f876b9c7cdfd1f"
+      },
+      "spatial_sha256": "18572e194b80a514615d75d3b9bcf67f3bb1a564402199546104658a90b2c747",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-2_subset30/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-2_subset30/spread_medium/m6_case.json",
+      "adaptation_status": "four_window_endpoints_only; seeded_feasibility_conditioned_interleaving",
+      "source_total_container_uses": 41,
+      "preserved_orders_sha256": "baf9e7fb08d4399c53857924bf216d2f641439a709d225e7a30c8d7d700baecd",
+      "preserved_policy_sha256": "dfb69694209948c4899ee11e7e09476ec431fb9df97286690aa793b556cc08ce",
+      "batch_count_certificate_sha256": "ddb0236e53393c0c23d4348414360a715a952cfdfaf19aaea1bfda0b2d81ac86"
+    },
+    {
+      "id": "M09",
+      "size": "medium",
+      "customer_count": 30,
+      "family_id": "zhou_Set2_100-5-3_subset30",
+      "source_block": "zhou:Set2_100-5-3",
+      "variant": "spread_medium",
+      "total_container_uses": 30,
+      "common_reference_files": {
+        "data": "data/formal_benchmark27_interleaved_v1/shared/medium/M09/network.csv",
+        "orders": "data/formal_benchmark27_interleaved_v1/shared/medium/M09/reference_orders.json",
+        "routing_config": "data/formal_benchmark27_interleaved_v1/shared/medium/M09/fleet.json",
+        "operating_policy": "data/formal_benchmark27_interleaved_v1/shared/medium/M09/reference_policy.json",
+        "economic_config": "data/formal_benchmark27_interleaved_v1/shared/medium/M09/economic.json"
+      },
+      "reference_sha256": {
+        "data": "b70b893b9a90bda7e26f515b3be81eafff977e74bd558f368a8ed6614c0dd235",
+        "orders": "fe7913727d2bf39b127fa17228e180490d805339b860a47581a483e2705a283e",
+        "routing_config": "05242655b5fe04001471df26cf4ff500ca3840184ece4273486612d68815f158",
+        "operating_policy": "9fbeeb493892dae4410b02a72c1ec03fc2337569088aff3d37437b36edc58bc8",
+        "economic_config": "543b6b8eb1ba4982ac3e0212eb9f07a55bbab091ed74f546c8f876b9c7cdfd1f"
+      },
+      "spatial_sha256": "5051b2fbd95b5ab27099deefadc3eeba9456d25b3b4b44eca52d586232befdf1",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-3_subset30/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-3_subset30/spread_medium/m6_case.json",
+      "adaptation_status": "four_window_endpoints_only; seeded_feasibility_conditioned_interleaving",
+      "source_total_container_uses": 43,
+      "preserved_orders_sha256": "12a23ef4d21522ac4c5583d730aef9b68e48f712ec274d7586ad574074f71611",
+      "preserved_policy_sha256": "dfb69694209948c4899ee11e7e09476ec431fb9df97286690aa793b556cc08ce",
+      "batch_count_certificate_sha256": "21efa71cf7007d02aed1ee894b3d81b35d0f034c61f87e88db551f888d308f4d"
+    },
+    {
+      "id": "L01",
+      "size": "large",
+      "customer_count": 50,
+      "family_id": "zhou_Set2_100-10-1_subset50",
+      "source_block": "zhou:Set2_100-10-1",
+      "variant": "spread_medium",
+      "total_container_uses": 50,
+      "common_reference_files": {
+        "data": "data/formal_benchmark27_interleaved_v1/shared/large/L01/network.csv",
+        "orders": "data/formal_benchmark27_interleaved_v1/shared/large/L01/reference_orders.json",
+        "routing_config": "data/formal_benchmark27_interleaved_v1/shared/large/L01/fleet.json",
+        "operating_policy": "data/formal_benchmark27_interleaved_v1/shared/large/L01/reference_policy.json",
+        "economic_config": "data/formal_benchmark27_interleaved_v1/shared/large/L01/economic.json"
+      },
+      "reference_sha256": {
+        "data": "6189f79c6ba51dce72cc927a718a7da7365d672529ad8fa3415148669b782481",
+        "orders": "54ee38fe7e7d2c9b2657c0b1bc752efc7d96bcf8f166271d4aef0bd410afcd3b",
+        "routing_config": "a7b1e7dfee448b7eed1ca6b7faddad979fcb01aad26784732e98780dff7c9896",
+        "operating_policy": "1113ba2153122deb6e25e64c935b72f53906f654cd9b43f036d95ca2fb391f25",
+        "economic_config": "543b6b8eb1ba4982ac3e0212eb9f07a55bbab091ed74f546c8f876b9c7cdfd1f"
+      },
+      "spatial_sha256": "b29ccbd350923f7ef9e22c1edad95f194060be3253c30e57e26a82096e5f422c",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-1_subset50/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-1_subset50/spread_medium/m6_case.json",
+      "adaptation_status": "four_window_endpoints_only; seeded_feasibility_conditioned_interleaving",
+      "source_total_container_uses": 78,
+      "preserved_orders_sha256": "b6d2ee42b835b4552eabb8f8e6bc193e2ac2e38a7851017fe1e09fdb83f42fbc",
+      "preserved_policy_sha256": "dfb69694209948c4899ee11e7e09476ec431fb9df97286690aa793b556cc08ce",
+      "batch_count_certificate_sha256": "189ddefb2d4138e5bd1b4101a2d147df6a2c9a81987afa7e68013f6b7995d00c"
+    },
+    {
+      "id": "L02",
+      "size": "large",
+      "customer_count": 50,
+      "family_id": "zhou_Set2_100-10-2_subset50",
+      "source_block": "zhou:Set2_100-10-2",
+      "variant": "spread_medium",
+      "total_container_uses": 50,
+      "common_reference_files": {
+        "data": "data/formal_benchmark27_interleaved_v1/shared/large/L02/network.csv",
+        "orders": "data/formal_benchmark27_interleaved_v1/shared/large/L02/reference_orders.json",
+        "routing_config": "data/formal_benchmark27_interleaved_v1/shared/large/L02/fleet.json",
+        "operating_policy": "data/formal_benchmark27_interleaved_v1/shared/large/L02/reference_policy.json",
+        "economic_config": "data/formal_benchmark27_interleaved_v1/shared/large/L02/economic.json"
+      },
+      "reference_sha256": {
+        "data": "21658eb255ad7a7c3afe7338fd9caa7b735c4059f9c4dc6e2a32071d2e119ec6",
+        "orders": "38df4e97687fb3b6ae2b1a17d38e4a131190fac548bdf75c14174881f32b06eb",
+        "routing_config": "a7b1e7dfee448b7eed1ca6b7faddad979fcb01aad26784732e98780dff7c9896",
+        "operating_policy": "1113ba2153122deb6e25e64c935b72f53906f654cd9b43f036d95ca2fb391f25",
+        "economic_config": "543b6b8eb1ba4982ac3e0212eb9f07a55bbab091ed74f546c8f876b9c7cdfd1f"
+      },
+      "spatial_sha256": "59ebadadad8dd992238aec7f23699aa4f3d6eecc152dd84217d9ca1805b75860",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-2_subset50/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-2_subset50/spread_medium/m6_case.json",
+      "adaptation_status": "four_window_endpoints_only; seeded_feasibility_conditioned_interleaving",
+      "source_total_container_uses": 74,
+      "preserved_orders_sha256": "eb9c497c29c9f617cc5ecc33eece04c2d6c929f10457e72f95feea0dfcf7c450",
+      "preserved_policy_sha256": "dfb69694209948c4899ee11e7e09476ec431fb9df97286690aa793b556cc08ce",
+      "batch_count_certificate_sha256": "8c1f73befaa75ff99322859c497b054d10bca2903099ebf9a1fc9605a5701cc7"
+    },
+    {
+      "id": "L03",
+      "size": "large",
+      "customer_count": 50,
+      "family_id": "zhou_Set2_100-5-1b_subset50",
+      "source_block": "zhou:Set2_100-5-1b",
+      "variant": "spread_medium",
+      "total_container_uses": 50,
+      "common_reference_files": {
+        "data": "data/formal_benchmark27_interleaved_v1/shared/large/L03/network.csv",
+        "orders": "data/formal_benchmark27_interleaved_v1/shared/large/L03/reference_orders.json",
+        "routing_config": "data/formal_benchmark27_interleaved_v1/shared/large/L03/fleet.json",
+        "operating_policy": "data/formal_benchmark27_interleaved_v1/shared/large/L03/reference_policy.json",
+        "economic_config": "data/formal_benchmark27_interleaved_v1/shared/large/L03/economic.json"
+      },
+      "reference_sha256": {
+        "data": "625190a3ab667ef77262b75ab0761d1fd714a3a37a4b968f1de6d4e3e92a21bf",
+        "orders": "0827c2ca4d4bd1f4e69301d431cfb1356b2ad20023c51a70bdf0e8dd9a71c503",
+        "routing_config": "a7b1e7dfee448b7eed1ca6b7faddad979fcb01aad26784732e98780dff7c9896",
+        "operating_policy": "1113ba2153122deb6e25e64c935b72f53906f654cd9b43f036d95ca2fb391f25",
+        "economic_config": "543b6b8eb1ba4982ac3e0212eb9f07a55bbab091ed74f546c8f876b9c7cdfd1f"
+      },
+      "spatial_sha256": "1077c563005c5101b488fc99c0e53ebea697a9e0398024ebf82dff1cc21aaf37",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-1b_subset50/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-1b_subset50/spread_medium/m6_case.json",
+      "adaptation_status": "four_window_endpoints_only; seeded_feasibility_conditioned_interleaving",
+      "source_total_container_uses": 77,
+      "preserved_orders_sha256": "bea49a3eb76b45702b4bb281ca993960e91e7d1bed377ac3a2c3627955ddaddc",
+      "preserved_policy_sha256": "dfb69694209948c4899ee11e7e09476ec431fb9df97286690aa793b556cc08ce",
+      "batch_count_certificate_sha256": "bd9ea0feec67ecc4d3ab928a6cb660a2615b46459090dd72cdc6c341d3f7d039"
+    },
+    {
+      "id": "L04",
+      "size": "large",
+      "customer_count": 50,
+      "family_id": "zhou_Set2_100-5-2_subset50",
+      "source_block": "zhou:Set2_100-5-2",
+      "variant": "spread_medium",
+      "total_container_uses": 50,
+      "common_reference_files": {
+        "data": "data/formal_benchmark27_interleaved_v1/shared/large/L04/network.csv",
+        "orders": "data/formal_benchmark27_interleaved_v1/shared/large/L04/reference_orders.json",
+        "routing_config": "data/formal_benchmark27_interleaved_v1/shared/large/L04/fleet.json",
+        "operating_policy": "data/formal_benchmark27_interleaved_v1/shared/large/L04/reference_policy.json",
+        "economic_config": "data/formal_benchmark27_interleaved_v1/shared/large/L04/economic.json"
+      },
+      "reference_sha256": {
+        "data": "ccb15361d14bd74beeab7469a19fe0dab5a0f70e1237577f7ca8370306914c81",
+        "orders": "3fdc58c24b8a29b8332b94f401ef10a0b7f73e42fe4d9dc709c50828c5a2484e",
+        "routing_config": "a7b1e7dfee448b7eed1ca6b7faddad979fcb01aad26784732e98780dff7c9896",
+        "operating_policy": "1113ba2153122deb6e25e64c935b72f53906f654cd9b43f036d95ca2fb391f25",
+        "economic_config": "543b6b8eb1ba4982ac3e0212eb9f07a55bbab091ed74f546c8f876b9c7cdfd1f"
+      },
+      "spatial_sha256": "287c5e88d5d8deb9a00ad7a45a7f7ca6bf71cc5dcad2fe83e9e2d3e15f58e048",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-2_subset50/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-2_subset50/spread_medium/m6_case.json",
+      "adaptation_status": "four_window_endpoints_only; seeded_feasibility_conditioned_interleaving",
+      "source_total_container_uses": 72,
+      "preserved_orders_sha256": "04a21d18c4780199fb839ee9de23ed933d33ba866c53a85556572280fa6e2986",
+      "preserved_policy_sha256": "dfb69694209948c4899ee11e7e09476ec431fb9df97286690aa793b556cc08ce",
+      "batch_count_certificate_sha256": "01a38828b9ff53463e02216b2cddd5ba05e398761e4f4105e90afc8eabbee2ef"
+    },
+    {
+      "id": "L05",
+      "size": "large",
+      "customer_count": 100,
+      "family_id": "zhou_Set2_100-10-1",
+      "source_block": "zhou:Set2_100-10-1",
+      "variant": "spread_medium",
+      "total_container_uses": 100,
+      "common_reference_files": {
+        "data": "data/formal_benchmark27_interleaved_v1/shared/large/L05/network.csv",
+        "orders": "data/formal_benchmark27_interleaved_v1/shared/large/L05/reference_orders.json",
+        "routing_config": "data/formal_benchmark27_interleaved_v1/shared/large/L05/fleet.json",
+        "operating_policy": "data/formal_benchmark27_interleaved_v1/shared/large/L05/reference_policy.json",
+        "economic_config": "data/formal_benchmark27_interleaved_v1/shared/large/L05/economic.json"
+      },
+      "reference_sha256": {
+        "data": "670021f44b5c7aaffa4a9337cf52e8ee5c3a67c6b23d65d15ccf43e61fb91a8c",
+        "orders": "6316d66de391d85276ba596839b3580f7f734ce508ea3d95eaedba3243248c09",
+        "routing_config": "20022932bb3f5abf9a1fa18bef7ac7e6208e04d0a23bbefb2a39892465c4d633",
+        "operating_policy": "76cd8e7d36f3c59755debb14e09b0e5136f3ed4d9b523de83468c9c89f838f7d",
+        "economic_config": "543b6b8eb1ba4982ac3e0212eb9f07a55bbab091ed74f546c8f876b9c7cdfd1f"
+      },
+      "spatial_sha256": "bbe965cabd1e519d442c49a4154ee43ea71b4e5305135a13bd633f51b5e9629a",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-1/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-1/spread_medium/m6_case.json",
+      "adaptation_status": "four_window_endpoints_only; seeded_feasibility_conditioned_interleaving",
+      "source_total_container_uses": 161,
+      "preserved_orders_sha256": "b03d99e554a27be7a1c5ddf54654c5cfdfbc8e71952d651bb6090de9e34b4bbb",
+      "preserved_policy_sha256": "dfb69694209948c4899ee11e7e09476ec431fb9df97286690aa793b556cc08ce",
+      "batch_count_certificate_sha256": "a75105ca8e8d005b0b67e3e36483c97410e4a55e78ad0bfc7cdf5abf784ac32b"
+    },
+    {
+      "id": "L06",
+      "size": "large",
+      "customer_count": 100,
+      "family_id": "zhou_Set2_100-10-2",
+      "source_block": "zhou:Set2_100-10-2",
+      "variant": "spread_medium",
+      "total_container_uses": 100,
+      "common_reference_files": {
+        "data": "data/formal_benchmark27_interleaved_v1/shared/large/L06/network.csv",
+        "orders": "data/formal_benchmark27_interleaved_v1/shared/large/L06/reference_orders.json",
+        "routing_config": "data/formal_benchmark27_interleaved_v1/shared/large/L06/fleet.json",
+        "operating_policy": "data/formal_benchmark27_interleaved_v1/shared/large/L06/reference_policy.json",
+        "economic_config": "data/formal_benchmark27_interleaved_v1/shared/large/L06/economic.json"
+      },
+      "reference_sha256": {
+        "data": "254670cab8de54a7a69638e00ecb61ae49aad964d1d06ccc113e15652205a60b",
+        "orders": "d975676606d27de45bb11f38c142a0d140505f7a9613a63956734b2f1d07c2b2",
+        "routing_config": "20022932bb3f5abf9a1fa18bef7ac7e6208e04d0a23bbefb2a39892465c4d633",
+        "operating_policy": "76cd8e7d36f3c59755debb14e09b0e5136f3ed4d9b523de83468c9c89f838f7d",
+        "economic_config": "543b6b8eb1ba4982ac3e0212eb9f07a55bbab091ed74f546c8f876b9c7cdfd1f"
+      },
+      "spatial_sha256": "c6f671f94f672dece47dad526dae7e06e3b150b924b148898da5ddbb5d6505af",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-2/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-10-2/spread_medium/m6_case.json",
+      "adaptation_status": "four_window_endpoints_only; seeded_feasibility_conditioned_interleaving",
+      "source_total_container_uses": 149,
+      "preserved_orders_sha256": "ff5d6c6030c8f63cd495b65f1ced496f85ff2522f64b46fc82bbe763e790c294",
+      "preserved_policy_sha256": "dfb69694209948c4899ee11e7e09476ec431fb9df97286690aa793b556cc08ce",
+      "batch_count_certificate_sha256": "b695788d437219d490ff3dc7d087ee10697a3d4ae091e9974ec026369f7e7075"
+    },
+    {
+      "id": "L07",
+      "size": "large",
+      "customer_count": 100,
+      "family_id": "zhou_Set2_100-5-1b",
+      "source_block": "zhou:Set2_100-5-1b",
+      "variant": "spread_medium",
+      "total_container_uses": 100,
+      "common_reference_files": {
+        "data": "data/formal_benchmark27_interleaved_v1/shared/large/L07/network.csv",
+        "orders": "data/formal_benchmark27_interleaved_v1/shared/large/L07/reference_orders.json",
+        "routing_config": "data/formal_benchmark27_interleaved_v1/shared/large/L07/fleet.json",
+        "operating_policy": "data/formal_benchmark27_interleaved_v1/shared/large/L07/reference_policy.json",
+        "economic_config": "data/formal_benchmark27_interleaved_v1/shared/large/L07/economic.json"
+      },
+      "reference_sha256": {
+        "data": "b425243a638f5aee197e89a9fdb3bfc3c23e51b3c3077d0e73f251e764504054",
+        "orders": "51c8b4bbb4c27583725234bc9d37f923e7ce7b7583c6302ed106966f0fa467ff",
+        "routing_config": "20022932bb3f5abf9a1fa18bef7ac7e6208e04d0a23bbefb2a39892465c4d633",
+        "operating_policy": "76cd8e7d36f3c59755debb14e09b0e5136f3ed4d9b523de83468c9c89f838f7d",
+        "economic_config": "543b6b8eb1ba4982ac3e0212eb9f07a55bbab091ed74f546c8f876b9c7cdfd1f"
+      },
+      "spatial_sha256": "88ddd587c61cb5d26d35ad61d3487619c85ddba8c01a3cf685dd34938c8a2753",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-1b/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-1b/spread_medium/m6_case.json",
+      "adaptation_status": "four_window_endpoints_only; seeded_feasibility_conditioned_interleaving",
+      "source_total_container_uses": 155,
+      "preserved_orders_sha256": "f5e82cf6a17dd548ad0fde55b089171c9112ed78f780a360aafdf4d6d26920d7",
+      "preserved_policy_sha256": "dfb69694209948c4899ee11e7e09476ec431fb9df97286690aa793b556cc08ce",
+      "batch_count_certificate_sha256": "b977445d179c9defa5323e35eda9c5874342cabe97ce8fca66c3c0075603e891"
+    },
+    {
+      "id": "L08",
+      "size": "large",
+      "customer_count": 100,
+      "family_id": "zhou_Set2_100-5-2",
+      "source_block": "zhou:Set2_100-5-2",
+      "variant": "spread_medium",
+      "total_container_uses": 100,
+      "common_reference_files": {
+        "data": "data/formal_benchmark27_interleaved_v1/shared/large/L08/network.csv",
+        "orders": "data/formal_benchmark27_interleaved_v1/shared/large/L08/reference_orders.json",
+        "routing_config": "data/formal_benchmark27_interleaved_v1/shared/large/L08/fleet.json",
+        "operating_policy": "data/formal_benchmark27_interleaved_v1/shared/large/L08/reference_policy.json",
+        "economic_config": "data/formal_benchmark27_interleaved_v1/shared/large/L08/economic.json"
+      },
+      "reference_sha256": {
+        "data": "22a14c25baa164159a9ab6db73bfd7e38bd61bf6a657ff2b0a989303c843d246",
+        "orders": "fc98efffedce9401f80c39566e49361623abcba71c17b78a021b72243a343e7a",
+        "routing_config": "20022932bb3f5abf9a1fa18bef7ac7e6208e04d0a23bbefb2a39892465c4d633",
+        "operating_policy": "76cd8e7d36f3c59755debb14e09b0e5136f3ed4d9b523de83468c9c89f838f7d",
+        "economic_config": "543b6b8eb1ba4982ac3e0212eb9f07a55bbab091ed74f546c8f876b9c7cdfd1f"
+      },
+      "spatial_sha256": "d02afdf21d7c240e23a350f4be6ee8c7d1c52ffae098f1cbacae07367eb2f5bb",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-2/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-2/spread_medium/m6_case.json",
+      "adaptation_status": "four_window_endpoints_only; seeded_feasibility_conditioned_interleaving",
+      "source_total_container_uses": 154,
+      "preserved_orders_sha256": "d34148cd616359826b8b4ceead0371ff6e20581f26ac057a281d27543f45dd71",
+      "preserved_policy_sha256": "dfb69694209948c4899ee11e7e09476ec431fb9df97286690aa793b556cc08ce",
+      "batch_count_certificate_sha256": "2c967879b5da329ebbbd964cef7b64b59e41731b9b5a8681e3917c53be309010"
+    },
+    {
+      "id": "L09",
+      "size": "large",
+      "customer_count": 100,
+      "family_id": "zhou_Set2_100-5-3",
+      "source_block": "zhou:Set2_100-5-3",
+      "variant": "spread_medium",
+      "total_container_uses": 100,
+      "common_reference_files": {
+        "data": "data/formal_benchmark27_interleaved_v1/shared/large/L09/network.csv",
+        "orders": "data/formal_benchmark27_interleaved_v1/shared/large/L09/reference_orders.json",
+        "routing_config": "data/formal_benchmark27_interleaved_v1/shared/large/L09/fleet.json",
+        "operating_policy": "data/formal_benchmark27_interleaved_v1/shared/large/L09/reference_policy.json",
+        "economic_config": "data/formal_benchmark27_interleaved_v1/shared/large/L09/economic.json"
+      },
+      "reference_sha256": {
+        "data": "94106ce8c768f90ab732f7780d4ad4bfc729bd0de87522ca7c30249c1e29a9f7",
+        "orders": "671a3052fac4b54d2c99d264720cbf2265417f304f1a237064e86ade6c0b06ab",
+        "routing_config": "20022932bb3f5abf9a1fa18bef7ac7e6208e04d0a23bbefb2a39892465c4d633",
+        "operating_policy": "76cd8e7d36f3c59755debb14e09b0e5136f3ed4d9b523de83468c9c89f838f7d",
+        "economic_config": "543b6b8eb1ba4982ac3e0212eb9f07a55bbab091ed74f546c8f876b9c7cdfd1f"
+      },
+      "spatial_sha256": "743aef38e2a2bf35c2299d900f3652e00fa6c3beff9a1bd39dc12653d1f61aef",
+      "existing_m5_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-3/spread_medium/m5_case.json",
+      "existing_m6_reference": "data/model5_model6/shared_v1_20261005/zhou_Set2_100-5-3/spread_medium/m6_case.json",
+      "adaptation_status": "four_window_endpoints_only; seeded_feasibility_conditioned_interleaving",
+      "source_total_container_uses": 156,
+      "preserved_orders_sha256": "353dc60312f5ed1e022beb2e44fb162073de734bb69c2b7a39f8d9ddc2f8c9bf",
+      "preserved_policy_sha256": "dfb69694209948c4899ee11e7e09476ec431fb9df97286690aa793b556cc08ce",
+      "batch_count_certificate_sha256": "df2b3012364dbbf162a5a5d090401ba79bd45787cb7edf6a97a2ca2d848207f4"
+    }
+  ],
+  "reviewed_reference_calendar": {
+    "batch_count": 3,
+    "cutoff_ratio": 0.7,
+    "original_cutoff_ratio": 0.75,
+    "reason": "Uniform feasibility repair after M03/M5 exact infeasibility and M03/L09 terminal-cleaning conflicts. Retain all 27 cases and physical demand; do not select by relative model performance.",
+    "review_date": "2026-10-15"
+  },
+  "review_protocol": {
+    "dataset_revision": 5,
+    "experimental_unit": "27 matched base cases; 14 original source blocks; seeds are repeated runs",
+    "primary_cost_policy": "User-defined basic coefficients confirmed 2026-10-16, shared across all 27 bases and eight projections",
+    "container_pool_cost_per_period": 5,
+    "pool_charge_definition": "One-time synthetic acquisition cost 5*N for the configured stock; reusing a box does not buy it again",
+    "economic_fields_used_in_joint_cost": [
+      "container_pool_cost_per_period",
+      "e1_distance_cost_per_km",
+      "e2_distance_cost_per_km",
+      "cleaning_cost_per_return",
+      "container_wear_cost_per_use"
+    ],
+    "cost_sensitivity": "Freeze any coefficient variants explicitly in new studies; retain original attempts and inputs. Revision 3 is an explicit user-authorized primary-profile change.",
+    "metrics": [
+      "independently audited feasibility",
+      "distance in benchmark coordinate units",
+      "comparable cost for reusable models only",
+      "N",
+      "Q",
+      "K",
+      "vehicles",
+      "trips",
+      "bound and proof scope",
+      "wall time",
+      "visited and unvisited K candidates"
+    ],
+    "native_objectives": {
+      "1-5": "distance",
+      "6-8": "cost"
+    },
+    "objective_control": "A common cost recalculation is not a fixed-policy cost optimization control. Do not attribute M5/M6 differences solely to additional decisions without that control.",
+    "reporting": "Report each size separately, pair by base case, retain source_block for block-balanced summaries; never treat all runs as independent cases.",
+    "feasibility_denominator": "All planned runs, including timeouts, heuristic no-solution and audit failures",
+    "witness_policy": "216 independently replayed schedules certify feasibility; they are not optimal and are not loaded automatically by benchmark solvers.",
+    "k_domain_policy": "Start with the common positive-integer domain. Remove only input-proven impossible counts; each exclusion is recorded and recomputed.",
+    "scope_limits": [
+      "One synthetic appointment and economic regime; not a representative empirical population",
+      "E1 capacity is deliberately loose; not an E1 scarcity benchmark",
+      "All orders released at cycle start; not a late-release stress benchmark",
+      "Most fixed assignments are already nearest-satellite assignments",
+      "A low-cost single-batch optimum is an admissible finding; do not tune prices to guarantee M8 wins",
+      "M5 fixes dispatch slots but does not require positive recovery in each slot; M6-M8 require productive delivery and recovery. Without harmonizing this rule, M5 is not automatically a strict subset control for M6."
+    ],
+    "formal_experiment_status": "Revision-2 formal results are historical. Revision-3 costs require a new prepared study and fresh optimization.",
+    "separate_purchase_and_wear_accounting": {
+      "pool_charge": "5*N one-time acquisition cost within the optimization",
+      "wear_in_objective": "0.01*Q explicit per-use wear; independent of purchase price, no lifetime depreciation",
+      "cleaning_and_tracking": "One combined fee 0.01*Q, stored as cleaning; tracking coefficient is zero",
+      "initial_investment_reported_separately": "5*N informational purchase metric; same purchase charge, not added a second time",
+      "implication": "For fixed demand and complete recovery, per-use fees sum to constant 0.02*Q; stock and weighted distances drive the decision."
+    },
+    "objective_formula": "0.1*D1 + 0.05*D2 + 5*N + 0.01*Q cleaning/traceability + 0.01*Q wear",
+    "zero_cost_fields": [
+      "e1_work_cost_per_minute",
+      "e2_work_cost_per_minute",
+      "e1_vehicle_cost_per_cycle",
+      "e2_vehicle_cost_per_cycle",
+      "e1_trip_cost",
+      "e2_trip_cost",
+      "tracking_cost_per_use"
+    ],
+    "scenario_label": "一客一箱、顾客间交错送取预约",
+    "demand_contract": {
+      "id": "one_customer_one_box_v1",
+      "boxes_per_customer": 1,
+      "orders_per_customer": 1,
+      "goods_weight": "Preserve the complete original customer goods weight.",
+      "delivery_weight": "goods_weight + container_weight",
+      "pickup_weight": "container_weight",
+      "task_volume": "container_volume",
+      "assumption": "Each customer demand fits one standard box; no bin-packing optimization."
+    },
+    "formal_run_status": "New time windows; previous solver results do not validate this release.",
+    "legacy_scenario_label": "多箱需求情景",
+    "batch_domain_change": "Input-derived certificates recomputed for the new windows.",
+    "rerun_gate": "First validate all eight S01 models with exact and ALNS and independent replay; then S04/S07.",
+    "formal_rerun": {
+      "exact_seconds": 300,
+      "alns_seconds": 30,
+      "alns_seeds": [
+        42,
+        43,
+        44,
+        45,
+        46
+      ],
+      "exact_calls": 216,
+      "alns_calls": 1080
+    }
+  },
+  "economic_profile": "config/experiments/benchmark27_v1/economic.json",
+  "economic_profile_sha256": "543b6b8eb1ba4982ac3e0212eb9f07a55bbab091ed74f546c8f876b9c7cdfd1f",
+  "dataset_version": "formal_benchmark27_interleaved_v1",
+  "source_dataset": "data/formal_benchmark27_one_box_v1",
+  "source_dataset_manifest_sha256": "adb7145dd95ef67889b9e5eedd7fdc1cf5dd0fc0bcbf2a85f6cb0dc00e2ccde6",
+  "demand_contract": {
+    "id": "one_customer_one_box_v1",
+    "boxes_per_customer": 1,
+    "orders_per_customer": 1,
+    "goods_weight": "Preserve the complete original customer goods weight.",
+    "delivery_weight": "goods_weight + container_weight",
+    "pickup_weight": "container_weight",
+    "task_volume": "container_volume",
+    "assumption": "Each customer demand fits one standard box; no bin-packing optimization."
+  },
+  "window_design": {
+    "design_version": "customer_interleaved_windows_v1",
+    "seed": 20261019,
+    "source_dataset": "data/formal_benchmark27_one_box_v1",
+    "output_dataset": "data/formal_benchmark27_interleaved_v1",
+    "construction_use_buffer_minutes": 2,
+    "pickup_relocation_probability": 0.6,
+    "pickup_move_attempts_per_order": 6,
+    "maximum_event_jitter_minutes": 18,
+    "maximum_departure_jitter_minutes": 35,
+    "delivery_early_slack_minutes": [
+      8,
+      35
+    ],
+    "delivery_late_slack_minutes": [
+      4,
+      22
+    ],
+    "pickup_early_slack_minutes": [
+      5,
+      25
+    ],
+    "pickup_late_slack_minutes": [
+      12,
+      55
+    ],
+    "preserve": [
+      "customers",
+      "network",
+      "goods_weight",
+      "container_count",
+      "satellite_id",
+      "delivery_batch_id",
+      "release_time",
+      "service_time",
+      "min_use_time",
+      "fleet",
+      "operating_policy",
+      "economic_coefficients"
+    ],
+    "method": "Fixed-seed feasibility construction with cross-customer pickup relocations, independently keyed event slack and independently keyed window widths. No route objective, optimizer, runtime, gap or model ranking is used to select inputs.",
+    "dependence_disclosure": "Appointments are synthetic and conditioned on an explicit feasible physical schedule, not independent empirical observations. Vehicle and route assignments in the witness are not binding input decisions and are not supplied as solver starts."
+  }
+}

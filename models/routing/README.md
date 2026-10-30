@@ -1,4 +1,7 @@
-# 八个模型独立维护
+# 九个模型独立维护
+
+M9 在 M8 上加入顾客级自由选仓，当前先提供独立 `exact/`。
+数学定义与验证见[模型9](../../docs/model9_free_multibatch.md)。
 
 先看[求解代码目录指南](../../docs/solver_directory_guide.md)：八个模型的两类算法
 按实际职责组织文件，不限制顶层数量。ALNS 主循环统一放在顶层 `search.py`，
@@ -10,6 +13,7 @@ routing/
 │   ├── alns/          M1 自己的搜索、算子、评价和缓存
 │   └── exact/         M1 自己的建模、求解、初解和下界
 ├── model_2/ … model_8/     同样各有 alns/、exact/
+├── model_9/exact/         自由选仓与不等长多批次的联合 MILP
 ├── catalog.py        编号与入口登记
 └── service.py        选择编号和求解方法
 ```
@@ -33,6 +37,7 @@ ALNS 和精确求解各有自己的实现；旧定制精确算法与 M5 混合�
 | M6 | 等长批次、共同分界、箱池与路线成本 | [alns](model_6/alns/README.md) | [exact](model_6/exact/README.md) |
 | M7 | 等长批次、逐批独立分界 | [alns](model_7/alns/README.md) | [exact](model_7/exact/README.md) |
 | M8 | 不等长批次、逐批独立分界 | [alns](model_8/alns/README.md) | [exact](model_8/exact/README.md) |
+| M9 | 自由选仓、不等长多批次、逐批独立分界 | 当前先做精确求解 | [exact](model_9/exact/README.md) |
 
 每个算法目录：`solver.py` 是带编号校验的公开入口；ALNS 的 `search.py` 展示主要迭代流程；
 精确目录的 `model.py` 是建模入口；`parameters.py` 管理已知参数与安全派生界，

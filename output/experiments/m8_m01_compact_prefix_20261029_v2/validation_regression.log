@@ -1,0 +1,45 @@
+{
+  "ok": true,
+  "python": "C:\\Users\\猫的秋刀鱼\\Desktop\\毕业设计\\.venv\\Scripts\\python.exe",
+  "python_version": "3.11.3",
+  "gurobi_required": true,
+  "stage": "ready",
+  "gurobi_home": "C:\\gurobi\\win64",
+  "engine_executable_exists": true,
+  "gurobipy_path": "C:\\gurobi\\win64\\python311\\lib\\gurobipy\\__init__.py",
+  "gurobi_version": [
+    11,
+    0,
+    3
+  ],
+  "solve_status": 2,
+  "code": "READY",
+  "objective": 1.0,
+  "message": "Configured interpreter, Gurobi binding, licence and integer solve verified."
+}
+..........................F.................                             [100%]
+================================== FAILURES ===================================
+_______ test_three_staggered_productive_batches_preserve_the_optimum[3] _______
+
+first_quantity = 3
+
+    @pytest.mark.parametrize('first_quantity', [1,3])
+    def test_three_staggered_productive_batches_preserve_the_optimum(first_quantity):
+        source = productive_fixture(8,count=3,orders=3)
+        orders = [replace(o, count=first_quantity if i == 0 else 1,
+                          delivery_window=d, pickup_window=p)
+                  for i,(o,d,p) in enumerate(zip(source.orders,[(0,20),(40,65),(80,105)],
+                                                 [(30,50),(70,90),(110,125)]))]
+        p = CalendarCycleInstance(source.network,orders,replace(source.operating_policy,cycle_end=133),
+                                 dict(batch_count_candidates=[1,2,3]),source.cost_profile.config,model=8)
+        baseline = solve_exact(p,time_limit=25,milp_options=dict(formulation='compact'))
+        enhanced = solve_exact(p,time_limit=25,preprocessing=True,vehicle_symmetry=True,
+                               milp_options=dict(formulation='compact'))
+>       assert baseline['info']['proven_optimal'] and enhanced['info']['proven_optimal']
+E       assert (False)
+
+tests\routing\test_model8_temporal_preprocessing.py:125: AssertionError
+- generated xml file: C:\Users\猫的秋刀鱼\Desktop\毕业设计\output\experiments\m8_m01_compact_prefix_20261029_v2\validation_regression.xml -
+=========================== short test summary info ===========================
+FAILED tests/routing/test_model8_temporal_preprocessing.py::test_three_staggered_productive_batches_preserve_the_optimum[3]
+1 failed, 43 passed in 133.10s (0:02:13)

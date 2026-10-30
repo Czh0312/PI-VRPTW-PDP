@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "registered_at": "2026-10-22T00:05:00+08:00",
+  "status": "SUPPLEMENTARY_RECOVERY_REQUIRED_BEFORE_FINAL_DELIVERY",
+  "trigger": "Two jobs stopped by sustained system memory pressure; controller continued normally.",
+  "records_preserved": true,
+  "frozen_manifest_unchanged": true,
+  "policy": [
+    "Collect every RESOURCE_LIMIT and SKIPPED_RESOURCE_LIMIT record when reconciling the final study, not only the initially listed jobs.",
+    "Preserve original attempts and resource-limit counts in primary efficiency tables.",
+    "Register recovery separately using the same frozen inputs, model code, economic profile, seed and requested budget.",
+    "Do not exceed one simultaneous exact solve and one ALNS solve; resource recovery may run serially after the main queue when memory is available.",
+    "Restore the affected small exact case's long-budget coverage even when the frozen queue conditionally skips its 10800-second extension after a resource limit.",
+    "Include recovered results in explicitly labelled supplementary/reference tables and cumulative elapsed-cost accounting; do not replace failed primary observations.",
+    "Finish recovery or explicitly report an actual remaining resource blocker before declaring experiments and remote delivery complete."
+  ],
+  "initially_affected_jobs": [
+    {
+      "id": "M04_m4_alns_60s_s44",
+      "method": "alns",
+      "case": "M04",
+      "model": 4,
+      "budget_seconds": 60,
+      "seed": 44,
+      "original_attempt": "runs/M04_m4_alns_60s_s44/attempt_001",
+      "original_status": "RESOURCE_LIMIT"
+    },
+    {
+      "id": "S05_m8_exact_3600s_s42",
+      "method": "exact",
+      "case": "S05",
+      "model": 8,
+      "budget_seconds": 3600,
+      "seed": 42,
+      "original_attempt": "runs/S05_m8_exact_3600s_s42/attempt_001",
+      "original_status": "RESOURCE_LIMIT",
+      "unproved_extension_seconds": 10800
+    }
+  ]
+}

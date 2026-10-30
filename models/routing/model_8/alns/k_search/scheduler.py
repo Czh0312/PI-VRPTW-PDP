@@ -19,6 +19,7 @@ CALENDAR_METRICS = ('calendar_retiming_attempts', 'calendar_retiming_feasible',
                     'calendar_reconstructions', 'calendar_reconstruction_improvements',
                     'calendar_retiming_seconds', 'calendar_reconstruction_seconds',
                     'calendar_cache_hits', 'calendar_cache_misses', 'calendar_cache_evictions')
+REPAIR_METRICS = ('timing_repair_attempts', 'timing_repair_successes', 'chain_candidates', 'chain_improvements')
 
 
 def _audit(problem, result):
@@ -126,7 +127,11 @@ def solve_counts(problem, *, solve_candidate, method, budget, seed, max_iteratio
                 phase = 'scout'
                 active = sorted(active, key=lambda r: r['batch_count'])[:3]
                 phase_deadline = begun + .5 * budget
-                weights = [4., 1., 1.][:len(active)]
+                # A single batch has no movable calendar boundary. Give
+                # multi-batch candidates enough scouting before comparing
+                # their partially searched costs on small instances.
+                weights = ([1. if r['batch_count'] == 1 else 2. for r in active]
+                           if len(problem.orders) <= 9 else [4., 1., 1.][:len(active)])
             elif round_number == 1:
                 phase = 'explore'
                 active = [r for r in active if not r['visits']]
@@ -207,11 +212,11 @@ def solve_counts(problem, *, solve_candidate, method, budget, seed, max_iteratio
                          proven_infeasible=bool(info.get('proven_infeasible')),
                          restart='audited_incumbent' if method == 'alns' and seed_result is not None else 'cold',
                          local_history=deepcopy(info.get('history', [])))
-            for key in ('proof_scope', 'build_time', 'variables', 'constraints', 'node_count',
+            for key in ('proof_scope', 'domain_certificate', 'build_time', 'variables', 'constraints', 'node_count',
                         'sol_count', 'evaluations', 'cache_hits', 'calendar_evaluations',
                         'operator_attempts', 'operator_improvements', 'operator_noops', 'cutoff_polish_calls',
                         'cutoff_polish_improvements', 'cutoff_polish_evaluations',
-                        'cutoff_polish_runtime', 'cutoff_polish_budget') + CALENDAR_METRICS:
+                        'cutoff_polish_runtime', 'cutoff_polish_budget') + CALENDAR_METRICS + REPAIR_METRICS:
                 if key in info:
                     visit[key] = deepcopy(info[key])
             visits.append(visit)
@@ -273,7 +278,7 @@ def solve_counts(problem, *, solve_candidate, method, budget, seed, max_iteratio
 
     sum_keys = ('evaluations', 'cache_hits', 'calendar_evaluations', 'cutoff_polish_calls',
                 'cutoff_polish_improvements', 'cutoff_polish_evaluations',
-                'cutoff_polish_runtime', 'cutoff_polish_budget') + CALENDAR_METRICS
+                'cutoff_polish_runtime', 'cutoff_polish_budget') + CALENDAR_METRICS + REPAIR_METRICS
     for row in rows:
         row.update({key: sum(v.get(key, 0) for v in row['visits']) for key in sum_keys})
         for key in ('operator_attempts', 'operator_improvements', 'operator_noops'):

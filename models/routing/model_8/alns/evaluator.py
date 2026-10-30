@@ -378,12 +378,35 @@ def _delay_departures(problem, result):
         trip["departure"] = max(trip["departure"], latest)
 
 
+def _required_pool(problem, raw):
+    """Propose the inventory peak; the lifted plan still gets a full audit.
+
+    Only depot cleaning releases can finance a later loading. Equal-time clean
+    releases are available, matching the inventory audit's half-open clock.
+    This is a sizing calculation, never a schedule-feasibility certificate.
+    """
+    p = problem.operating_policy
+    releases = [
+        (trip["return_complete"] + p.cleaning_duration,
+         sum(event["quantity"] for event in trip["events"] if event["kind"] == "p"))
+        for trip in raw["e1_trips"]
+    ]
+    loading = getattr(problem, "batch_loading_starts", None)
+    issued = required = 0
+    for batch in p.batches:
+        issued += problem.batch_demands[batch.id]
+        start = batch.start if loading is None else loading[batch.id]
+        required = max(required, issued - sum(n for ready, n in releases if ready <= start))
+    return required
+
+
 class JointEvaluator:
     def __init__(self, problem, capacity=512):
         self.problem, self.capacity = problem, capacity
         self.cache = OrderedDict()
         self.projections = OrderedDict()
         self.hits = self.misses = 0
+        self.single_audit_accepts = self.reference_fallbacks = 0
         # Feasibility penalty is search-only and scaled to declared cost units.
         rates = problem.cost_profile.rates
         self.penalty = (
@@ -425,31 +448,56 @@ class JointEvaluator:
         )
         if issues:
             value = (fallback + self.penalty * len(issues), None, tuple(issues))
+        elif len(self.problem.orders) > 9:
+            # Short-budget quality gains were validated on small instances.
+            # Preserve the established evaluation path for larger searches.
+            _delay_departures(fixed, raw)
+            value = self._reference_value(fixed, raw, assignment, cutoffs, fallback)
         else:
             _delay_departures(fixed, raw)
-            physical = audit_solution(fixed, raw)
-            if not physical["valid"]:
-                value = (
-                    fallback + self.penalty * max(1, len(physical["errors"])),
-                    None,
-                    tuple(e["code"] for e in physical["errors"]),
-                )
-            else:
-                pool = max(self.problem.pool_min, physical["minimum_pool_for_schedule"])
-                cost = self.problem.cost_profile.evaluate(physical, pool)["total"]
-                if pool > self.problem.pool_max:
-                    value = (
-                        cost + self.penalty * (pool - self.problem.pool_max),
-                        None,
-                        ("POOL_BOUNDS",),
-                    )
-                else:
-                    candidate = lift_result(self.problem, raw, assignment, pool, "alns", cutoffs)
-                    if candidate["audit"]["valid"]:
-                        value = (candidate["info"]["objective"], candidate, ())
-                    else:
-                        value = (cost + self.penalty, None, ("JOINT_AUDIT_FAILED",))
+            required = _required_pool(fixed, raw)
+            pool = max(self.problem.pool_min, required)
+            value = None
+            if pool <= self.problem.pool_max:
+                # lift_result performs the complete physical/two-cycle replay
+                # at the proposed pool and validates the full joint contract.
+                candidate = lift_result(self.problem, raw, assignment, pool, "alns", cutoffs)
+                if (candidate["audit"]["valid"]
+                        and candidate["audit"]["minimum_pool_for_schedule"] == required):
+                    self.single_audit_accepts += 1
+                    value = (candidate["info"]["objective"], candidate, ())
+            if value is None:
+                # Failed prechecks retain the original error codes and penalty
+                # arithmetic. A failed proposed audit is never a feasible plan.
+                self.reference_fallbacks += 1
+                value = self._reference_value(fixed, raw, assignment, cutoffs, fallback)
         self.cache[key] = value
         if len(self.cache) > self.capacity:
             self.cache.popitem(last=False)
+        return value
+
+    def _reference_value(self, fixed, raw, assignment, cutoffs, fallback):
+        """Original two-replay path for sizing failures or infeasible schedules."""
+        physical = audit_solution(fixed, raw)
+        if not physical["valid"]:
+            value = (
+                fallback + self.penalty * max(1, len(physical["errors"])),
+                None,
+                tuple(e["code"] for e in physical["errors"]),
+            )
+        else:
+            pool = max(self.problem.pool_min, physical["minimum_pool_for_schedule"])
+            cost = self.problem.cost_profile.evaluate(physical, pool)["total"]
+            if pool > self.problem.pool_max:
+                value = (
+                    cost + self.penalty * (pool - self.problem.pool_max),
+                    None,
+                    ("POOL_BOUNDS",),
+                )
+            else:
+                candidate = lift_result(self.problem, raw, assignment, pool, "alns", cutoffs)
+                if candidate["audit"]["valid"]:
+                    value = (candidate["info"]["objective"], candidate, ())
+                else:
+                    value = (cost + self.penalty, None, ("JOINT_AUDIT_FAILED",))
         return value

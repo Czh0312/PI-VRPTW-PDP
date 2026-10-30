@@ -100,7 +100,7 @@ def describe(dataset, output):
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--dataset', default='data/formal_benchmark27_v1')
+    parser.add_argument('--dataset', default='data/formal_benchmark27_uniform_7_20_50_v1')
     parser.add_argument('--output', default='output/inspections/formal_benchmark27_review_20261015/structure')
     args=parser.parse_args()
     result=describe(args.dataset,args.output)

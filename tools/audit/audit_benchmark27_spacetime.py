@@ -30,6 +30,9 @@ def source_satellites(path,source_block):
 
 def audit_design(dataset):
     root=resolve_project_path(dataset);manifest=read(root/'manifest.json');design=read(root/'design.json')
+    if manifest['dataset_version']=='formal_benchmark27_uniform_7_20_50_v1':
+        from tools.audit.audit_uniform_benchmark27 import audit_uniform
+        return audit_uniform(root)
     standard=audit_dataset(root)
     require(not standard['fixed_model_necessary_condition_failures'],'Fixed model failed necessary physical conditions')
     source=resolve_project_path(manifest['source_dataset']);original=read(source/'manifest.json')
@@ -147,7 +150,7 @@ def audit_design(dataset):
 
 
 if __name__=='__main__':
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--dataset',default='data/formal_benchmark27_spacetime_v4_1');parser.add_argument('--output')
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--dataset',default='data/formal_benchmark27_uniform_7_20_50_v1');parser.add_argument('--output')
     args=parser.parse_args();result=audit_design(args.dataset)
     if args.output:
         target=resolve_project_path(args.output);target.parent.mkdir(parents=True,exist_ok=True)

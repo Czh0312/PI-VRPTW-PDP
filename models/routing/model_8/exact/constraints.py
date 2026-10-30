@@ -5,11 +5,85 @@ import time
 from models.routing.model_8.exact.objective import add_distance_cost
 
 
+def validate_strengthening(profile):
+    if profile not in ('none', 'physical', 'physical_time'):
+        raise ValueError('M8 strengthening must be none, physical or physical_time')
+    return profile
+
+
+def add_physical_bounds(parameters, variables):
+    """Expose necessary stock and productive-visit inequalities to the LP.
+
+    Each batch debits its entire demand at loading, so D_b <= N. Summing
+    these inequalities and using integer N gives N >= ceil(Q/K); each
+    indivisible order also needs its own count of containers simultaneously.
+    Every productive batch has positive delivery and recovery quantities,
+    hence at least one E1 visit of each kind, across all satellites/vehicles.
+    No calendar, assignment, route or incumbent is fixed by these bounds.
+    """
+    import gurobipy as gp
+
+    batches = parameters.policy.batches
+    total = parameters.total_containers
+    lower = max((total + len(batches) - 1) // len(batches),
+                max((o.count for o in parameters.problem.orders), default=0))
+    variables.pool.LB = max(parameters.problem.pool_min, lower)
+    for batch in batches:
+        demand = gp.quicksum(variables.demand_counts[s, batch.id]
+                             for s in parameters.problem.satellites)
+        variables.model.addConstr(demand <= variables.pool,
+                                 name=f'physical_batch_pool_{batch.id}')
+        if parameters.problem.require_productive_batches:
+            for kind in ('d', 'p'):
+                visits = gp.quicksum(
+                    route['visit'][i]
+                    for route in variables.routes['e1'] if route['batch'].id == batch.id
+                    for i, node in enumerate(route['nodes']) if node['kind'] == kind
+                )
+                active = variables.calendar.get('prefix_active', {}).get(batch.id, 1)
+                variables.model.addConstr(visits >= active,
+                                          name=f'physical_productive_visit_{batch.id}_{kind}')
+    return dict(profile='physical', pool_lower_bound=lower,
+                batch_pool_rows=len(batches),
+                productive_visit_rows=2*len(batches) if parameters.problem.require_productive_batches else 0)
+
+
+def add_physical_time_bounds(parameters, variables, statistics):
+    from models.routing.model_8.exact.parameters import necessary_time_bounds
+    import gurobipy as gp
+
+    bounds = necessary_time_bounds(parameters.problem)
+    variables.pool.LB = max(parameters.problem.pool_min, statistics['pool_lower_bound'], bounds['pool_lower_bound'])
+    first = parameters.policy.batches[0].id
+    for row in bounds['forced_first_batch']:
+        variable = variables.assignments.get((row['order'], first))
+        # An empty first-batch domain makes this block infeasible, rather
+        # than silently discarding the implication or the original K.
+        lhs = gp.LinExpr() if variable is None else variable
+        variables.model.addConstr(lhs == 1, name=f'physical_time_first_{row["order"]}')
+    statistics.update(profile='physical_time', time_bounds=bounds)
+
+
 def add_calendar_constraints(parameters, variables):
     """Define calendar boundaries and delivery/recovery cutoffs."""
     import gurobipy as gp
 
     variable_calendar = getattr(parameters.problem, "variable_calendar", False)
+    prefix = getattr(parameters.problem, 'optional_batch_prefix', False)
+    if prefix:
+        bids = [b.id for b in parameters.policy.batches]
+        active = variables.model.addVars(bids, vtype=gp.GRB.BINARY, name='prefix_active')
+        counts = tuple(parameters.problem.prefix_original_counts)
+        selectors = variables.model.addVars(counts, vtype=gp.GRB.BINARY, name='prefix_count')
+        for count, selector in selectors.items():
+            if count not in parameters.problem.prefix_retained_counts:
+                selector.UB = 0
+        variables.model.addConstr(selectors.sum() == 1)
+        variables.model.addConstr(active.sum() == gp.quicksum(k*v for k,v in selectors.items()))
+        for left, right in zip(bids, bids[1:]):
+            variables.model.addConstr(active[left] >= active[right])
+        variables.calendar['prefix_active'] = active
+        variables.calendar['prefix_count_selectors'] = selectors
     if variable_calendar:
         starts = {
             b.id: variables.create_batch_start(b, parameters.problem)
@@ -41,12 +115,28 @@ def add_calendar_constraints(parameters, variables):
         }
     if variable_calendar:
         for b in parameters.policy.batches:
+            active = variables.calendar.get('prefix_active', {}).get(b.id, 1)
             variables.model.addConstr(
-                cutoffs[b.id] >= starts[b.id] + parameters.problem.minimum_phase_ticks
+                cutoffs[b.id] >= starts[b.id] + parameters.problem.minimum_phase_ticks*active
             )
             variables.model.addConstr(
-                cutoffs[b.id] <= ends[b.id] - parameters.problem.minimum_phase_ticks
+                cutoffs[b.id] <= ends[b.id] - parameters.problem.minimum_phase_ticks*active
             )
+            if prefix:
+                variables.model.addConstr(ends[b.id]-starts[b.id]
+                    <= (parameters.policy.cycle_end-parameters.policy.cycle_start)*active)
+    step = getattr(parameters.problem, 'calendar_decision_step', 1)
+    if step > 1:
+        for kind, values in (('start', starts), ('cutoff', cutoffs)):
+            for bid, value in values.items():
+                if isinstance(value, (int, float)):
+                    if value % step:
+                        raise ValueError('Fixed calendar time outside the decision grid')
+                else:
+                    index = variables.model.addVar(vtype=gp.GRB.INTEGER,
+                        lb=0, ub=parameters.policy.cycle_end//step,
+                        name=f'calendar_grid_{kind}_{bid}')
+                    variables.model.addConstr(value == step*index)
     return variable_calendar, starts, ends, cutoffs
 
 
@@ -76,7 +166,8 @@ def add_order_batch_constraints(
                 )
     for b in parameters.policy.batches:
         members = [v for (oid, bid), v in y.items() if bid == b.id]
-        variables.model.addConstr(z[b.id] == 1, name=f"batch_delivery_active_{b.id}")
+        active = variables.calendar.get('prefix_active', {}).get(b.id, 1)
+        variables.model.addConstr(z[b.id] == active, name=f"batch_delivery_active_{b.id}")
         for v in members:
             variables.model.addConstr(v <= z[b.id])
         variables.model.addConstr(z[b.id] <= gp.quicksum(members))
@@ -372,6 +463,8 @@ def add_first_echelon_constraints(
                     )
             r = make_route(nodes, parameters.problem.depot, "e1", f"e1_{b.id}_{k}", b)
             r.update(batch=b, vehicle=k)
+            if 'prefix_active' in variables.calendar:
+                variables.model.addConstr(r['used'] <= variables.calendar['prefix_active'][b.id])
             hd = variables.create_hd(r)
             ds = [r["visit"][i] for i, n in enumerate(nodes) if n["kind"] == "d"]
             for v in ds:
@@ -471,10 +564,12 @@ def add_second_echelon_constraints(
     *,
     causal_limit,
     make_route,
+    vehicle_symmetry=False,
 ):
     """Build second-echelon trips, supply synchronization and vehicle calendars."""
     import gurobipy as gp
 
+    symmetry_rows = 0
     for s in parameters.problem.satellites:
         local = [o for o in parameters.problem.orders if o.satellite == s]
         if not local:
@@ -494,6 +589,7 @@ def add_second_echelon_constraints(
             for kind in ("d", "p")
         ]
         first_slots = []
+        first_keys = []
         for k in range(parameters.fleet.e2_per_sat_count):
             previous = None
             for slot in range(min(parameters.policy.e2_max_trips_per_vehicle, len(nodes))):
@@ -502,6 +598,17 @@ def add_second_echelon_constraints(
                 if slot == 0:
                     if first_slots:
                         variables.model.addConstr(r["used"] <= first_slots[-1])
+                    if vehicle_symmetry:
+                        key = gp.quicksum((i+1)*r['x'][-1, i] for i in range(len(nodes)))
+                        if first_keys:
+                            # Rename complete homogeneous vehicle schedules by
+                            # their first trip's first task. Unique tasks make
+                            # these keys distinct; no physical schedule is lost.
+                            variables.model.addConstr(
+                                first_keys[-1]+r['used'] <= key+len(nodes)*(1-r['used']),
+                                name=f'e2_first_task_order_{s}_{k}')
+                            symmetry_rows += 1
+                        first_keys.append(key)
                     first_slots.append(r["used"])
                 selects = {b.id: variables.create_only_pick() for b in parameters.policy.batches}
                 loaded = gp.quicksum(selects.values())
@@ -604,6 +711,7 @@ def add_second_echelon_constraints(
                 previous = r
     for key, copies in variables.aggregate_arcs.items():
         variables.model.addConstr(variables.global_arcs[key] == gp.quicksum(copies))
+    return symmetry_rows
 
 
 def add_task_and_return_coverage_constraints(parameters, variables):
@@ -611,8 +719,9 @@ def add_task_and_return_coverage_constraints(parameters, variables):
     import gurobipy as gp
 
     for b in parameters.policy.batches:
+        active = variables.calendar.get('prefix_active', {}).get(b.id, 1)
         variables.model.addConstr(
-            gp.quicksum(variables.expected_returns[s, b.id] for s in parameters.problem.satellites) >= 1,
+            gp.quicksum(variables.expected_returns[s, b.id] for s in parameters.problem.satellites) >= active,
             name=f"batch_recovery_positive_{b.id}",
         )
 

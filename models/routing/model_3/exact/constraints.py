@@ -92,6 +92,8 @@ def add_route_constraints(
     objective,
     route_arcs,
     batch=None,
+    capacity_links=False,
+    resource_flows=False,
 ):
     """Link route arcs, visits, time windows, capacities and load propagation."""
     import gurobipy as gp
@@ -185,6 +187,15 @@ def add_route_constraints(
     else:
         variables.model.addConstr(initial_w <= cap_w)
         variables.model.addConstr(initial_v <= cap_v)
+    if capacity_links:
+        # These hold for every original binary route at any instance size.
+        # They prevent a fractionally enabled trip from carrying a full load.
+        variables.model.addConstr(initial_w <= cap_w*used)
+        variables.model.addConstr(initial_v <= cap_v*used)
+        returned_w = gp.quicksum(n['w']*visit[i] for i, n in enumerate(nodes) if n['kind'] == 'p')
+        returned_v = gp.quicksum(n['v']*visit[i] for i, n in enumerate(nodes) if n['kind'] == 'p')
+        variables.model.addConstr(returned_w <= cap_w*used)
+        variables.model.addConstr(returned_v <= cap_v*used)
     for i, n in enumerate(nodes):
         if i % 64 == 0:
             check_budget()
@@ -249,6 +260,8 @@ def add_route_constraints(
                 (load_w[b], initial_w, nodes[b]["w"], cap_w, 0),
                 (load_v[b], initial_v, nodes[b]["v"], cap_v, 2),
             ):
+                if resource_flows and layer == 'e2':
+                    continue
                 if shared and linear_boundary:
                     lower, upper = parameters.bounds["loads"][keys[b]][offset : offset + 2]
                     variables.model.addConstr(
@@ -285,12 +298,13 @@ def add_route_constraints(
             if rank is not None:
                 variables.model.addConstr((x[a, b] == 1) >> (rank[b] >= rank[a] + 1))
             sign = -1 if nodes[b]["kind"] == "d" else 1
-            variables.model.addConstr(
-                (x[a, b] == 1) >> (load_w[b] == load_w[a] + sign * nodes[b]["w"])
-            )
-            variables.model.addConstr(
-                (x[a, b] == 1) >> (load_v[b] == load_v[a] + sign * nodes[b]["v"])
-            )
+            if not (resource_flows and layer == 'e2'):
+                variables.model.addConstr(
+                    (x[a, b] == 1) >> (load_w[b] == load_w[a] + sign * nodes[b]["w"])
+                )
+                variables.model.addConstr(
+                    (x[a, b] == 1) >> (load_v[b] == load_v[a] + sign * nodes[b]["v"])
+                )
         if (
             layer == "e1"
             and b != -2
@@ -684,6 +698,7 @@ def add_shared_route_constraints(
     objective,
     step_slack,
     task_step_bounds,
+    resource_flows=False,
 ):
     """Link shared task arcs and route identities, times, loads and causal steps."""
     import gurobipy as gp
@@ -773,6 +788,8 @@ def add_shared_route_constraints(
                 (variables.task_load_weight, weight, 0),
                 (variables.task_load_volume, volume, 2),
             ):
+                if resource_flows:
+                    continue
                 if linear_internal:
                     lo_left, hi_left = parameters.bounds["loads"][left][offset : offset + 2]
                     lo_right, hi_right = parameters.bounds["loads"][right][offset : offset + 2]

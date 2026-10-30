@@ -16,12 +16,12 @@ def main(argv=None):
         return baseline_main([arg for arg in arguments if arg != "--baseline"])
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--case", default=str(DEFAULT_CASE))
-    parser.add_argument("--model", type=int, choices=range(1, 9), help="M1–M5 原模型；M6 统一分界；M7 独立分界；M8 不等长批次")
-    parser.add_argument("--economic-config", help="M3 成本对照及 M5–M8 成本参数与证据配置")
+    parser.add_argument("--model", type=int, choices=range(1, 10), help="M1–M5 原模型；M6 统一分界；M7 独立分界；M8 不等长批次；M9 自由选仓多批次（精确）")
+    parser.add_argument("--economic-config", help="M3 成本对照及 M5–M9 成本参数与证据配置")
     parser.add_argument('--objective-mode', choices=('cost', 'distance'),
                         help='M3 可选 distance/cost（默认 distance）；M5 默认 cost')
-    parser.add_argument('--pool-min', type=int, help='M5–M8 容器池决策下界')
-    parser.add_argument('--pool-max', type=int, help='M5–M8 容器池决策上界')
+    parser.add_argument('--pool-min', type=int, help='M5–M9 容器池决策下界')
+    parser.add_argument('--pool-max', type=int, help='M5–M9 容器池决策上界')
     schedules=parser.add_mutually_exclusive_group()
     schedules.add_argument('--uniform-cycle',dest='uniform_cycle',action='store_true',default=None,
                            help='M6 基础版：优化周期批次数，均分周期，各批共用相对分界点')
@@ -29,8 +29,8 @@ def main(argv=None):
                            help='M6 历史候选时段模式，保留输入批次起止')
     counts = parser.add_mutually_exclusive_group()
     counts.add_argument('--batch-count-candidates',type=int,nargs='+',help='显式指定用于诊断的 K 子集')
-    counts.add_argument('--all-batch-counts',action='store_true',help='M6–M8 允许全部满足周期及最短阶段约束的正整数 K')
-    parser.add_argument('--min-phase-minutes',type=float,help='M6–M8 各阶段最短时长，默认1分钟（场景假设）')
+    counts.add_argument('--all-batch-counts',action='store_true',help='M6–M9 允许全部满足周期及最短阶段约束的正整数 K')
+    parser.add_argument('--min-phase-minutes',type=float,help='M6–M9 各阶段最短时长，默认1分钟（场景假设）')
     cutoffs=parser.add_mutually_exclusive_group()
     cutoffs.add_argument('--optimize-cutoffs',dest='optimize_cutoffs',action='store_true',default=None,
                          help='M6 优化两窗截点，保持候选批次起止与顾客窗口不变')
@@ -40,10 +40,10 @@ def main(argv=None):
     parser.add_argument("--solver", choices=("alns", "exact"))
     parser.add_argument("--exact-time", type=float)
     parser.add_argument("--exact-strategy", choices=("auto", "milp"),
-                        help="直接Gurobi（默认milp，auto为兼容别名）；M6–M8统一优化批次数")
+                        help="直接Gurobi（默认milp，auto为兼容别名）；M6–M9统一优化批次数")
     parser.add_argument("--milp-threads", type=int, help="直接MILP基线的线程数，默认1")
     parser.add_argument("--milp-formulation", choices=("expanded", "compact"),
-                        help="直接MILP基线的等价表达，默认expanded")
+                        help="直接MILP的等价表达，M3/M4默认compact，其余默认expanded")
     parser.add_argument('--m4-strengthening', choices=('none','bounds','capacity','combined','activation','capacity_activation'),
                         help='M4精确MILP的有效约束强化；默认none，其余为显式对照选项')
     parser.add_argument("--time", type=float)
@@ -89,11 +89,13 @@ def main(argv=None):
         milp_options['formulation'] = args.milp_formulation
     if milp_options:
         config['milp_options'] = milp_options
+    if config['model'] == 9 and config.get('solver') != 'exact':
+        raise ValueError('M9 currently supports --solver exact only')
     if args.fleet_config:
         fleet = {**load_json(args.fleet_config), "operating_policy": fleet["operating_policy"]}
         config["routing_config"] = args.fleet_config
     options=dict(config.get('joint_batch_options',{}))
-    if args.model in (7, 8):
+    if args.model in (7, 8, 9):
         from models.common.cycle.calendar import SCHEDULE_MODES
         options['schedule_mode'] = SCHEDULE_MODES[args.model]
         config['joint_batch_options'] = options
@@ -105,8 +107,8 @@ def main(argv=None):
             options['schedule_mode']='uniform_cycle'
         config['joint_batch_options']=options
     if args.all_batch_counts or args.batch_count_candidates is not None or args.min_phase_minutes is not None:
-        if config['model'] not in (7, 8) and (config['model']!=6 or options.get('schedule_mode')!='uniform_cycle'):
-            raise ValueError('Batch-count and phase-minimum options require M6 --uniform-cycle or M7/M8')
+        if config['model'] not in (7, 8, 9) and (config['model']!=6 or options.get('schedule_mode')!='uniform_cycle'):
+            raise ValueError('Batch-count and phase-minimum options require M6 --uniform-cycle or M7/M8/M9')
         if args.batch_count_candidates is not None:
             options['batch_count_candidates']=args.batch_count_candidates
         elif args.all_batch_counts:
@@ -126,8 +128,8 @@ def main(argv=None):
     if args.initial_joint_result:
         config['initial_joint_result']=args.initial_joint_result
     if args.pool_min is not None or args.pool_max is not None:
-        if config['model'] not in (5, 6, 7, 8):
-            raise ValueError('Pool decision bounds require M5–M8')
+        if config['model'] not in (5, 6, 7, 8, 9):
+            raise ValueError('Pool decision bounds require M5–M9')
         if config['model'] == 5 and config.get('objective_mode') == 'distance':
             raise ValueError('M5 pool decision bounds require cost mode and --economic-config')
         key = 'pool_options' if config['model'] == 5 else 'joint_batch_options'
@@ -138,14 +140,14 @@ def main(argv=None):
         config[key] = bounds
     if args.container_pool_size is not None:
         config, fleet = apply_container_pool_size(config, fleet, args.container_pool_size)
-        if config['model'] in (5, 6, 7, 8):
+        if config['model'] in (5, 6, 7, 8, 9):
             key = 'pool_options' if config['model'] == 5 else 'joint_batch_options'
             config[key] = {**config.get(key, {}),
                                            'pool_min': args.container_pool_size, 'pool_max': args.container_pool_size}
-    elif config['model'] not in (5, 6, 7, 8) or (
+    elif config['model'] not in (5, 6, 7, 8, 9) or (
             config['model'] == 5 and config.get('objective_mode') == 'distance'):
         config, fleet = apply_pool_config(config, fleet, args.pool_config)
     elif args.pool_config:
-        raise ValueError('M5–M8 optimize N; use --pool-min/--pool-max instead of --pool-config')
+        raise ValueError('M5–M9 optimize N; use --pool-min/--pool-max instead of --pool-config')
     from .multibatch import run_case
     return run_case(config, fleet, case_path=args.case, output=args.output)

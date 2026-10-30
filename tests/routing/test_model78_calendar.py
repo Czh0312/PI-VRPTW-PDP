@@ -238,9 +238,11 @@ def test_cli_native_cases_override_and_snapshot(tmp_path, number):
     manifest = json.loads((tmp_path/'run/manifest.json').read_text())
     assert manifest['calendar_config']['model'] == number
     assert (tmp_path/f'run/source_snapshot/models/routing/model_{number}/exact/model.py').is_file()
-    # Keep the override fixture portable; archived generated cases contain
-    # absolute paths from the machine that originally produced the dataset.
-    portable = json.loads(Path(case).read_text(encoding='utf-8'))
+    # Expand include-based examples before changing their model. This fixture
+    # tests CLI overrides, independently of the source dataset's model contract.
+    portable = deepcopy(config)
+    portable.pop('parameter_contract', None)
+    portable.pop('batch_count_certificate', None)
     portable.update(model=6)
     portable['joint_batch_options']['schedule_mode'] = 'uniform_cycle'
     source_case = tmp_path/'source_m6.json'

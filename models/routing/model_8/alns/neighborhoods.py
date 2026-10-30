@@ -20,6 +20,7 @@ from models.routing.model_8.alns.cutoff_moves import (
 from models.routing.model_8.alns.calendar_moves import boundary_events, move_boundaries
 
 from collections import Counter, OrderedDict
+from functools import partial
 import time
 
 
@@ -35,7 +36,7 @@ def _goods_ready(problem, state):
     return ready
 
 
-def _route_score(problem, route, goods, vehicle_ready):
+def _route_score(problem, route, goods, vehicle_ready, *, supply_aware=False):
     p, f = problem.operating_policy, problem.fleet
     tasks, site = route["tasks"], route["satellite"]
     if not tasks:
@@ -54,9 +55,14 @@ def _route_score(problem, route, goods, vehicle_ready):
         window = order.delivery_window if kind == "d" else order.pickup_window
         current = max(current + problem.travel(previous, order.customer), window[0])
         if kind == "p":
+            earliest_delivery = order.delivery_window[0]+order.service_time
+            if supply_aware and len(problem.orders) <= 9:
+                earliest_delivery = max(order.delivery_window[0],
+                    goods[site, order.batch]+p.e2_dispatch_prep_time
+                    +problem.travel(site, order.customer))+order.service_time
             current = max(
                 current,
-                delivered.get(oid, order.delivery_window[0] + order.service_time)
+                delivered.get(oid, earliest_delivery)
                 + order.min_use_time,
             )
         due = window[1]
@@ -95,7 +101,9 @@ def destroy_repair(
     *,
     scorer=None,
     cache_distances=False,
-    cache_pickup_prefix=False
+    cache_pickup_prefix=False,
+    validator=None,
+    repair_stats=None,
 ):
     if not problem.orders:
         return clone_state(original)
@@ -122,6 +130,20 @@ def destroy_repair(
         cache_distances=cache_distances,
         cache_pickup_prefix=cache_pickup_prefix,
     )
+    if repaired is not None and validator is not None and len(problem.orders) <= 9:
+        _, candidate, issues = validator(repaired)
+        if candidate is None and 'TIMING_CYCLE' in issues and time.perf_counter() < deadline:
+            if repair_stats is not None:
+                repair_stats['timing_repair_attempts'] = repair_stats.get('timing_repair_attempts', 0)+1
+            rescued = repair_orders(problem, original, removed, deadline, scorer=scorer,
+                cache_distances=cache_distances, cache_pickup_prefix=cache_pickup_prefix,
+                avoid_precedence_cycles=True)
+            if rescued is not None:
+                _, feasible, _ = validator(rescued)
+                if feasible is not None:
+                    repaired = rescued
+                    if repair_stats is not None:
+                        repair_stats['timing_repair_successes'] = repair_stats.get('timing_repair_successes', 0)+1
     return repaired if repaired is not None else clone_state(original)
 
 
@@ -136,7 +158,8 @@ def repair_orders(
     fast_scores=True,
     scorer=None,
     cache_distances=False,
-    cache_pickup_prefix=False
+    cache_pickup_prefix=False,
+    avoid_precedence_cycles=False,
 ):
     """Reinsert complete requests; interruption never exposes a partial state.
 
@@ -165,9 +188,15 @@ def repair_orders(
         score_route = scorer
         # A distance floor cannot screen an externally supplied cost score.
         screen = False
+    if avoid_precedence_cycles and len(problem.orders) <= 9:
+        if scorer is not None:
+            score_route = scorer
+            screen = False
+        if score_route is _route_score or score_route is _local_cost_scorer:
+            score_route = partial(score_route, supply_aware=True)
     distance = problem.distance
     prefix_enabled = False
-    if tasks and fast_scores and len(p.batches) == 1:
+    if tasks and fast_scores and len(p.batches) == 1 and not avoid_precedence_cycles:
         from models.routing.model_8.alns.performance.scoring import SingleBatchRouteScorer
 
         score_route = scorer if scorer is not None else SingleBatchRouteScorer(problem)
@@ -185,6 +214,8 @@ def repair_orders(
             return None
         oid, kind = task
         order, routes = problem.order_map[oid], state["e2"]
+        delivery_route = next(((index, route['vehicle']) for index, route in enumerate(routes)
+                               if (oid, 'd') in route['tasks']), None) if avoid_precedence_cycles and kind == 'p' and len(problem.orders) <= 9 else None
         ready, before, scores, distances = {}, {}, {}, {}
         counts = Counter((r["satellite"], r["vehicle"]) for r in routes)
         for index, route in enumerate(routes):
@@ -218,6 +249,8 @@ def repair_orders(
             if route["satellite"] != order.satellite:
                 continue
             existing = route["tasks"]
+            if delivery_route is not None and route['vehicle'] == delivery_route[1] and index < delivery_route[0]:
+                continue
             if kind == "d" and any(
                 k == "d" and problem.order_map[i].batch != order.batch for i, k in existing
             ):
@@ -299,11 +332,17 @@ def repair_orders(
                 ),
                 len(routes),
             )
+            if delivery_route is not None and vehicle == delivery_route[1]:
+                pos = max(pos, delivery_route[0]+1)
             begin = (
-                before[pos]
+                before.get(pos, ready.get((order.satellite, vehicle), p.cycle_start))
                 if pos < len(routes)
                 else ready.get((order.satellite, vehicle), p.cycle_start)
             )
+            if delivery_route is not None:
+                begin = next((before[index] for index in range(pos, len(routes))
+                              if routes[index]['satellite'] == order.satellite and routes[index]['vehicle'] == vehicle),
+                             ready.get((order.satellite, vehicle), p.cycle_start))
             score, _ = score_route(problem, candidate, goods, begin)
             if best is None or score < best[0]:
                 best = (score, pos, candidate, True)
@@ -451,9 +490,9 @@ def _route_move(problem, state, rng, operator):
     return proposed
 
 
-def _local_cost_scorer(problem, route, goods, ready):
+def _local_cost_scorer(problem, route, goods, ready, *, supply_aware=False):
     """Insertion surrogate; only complete audited cost ranks final solutions."""
-    score, end = _route_score(problem, route, goods, ready)
+    score, end = _route_score(problem, route, goods, ready, supply_aware=supply_aware)
     ids = (
         [route["satellite"]]
         + [problem.order_map[o].customer for o, _ in route["tasks"]]

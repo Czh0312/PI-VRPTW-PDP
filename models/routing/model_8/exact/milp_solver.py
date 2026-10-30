@@ -11,7 +11,8 @@ from models.common.cycle.joint import joint_empty_result
 from models.routing.model_8.exact.formulation import build_model
 
 
-def solve_milp(problem, time_limit=60, seed=42, verbose=False, *, milp_options=None):
+def solve_milp(problem, time_limit=60, seed=42, verbose=False, *, milp_options=None,
+               strengthening='physical_time', preprocessing=False, vehicle_symmetry=False):
     """Solve one fixed-K projection; the public entry builds a single MILP for the entire K domain."""
     validate_problem(problem, 6)  # Internal joint projection, including M7/M8 children.
     if getattr(problem, 'uniform_cycle', False) or getattr(problem, 'calendar_cycle', False):
@@ -20,9 +21,14 @@ def solve_milp(problem, time_limit=60, seed=42, verbose=False, *, milp_options=N
         raise ValueError('M8 baseline requires its own fixed-K projection')
     validate_budget(time_limit, seed)
     options = MilpOptions.resolve(milp_options)
+    from models.routing.model_8.exact.constraints import validate_strengthening
+    from models.routing.model_8.exact.preprocessing import validate_preprocessing_options
+    validate_strengthening(strengthening)
+    validate_preprocessing_options(preprocessing, vehicle_symmetry)
     begun = time.perf_counter()
     config = options.metadata(time_limit, seed)
-    config['formulation_options'] = dict(compact_e2=options.formulation == 'compact')
+    config['formulation_options'] = dict(compact_e2=options.formulation == 'compact', strengthening=strengthening)
+    config['formulation_options'].update(preprocessing=preprocessing, vehicle_symmetry=vehicle_symmetry)
     config['retained_model_bounds'] = False
     result = joint_empty_result(problem, 'exact')
 
@@ -32,7 +38,8 @@ def solve_milp(problem, time_limit=60, seed=42, verbose=False, *, milp_options=N
 
     try:
         model, ctx = build_model(problem, verbose=verbose, deadline=begun+time_limit,
-                                 compact_e2=options.formulation == 'compact')
+                                 compact_e2=options.formulation == 'compact', strengthening=strengthening,
+                                 preprocessing=preprocessing, vehicle_symmetry=vehicle_symmetry)
     except TimeoutError:
         result['info'].update(status='TIME_LIMIT_BUILD')
         return finish(result)

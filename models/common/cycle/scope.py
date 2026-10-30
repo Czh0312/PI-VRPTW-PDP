@@ -40,7 +40,7 @@ def validate_problem(problem, model):
     elif model == 6:
         if problem.model_number != 6 or not getattr(problem, 'joint_batch', False):
             raise ValueError('Model 6 requires a JointBatchInstance')
-    elif model in (7, 8):
+    elif model in (7, 8, 9):
         if problem.model_number != model or not getattr(problem, 'calendar_cycle', False):
             raise ValueError(f'Model {model} requires its CalendarCycleInstance')
     else:

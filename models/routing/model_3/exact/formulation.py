@@ -37,6 +37,9 @@ def build_model(
     compress_routes=None,
     linear_e2_links=None,
     factor_e2_loads=None,
+    capacity_links=False,
+    resource_flows=False,
+    precedence_links=False,
 ):
     import gurobipy as gp
 
@@ -51,6 +54,7 @@ def build_model(
     p = parameters.policy
     f = parameters.fleet
     free = parameters.free_assignment
+    flow_mode = resource_flows and not free and problem.reusable
     compact = parameters.share_e2
     linear_mode = parameters.linear_link_mode
     windows = parameters.task_windows
@@ -198,6 +202,8 @@ def build_model(
             objective=objective,
             route_arcs=route_arcs,
             batch=batch,
+            capacity_links=capacity_links,
+            resource_flows=flow_mode,
         )
         return result
 
@@ -218,6 +224,15 @@ def build_model(
         step_slack=step_slack,
         task_step_bounds=task_step_bounds,
     )
+    minimum_trips = {}
+    if capacity_links:
+        from models.routing.model_3.exact.route_bounds import minimum_trip_count
+        for site in problem.satellites:
+            required = minimum_trip_count(problem, site)
+            if required:
+                minimum_trips[site] = required
+                m.addConstr(gp.quicksum(r['used'] for r in routes2 if r['satellite'] == site)
+                            >= required, name=f'minimum_e2_trips_{site}')
     objective, identities, site_arcs = add_shared_route_constraints(
         parameters,
         variables,
@@ -230,6 +245,7 @@ def build_model(
         objective=objective,
         step_slack=step_slack,
         task_step_bounds=task_step_bounds,
+        resource_flows=flow_mode,
     )
     add_task_and_return_coverage_constraints(
         parameters,
@@ -237,6 +253,15 @@ def build_model(
         check_budget=check_budget,
     )
     add_inventory_constraints(parameters, variables)
+    precedence_info = dict(applied=False, reason='disabled')
+    if precedence_links:
+        from models.routing.model_3.exact.precedence_cuts import add_conflicts
+        precedence_info = add_conflicts(parameters, variables, e2_nodes, e2_arc_cache, check_budget=check_budget)
+    resource_flow_info = dict(applied=False, reason='disabled')
+    if resource_flows:
+        from models.routing.model_3.exact.resource_flows import add_resource_flows
+        resource_flow_info = add_resource_flows(parameters, variables, e2_nodes, e2_arc_cache,
+                                                check_budget=check_budget)
     if getattr(problem, 'cost_objective', False):
         set_cost_objective(parameters, variables)
     else:
@@ -265,4 +290,8 @@ def build_model(
         assignments=assignments,
         trip_count_symmetry=True,
         single_batch_bounds=True,
+        capacity_links=capacity_links,
+        minimum_e2_trips=minimum_trips,
+        resource_flows=resource_flow_info,
+        precedence_links=precedence_info,
     )

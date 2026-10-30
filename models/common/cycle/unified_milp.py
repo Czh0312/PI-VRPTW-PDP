@@ -1,7 +1,9 @@
-"""Single-model batch-count selection; no external K search or certificates.
+"""Single-model batch-count selection, without external K optimization.
 
 Numbered models supply their own fixed-count formulation and extraction.
-This module only assembles their disjunction and handles the public contract.
+This module assembles their disjunction and handles the public contract.
+Optional input-only certificates may replace impossible blocks by selector=0;
+the full original count domain and every certificate remain in the result.
 """
 import time
 
@@ -11,12 +13,14 @@ from models.common.cycle.joint import joint_empty_result
 
 
 def build_unified_model(problem, *, build_fixed, verbose=False, deadline=None, compact_e2=False,
-                        count_screening=False):
+                        count_screening=False, count_certificate=None):
     import gurobipy as gp
     from gurobipy import GRB
 
     if not isinstance(count_screening, bool):
         raise ValueError('count_screening must be boolean')
+    if count_certificate is not None and not callable(count_certificate):
+        raise ValueError('count_certificate must be callable')
     counts = tuple(problem.batch_count_candidates)
     if not counts or len(set(counts)) != len(counts):
         raise ValueError('Expected a nonempty unique batch-count domain')
@@ -35,9 +39,11 @@ def build_unified_model(problem, *, build_fixed, verbose=False, deadline=None, c
         for count in counts:
             check_deadline(deadline)
             child = problem.for_count(count)
-            if count_screening:
+            if count_screening or count_certificate is not None:
                 from models.common.cycle.count_screening import infeasible_count_certificate
-                certificate = infeasible_count_certificate(child)
+                certificate = infeasible_count_certificate(child) if count_screening else None
+                if certificate is None and count_certificate is not None:
+                    certificate = count_certificate(child)
                 check_deadline(deadline)
                 if certificate is not None:
                     # Keep the original K domain and its explicit proof. This
@@ -83,7 +89,7 @@ def _identity(problem, result):
 
 
 def solve_unified_milp(problem, *, build_fixed, extract_fixed, time_limit=60, seed=42,
-                       verbose=False, milp_options=None, count_screening=False):
+                       verbose=False, milp_options=None, count_screening=False, count_certificate=None):
     validate_budget(time_limit, seed)
     options = MilpOptions.resolve(milp_options)
     begun = time.perf_counter()
@@ -92,7 +98,11 @@ def solve_unified_milp(problem, *, build_fixed, extract_fixed, time_limit=60, se
     config.update(batch_count_formulation='one_hot_disjunctive_MILP', k_search=None,
                   retained_model_bounds=False, formulation_options=dict(
                       compact_e2=options.formulation == 'compact', strengthening=False,
-                      count_screening=count_screening))
+                      count_screening=count_screening or count_certificate is not None))
+    if count_certificate is not None:
+        config['formulation_options']['count_certificate'] = (
+            getattr(count_certificate, '__module__', type(count_certificate).__module__)+'.'+
+            getattr(count_certificate, '__qualname__', type(count_certificate).__name__))
     result = joint_empty_result(problem, 'exact')
     result['cycle_batch_count'] = None
     scope = f'full_model_{problem.model_number}_all_K_joint_cost_integer_time_MILP'
@@ -109,7 +119,7 @@ def solve_unified_milp(problem, *, build_fixed, extract_fixed, time_limit=60, se
         model, context = build_unified_model(problem, build_fixed=build_fixed, verbose=verbose,
                                              deadline=begun+time_limit,
                                              compact_e2=options.formulation == 'compact',
-                                             count_screening=count_screening)
+                                             count_screening=count_screening, count_certificate=count_certificate)
     except TimeoutError:
         result['info'].update(status='TIME_LIMIT_BUILD', objective=None, best_bound=None,
                               proven_optimal=False, proven_infeasible=False, mip_gap=None)

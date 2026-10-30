@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "profile_id": "fleet_by_size_v1_draft",
+  "status": "proposal_only_not_applied_to_formal_data",
+  "source_dataset": "data/formal_benchmark27_one_box_v1",
+  "units": {
+    "weight": "benchmark demand units",
+    "volume": "benchmark volume units"
+  },
+  "vehicle_count_basis": {
+    "E1_vehicle_count": "total vehicles at the depot",
+    "vehicles_per_satellite": "same fixed number at every satellite within a size class; selected by user"
+  },
+  "by_size": {
+    "small": {
+      "E1_vehicle_count": 2,
+      "E1_Qk": 200,
+      "E1_Ck": 10,
+      "vehicles_per_satellite": 2,
+      "E2_Qv": 60,
+      "E2_Cv": 3
+    },
+    "medium": {
+      "E1_vehicle_count": 3,
+      "E1_Qk": 400,
+      "E1_Ck": 20,
+      "vehicles_per_satellite": 3,
+      "E2_Qv": 100,
+      "E2_Cv": 5
+    },
+    "large": {
+      "E1_vehicle_count": 5,
+      "E1_Qk": 800,
+      "E1_Ck": 40,
+      "vehicles_per_satellite": 5,
+      "E2_Qv": 120,
+      "E2_Cv": 6
+    }
+  },
+  "design_basis": [
+    "One profile per small/medium/large class, independent of the exact customer count within a class.",
+    "Observed fixed-assignment per-satellite single-batch maxima: weight 158/275/535 and boxes 9/15/30.",
+    "Rounded E1 capacities cover those unsplittable satellite demands; this is a feasibility screen, not a complete routing proof.",
+    "E1 counts 2/3/5 cover the maximum number of satellites in each class; E2 counts are 2/3/5 per satellite.",
+    "E2 weight limits are below volume_capacity times the maximum loaded-box weight in each class, so volume does not automatically imply the weight constraint.",
+    "No objectives, optimal pools, speedups or preferred model rankings were used to select these draft values."
+  ],
+  "unchanged": [
+    "customers, goods weights, one-box demand, coordinates and assignments",
+    "delivery and pickup windows, release/use/service times and cycle",
+    "box weight 2, box volume 1, speed 2, cleaning and trip rules",
+    "economic coefficients, batch definitions and solver implementations"
+  ]
+}
