@@ -1,7 +1,9 @@
-# 九个模型独立维护
+# 编号模型独立维护
 
 M9 在 M8 上加入顾客级自由选仓，当前先提供独立 `exact/`。
 数学定义与验证见[模型9](../../docs/model9_free_multibatch.md)。
+
+M10 为固定分仓无批次模型，独立提供 `exact/`（同一MILP的HiGHS/Gurobi后端）和 `alns/`。模型规则见[模型10](../../docs/model10_no_batch.md)。其ALNS主循环在本目录的 `solver.py`，无跨K调度；精确表达和原生后端分别在 `formulation.py` 与 `linear.py`。
 
 先看[求解代码目录指南](../../docs/solver_directory_guide.md)：八个模型的两类算法
 按实际职责组织文件，不限制顶层数量。ALNS 主循环统一放在顶层 `search.py`，
@@ -14,6 +16,7 @@ routing/
 │   └── exact/         M1 自己的建模、求解、初解和下界
 ├── model_2/ … model_8/     同样各有 alns/、exact/
 ├── model_9/exact/         自由选仓与不等长多批次的联合 MILP
+├── model_10/              无批次多趟，独立 alns/ 与 exact/
 ├── catalog.py        编号与入口登记
 └── service.py        选择编号和求解方法
 ```
@@ -21,7 +24,7 @@ routing/
 **求解代码按模型隔离，不再设置算法 common，也不跨模型调用求解实现。**
 相同算法在各模型内是独立普通文件；没有软链接、硬链接、继承转发或自动同步。
 修改某个模型目录只修改该模型的实现。以后若要把同一修复用于多个模型，需要逐个明确修改和验证。
-ALNS 和精确求解各有自己的实现；旧定制精确算法与 M5 混合入口已归档，当前只保留直接 Gurobi 和 ALNS。
+ALNS 和精确求解各有自己的实现；旧定制精确算法与 M5 混合入口已归档。M1–M9精确入口使用直接Gurobi，M10另提供原生HiGHS。
 
 数据读取、业务实例、规则和独立审计仍由 [models/common](../common/README.md) 提供，成本定义在
 [models/cost](../cost/README.md)。修改这些基础部分会统一影响相关模型；它们不属于本次拆开的求解算法。
@@ -38,8 +41,9 @@ ALNS 和精确求解各有自己的实现；旧定制精确算法与 M5 混合�
 | M7 | 等长批次、逐批独立分界 | [alns](model_7/alns/README.md) | [exact](model_7/exact/README.md) |
 | M8 | 不等长批次、逐批独立分界 | [alns](model_8/alns/README.md) | [exact](model_8/exact/README.md) |
 | M9 | 自由选仓、不等长多批次、逐批独立分界 | 当前先做精确求解 | [exact](model_9/exact/README.md) |
+| M10 | 固定分仓、无批次多趟、箱池与运输取舍 | [alns](model_10/alns/README.md) | [exact](model_10/exact/README.md) |
 
-每个算法目录：`solver.py` 是带编号校验的公开入口；ALNS 的 `search.py` 展示主要迭代流程；
+M1–M9算法目录：`solver.py` 是带编号校验的公开入口；ALNS 的 `search.py` 展示主要迭代流程；
 精确目录的 `model.py` 是建模入口；`parameters.py` 管理已知参数与安全派生界，
 `variables.py` 定义决策变量，`constraints.py` 按业务类别添加约束，`objective.py` 定义目标函数。
 `formulation.py`负责组装这些部分，

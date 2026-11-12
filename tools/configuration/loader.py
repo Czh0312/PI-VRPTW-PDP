@@ -127,17 +127,19 @@ def load_routing_case(path: str | Path, *, use_pool_config=True) -> tuple[dict[s
         fleet_config = {**fleet_config, "operating_policy": (
             load_json(policy) if isinstance(policy, str) else policy)}
     version = (fleet_config.get('operating_policy') or {}).get('policy_version')
-    if version == 'multi_batch_cutoff_v1':
+    if version in ('multi_batch_cutoff_v1', 'no_batch_container_cycle_v1'):
         if case.get('schema_version') != 2 or not case.get('orders'):
             raise ValueError('Multibatch cases require schema_version=2 and orders')
+        if version == 'no_batch_container_cycle_v1' and case['model'] != 10:
+            raise ValueError('The no-batch policy requires model 10')
     elif case.get('schema_version', 1) != 1 or case.get('orders'):
         raise ValueError('schema_version=2/orders requires multi_batch_cutoff_v1')
-    fixed_pool = case['model'] not in (5, 6, 7, 8, 9) or (
+    fixed_pool = case['model'] not in (5, 6, 7, 8, 9, 10) or (
         case['model'] == 5 and run_config.get('objective_mode') == 'distance')
     if version == 'multi_batch_cutoff_v1' and use_pool_config and fixed_pool:
         from .container_pools import apply_pool_config
         run_config, fleet_config = apply_pool_config(run_config, fleet_config)
-    elif 'container_pool_size' in run_config:
+    elif 'container_pool_size' in run_config and case['model'] != 10:
         run_config, fleet_config = apply_container_pool_size(
             run_config, fleet_config, run_config['container_pool_size'])
     return run_config, fleet_config

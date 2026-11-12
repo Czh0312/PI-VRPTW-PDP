@@ -255,11 +255,19 @@ def test_time_rounding_is_explicit():
 def test_order_identity_and_balanced_counts(tmp_path):
     cfg, fleet = load_routing_case('config/experiments/examples/multibatch_demo.json')
     p = load_instance(cfg, fleet)
-    assert len(p.orders) == 4 and len({o.customer for o in p.orders}) == 2
     with resolve_project_path(cfg['orders']).open() as f:
-        data = json.load(f)
-    data[0]['pickup_container_count'] = 0
+        source = json.load(f)
+    # Repeated-customer order identities are a reader property, not a promise
+    # about whichever benchmark is currently selected as the public demo.
+    data = [deepcopy(source[i]) for i in (0, 0, 1, 1)]
+    for i, row in enumerate(data):
+        row['order_id'] = f'repeated_customer_order_{i}'
     path = tmp_path/'orders.json'
+    path.write_text(json.dumps(data))
+    orders = load_orders(path, p.operating_policy)
+    assert len(orders) == len({o.id for o in orders}) == 4
+    assert len({o.customer for o in orders}) == 2
+    data[0]['pickup_container_count'] = 0
     path.write_text(json.dumps(data))
     with pytest.raises(ValueError, match='UNBALANCED'):
         load_orders(path, p.operating_policy)
@@ -322,7 +330,10 @@ def test_exact_proves_infeasible_cases(exact, case):
 def test_cli_roundtrip_and_no_overwrite(tmp_path):
     from cli.route import main
     out = tmp_path/'run'
-    r = main(['--case', 'config/experiments/examples/multibatch_demo.json', '--time', '.1', '--iterations', '0', '--output', str(out)])
+    case = tmp_path/'plot_case.json'
+    case.write_text(json.dumps({'$include':['config/experiments/examples/multibatch_demo.json'],
+                                'save_plots':True}))
+    r = main(['--case', str(case), '--time', '.1', '--iterations', '0', '--output', str(out)])
     assert r['audit']['valid']
     saved = json.loads((out/'result.json').read_text())
     cfg, fleet = load_routing_case('config/experiments/examples/multibatch_demo.json')

@@ -11,9 +11,11 @@ class ModelSpec:
     supported_solvers: tuple = ('exact', 'alns')
 
     def module_path(self, batch_mode, method):
-        if batch_mode not in ('single_batch', 'multi_batch'):
+        if batch_mode not in ('single_batch', 'multi_batch', 'no_batch'):
             raise ValueError(f'Unknown batch mode: {batch_mode}')
-        expected = 'multi_batch' if self.supports_multi_batch else 'single_batch'
+        if batch_mode == 'no_batch' and self.number != 10:
+            raise ValueError('no_batch is reserved for M10')
+        expected = 'no_batch' if self.number == 10 else ('multi_batch' if self.supports_multi_batch else 'single_batch')
         if self.number not in (6, 7, 8, 9) and batch_mode != expected:
             raise ValueError(f'M{self.number} requires {expected}')
         if method not in ('exact', 'alns'):
@@ -32,9 +34,10 @@ MODEL_SPECS = {
     7: ModelSpec(7, "independent_cutoff_cost", "等长批次、逐批独立分界与容器路径成本优化", True, True),
     8: ModelSpec(8, "flexible_batch_cost", "不等长批次、逐批独立分界与容器路径成本优化", True, True),
     9: ModelSpec(9, "free_flexible_batch_cost", "自由分仓、不等长多批次与容器路径成本联合优化", True, True, ('exact',)),
+    10: ModelSpec(10, "no_batch_container_cycle", "固定分仓、无批次、多趟车辆与循环箱池权衡"),
 }
 
 def require_model_number(number):
     if number not in MODEL_SPECS:
-        raise ValueError(f"当前模型编号必须为 1–9；M9 当前先支持精确求解，收到: {number}")
+        raise ValueError(f"当前模型编号必须为 1–10；M9 当前先支持精确求解，收到: {number}")
     return number

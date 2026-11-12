@@ -22,6 +22,8 @@ python3 -m venv .venv
 依赖尚未锁定版本；复现实验还应核对原运行保存的 Python、依赖、输入及源码信息。
 精确求解需要 Gurobi 许可证，ALNS 入口按需加载，不导入 Gurobi。
 
+M10另支持通过SciPy调用原生HiGHS，无需Gurobi许可证。其独立业务层位于 `models/common/no_batch/`，CLI位于 `cli/no_batch.py`，两种算法位于 `models/routing/model_10/`。规则与专项检查见[模型10说明](model10_no_batch.md)。
+
 根目录保留项目入口 `main.py`、说明 `README.md`、统一工程配置 `pyproject.toml` 和 `Makefile`，
 供安装、运行和测试使用。`.gitignore`、`.gitattributes`、`.gitmodules` 是仓库级 Git 配置；
 `.ignore` 只控制源码搜索范围。它们按项目根目录生效，不混入业务参数 `config/`。

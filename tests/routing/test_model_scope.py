@@ -7,9 +7,9 @@ from models.routing.service import solve_routing
 from cli.route import DEFAULT_CASE, load_config, main
 
 
-@pytest.mark.parametrize("model", [0, 9])
+@pytest.mark.parametrize("model", [0, 11])
 def test_unknown_models_are_rejected_before_loading_solver(model):
-    with pytest.raises(ValueError, match="1–8"):
+    with pytest.raises(ValueError, match="1–10"):
         solve_routing(model=model, method="alns", problem=SimpleNamespace())
 
 
@@ -28,14 +28,22 @@ def test_default_is_current_single_batch():
 
 
 def test_current_cost_cli_prices_saved_cycle(tmp_path):
+    import json
+    from models.common.cycle import load_instance
     from cli.cost import main as price
+    config, fleet = load_config(DEFAULT_CASE)
+    problem = load_instance(config, fleet)
+    saved = solve_routing(model=3, method='alns', problem=problem, alns_time=.5, alns_iter=100)
+    assert saved['audit']['valid']
+    source = tmp_path/'current_cycle.json'
+    source.write_text(json.dumps(saved), encoding='utf-8')
     result = price([
-        "--route-result", "output/experiments/static_batch_suite_v1/data_audit_20260929/mechanism_forced_late_b1.json",
+        "--case", str(DEFAULT_CASE), "--route-result", str(source),
         "--economic-config", "config/cost/synthetic/multibatch_synthetic.json",
         "--output", str(tmp_path / "cost"),
     ])
-    assert result["container_pool_size"] == 6
-    assert result["container_uses"] == 6
+    assert result["container_pool_size"] == problem.operating_policy.container_pool_size
+    assert result["container_uses"] == problem.total
     assert result["currency"] == "synthetic_units"
     assert not result["cost_is_optimized"]
 

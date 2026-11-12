@@ -18,5 +18,7 @@
 M9 的[自由选仓多批次数学模型](model9_free_multibatch.md)及
 [精确小算例结果](../output/experiments/model9_small_exact_20261030/README.md)为当前新增入口。
 
+M10 的[无批次模型规则与运行说明](model10_no_batch.md)和[首版实现验证](../output/experiments/model10_validation_20261112/report.md)包含独立审计、精确MILP、ALNS及箱池权衡入口。
+
 已实施方案可以作为模型设计依据保留，其中带日期的状态按当时版本理解。
 每次修改相关模块时检查对应计划；不因一次测试或一次小修复另建记录文件。

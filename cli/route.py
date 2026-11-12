@@ -11,12 +11,21 @@ def load_config(case_path=DEFAULT_CASE, **kwargs):
 
 def main(argv=None):
     arguments = list(sys.argv[1:] if argv is None else argv)
+    # M10 has no calendar options; keep its parser isolated from M1-M9.
+    probe = argparse.ArgumentParser(add_help=False)
+    probe.add_argument('--model', type=int)
+    probe.add_argument('--case', default=str(DEFAULT_CASE))
+    selected, _ = probe.parse_known_args(arguments)
+    number = selected.model if selected.model is not None else load_json(selected.case).get('model')
+    if number == 10:
+        from .no_batch import main as no_batch_main
+        return no_batch_main(arguments)
     if "--baseline" in arguments:
         from .baseline_route import main as baseline_main
         return baseline_main([arg for arg in arguments if arg != "--baseline"])
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--case", default=str(DEFAULT_CASE))
-    parser.add_argument("--model", type=int, choices=range(1, 10), help="M1–M5 原模型；M6 统一分界；M7 独立分界；M8 不等长批次；M9 自由选仓多批次（精确）")
+    parser.add_argument("--model", type=int, choices=range(1, 11), help="M1–M5 原模型；M6–M9 批次扩展；M10 无批次（用 --model 10 --help 查看）")
     parser.add_argument("--economic-config", help="M3 成本对照及 M5–M9 成本参数与证据配置")
     parser.add_argument('--objective-mode', choices=('cost', 'distance'),
                         help='M3 可选 distance/cost（默认 distance）；M5 默认 cost')

@@ -15,6 +15,23 @@ def solve_routing(*, model, method, problem, e1_tasks=None, e2_tasks_by_sat=None
                   exact_time=None, exact_backend=None, allow_baseline=False, initial_result=None,
                   exact_strategy=None, milp_options=None, m4_strengthening=None):
     model = require_model_number(int(model))
+    method = str(method).lower()
+    if model == 10:
+        if getattr(problem, 'model_number', None) != 10 or e1_tasks or e2_tasks_by_sat or allow_baseline:
+            raise ValueError('M10 requires its own no-batch instance and endogenous tasks')
+        if m4_strengthening is not None:
+            raise ValueError('M4 options are not applicable to M10')
+        module = import_module(MODEL_SPECS[10].module_path('no_batch', str(method).lower()))
+        if method == 'exact':
+            if initial_result is not None:
+                raise ValueError('M10 native MILP does not use a heuristic warm start')
+            return module.solve_exact(problem, time_limit=exact_time if exact_time is not None else 60,
+                                      seed=seed, backend=exact_backend or 'highs',
+                                      strategy=exact_strategy or 'milp', milp_options=milp_options)
+        if exact_strategy is not None or milp_options is not None:
+            raise ValueError('Exact options require the exact solver')
+        return module.solve_alns(problem, max_time=alns_time, max_iterations=alns_iter,
+                                 seed=seed, initial_result=initial_result)
     policy = policy_for(problem)
     policy.require_model(model)
     method = str(method).lower()

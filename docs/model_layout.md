@@ -1,7 +1,9 @@
 # 模型代码边界
 
-现行结构是 `models/routing/model_1/` 至 `model_8/`，每个目录独立拥有 `alns/` 和 `exact/`。
+现行结构是 `models/routing/model_1/` 至 `model_10/`；M9 当前仅有 `exact/`，其余模型各自拥有 `alns/` 和 `exact/`。
 逐文件用途见[模型导航](../models/routing/README.md)。
+
+M10 使用独立的无批次业务层 `models/common/no_batch/` 和 `cli/no_batch.py`，支持原生 HiGHS/Gurobi MILP 及 ALNS。其事件库存、回收数量、证明范围和运行方式见[模型10](model10_no_batch.md)。
 统一目录结构、阅读入口和内部路径迁移见[求解代码目录指南](solver_directory_guide.md)。
 
 精确模型按参数、变量、约束、目标函数和组装职责拆分。各文件的阅读顺序、
