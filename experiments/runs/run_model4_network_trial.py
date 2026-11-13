@@ -30,11 +30,11 @@ def main():
     folder = (ROOT / args.output / args.mode).resolve()
     folder.relative_to(ROOT)
     folder.mkdir(parents=True, exist_ok=False)
-    case = ROOT / f'data/formal_benchmark27_uniform_7_20_50_v1/model_4/{args.scale}/{args.case}/case.json'
+    case = ROOT / f'data/benchmark27_models_1_6_v1/model_4/{args.scale}/{args.case}/case.json'
     config = json.loads(case.read_text(encoding='utf-8'))
     inputs = {'case.json': case}
     for key in ('data', 'routing_config', 'economic_config', 'dataset_metadata', 'orders',
-                'operating_policy', 'parameter_contract', 'algorithm_config', 'distance_matrix', 'duration_matrix'):
+                'operating_policy', 'legacy_operating_policy', 'algorithm_config', 'distance_matrix', 'duration_matrix'):
         if isinstance(config.get(key), str):
             inputs[f'{key}{Path(config[key]).suffix}'] = ROOT / config[key]
     (folder / 'inputs').mkdir()

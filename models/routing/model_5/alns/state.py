@@ -64,3 +64,10 @@ def state_from_result(problem, result):
                 depart_after=trip["departure"], return_after=trip["return_complete"]
             )
     return state
+
+
+def clone_joint_state(state):
+    copied = clone_state(state)
+    if "cutoffs" in state:
+        copied["cutoffs"] = dict(state["cutoffs"])
+    return copied

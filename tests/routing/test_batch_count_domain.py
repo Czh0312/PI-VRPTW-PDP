@@ -6,11 +6,10 @@ import json
 import pytest
 
 from models.common.cycle.calendar import CalendarCycleInstance
-from models.common.cycle.uniform import UniformCycleInstance
 from models.common.cycle.audit import audit_solution
 from models.cost.comparison import evaluate_comparison_cost
 from models.routing.service import solve_routing
-from tests.routing.test_model6_joint import joint_fixture, exact_available
+from tests.routing.calendar_fixtures import joint_fixture, exact_available
 
 
 def instance(model, counts='all_positive_integers', order_count=2):
@@ -23,21 +22,15 @@ def instance(model, counts='all_positive_integers', order_count=2):
                           delivery_window=(0,115), pickup_window=(0,120))
                   for i in range(order_count)]
     options = dict(batch_count_candidates=counts)
-    if model == 6:
-        options['schedule_mode'] = 'uniform_cycle'
-        return UniformCycleInstance(source.network, orders, source.operating_policy,
-                                    options, source.cost_profile.config)
     return CalendarCycleInstance(source.network, orders, source.operating_policy,
                                  options, source.cost_profile.config, model=model)
 
 
-@pytest.mark.parametrize('model', [6, 7, 8])
+@pytest.mark.parametrize('model', [5])
 def test_default_domain_uses_phase_constraint_instead_of_source_calendar(model):
     source = joint_fixture()
-    options = {'schedule_mode': 'uniform_cycle'} if model == 6 else {}
-    cls = UniformCycleInstance if model == 6 else CalendarCycleInstance
-    p = cls(source.network, source.orders, source.operating_policy, options,
-            source.cost_profile.config, **({} if model == 6 else {'model': model}))
+    p = CalendarCycleInstance(source.network, source.orders, source.operating_policy, {},
+                              source.cost_profile.config, model=model)
     assert p.batch_count_candidates == tuple(range(1, 66))
     assert len(p.for_count(4).operating_policy.batches) == 4
     assert len(p.for_count(65).operating_policy.batches) == 65
@@ -45,7 +38,7 @@ def test_default_domain_uses_phase_constraint_instead_of_source_calendar(model):
         p.for_count(66)
 
 
-@pytest.mark.parametrize('model', [6, 7, 8])
+@pytest.mark.parametrize('model', [5])
 def test_equal_partition_refines_clock_without_changing_physical_times(model):
     p = instance(model, [3, 7])
     child = p.for_count(3)
@@ -62,7 +55,7 @@ def test_equal_partition_refines_clock_without_changing_physical_times(model):
     assert child.service('S') == 3*p.service('S')
 
 
-@pytest.mark.parametrize('model', [6, 7, 8])
+@pytest.mark.parametrize('model', [5])
 @pytest.mark.parametrize('method', ['alns', 'exact'])
 def test_nondivisible_count_solves_and_independently_replays_cost(model, method, request):
     if method == 'exact':
@@ -83,7 +76,7 @@ def test_nondivisible_count_solves_and_independently_replays_cost(model, method,
     assert not audit_solution(p, forged)['valid']
 
 
-@pytest.mark.parametrize('model', [6, 7, 8])
+@pytest.mark.parametrize('model', [5])
 def test_unrestricted_search_keeps_all_counts_in_proof_scope(model):
     p = instance(model)
     r = solve_routing(model=model, method='alns', problem=p, alns_time=.1, alns_iter=20)
@@ -95,14 +88,12 @@ def test_unrestricted_search_keeps_all_counts_in_proof_scope(model):
 def test_cli_all_counts_overrides_an_existing_restricted_case(tmp_path):
     from cli.route import main
     from tools.configuration.loader import load_routing_case
-    from models.common.cycle.policy import MultiBatchPolicy
-    case = 'config/experiments/examples/model7_demo.json'
+    from models.common.cycle import load_instance
+    case = 'config/experiments/examples/model5_demo.json'
     config, fleet = load_routing_case(case)
-    policy = MultiBatchPolicy.from_config(fleet['operating_policy'])
+    policy = load_instance(config, fleet).operating_policy
     minimum = policy.ticks(config['joint_batch_options'].get('min_phase_minutes', 1))
     expected = list(range(1, (policy.cycle_end-policy.cycle_start)//(2*minimum)+1))
-    # This example now follows the current benchmark. Its horizon is an input,
-    # not the historical 130-minute synthetic fixture used by other tests here.
     assert config['joint_batch_options']['batch_count_candidates'] != expected
     r = main(['--case', case, '--all-batch-counts',
               '--solver', 'alns', '--time', '1', '--iterations', '200',
@@ -112,7 +103,7 @@ def test_cli_all_counts_overrides_an_existing_restricted_case(tmp_path):
     assert r['audit']['valid'] and r['audit']['periodic_replay']['valid']
 
 
-@pytest.mark.parametrize('model', [6, 7, 8])
+@pytest.mark.parametrize('model', [5])
 def test_four_batch_solution_is_admissible_and_audited(model):
     p = instance(model, [4], order_count=4)
     r = solve_routing(model=model, method='alns', problem=p, alns_time=.5, alns_iter=200)

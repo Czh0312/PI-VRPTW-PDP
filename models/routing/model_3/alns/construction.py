@@ -141,7 +141,8 @@ def appointment_state(problem, rng):
                 t = max(t + problem.travel(last, o.customer), o.delivery_window[0])
                 if t > o.delivery_window[1]:
                     return None
-                if len(p.batches) == 1 and t + o.service_time > p.batches[0].cutoff:
+                if (len(p.batches) == 1 and p.batches[0].cutoff is not None
+                        and t + o.service_time > p.batches[0].cutoff):
                     return None
                 delivered[o.id] = t
                 t += o.service_time
@@ -159,7 +160,7 @@ def appointment_state(problem, rng):
             finish = t + problem.travel(last, site) + p.e2_return_unload_time
             if finish + p.e2_turnaround_time > p.cycle_end:
                 return None
-            if problem.reusable and finish > p.batches[-1].cutoff:
+            if problem.reusable and p.batches[-1].cutoff is not None and finish > p.batches[-1].cutoff:
                 return None
             return depart, finish
 

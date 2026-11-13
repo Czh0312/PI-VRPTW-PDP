@@ -16,15 +16,15 @@ def solve_routing(*, model, method, problem, e1_tasks=None, e2_tasks_by_sat=None
                   exact_strategy=None, milp_options=None, m4_strengthening=None):
     model = require_model_number(int(model))
     method = str(method).lower()
-    if model == 10:
-        if getattr(problem, 'model_number', None) != 10 or e1_tasks or e2_tasks_by_sat or allow_baseline:
-            raise ValueError('M10 requires its own no-batch instance and endogenous tasks')
+    if model == 6:
+        if getattr(problem, 'model_number', None) != 6 or getattr(policy_for(problem), 'policy_version', None) != 'no_batch_container_cycle_v1' or e1_tasks or e2_tasks_by_sat or allow_baseline:
+            raise ValueError('M6 requires its own no-batch instance and endogenous tasks')
         if m4_strengthening is not None:
-            raise ValueError('M4 options are not applicable to M10')
-        module = import_module(MODEL_SPECS[10].module_path('no_batch', str(method).lower()))
+            raise ValueError('M4 options are not applicable to M6')
+        module = import_module(MODEL_SPECS[6].module_path('no_batch', method))
         if method == 'exact':
             if initial_result is not None:
-                raise ValueError('M10 native MILP does not use a heuristic warm start')
+                raise ValueError('M6 native MILP does not use a heuristic warm start')
             return module.solve_exact(problem, time_limit=exact_time if exact_time is not None else 60,
                                       seed=seed, backend=exact_backend or 'highs',
                                       strategy=exact_strategy or 'milp', milp_options=milp_options)
@@ -45,14 +45,14 @@ def solve_routing(*, model, method, problem, e1_tasks=None, e2_tasks_by_sat=None
         raise ValueError('milp_options requires exact_strategy="milp"')
     if initial_result is not None and method == 'exact':
         raise ValueError('Direct Gurobi does not accept an external initial solution')
-    if initial_result is not None and model not in (6, 7, 8):
-        raise ValueError('Initial joint solution requires M6–M8')
+    if initial_result is not None and model != 5:
+        raise ValueError('Initial joint solution requires M5')
     if getattr(policy, "multi_batch", False):
         if problem.model_number != model:
             raise ValueError("Requested model does not match the loaded instance")
         if e1_tasks or e2_tasks_by_sat:
             raise ValueError("Multibatch quantities must be derived from return events, not static tasks")
-        expected_backend = 'joint_batch_indexed' if model in (6, 7, 8, 9) else 'multibatch_indexed'
+        expected_backend = 'joint_batch_indexed' if model == 5 else 'multibatch_indexed'
         if exact_backend not in (None, expected_backend):
             raise ValueError(f'Model {model} requires {expected_backend}; incompatible or legacy backend: {exact_backend}')
         from models.common.cycle.scope import batch_mode_for
@@ -73,9 +73,7 @@ def solve_routing(*, model, method, problem, e1_tasks=None, e2_tasks_by_sat=None
     if exact_strategy is not None or milp_options is not None:
         raise ValueError('Exact strategies require the current cycle policy, not the historical baseline')
     if model == 5:
-        raise ValueError('Current M5 requires multi_batch_cutoff_v1 with B>1; historical M5 was retired')
-    if model in (6, 7, 8, 9):
-        raise ValueError(f'Current M{model} requires multi_batch_cutoff_v1 and explicit joint batch/cost inputs')
+        raise ValueError('M5 requires flexible-cycle batch and cost inputs')
     if not allow_baseline:
         raise ValueError("Historical policy: use route --baseline / allow_baseline=True explicitly. "
                          "Current M1/M2/M4 require the unified single-batch policy.")

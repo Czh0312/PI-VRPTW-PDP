@@ -1,4 +1,4 @@
-"""Cost contract shared by M6 solvers and independently recomputed by audit."""
+"""Cost contract for Models 3 and 5 with independent schedule evaluation."""
 from __future__ import annotations
 
 from copy import deepcopy
@@ -36,7 +36,7 @@ class JointCostProfile:
     def __init__(self, config):
         self.config = deepcopy(config)
         if config.get('cost_basis') != 'disjoint_distance_time_fixed':
-            raise ValueError('M6 requires disjoint_distance_time_fixed cost basis')
+            raise ValueError('Expected disjoint_distance_time_fixed cost basis')
         for key in ('currency', 'source_type', 'description', 'price_basis',
                     'evaluation_period', 'pool_cost_basis', 'work_time_basis'):
             if not isinstance(config.get(key), str) or not config[key].strip():

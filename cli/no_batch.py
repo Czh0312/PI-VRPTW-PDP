@@ -1,4 +1,4 @@
-"""Model 10 runs and epsilon-constraint transport/container frontier."""
+"""Model 6 runs and epsilon-constraint transport/container frontier."""
 import argparse
 import csv
 from datetime import datetime
@@ -13,7 +13,7 @@ from tools.configuration.loader import PROJECT_ROOT, load_json, load_routing_cas
 from models.common.no_batch.instance import load_instance
 from models.routing.service import solve_routing
 
-DEFAULT_CASE = PROJECT_ROOT/'config/experiments/examples/model10_demo.json'
+DEFAULT_CASE = PROJECT_ROOT/'config/experiments/examples/model6_demo.json'
 
 
 def write_json(path,value):
@@ -47,10 +47,10 @@ shared; a restricted-point proof is never promoted to a different point.
 
 def run_case(config,fleet,*,output=None,case_path=None,pool_caps=None,initial_result=None):
     problem=load_instance(config,fleet)
-    out=resolve_project_path(output) if output else PROJECT_ROOT/'output/single_runs/model10'/datetime.now().strftime('%Y%m%dT%H%M%S_%f')
+    out=resolve_project_path(output) if output else PROJECT_ROOT/'output/current/model_6'/datetime.now().strftime('%Y%m%dT%H%M%S_%f')
     if out.exists() and any(out.iterdir()):raise ValueError(f'Refusing to overwrite nonempty output directory: {out}')
     out.mkdir(parents=True,exist_ok=True)
-    source_roots=('models/common','models/routing/model_10','tools/configuration','cli')
+    source_roots=('models/common','models/routing/model_6','tools/configuration','cli')
     sources=sorted({p for folder in source_roots for p in (PROJECT_ROOT/folder).rglob('*.py')}|
                    {PROJECT_ROOT/'models/routing/catalog.py',PROJECT_ROOT/'models/routing/service.py',PROJECT_ROOT/'main.py'})
     inputs=[]
@@ -66,17 +66,17 @@ def run_case(config,fleet,*,output=None,case_path=None,pool_caps=None,initial_re
     for package in ('numpy','scipy','gurobipy'):
         try:versions[package]=version(package)
         except PackageNotFoundError:versions[package]=None
-    write_json(out/'manifest.json',dict(model=10,config=config,fleet=fleet,python=sys.version,
+    write_json(out/'manifest.json',dict(model=6,config=config,fleet=fleet,python=sys.version,
                policy=problem.operating_policy.as_dict(),options=problem.options,package_versions=versions,
                source_sha256={str(p.relative_to(PROJECT_ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sources},
                input_sha256={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(set(inputs))},
-               scope='Fixed assignment; one container/order; no batches; all orders known; unlimited cleaning/storage; distance transport cost'))
+               scope='Fixed assignment; one container/order; no batches; all orders known; unlimited cleaning/storage'))
     if initial_result is not None:write_json(out/'initial_result.json',initial_result)
     caps=[problem.pool_max] if pool_caps is None else list(pool_caps)
     results=[];frontier=[];previous=initial_result
     for cap in caps:
         selected=problem.with_options(pool_max=cap)
-        kwargs=dict(model=10,method=config.get('solver','alns'),problem=selected,
+        kwargs=dict(model=6,method=config.get('solver','alns'),problem=selected,
                     alns_time=config.get('alns_time',120),alns_iter=config.get('alns_iter',5000),seed=config.get('seed',42),
                     exact_time=config.get('exact_time',60))
         if kwargs['method']=='exact':
@@ -89,6 +89,8 @@ def run_case(config,fleet,*,output=None,case_path=None,pool_caps=None,initial_re
         row=dict(pool_cap=cap,actual_pool=result.get('container_pool_size'),transport_cost=result.get('info',{}).get('transport_cost'),
                  status=result['info']['status'],proven_optimal=result['info']['proven_optimal'],
                  proven_infeasible=result['info']['proven_infeasible'],runtime=result['info']['runtime'])
+        if pool_caps is None:
+            row.update(objective=problem.objective_mode, objective_value=result['info'].get('objective'))
         frontier.append(row)
         print(json.dumps(row,ensure_ascii=False))
         if result.get('feasible'):previous=result
@@ -99,13 +101,13 @@ def run_case(config,fleet,*,output=None,case_path=None,pool_caps=None,initial_re
             writer=csv.DictWriter(f,fieldnames=list(frontier[0]));writer.writeheader();writer.writerows(frontier)
         write_json(out/'frontier.json',dict(points=frontier,
                    interpretation='Limited-search feasible upper bounds unless proven_optimal. No solution found is not infeasibility.'))
-    print(f'M10 output: {out}')
+    print(f'M6 output: {out}')
     return results[0] if pool_caps is None else results
 
 
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--model',type=int,choices=(10,),default=10)
+    parser.add_argument('--model',type=int,choices=(6,),default=6)
     parser.add_argument('--case',default=str(DEFAULT_CASE))
     parser.add_argument('--solver',choices=('exact','alns'))
     parser.add_argument('--exact-backend',choices=('highs','gurobi'))
@@ -114,18 +116,29 @@ def main(argv=None):
     parser.add_argument('--time',type=float)
     parser.add_argument('--iterations',type=int)
     parser.add_argument('--seed',type=int)
+    work_window = parser.add_mutually_exclusive_group()
+    work_window.add_argument('--no-work-window', dest='no_work_window', action='store_true', default=None,
+                             help='次日首单释放前恢复初始状态')
+    work_window.add_argument('--fixed-work-window', dest='no_work_window', action='store_false', default=None,
+                             help='复现配置中的固定作业窗口')
     parser.add_argument('--pool-max',type=int)
-    parser.add_argument('--objective-mode',choices=('transport','min_pool'))
+    parser.add_argument('--objective-mode',choices=('total_cost','transport','min_pool'))
     parser.add_argument('--transport-budget',type=float)
     parser.add_argument('--e1-max-trips',type=int,help='Optional restriction; default safe total-demand bound')
     parser.add_argument('--milp-threads',type=int)
-    parser.add_argument('--initial-result',help='Independently audited M10 JSON for ALNS')
-    parser.add_argument('--frontier',action='store_true',help='Solve Q,Q-1,...,1; --time/--exact-time is PER point')
-    parser.add_argument('--pool-caps',type=int,nargs='+',help='Explicit frontier caps; budgets are PER point')
+    parser.add_argument('--initial-result',help='Independently audited M6 JSON for ALNS')
+    parser.add_argument('--frontier',action='store_true',help='Transport frontier for Q,Q-1,...,1; budget is per point')
+    parser.add_argument('--pool-caps',type=int,nargs='+',help='Explicit transport frontier caps; budget is per point')
     parser.add_argument('--output')
     args=parser.parse_args(argv)
     config,fleet=load_routing_case(args.case,use_pool_config=False)
-    config={**config,'model':10}
+    if config['model'] == 6 and (fleet.get('operating_policy') or {}).get('policy_version') != 'no_batch_container_cycle_v1':
+        raise ValueError('Use the archived solver for old uniform Model 6 cases')
+    config={**config,'model':6}
+    if args.no_work_window is not None:
+        config['no_work_window'] = args.no_work_window
+    else:
+        config.setdefault('no_work_window', True)
     if config.get('exact_backend') not in ('highs','gurobi'):
         config['exact_backend']='highs'
     for arg,key in (('solver','solver'),('exact_backend','exact_backend'),('exact_time','exact_time'),
@@ -134,6 +147,9 @@ def main(argv=None):
     options=dict(config.get('no_batch_options',{}))
     for arg,key in (('pool_max','pool_max'),('objective_mode','objective'),('transport_budget','transport_budget'),('e1_max_trips','e1_max_trips_per_vehicle')):
         if getattr(args,arg) is not None:options[key]=getattr(args,arg)
+    options.setdefault('objective', 'total_cost')
+    if (args.frontier or args.pool_caps) and args.objective_mode is None and options.get('objective') == 'total_cost':
+        options['objective'] = 'transport'
     config['no_batch_options']=options
     if args.milp_threads is not None:config['milp_options']={'threads':args.milp_threads}
     if args.initial_result and config.get('solver')=='exact':raise ValueError('--initial-result is for ALNS')

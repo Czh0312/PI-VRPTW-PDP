@@ -159,7 +159,8 @@ def seed_columns(problem, parameters, site, *, deadline):
             distance += problem.distance(at, o.customer)
             clock, at = arrive+o.service_time, o.customer
         end = clock+problem.travel(at, site)+policy.e2_return_unload_time
-        if end+policy.e2_turnaround_time > policy.cycle_end or (any(bit >= n for bit in sequence) and end > policy.batches[0].cutoff):
+        if end+policy.e2_turnaround_time > policy.cycle_end or (
+                not policy.consolidated_handoff and any(bit >= n for bit in sequence) and end > policy.batches[0].cutoff):
             return None
         return dict(mask=sum(1 << bit for bit in sequence), distance=distance+problem.distance(at, site),
                     satellite=site, sequence=tuple(sequence))
@@ -260,7 +261,8 @@ def seed_columns(problem, parameters, site, *, deadline):
             last = row['sequence'][-1]
             end = ready[last]+orders[last % n].service_time+problem.travel(orders[last % n].customer, site)+policy.e2_return_unload_time
             if end+policy.e2_turnaround_time > policy.cycle_end or (
-                    any(bit >= n for bit in row['sequence']) and end > policy.batches[0].cutoff):
+                    not policy.consolidated_handoff and any(bit >= n for bit in row['sequence'])
+                    and end > policy.batches[0].cutoff):
                 return False
         return True
 

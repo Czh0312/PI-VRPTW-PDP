@@ -1,7 +1,7 @@
 """Necessary assignment conditions, checked before creating a fixed-K MILP.
 
 These certificates use the child's full legal domains, including movable
-calendar bounds for M8. Passing this check does not establish feasibility.
+calendar bounds for Model 5.
 """
 
 

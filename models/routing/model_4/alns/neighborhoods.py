@@ -15,7 +15,8 @@ def _goods_ready(problem, state):
     ready = {}
     for b in problem.operating_policy.batches:
         for sites in state["deliveries"][b.id]:
-            current, previous = b.start + problem.operating_policy.e1_load_time, problem.depot
+            current = problem.e1_loading_start(b, sites) + problem.operating_policy.e1_load_time
+            previous = problem.depot
             for site in sites:
                 current += problem.travel(previous, site) + problem.service(site)
                 ready[site, b.id] = current
@@ -48,7 +49,7 @@ def _route_score(problem, route, goods, vehicle_ready):
                 + order.min_use_time,
             )
         due = window[1]
-        if kind == "d" and len(p.batches) == 1:
+        if kind == "d" and len(p.batches) == 1 and p.batches[0].cutoff is not None:
             due = min(due, p.batches[0].cutoff - order.service_time)
         late += max(0, current - due)
         current += order.service_time
@@ -65,7 +66,7 @@ def _route_score(problem, route, goods, vehicle_ready):
         route.get("return_after", p.cycle_start),
     )
     late += max(0, completed + p.e2_turnaround_time - p.cycle_end)
-    if any(k == "p" for _, k in tasks):
+    if p.batches[-1].cutoff is not None and any(k == "p" for _, k in tasks):
         late += max(0, completed - p.batches[-1].cutoff)
     distance += problem.distance(previous, site)
     return (
@@ -358,7 +359,7 @@ def move_route(problem, original, rng, operator):
         elif len(routes) > 1:
             a, b = rng.sample(range(len(routes)), 2)
             routes[a], routes[b] = routes[b], routes[a]
-    elif operator == "cutoff" and routes:
+    elif operator == "cutoff" and routes and not p.consolidated_handoff:
         r = rng.choice(routes)
         boundary = rng.choice(p.batches).cutoff
         target = rng.choice(

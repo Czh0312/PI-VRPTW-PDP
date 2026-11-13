@@ -44,14 +44,12 @@ def test_csv_parser_preserves_paths_relative_to_callers_directory(tmp_path, monk
 
 
 def test_historical_generators_default_outside_formal_data():
-    from tools.data import build_static_batch_suite, build_model6_uniform_dataset
-    from tools.data import build_model5_model6_shared_dataset
-    for module in (build_static_batch_suite, build_model6_uniform_dataset,
-                   build_model5_model6_shared_dataset):
-        target = Path(module.DEFAULT_OUTPUT)
-        if not target.is_absolute():
-            target = loader.PROJECT_ROOT / target
-        assert target.is_relative_to(loader.PROJECT_ROOT / 'output/generated_datasets')
+    from tools.data import build_static_batch_suite
+
+    target = loader.PROJECT_ROOT / build_static_batch_suite.DEFAULT_OUTPUT
+    assert target.is_relative_to(loader.PROJECT_ROOT / 'output/generated_datasets')
+    history = loader.PROJECT_ROOT/'archive/experiments/pre_renumbering_20261113/tools/data'
+    assert (history/'build_model6_uniform_dataset.py').is_file()
 
 
 def test_retired_cases_resolve_without_recreating_active_folders(tmp_path,monkeypatch):

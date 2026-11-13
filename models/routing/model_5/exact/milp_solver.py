@@ -4,39 +4,40 @@ import time
 from models.common.solver_config import (
     MilpOptions, validate_budget, read_milp_info, accept_milp_audit,
 )
-from models.common.cycle.scope import validate_problem
+from models.common.cycle.scope import require_fixed_calendar
 from models.routing.model_5.exact.solution import extract_solution
 
-from models.common.cycle.audit import audit_solution
-from models.common.cycle.state import empty_result
-from models.common.cycle.precheck import check_necessary_conditions, rejected_result, travel_lower_bounds
+from models.common.cycle.joint import joint_empty_result
 from models.routing.model_5.exact.formulation import build_model
 
 
-def solve_milp(problem, time_limit=60, seed=42, verbose=False, *, milp_options=None):
-    """Solve the complete model, including free assignment where applicable."""
-    validate_problem(problem, 5)
+def solve_milp(problem, time_limit=60, seed=42, verbose=False, *, milp_options=None,
+               strengthening='physical_time', preprocessing=False, vehicle_symmetry=False):
+    """Solve one fixed-K projection; the public entry builds a single MILP for the entire K domain."""
+    require_fixed_calendar(problem)
+    if getattr(problem, 'calendar_model_number', None) != 5:
+        raise ValueError('M5 baseline requires its own fixed-K projection')
     validate_budget(time_limit, seed)
     options = MilpOptions.resolve(milp_options)
+    from models.routing.model_5.exact.constraints import validate_strengthening
+    from models.routing.model_5.exact.preprocessing import validate_preprocessing_options
+    validate_strengthening(strengthening)
+    validate_preprocessing_options(preprocessing, vehicle_symmetry)
     begun = time.perf_counter()
     config = options.metadata(time_limit, seed)
+    config['formulation_options'] = dict(compact_e2=options.formulation == 'compact', strengthening=strengthening)
+    config['formulation_options'].update(preprocessing=preprocessing, vehicle_symmetry=vehicle_symmetry)
+    config['retained_model_bounds'] = False
+    result = joint_empty_result(problem, 'exact')
 
     def finish(result):
         result['info'].update(solver_config=config, runtime=time.perf_counter()-begun)
         return result
 
-    travel = travel_lower_bounds(problem)
-    domains = None
-    precheck = check_necessary_conditions(problem, travel)
-    if not precheck['passed']:
-        return finish(rejected_result(problem, 'exact', precheck, time.perf_counter()-begun))
-    result = empty_result(problem, 'exact')
-    result['precheck'] = precheck
-    formulation = dict(compress_multibatch_routes=options.formulation == 'compact')
-    config['formulation_options'] = formulation
     try:
         model, ctx = build_model(problem, verbose=verbose, deadline=begun+time_limit,
-                                 travel_bounds=travel, domain_check=domains, **formulation)
+                                 compact_e2=options.formulation == 'compact', strengthening=strengthening,
+                                 preprocessing=preprocessing, vehicle_symmetry=vehicle_symmetry)
     except TimeoutError:
         result['info'].update(status='TIME_LIMIT_BUILD')
         return finish(result)
@@ -45,18 +46,17 @@ def solve_milp(problem, time_limit=60, seed=42, verbose=False, *, milp_options=N
         model.Params.Seed = seed
         build_time = time.perf_counter()-begun
         model.Params.TimeLimit = max(0., time_limit-build_time)
-        # No custom callback, MIP start, route-pool or external bound in this path.
         model.optimize()
-        result['info'] = read_milp_info(model, build_time=build_time,
-            proof_scope='full_model_5_integer_time_MILP')
-        config['compressed_routes'] = bool(ctx.get('compressed_e2_routes'))
+        info = read_milp_info(model, build_time=build_time,
+                             proof_scope='model_5_fixed_K_joint_cost_integer_time_MILP')
+        info.update(compact_e2=ctx['parameters'].compact_e2,
+                    candidate_slots=len(problem.operating_policy.batches))
+        result['info'] = info
         extraction_begun = time.perf_counter()
         if model.SolCount:
-            extract_solution(problem, model, ctx, result)
-            audit = audit_solution(problem, result)
-            result.update(audit=audit, cutoff_snapshots=audit.get('cutoff_snapshots', []),
-                          depot_releases=audit.get('depot_releases', []))
+            result = extract_solution(problem, model, ctx, info)
             accept_milp_audit(result, float(model.ObjVal))
+        result['solver_module'] = __name__
         result['info']['extraction_audit_time'] = time.perf_counter()-extraction_begun
         return finish(result)
     finally:

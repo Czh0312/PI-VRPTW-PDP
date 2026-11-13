@@ -156,12 +156,23 @@ def test_multiple_boxes_and_refined_integer_clocks_keep_the_original_optimum(ref
 def test_optimal_relaxation_cannot_publish_a_proof_without_a_full_model_solution(monkeypatch):
     import gurobipy as gp
     original = gp.Model.optimize
+    from models.routing.model_3.exact import milp_solver
+
+    main_model = None
+    build = milp_solver.build_model
+
+    def mark_main(*args, **kwargs):
+        nonlocal main_model
+        main_model, context = build(*args, **kwargs)
+        return main_model, context
 
     def no_main_solution(model, *args, **kwargs):
-        if model.ModelName == 'multi_batch_cutoff_v1':
+        if model is main_model:
+            model.Params.SolutionLimit = 1
             model.Params.TimeLimit = 0
         return original(model, *args, **kwargs)
 
+    monkeypatch.setattr(milp_solver, 'build_model', mark_main)
     monkeypatch.setattr(gp.Model, 'optimize', no_main_solution)
     result = solve_exact(tiny_problem(3, 2), time_limit=5)
     assert any(site['assignment'].get('native_status') == gp.GRB.OPTIMAL

@@ -30,40 +30,75 @@ class ModelVariables:
     activation: dict = field(default_factory=dict)
     physical_vehicles: dict = field(default_factory=dict)
 
-    def create_task_time(self, H, k, o):
+    def create_container_pool(self, problem):
         from gurobipy import GRB
 
-        return self.model.addVar(vtype=GRB.INTEGER, ub=H, name=f"{o.id}_{k}")
+        return self.model.addVar(
+            vtype=GRB.INTEGER, lb=problem.pool_min, ub=problem.pool_max, name="container_pool"
+        )
 
-    def create_task_load_w(self, f):
+    def create_task_time(self, k, o):
         from gurobipy import GRB
 
-        return self.model.addVar(ub=f.e2_weight_cap)
+        return self.model.addVar(
+            vtype=GRB.INTEGER,
+            lb=(o.delivery_window if k == "d" else o.pickup_window)[0],
+            ub=(o.delivery_window if k == "d" else o.pickup_window)[1],
+            name=f"time_{o.id}_{k}",
+        )
 
-    def create_task_load_v(self, f):
+    def create_task_step(self, causal_limit, key):
         from gurobipy import GRB
 
-        return self.model.addVar(ub=f.e2_volume_cap)
+        return self.model.addVar(ub=causal_limit, name=f"causal_{key[0]}_{key[1]}")
 
-    def create_task_step(self, hi, lo):
+    def create_batch_start(self, b, problem):
         from gurobipy import GRB
 
-        return self.model.addVar(lb=lo, ub=hi)
+        return self.model.addVar(
+            vtype=GRB.INTEGER,
+            lb=problem.start_bounds[b.id][0],
+            ub=problem.start_bounds[b.id][1],
+            name=f"batch_start_{b.id}",
+        )
 
-    def create_customer_assignment(self, c, s):
+    def create_batch_end(self, b, problem):
         from gurobipy import GRB
 
-        return self.model.addVar(vtype=GRB.BINARY, name=f"assign_{c}_{s}")
+        lo, hi = problem.end_bounds[b.id]
+        return self.model.addVar(vtype=GRB.INTEGER, lb=lo, ub=hi, name=f"batch_end_{b.id}")
 
-    def create_satellite_activation(self, s):
+    def create_shared_cutoff_offset(self, hi, lo):
         from gurobipy import GRB
 
-        return self.model.addVar(vtype=GRB.BINARY, name=f"active_{s}")
+        return self.model.addVar(vtype=GRB.INTEGER, lb=lo, ub=hi, name="shared_cutoff_offset")
 
-    def create_supply_time(self, H, b, s):
+    def create_batch_cutoff(self, b, problem):
         from gurobipy import GRB
 
-        return self.model.addVar(vtype=GRB.INTEGER, ub=H, name=f"delivery_{s}_{b.id}")
+        return self.model.addVar(
+            vtype=GRB.INTEGER,
+            lb=problem.cutoff_bounds[b.id][0],
+            ub=problem.cutoff_bounds[b.id][1],
+            name=f"cutoff_{b.id}",
+        )
+
+    def create_order_batch_assignment(self, b, o):
+        from gurobipy import GRB
+
+        return self.model.addVar(vtype=GRB.BINARY, name=f"assign_{o.id}_{b}")
+
+    def create_batch_activation(self, b):
+        from gurobipy import GRB
+
+        return self.model.addVar(vtype=GRB.BINARY, name=f"delivery_active_{b.id}")
+
+    def create_supply_time(self, b, problem, s):
+        from gurobipy import GRB
+
+        return self.model.addVar(
+            vtype=GRB.INTEGER, ub=problem.cutoff_bounds[b.id][1], name=f"supply_{s}_{b.id}"
+        )
 
     def create_route_used(self, label):
         from gurobipy import GRB
@@ -80,231 +115,83 @@ class ModelVariables:
 
         return self.model.addVar(vtype=GRB.INTEGER, ub=H, name=label + "_end")
 
-    def create_route_visits(self, count, label):
+    def create_route_visits(self, label, nodes):
         from gurobipy import GRB
 
-        return self.model.addVars(count, vtype=GRB.BINARY, name=label + "_visit")
+        return self.model.addVars(len(nodes), vtype=GRB.BINARY, name=label + "_visit")
 
-    def create_route_times(self, H, count, label):
+    def create_route_times(self, H, label, nodes):
         from gurobipy import GRB
 
-        return self.model.addVars(count, vtype=GRB.INTEGER, ub=H, name=label + "_time")
+        return self.model.addVars(len(nodes), vtype=GRB.INTEGER, ub=H, name=label + "_time")
 
-    def create_route_rank(self, count, label):
+    def create_route_weight(self, cap_w, label, nodes):
         from gurobipy import GRB
 
-        return self.model.addVars(count, lb=0, ub=max(1, count), name=label + "_rank")
+        return self.model.addVars(len(nodes), ub=cap_w, name=label + "_weight")
 
-    def create_load_w(self, cap_w, count, label):
+    def create_route_volume(self, cap_v, label, nodes):
         from gurobipy import GRB
 
-        return self.model.addVars(count, ub=cap_w, name=label + "_weight")
+        return self.model.addVars(len(nodes), ub=cap_v, name=label + "_volume")
 
-    def create_load_v(self, cap_v, count, label):
+    def create_route_rank(self, label, nodes):
         from gurobipy import GRB
 
-        return self.model.addVars(count, ub=cap_v, name=label + "_volume")
+        return self.model.addVars(len(nodes), ub=max(1, len(nodes)), name=label + "_rank")
 
-    def create_global_arcs(self, global_arcs):
+    def create_route_arcs(self, arcs, label, *, continuous_internal=False):
         from gurobipy import GRB
 
-        return self.model.addVar(vtype=GRB.BINARY, name=f"e2_link_{len(global_arcs)}")
+        types = {(a, b): GRB.CONTINUOUS if continuous_internal and a >= 0 and b >= 0
+                 else GRB.BINARY for a, b in arcs}
+        return self.model.addVars(arcs, lb=0, ub=1, vtype=types, name=label + "_arc")
 
-    def create_route_arcs(self, a, b, label):
+    def create_quantity(self, Q, b, k, kind, s):
         from gurobipy import GRB
 
-        return self.model.addVar(vtype=GRB.BINARY, name=f"{label}_arc[{a},{b}]")
+        return self.model.addVar(vtype=GRB.INTEGER, ub=Q, name=f"quantity_{b.id}_{k}_{s}_{kind}")
 
-    def create_route_arcs_2(self, arcs, label):
+    def create_goods_weight(self, b, f, k, s):
         from gurobipy import GRB
 
-        return self.model.addVars(arcs, vtype=GRB.BINARY, name=label + "_arc")
+        return self.model.addVar(ub=f.e1_weight_cap, name=f"goods_weight_{b.id}_{k}_{s}")
 
-    def create_departure_w(self, cap_w, label):
+    def create_hd(self, r):
         from gurobipy import GRB
 
-        return self.model.addVar(ub=cap_w, name=label + "_initial_w")
+        return self.model.addVar(vtype=GRB.BINARY, name=r["label"] + "_loaded")
 
-    def create_departure_v(self, cap_v, label):
-        from gurobipy import GRB
-
-        return self.model.addVar(ub=cap_v, name=label + "_initial_v")
-
-    def create_quantity(self, s, tightened):
-        from gurobipy import GRB
-
-        return self.model.addVar(vtype=GRB.INTEGER, ub=tightened["quantities"][s])
-
-    def create_goods_weight(self, f):
-        from gurobipy import GRB
-
-        return self.model.addVar(ub=f.e1_weight_cap)
-
-    def create_quantity_2(self, b, k, s, tightened):
-        from gurobipy import GRB
-
-        return self.model.addVar(
-            vtype=GRB.INTEGER, ub=tightened["quantities"][s], name=f"q_{b.id}_{k}_{s}"
-        )
-
-    def create_r(self):
+    def create_only_pick(self):
         from gurobipy import GRB
 
         return self.model.addVar(vtype=GRB.BINARY)
 
-    def create_r_2(self, r):
-        from gurobipy import GRB
-
-        return self.model.addVar(lb=r["step_start_bounds"][0], ub=r["step_start_bounds"][1])
-
-    def create_r_3(self, r):
-        from gurobipy import GRB
-
-        return self.model.addVar(lb=r["step_end_bounds"][0], ub=r["step_end_bounds"][1])
-
-    def create_identities(self, key, routes2):
-        from gurobipy import GRB
-
-        return self.model.addVar(lb=1, ub=len(routes2), name=f"e2_route_{key}")
-
-    def multibatch_create_task_time(self, H, k, o):
-        from gurobipy import GRB
-
-        return self.model.addVar(vtype=GRB.INTEGER, ub=H, name=f"{o.id}_{k}")
-
-    def multibatch_create_task_load_w(self, f):
-        from gurobipy import GRB
-
-        return self.model.addVar(ub=f.e2_weight_cap)
-
-    def multibatch_create_task_load_v(self, f):
-        from gurobipy import GRB
-
-        return self.model.addVar(ub=f.e2_volume_cap)
-
-    def multibatch_create_task_step(self, causal_limit):
-        from gurobipy import GRB
-
-        return self.model.addVar(ub=causal_limit)
-
-    def multibatch_create_customer_assignment(self, c, s):
-        from gurobipy import GRB
-
-        return self.model.addVar(vtype=GRB.BINARY, name=f"assign_{c}_{s}")
-
-    def multibatch_create_satellite_activation(self, s):
-        from gurobipy import GRB
-
-        return self.model.addVar(vtype=GRB.BINARY, name=f"active_{s}")
-
-    def multibatch_create_supply_time(self, H, b, s):
-        from gurobipy import GRB
-
-        return self.model.addVar(vtype=GRB.INTEGER, ub=H, name=f"delivery_{s}_{b.id}")
-
-    def multibatch_create_route_used(self, label):
-        from gurobipy import GRB
-
-        return self.model.addVar(vtype=GRB.BINARY, name=label + "_used")
-
-    def multibatch_create_route_start(self, H, label):
-        from gurobipy import GRB
-
-        return self.model.addVar(vtype=GRB.INTEGER, ub=H, name=label + "_start")
-
-    def multibatch_create_route_end(self, H, label):
-        from gurobipy import GRB
-
-        return self.model.addVar(vtype=GRB.INTEGER, ub=H, name=label + "_end")
-
-    def multibatch_create_route_visits(self, count, label):
-        from gurobipy import GRB
-
-        return self.model.addVars(count, vtype=GRB.BINARY, name=label + "_visit")
-
-    def multibatch_create_route_times(self, H, count, label):
-        from gurobipy import GRB
-
-        return self.model.addVars(count, vtype=GRB.INTEGER, ub=H, name=label + "_time")
-
-    def multibatch_create_route_rank(self, count, label):
-        from gurobipy import GRB
-
-        return self.model.addVars(count, lb=0, ub=max(1, count), name=label + "_rank")
-
-    def multibatch_create_load_w(self, cap_w, count, label):
-        from gurobipy import GRB
-
-        return self.model.addVars(count, ub=cap_w, name=label + "_weight")
-
-    def multibatch_create_load_v(self, cap_v, count, label):
-        from gurobipy import GRB
-
-        return self.model.addVars(count, ub=cap_v, name=label + "_volume")
-
-    def multibatch_create_global_arcs(self, global_arcs):
-        from gurobipy import GRB
-
-        return self.model.addVar(vtype=GRB.BINARY, name=f"m5_link_{len(global_arcs)}")
-
-    def multibatch_create_route_arcs(self, a, b, label):
-        from gurobipy import GRB
-
-        return self.model.addVar(vtype=GRB.BINARY, name=f"{label}_arc[{a},{b}]")
-
-    def multibatch_create_route_arcs_2(self, arcs, label):
-        from gurobipy import GRB
-
-        return self.model.addVars(arcs, vtype=GRB.BINARY, name=label + "_arc")
-
-    def multibatch_create_departure_loads(self, cap_w, label):
-        from gurobipy import GRB
-
-        return self.model.addVar(ub=cap_w, name=label + "_departure_weight")
-
-    def multibatch_create_departure_loads_2(self, cap_v, label):
-        from gurobipy import GRB
-
-        return self.model.addVar(ub=cap_v, name=label + "_departure_volume")
-
-    def multibatch_create_quantity(self, total):
-        from gurobipy import GRB
-
-        return self.model.addVar(vtype=GRB.INTEGER, ub=total)
-
-    def multibatch_create_goods_weight(self, f):
-        from gurobipy import GRB
-
-        return self.model.addVar(ub=f.e1_weight_cap)
-
-    def multibatch_create_quantity_2(self, b, k, s, total):
-        from gurobipy import GRB
-
-        return self.model.addVar(vtype=GRB.INTEGER, ub=total, name=f"q_{b.id}_{k}_{s}")
-
-    def multibatch_create_r(self):
-        from gurobipy import GRB
-
-        return self.model.addVar(vtype=GRB.BINARY)
-
-    def multibatch_create_pickup_return_time(self, lower, o, upper):
+    def create_pickup_return_time(self, o, p, problem):
         from gurobipy import GRB
 
         return self.model.addVar(
-            vtype=GRB.INTEGER, lb=lower, ub=upper, name=f"pickup_return_{o.id}"
+            vtype=GRB.INTEGER,
+            ub=problem.cutoff_bounds[p.batches[-1].id][1],
+            name=f"returned_{o.id}",
         )
 
-    def multibatch_create_eligible(self, b, o):
+    def create_h(self, b, o):
         from gurobipy import GRB
 
         return self.model.addVar(vtype=GRB.BINARY, name=f"eligible_{o.id}_{b.id}")
 
-    def multibatch_create_identities(self, identities, local_routes):
+    def create_ss(self, causal_limit):
         from gurobipy import GRB
 
-        return self.model.addVar(lb=1, ub=len(local_routes), name=f"m5_route_{len(identities)}")
+        return self.model.addVar(ub=causal_limit)
 
-    def multibatch_create_quantity_3(self, total):
+    def create_released(self, Q):
         from gurobipy import GRB
 
-        return self.model.addVar(lb=0, ub=total, vtype=GRB.INTEGER)
+        return self.model.addVar(vtype=GRB.INTEGER, ub=Q)
+
+    def create_active(self, key, layer):
+        from gurobipy import GRB
+
+        return self.model.addVar(vtype=GRB.BINARY, name=f"vehicle_{layer}_{key}")

@@ -307,6 +307,7 @@ def add_route_constraints(
                 )
         if (
             layer == "e1"
+            and batch.cutoff is not None
             and b != -2
             and nodes[b]["kind"] == "p"
             and (a == -1 or nodes[a]["kind"] == "d")
@@ -349,11 +350,9 @@ def add_first_echelon_constraints(
                 n = parameters.problem.demands[s, b.id]
                 if parameters.free_assignment and s not in parameters.bounds["supply"]:
                     continue
-                delivery_window = (
-                    parameters.bounds["visits"][s, "d"]
-                    if n or parameters.free_assignment
-                    else (b.start, b.cutoff - parameters.problem.service(s))
-                )
+                if not n and not parameters.free_assignment:
+                    continue
+                delivery_window = parameters.bounds["visits"][s, "d"]
                 if parameters.free_assignment:
                     q = variables.create_quantity(s, parameters.bounds)
                     w = variables.create_goods_weight(parameters.fleet)
@@ -381,8 +380,7 @@ def add_first_echelon_constraints(
                         )
                     )
                 if parameters.problem.reusable and (n or parameters.free_assignment):
-                    # B=1: all orders must be unloaded by its sole cutoff, so
-                    # every satellite's pickup quantity is known in advance.
+                    # B=1: the single handoff collects all of the satellite's boxes.
                     q = (
                         n
                         if not parameters.free_assignment
@@ -415,12 +413,13 @@ def add_first_echelon_constraints(
             for v in dvis:
                 variables.model.addConstr(r["has_delivery"] >= v)
             variables.model.addConstr(r["has_delivery"] <= gp.quicksum(dvis))
-            only_pick = variables.create_r()
-            variables.model.addConstr(only_pick == r["used"] - r["has_delivery"])
-            variables.model.addConstr(
-                (r["has_delivery"] == 1) >> (r["start"] == b.start + parameters.policy.e1_load_time)
-            )
-            variables.model.addConstr((only_pick == 1) >> (r["start"] >= b.cutoff))
+            if b.cutoff is not None:
+                only_pick = variables.create_r()
+                variables.model.addConstr(only_pick == r["used"] - r["has_delivery"])
+                variables.model.addConstr(
+                    (r["has_delivery"] == 1) >> (r["start"] == b.start + parameters.policy.e1_load_time)
+                )
+                variables.model.addConstr((only_pick == 1) >> (r["start"] >= b.cutoff))
             variables.model.addConstr((r["used"] == 1) >> (r["end"] <= b.end))
             variables.model.addConstr(
                 (r["used"] == 1)
@@ -433,6 +432,11 @@ def add_first_echelon_constraints(
             )
             for i, n in enumerate(nodes):
                 if n["kind"] == "d":
+                    if parameters.policy.consolidated_handoff:
+                        loading = parameters.problem.site_release[n["site"]]
+                        variables.model.addConstr(
+                            (r["visit"][i] == 1) >> (r["start"] >= loading + parameters.policy.e1_load_time)
+                        )
                     variables.model.addConstr(
                         (r["visit"][i] == 1)
                         >> (variables.supply_times[n["site"], b.id] == r["times"][i] + n["service"])
@@ -479,6 +483,20 @@ def add_second_echelon_constraints(
 ):
     """Build second-echelon trips, supply synchronization and vehicle calendars."""
     import gurobipy as gp
+    cutoff = parameters.policy.batches[0].cutoff
+    handoffs = {}
+    if parameters.policy.consolidated_handoff:
+        for route_info in variables.routes["e1"]:
+            for i, node in enumerate(route_info["nodes"]):
+                if node["kind"] != "p":
+                    continue
+                site = node["site"]
+                if site not in handoffs:
+                    handoffs[site] = variables.model.addVar(lb=node["window"][0], ub=node["window"][1],
+                                                             vtype=gp.GRB.INTEGER, name=f"handoff_{site}")
+                variables.model.addConstr(
+                    (route_info["visit"][i] == 1) >> (handoffs[site] == route_info["times"][i])
+                )
 
     for s in parameters.problem.satellites:
         orders = [
@@ -626,29 +644,28 @@ def add_second_echelon_constraints(
                                     + parameters.policy.e2_dispatch_prep_time
                                 )
                             )
-                            variables.model.addConstr(
-                                (r["visit"][i] == 1)
-                                >> (
-                                    r["times"][i] + o.service_time
-                                    <= parameters.policy.batches[0].cutoff
+                            if cutoff is not None:
+                                variables.model.addConstr(
+                                    (r["visit"][i] == 1) >> (r["times"][i] + o.service_time <= cutoff)
                                 )
-                            )
+                    elif cutoff is None:
+                        variables.model.addConstr((r["visit"][i] == 1) >> (r["end"] <= handoffs[s]))
                     else:
                         if linear_schedule:
                             slack = max(
                                 0,
                                 parameters.horizon
                                 - parameters.policy.e2_turnaround_time
-                                - parameters.policy.batches[0].cutoff,
+                                - cutoff,
                             )
                             variables.model.addConstr(
                                 r["end"]
-                                <= parameters.policy.batches[0].cutoff + slack * (1 - r["visit"][i])
+                                <= cutoff + slack * (1 - r["visit"][i])
                             )
                         else:
                             variables.model.addConstr(
                                 (r["visit"][i] == 1)
-                                >> (r["end"] <= parameters.policy.batches[0].cutoff)
+                                >> (r["end"] <= cutoff)
                             )
                 for (i, j), arc in r["x"].items():
                     if parameters.share_e2 and i >= 0 and j >= 0:

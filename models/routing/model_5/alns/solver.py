@@ -1,24 +1,29 @@
-"""ALNS entry for M5: 固定分仓、多批次有限容器循环."""
-from models.common.cycle.scope import validate_problem, finish_result
+"""M5 adaptive search; no exact solver imports."""
+from models.common.cycle.scope import validate_problem
+from models.routing.model_5.alns.k_search.scheduler import solve_counts as aggregate
+from models.routing.model_5.alns.parameters import validate_calendar_reconstruction_period
 
 
-def solve_alns(
-    problem, max_time=10, max_iterations=5000, seed=42, *, cache_descent_distances=False,
-    cache_e2_schedule=False,
-    critical_stock_repair=False,
-    stock_chain_strategy='stock_first',
-):
+def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_result=None,
+               budget_strategy="adaptive", *, calendar_reconstruction_period=1):
     validate_problem(problem, 5)
-    from models.routing.model_5.alns.search import solve_alns as solve_local
+    return solve_counts(
+        problem,
+        method="alns",
+        budget=max_time,
+        seed=seed,
+        max_iterations=max_iterations,
+        initial_result=initial_result,
+        budget_strategy=budget_strategy,
+        calendar_reconstruction_period=calendar_reconstruction_period,
+    )
 
-    options = dict(max_time=max_time, max_iterations=max_iterations, seed=seed)
-    if cache_descent_distances:
-        options["cache_descent_distances"] = True
-    if cache_e2_schedule:
-        options["cache_e2_schedule"] = True
-    if critical_stock_repair:
-        options["critical_stock_repair"] = True
-    if stock_chain_strategy != 'stock_first':
-        options['stock_chain_strategy'] = stock_chain_strategy
-    result = solve_local(problem, **options)
-    return finish_result(problem, result, solver_module=solve_local.__module__)
+
+def solve_counts(problem, *, calendar_reconstruction_period=1, **kwargs):
+    from functools import partial
+    from models.routing.model_5.alns.search import solve_variable_count as solve
+    period = validate_calendar_reconstruction_period(calendar_reconstruction_period)
+    candidate = solve if period == 1 else partial(solve, calendar_reconstruction_period=period)
+    result = aggregate(problem, solve_candidate=candidate, **kwargs)
+    result['info']['calendar_reconstruction_period'] = period
+    return result

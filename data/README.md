@@ -1,15 +1,11 @@
-# 当前正式数据集
+# 当前基准数据
 
-唯一活动的正式基准数据集为 [formal_benchmark27_uniform_7_20_50_v1](formal_benchmark27_uniform_7_20_50_v1/README.md)。
+[六模型数据集](benchmark27_models_1_6_v1/README.md)包含 27 个基础算例和 162 个可运行配置。每客一箱。同一算例的六个模型共用顾客、路网和车队。
 
-| 规模 | 每例顾客数 | 基础算例 |
-|---|---:|---|
-| 小 | 7 | S01～S09，共9例 |
-| 中 | 20 | M01～M09，共9例 |
-| 大 | 50 | L01～L09，共9例 |
+| 规模 | 顾客数 | 算例 |
+| --- | ---: | --- |
+| 小 | 7 | S01–S09 |
+| 中 | 20 | M01–M09 |
+| 大 | 50 | L01–L09 |
 
-共27个基础算例、模型1～8共216个入口；每客一箱。完整运行清单见数据集内case_index.csv。
-
-模型3与模型8的ALNS实验先选每档前三例，具体约束见[当前方案](../config/experiments/m3_m8_uniform_7_20_50_v1/README.md)。所有求解保持停止。
-
-其他数据版本、机制例、场景数据和旧配置均移入[历史归档](../archive/datasets/retired_20261024/README.md)，不属于当前正式算例。顾客裁剪保留需求、坐标和时间窗，资源沿用各来源并在同一基础算例的各模型间匹配。新数据尚未进行求解，不沿用历史最优性或可行性证明。
+[算例索引](benchmark27_models_1_6_v1/case_index.csv) · [输入哈希与来源](benchmark27_models_1_6_v1/manifest.json) · [原编号冻结数据](../archive/datasets/pre_renumbering_20261113/README.md)

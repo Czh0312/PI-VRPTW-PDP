@@ -46,8 +46,7 @@ print('IMPORTED', count)
 
 
 @pytest.mark.parametrize('number,method',
-                         [(n, method) for n in range(1, 9) for method in ('exact', 'alns')]
-                         + [(9, 'exact')])
+                         [(n, method) for n in range(1, 6) for method in ('exact', 'alns')])
 def test_all_components_are_owned_and_importable(number, method):
     folder = ROOT/f'models/routing/model_{number}/{method}'
     assert CORE[method] <= {p.stem for p in folder.glob('*.py')}
@@ -61,7 +60,7 @@ def test_all_components_are_owned_and_importable(number, method):
     assert 'IMPORTED' in completed.stdout
 
 
-@pytest.mark.parametrize('number', range(1, 10))
+@pytest.mark.parametrize('number', range(1, 7))
 def test_exact_layout_has_no_retired_directories_or_forwarders(number):
     folder = ROOT/f'models/routing/model_{number}/exact'
     for name in ('accelerators', 'formulations', 'search'):
@@ -71,55 +70,3 @@ def test_exact_layout_has_no_retired_directories_or_forwarders(number):
                  'enhanced_solver.py', 'initialization.py'):
         assert not (folder/name).exists()
     assert not (folder.parent/'hybrid').exists()
-
-
-
-
-
-@pytest.mark.parametrize('organized', [False, True])
-@pytest.mark.parametrize('old,new', [
-    ('partitioned_assignment', 'search.partitioned_assignment'),
-    ('single_batch', 'search.single_batch'),
-    ('joint_solver', 'search.fixed_count'),
-    ('search', 'search.calendar'),
-    ('batch_search', 'search.batch_search'),
-    ('calendar_search', 'solver'),
-])
-def test_experiment_observer_resolves_frozen_and_current_layouts(tmp_path, monkeypatch, organized, old, new):
-    from types import SimpleNamespace
-    from experiments.runs import run_thesis_completion as driver
-    package = 'models.routing.model_8.alns'
-    if organized:
-        (tmp_path/'search').mkdir()
-    expected = package+'.'+(new if organized else old)
-    component = object()
-
-    def load(name):
-        if name == package:
-            return SimpleNamespace(__file__=str(tmp_path/'__init__.py'))
-        assert name == expected
-        return component
-
-    monkeypatch.setattr(driver, 'import_module', load)
-    assert driver.solver_component(8, 'alns', old) is component
-
-
-@pytest.mark.parametrize('number,name,target', [
-    (2, 'partitioned_assignment', 'assignment.partitioned_search'),
-    (2, 'single_batch', 'search'),
-    (5, 'single_batch', 'single_batch_search'),
-    (6, 'solver', 'search'),
-    (7, 'joint_solver', 'search'),
-    (8, 'joint_solver', 'fixed_calendar_search'),
-    (8, 'search', 'search'),
-    (6, 'batch_search', 'k_search.scheduler'),
-    (7, 'batch_search', 'k_search.scheduler'),
-    (8, 'batch_search', 'k_search.scheduler'),
-    (7, 'calendar_search', 'solver'),
-    (8, 'calendar_search', 'solver'),
-])
-def test_experiment_observer_reaches_active_search_components(number, name, target):
-    from experiments.runs import run_thesis_completion as driver
-
-    module = driver.solver_component(number, 'alns', name)
-    assert module is import_module(f'models.routing.model_{number}.alns.{target}')

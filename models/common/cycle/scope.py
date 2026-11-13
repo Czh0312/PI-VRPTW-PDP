@@ -20,12 +20,16 @@ def require_scope(problem, model, batch_mode):
 
 def finish_result(problem, result, *, solver_module=None):
     mode = batch_mode_for(problem)
-    # Earliest-route normalization can change priced occupied time. Preserve
-    # the cost solver's explicit schedule and its incumbent/bound contract.
-    if (mode == 'single_batch' and result.get('audit', {}).get('valid')
-            and not getattr(problem, 'cost_objective', False)):
-        from models.common.cycle.timing import normalize_schedule
-        result = normalize_schedule(problem, result)
+    if mode == 'single_batch' and result.get('audit', {}).get('valid'):
+        cost = getattr(problem, 'cost_objective', False)
+        # Consolidated handoff has no fixed recovery time. Report the earliest
+        # execution of the chosen routes when occupied time carries no fee.
+        unpriced_time = (problem.operating_policy.consolidated_handoff and cost
+                         and all(problem.cost_profile.rates[f'{layer}_work_cost_per_minute'] == 0
+                                 for layer in ('e1', 'e2')))
+        if not cost or unpriced_time:
+            from models.common.cycle.timing import normalize_schedule
+            result = normalize_schedule(problem, result)
     result['batch_mode'] = mode
     result['model_module'] = f'models.routing.model_{problem.model_number}.{result["solver"]}'
     if solver_module is not None:
@@ -35,13 +39,16 @@ def finish_result(problem, result, *, solver_module=None):
 
 def validate_problem(problem, model):
     """One model identity check, shared by its exact and ALNS entries."""
-    if model <= 5:
-        require_scope(problem, model, 'multi_batch' if model == 5 else 'single_batch')
-    elif model == 6:
-        if problem.model_number != 6 or not getattr(problem, 'joint_batch', False):
-            raise ValueError('Model 6 requires a JointBatchInstance')
-    elif model in (7, 8, 9):
-        if problem.model_number != model or not getattr(problem, 'calendar_cycle', False):
-            raise ValueError(f'Model {model} requires its CalendarCycleInstance')
+    if model in (1, 2, 3, 4):
+        require_scope(problem, model, 'single_batch')
+    elif model == 5:
+        if problem.model_number != 5 or not getattr(problem, 'calendar_cycle', False):
+            raise ValueError('Model 5 requires a CalendarCycleInstance')
     else:
         raise ValueError(f'Unknown model: {model}')
+
+
+def require_fixed_calendar(problem):
+    if (problem.model_number != 5 or not getattr(problem, 'joint_batch', False)
+            or getattr(problem, 'calendar_cycle', False)):
+        raise ValueError('Expected a fixed-count Model 5 calendar')

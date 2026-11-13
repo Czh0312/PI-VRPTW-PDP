@@ -1,46 +1,58 @@
-"""Decode the model incumbent; feasibility and proofs remain with the caller."""
+"""Decode joint decisions through the existing independently audited projection."""
+from models.common.cycle.joint import lift_result
+from models.common.cycle.state import empty_result
 
 
-def extract_solution(problem, model, ctx, result):
-    """Populate a JSON-native result before the Gurobi model is disposed."""
-    if problem.free_assignment:
-        result['assignment'] = {c: s for (c, s), variable in ctx['assignments'].items() if variable.X > .5}
+def extract_solution(problem, m, ctx, info):
+    """Extract routes, allocation, pool and calendar; preserve projection audit."""
+    import gurobipy as gp
 
-    def int_value(var):
-        raw = var if isinstance(var, int) else var.X
-        if abs(raw-round(raw)) > 1e-4:
-            raise RuntimeError(f'Nonintegral schedule/quantity in incumbent: {raw}')
-        return int(round(raw))
+    def integral(v):
+        value=v if isinstance(v,int) else v.getValue() if isinstance(v,gp.LinExpr) else v.X
+        if abs(value-round(value))>1e-4:
+            raise RuntimeError(f'Nonintegral M5 schedule or quantity: {value}')
+        return int(round(value))
 
-    for layer in ('e1', 'e2'):
+    assignment={oid:bid for (oid,bid),v in ctx['assignments'].items() if v.X>.5}
+    pool=integral(ctx['pool'])
+    cutoffs={bid:integral(value) for bid,value in ctx['cutoffs'].items()}
+    selected_problem = problem
+    if getattr(problem, 'variable_calendar', False):
+        boundaries = [integral(ctx['batch_starts'][b.id]) for b in problem.operating_policy.batches]
+        last = problem.operating_policy.batches[-1].id
+        boundaries.append(integral(ctx['batch_ends'][last]))
+        selected_problem = problem.with_boundaries(boundaries)
+        info['proof_scope'] = 'variable_boundaries_independent_cutoffs_joint_cost_integer_time_MILP'
+    fixed=selected_problem.project(assignment,pool,cutoffs)
+    raw=empty_result(fixed,'exact')
+    raw['info']={**info,'objective':None}
+    for layer in ('e1','e2'):
         for r in ctx[layer]:
-            if r['used'].X < 0.5:
+            if r['used'].X<.5:
                 continue
-            following = {a: b for (a, b), x in r['x'].items() if x.X > 0.5 and
-                         (not r.get('global_internal_arcs') or
-                          (a == -1 or r['visit'][a].X > .5) and (b == -2 or r['visit'][b].X > .5))}
-            order, cursor = [], -1
-            while following.get(cursor, -2) != -2:
-                cursor = following[cursor]
+            following={a:b for (a,b),v in r['x'].items() if v.X>.5}
+            order,cursor=[],-1
+            while following.get(cursor,-2)!=-2:
+                cursor=following[cursor]
                 if cursor in order:
-                    raise RuntimeError('Cycle in extracted route')
+                    raise RuntimeError('Cycle in M5 incumbent')
                 order.append(cursor)
-            expected = {i for i, v in r['visit'].items() if v.X > 0.5}
-            if set(order) != expected or len(order) != len(expected):
-                raise RuntimeError('Disconnected incumbent route')
-            trip = dict(trip_id=r['label'], vehicle_id=r['vehicle'],
-                        departure=int_value(r['start']), return_complete=int_value(r['end']), events=[])
-            if layer == 'e1':
-                trip['batch_id'] = r['batch'].id
+            if set(order)!={i for i,v in r['visit'].items() if v.X>.5}:
+                raise RuntimeError('Disconnected M5 incumbent')
+            trip=dict(trip_id=r['label'],vehicle_id=r['vehicle'],departure=integral(r['start']),
+                      return_complete=integral(r['end']),events=[])
+            if layer=='e1':
+                trip['batch_id']=r['batch'].id
             else:
-                trip.update(satellite_id=r['satellite'], trip_index=r['slot'])
+                trip.update(satellite_id=r['satellite'],trip_index=r['slot'])
             for i in order:
-                n = r['nodes'][i]
-                event = dict(kind=n['kind'], start=int_value(r['times'][i]), quantity=int_value(n['quantity']))
-                event['site_id' if layer == 'e1' else 'order_id'] = n['site'] if layer == 'e1' else n['order'].id
+                n=r['nodes'][i]
+                event=dict(kind=n['kind'],start=integral(r['times'][i]),quantity=integral(n['quantity']))
+                event['site_id' if layer=='e1' else 'order_id']=n['site'] if layer=='e1' else n['order'].id
                 trip['events'].append(event)
-            result[layer+'_trips'].append(trip)
-    if getattr(problem, 'optimize_pool', False):
-        from models.common.cycle.fixed_pool import attach_pool_cost
-        attach_pool_cost(problem, result, int_value(ctx['pool']))
+            raw[layer+'_trips'].append(trip)
+    result=lift_result(selected_problem,raw,assignment,pool,'exact',cutoffs)
+    if result['audit']['valid'] and getattr(problem, 'variable_calendar', False):
+        from models.routing.model_5.timing import close_schedule
+        result = close_schedule(problem.parent, problem.count, result)
     return result

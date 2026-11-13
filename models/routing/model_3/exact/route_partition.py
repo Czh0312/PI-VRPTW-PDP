@@ -68,7 +68,8 @@ def enumerate_trips(problem, parameters, *, deadline, max_prefixes=MAX_PREFIXES,
                         end = clock + problem.travel(at, site) + policy.e2_return_unload_time
                         has_pickups = mask >> n
                         if (end + policy.e2_turnaround_time <= policy.cycle_end
-                                and (not has_pickups or end <= policy.batches[0].cutoff)):
+                                and (not has_pickups or policy.consolidated_handoff
+                                     or end <= policy.batches[0].cutoff)):
                             length = distance + problem.distance(at, site)
                             if mask not in columns or length < columns[mask]['distance']:
                                 columns[mask] = dict(mask=mask, distance=length, satellite=site, sequence=tuple(path))

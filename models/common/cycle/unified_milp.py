@@ -79,13 +79,9 @@ def _identity(problem, result):
     result.update(model=problem.model_number, solver='exact',
                   model_module=f'models.routing.model_{problem.model_number}.exact',
                   solver_module=f'models.routing.model_{problem.model_number}.exact.solver')
-    if getattr(problem, 'uniform_cycle', False):
-        result.update(schedule_mode='uniform_cycle', batch_mode='uniform_cycle',
-                      uniform_cycle_config=problem.uniform_contract)
-    else:
-        from models.common.cycle.calendar import STRATEGIES
-        result.update(strategy=STRATEGIES[problem.model_number], schedule_mode=problem.schedule_mode,
-                      batch_mode=problem.schedule_mode, calendar_config=problem.calendar_contract)
+    from models.common.cycle.calendar import STRATEGIES
+    result.update(strategy=STRATEGIES[problem.model_number], schedule_mode=problem.schedule_mode,
+                  batch_mode=problem.schedule_mode, calendar_config=problem.calendar_contract)
 
 
 def solve_unified_milp(problem, *, build_fixed, extract_fixed, time_limit=60, seed=42,
@@ -143,14 +139,10 @@ def solve_unified_milp(problem, *, build_fixed, extract_fixed, time_limit=60, se
             block = context['blocks'][count]
             result = extract_fixed(block['problem'], model, block['context'], info)
             if result.get('audit', {}).get('valid'):
-                if getattr(problem, 'uniform_cycle', False):
-                    from models.common.cycle.uniform import attach_uniform_decisions
-                    attach_uniform_decisions(problem, result, count)
-                else:
-                    from models.common.cycle.calendar import attach_calendar_decisions
-                    boundaries = [b['start'] for b in result['batches']]
-                    boundaries.append(block['problem'].operating_policy.cycle_end)
-                    attach_calendar_decisions(problem, result, count, boundaries)
+                from models.common.cycle.calendar import attach_calendar_decisions
+                boundaries = [b['start'] for b in result['batches']]
+                boundaries.append(result['batches'][-1]['end'])
+                attach_calendar_decisions(problem, result, count, boundaries)
                 _identity(problem, result)
                 from models.common.cycle.audit import audit_solution
                 result['audit'] = audit_solution(problem, result)

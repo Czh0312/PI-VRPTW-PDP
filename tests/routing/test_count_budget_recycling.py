@@ -21,7 +21,7 @@ def candidate(cost=None, *, bound=None, optimal=False, infeasible=False, iterati
                 audit=dict(valid=cost is not None), reject=reject)
 
 
-@pytest.fixture(params=[(n, m) for n in (6, 7, 8) for m in ('alns',)])
+@pytest.fixture(params=[(n, m) for n in (5,) for m in ('alns',)])
 def harness(request, monkeypatch):
     number, method = request.param
     component = 'k_search.scheduler'
@@ -34,7 +34,7 @@ def harness(request, monkeypatch):
     monkeypatch.setattr(module, '_metadata', lambda *a: None)
     monkeypatch.setattr(module, 'joint_empty_result', lambda *a: candidate())
     problem = SimpleNamespace(model_number=number, batch_count_candidates=(1, 2), for_count=lambda k: k)
-    solve = getattr(module, 'solve_uniform' if number == 6 else 'solve_counts')
+    solve = module.solve_counts
 
     def run(fn, **kwargs):
         return solve(problem, solve_candidate=fn, method=method, budget=kwargs.pop('budget', 10),

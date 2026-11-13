@@ -8,16 +8,15 @@ import pytest
 
 from models.common.cycle.audit import audit_solution
 from models.common.gurobi_disjunction import append_block
-from tests.routing.test_model6_uniform import uniform_fixture
-from tests.routing.test_model78_calendar import calendar_fixture
-from tests.routing.test_model6_joint import joint_fixture
+from tests.routing.test_model5_calendar import calendar_fixture
+from tests.routing.calendar_fixtures import joint_fixture
 
 
 def instance(number, **kwargs):
-    return uniform_fixture(**kwargs) if number == 6 else calendar_fixture(number, **kwargs)
+    return calendar_fixture(number, **kwargs)
 
 
-@pytest.mark.parametrize('number', [6, 7, 8])
+@pytest.mark.parametrize('number', [5])
 def test_all_counts_use_one_optimize_without_external_search(number, monkeypatch):
     package = f'models.routing.model_{number}.exact'
     def forbidden(*args, **kwargs):
@@ -50,7 +49,7 @@ def test_all_counts_use_one_optimize_without_external_search(number, monkeypatch
     json.dumps(result, allow_nan=False)
 
 
-@pytest.mark.parametrize('number', [6, 7, 8])
+@pytest.mark.parametrize('number', [5])
 def test_unified_objective_equals_minimum_of_fixed_count_milps(number):
     p = instance(number, counts=(1, 2, 3))
     base = f'models.routing.model_{number}.exact'
@@ -65,7 +64,7 @@ def test_unified_objective_equals_minimum_of_fixed_count_milps(number):
     assert unified['info']['objective'] == pytest.approx(min(costs))
 
 
-@pytest.mark.parametrize('number', [6, 7, 8])
+@pytest.mark.parametrize('number', [5])
 def test_all_infeasible_counts_prove_the_full_problem_infeasible(number):
     result = import_module(f'models.routing.model_{number}.exact').solve_exact(
         instance(number, counts=(3, 4)), time_limit=10)
@@ -74,18 +73,13 @@ def test_all_infeasible_counts_prove_the_full_problem_infeasible(number):
     assert result['info']['objective'] is None
 
 
-@pytest.mark.parametrize('number', [6, 7])
+@pytest.mark.parametrize('number', [5])
 def test_nondivisible_clocks_retain_physical_cost_and_audit(number):
-    from models.common.cycle.uniform import UniformCycleInstance
     from models.common.cycle.calendar import CalendarCycleInstance
     source = joint_fixture(pool_rate=30)
     policy = replace(source.operating_policy, cycle_end=131)
-    if number == 6:
-        p = UniformCycleInstance(source.network, source.orders, policy,
-            dict(schedule_mode='uniform_cycle', batch_count_candidates=[1, 2]), source.cost_profile.config)
-    else:
-        p = CalendarCycleInstance(source.network, source.orders, policy,
-            dict(batch_count_candidates=[1, 2]), source.cost_profile.config, model=7)
+    p = CalendarCycleInstance(source.network, source.orders, policy,
+                              dict(batch_count_candidates=[1, 2]), source.cost_profile.config, model=5)
     assert p.for_count(2).operating_policy.time_tick_subdivision == 2
     package = f'models.routing.model_{number}.exact'
     expected = [import_module(package+'.milp_solver').solve_milp(p.for_count(k), time_limit=10)
@@ -97,8 +91,8 @@ def test_nondivisible_clocks_retain_physical_cost_and_audit(number):
 
 
 def test_public_builder_exposes_one_hot_count_and_pool_decisions():
-    p = calendar_fixture(8)
-    model, ctx = import_module('models.routing.model_8.exact.model').build_model(p)
+    p = calendar_fixture(5)
+    model, ctx = import_module('models.routing.model_5.exact.model').build_model(p)
     try:
         assert set(ctx['selectors']) == set(p.batch_count_candidates)
         assert ctx['batch_count'].VarName == 'batch_count'
@@ -147,7 +141,7 @@ def test_disjunction_scales_constants_signed_bounds_and_zero_trigger_indicators(
         master.dispose()
 
 
-@pytest.mark.parametrize('number', range(1, 9))
+@pytest.mark.parametrize('number', range(1, 6))
 def test_auto_alias_now_uses_direct_gurobi(number, monkeypatch):
     from tests.routing.test_milp_baseline import instance as basic_instance
     package = f'models.routing.model_{number}.exact'

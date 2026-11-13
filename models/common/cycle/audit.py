@@ -41,16 +41,10 @@ def audit_solution(problem, result, repeat=True):
         if getattr(problem, 'cost_objective', False):
             from models.common.cycle.single_batch_cost import audit_single_batch_cost
             return audit_single_batch_cost(problem, result, repeat)
-        if getattr(problem, 'optimize_pool', False):
-            from models.common.cycle.fixed_pool import audit_pool_solution
-            return audit_pool_solution(problem, result, repeat)
         if getattr(problem, 'joint_batch', False):
             if getattr(problem, 'calendar_cycle', False):
                 from models.common.cycle.calendar import audit_calendar_solution
                 return audit_calendar_solution(problem, result, repeat)
-            if getattr(problem, 'uniform_cycle', False):
-                from models.common.cycle.uniform import audit_uniform_solution
-                return audit_uniform_solution(problem, result, repeat)
             from models.common.cycle.joint import audit_joint_solution
             return audit_joint_solution(problem, result, repeat)
         if problem.free_assignment:
@@ -70,6 +64,7 @@ def audit_solution(problem, result, repeat=True):
 
 def _audit(problem, result, repeat):
     p, f = problem.operating_policy, problem.fleet
+    consolidated = p.consolidated_handoff
     errors, ledger_events = [], []
     loading_starts = getattr(problem, 'batch_loading_starts', {b.id: b.start for b in p.batches})
 
@@ -77,7 +72,7 @@ def _audit(problem, result, repeat):
     # must exist when their batch starts loading, not merely at customer service.
     for order in problem.orders:
         batch = problem.batch_map[order.batch]
-        if order.release_time is not None and loading_starts[batch.id] < order.release_time:
+        if not consolidated and order.release_time is not None and loading_starts[batch.id] < order.release_time:
             errors.append(dict(code='ORDER_RELEASE_AFTER_BATCH_START', order_id=order.id,
                                batch_id=batch.id, batch_start=batch.start, release_time=order.release_time))
         if order.allowed_batch_ids is not None and order.batch not in order.allowed_batch_ids:
@@ -118,11 +113,12 @@ def _audit(problem, result, repeat):
     for b in p.batches:
         if getattr(problem, 'require_productive_batches', False) and not problem.batch_demands[b.id]:
             error('EMPTY_BATCH_DELIVERY', batch=b.id)
-        transfer(loading_starts[b.id], 'clean', 'forward', problem.batch_demands[b.id], f'issue:{b.id}')
+        if not consolidated:
+            transfer(loading_starts[b.id], 'clean', 'forward', problem.batch_demands[b.id], f'issue:{b.id}')
 
     e1_d, e1_p = defaultdict(list), defaultdict(list)
     e2_d, e2_p = defaultdict(list), defaultdict(list)
-    returns, releases, vehicles = [], [], defaultdict(list)
+    returns, releases, issues, vehicles = [], [], [], defaultdict(list)
     distances = {'e1': 0.0, 'e2': 0.0}
     waiting = {'e1': 0, 'e2': 0}
     duration = {'e1': 0, 'e2': 0}
@@ -152,15 +148,26 @@ def _audit(problem, result, repeat):
                 key = ('e1', vehicle)
                 slot = problem.batch_index[batch.id]
                 delivery_events = [e for e in events if e['kind'] == 'd']
-                if delivery_events and departure != loading_starts[batch.id]+p.e1_load_time:
-                    error('E1_PHASE_VIOLATION', trip=rid, detail='delivery departure must follow scheduled loading')
-                if not delivery_events and departure < batch.cutoff:
-                    error('E1_PHASE_VIOLATION', trip=rid, detail='pickup-only departure precedes cutoff')
+                if consolidated:
+                    vehicle_begin = departure - (p.e1_load_time if delivery_events else 0)
+                    if delivery_events:
+                        sites = [e['site_id'] for e in delivery_events]
+                        ready = problem.e1_loading_start(batch, sites)
+                        if vehicle_begin < ready:
+                            error('ORDER_NOT_RELEASED_AT_LOADING', trip=rid, earliest=ready, actual=vehicle_begin)
+                        issued = sum(problem.demands[site, batch.id] for site in sites)
+                        transfer(vehicle_begin, 'clean', 'forward', issued, f'issue:{rid}')
+                        issues.append((vehicle_begin, issued))
+                else:
+                    if delivery_events and departure != loading_starts[batch.id]+p.e1_load_time:
+                        error('E1_PHASE_VIOLATION', trip=rid, detail='delivery departure must follow scheduled loading')
+                    if not delivery_events and departure < batch.cutoff:
+                        error('E1_PHASE_VIOLATION', trip=rid, detail='pickup-only departure precedes cutoff')
+                    vehicle_begin = loading_starts[batch.id] if delivery_events else departure
                 if completed > batch.end:
                     error('RETURN_DEADLINE', trip=rid, deadline=batch.end, actual=completed)
                 load_w = sum(problem.weights[e['site_id'], batch.id] for e in delivery_events)
                 load_v = sum(problem.demands[e['site_id'], batch.id]*f.container_volume for e in delivery_events)
-                vehicle_begin = loading_starts[batch.id] if delivery_events else departure
                 unload, turnaround = p.depot_return_unload_time, p.e1_turnaround_time
             else:
                 base = trip['satellite_id']
@@ -206,14 +213,14 @@ def _audit(problem, result, repeat):
                     if isinstance(n, bool) or not isinstance(n, int) or n <= 0:
                         raise ValueError('E1 task quantity must be a positive integer')
                     if kind == 'd':
-                        if seen_pick or start+service > batch.cutoff:
+                        if seen_pick or (not consolidated and start+service > batch.cutoff):
                             error('E1_PHASE_VIOLATION', trip=rid, site=site)
                         if n != problem.demands[site, batch.id]:
                             error('DELIVERY_AMOUNT_MISMATCH', trip=rid, site=site)
                         e1_d[site, batch.id].append((start+service, rid))
                         w, v = problem.weights[site, batch.id], n*f.container_volume
                     else:
-                        if not seen_pick:
+                        if not consolidated and not seen_pick:
                             waiting[layer] += max(0, batch.cutoff-current)
                             current = max(current, batch.cutoff)
                         seen_pick = True
@@ -233,7 +240,7 @@ def _audit(problem, result, repeat):
                     if not tw[0] <= start <= tw[1]:
                         error('TIME_WINDOW', trip=rid, order=o.id, kind=kind)
                     if kind == 'd':
-                        if len(p.batches) == 1 and start+service > p.batches[0].cutoff:
+                        if len(p.batches) == 1 and not consolidated and start+service > p.batches[0].cutoff:
                             error('DELIVERY_PHASE_VIOLATION', trip=rid, order=o.id)
                         e2_d[o.id].append((start, rid))
                         ready = e1_d[o.satellite, o.batch]
@@ -314,42 +321,63 @@ def _audit(problem, result, repeat):
     if visited != len(vertices):
         error('CAUSAL_CYCLE')
 
-    snapshots = []
-    for s in problem.satellites:
-        previous_cutoff = p.cycle_start-1
-        for b in p.batches:
-            eligible = [r for r in returns if r['satellite_id'] == s and r['quantity']
-                        and previous_cutoff < r['time'] <= b.cutoff]
-            q = sum(r['quantity'] for r in eligible)
-            actual = e1_p[s, b.id]
-            actual_q = sum(row[0] for row in actual)
-            if q != actual_q or len(actual) != (1 if q else 0):
-                error('CUTOFF_ELIGIBLE_LEFT_BEHIND' if actual_q < q else 'PICKUP_AMOUNT_MISMATCH',
-                      satellite=s, batch=b.id, expected=q, actual=actual_q, visits=len(actual))
-            snapshots.append(dict(satellite_id=s, batch_id=b.id, cutoff=b.cutoff,
-                                  quantity=q, eligible_events=sorted(r['trip_id'] for r in eligible),
-                                  pickup_trip=actual[0][2] if len(actual) == 1 else None,
-                                  pickup_time=actual[0][1] if len(actual) == 1 else None))
-            previous_cutoff = b.cutoff
-    if getattr(problem, 'require_productive_batches', False):
-        for b in p.batches:
-            if not sum(row[0] for s in problem.satellites for row in e1_p[s, b.id]):
-                error('EMPTY_BATCH_RECOVERY', batch=b.id)
-    for r in returns:
-        if r['quantity'] and r['time'] > p.batches[-1].cutoff:
-            error('TERMINAL_OUTSTANDING', trip=r['trip_id'], time=r['time'])
+    snapshots, handoffs = [], []
+    if consolidated:
+        if p.container_pool_size < problem.total:
+            error('POOL_BELOW_NECESSARY_BOUND', pool=p.container_pool_size, lower_bound=problem.total)
+        batch = p.batches[0]
+        for site in problem.satellites:
+            quantity = problem.demands[site, batch.id]
+            pickups = e1_p[site, batch.id]
+            unloaded = [r for r in returns if r['satellite_id'] == site and r['quantity']]
+            if (len(pickups) != int(quantity > 0) or sum(n for n, _, _ in pickups) != quantity
+                    or sum(r['quantity'] for r in unloaded) != quantity):
+                error('CONSOLIDATED_PICKUP_COVERAGE', satellite=site, expected=quantity)
+                continue
+            if quantity:
+                ready = max(r['time'] for r in unloaded)
+                _, start, rid = pickups[0]
+                if start < ready:
+                    error('PICKUP_BEFORE_SATELLITE_READY', satellite=site, trip=rid, earliest=ready, actual=start)
+                handoffs.append(dict(satellite_id=site, batch_id=batch.id, quantity=quantity,
+                                     last_unload=ready, pickup_trip=rid, pickup_time=start))
+    else:
+        for s in problem.satellites:
+            previous_cutoff = p.cycle_start-1
+            for b in p.batches:
+                eligible = [r for r in returns if r['satellite_id'] == s and r['quantity']
+                            and previous_cutoff < r['time'] <= b.cutoff]
+                q = sum(r['quantity'] for r in eligible)
+                actual = e1_p[s, b.id]
+                actual_q = sum(row[0] for row in actual)
+                if q != actual_q or len(actual) != (1 if q else 0):
+                    error('CUTOFF_ELIGIBLE_LEFT_BEHIND' if actual_q < q else 'PICKUP_AMOUNT_MISMATCH',
+                          satellite=s, batch=b.id, expected=q, actual=actual_q, visits=len(actual))
+                snapshots.append(dict(satellite_id=s, batch_id=b.id, cutoff=b.cutoff,
+                                      quantity=q, eligible_events=sorted(r['trip_id'] for r in eligible),
+                                      pickup_trip=actual[0][2] if len(actual) == 1 else None,
+                                      pickup_time=actual[0][1] if len(actual) == 1 else None))
+                previous_cutoff = b.cutoff
+        if getattr(problem, 'require_productive_batches', False):
+            for b in p.batches:
+                if not sum(row[0] for s in problem.satellites for row in e1_p[s, b.id]):
+                    error('EMPTY_BATCH_RECOVERY', batch=b.id)
+        for r in returns:
+            if r['quantity'] and r['time'] > p.batches[-1].cutoff:
+                error('TERMINAL_OUTSTANDING', trip=r['trip_id'], time=r['time'])
 
     stocks, issued, required_pool = [], 0, 0
-    for b in p.batches if problem.reusable else ():
-        loading = loading_starts[b.id]
+    loading_events = ([(p.batches[0].id, t, n) for t, n in sorted(issues)] if consolidated else
+                      [(b.id, loading_starts[b.id], problem.batch_demands[b.id])
+                       for b in p.batches if problem.reusable])
+    for bid, loading, n in loading_events:
         available = p.container_pool_size-issued+sum(r['quantity'] for r in releases if r['clean_ready'] <= loading)
-        n = problem.batch_demands[b.id]
         required_pool = max(required_pool, p.container_pool_size-available+n)
         if available < n:
             future = [r['clean_ready'] for r in releases if r['clean_ready'] > loading]
-            error('CLEAN_STOCK_SHORTAGE', batch=b.id, time=loading, needed=n, available=available,
+            error('CLEAN_STOCK_SHORTAGE', batch=bid, time=loading, needed=n, available=available,
                   shortage=n-available, next_release=min(future) if future else None)
-        stocks.append(dict(batch_id=b.id, time=loading, available=available, demand=n, after=available-n))
+        stocks.append(dict(batch_id=bid, time=loading, available=available, demand=n, after=available-n))
         issued += n
 
     in_cycle = [e for e in ledger_events if e['time'] <= p.cycle_end]
@@ -359,7 +387,7 @@ def _audit(problem, result, repeat):
         error('TERMINAL_OUTSTANDING', states=terminal)
     periodic = dict(valid=False, cycles=2, terminal_state=None)
     if repeat and not errors:
-        period = p.cycle_end-p.cycle_start
+        period = p.repeat_interval or p.cycle_end-p.cycle_start
         terminal2, _, errors2 = replay_ledger(in_cycle, p.container_pool_size if problem.reusable else 0, problem.satellites, 2, period)
         for rows in vehicles.values():
             if rows[0][1]+period < rows[-1][2]+rows[-1][4]:
@@ -374,11 +402,13 @@ def _audit(problem, result, repeat):
     claimed = result.get('info', {}).get('objective')
     if claimed is not None and (not math.isfinite(claimed) or abs(claimed-total_distance) > 1e-5*max(1, total_distance)):
         error('OBJECTIVE_MISMATCH', claimed=claimed, recomputed=total_distance)
-    for field, calculated in (('cutoff_snapshots', snapshots), ('depot_releases', releases)):
+    for field, calculated in (('cutoff_snapshots', snapshots), ('consolidated_handoffs', handoffs),
+                              ('depot_releases', releases)):
         if field in result and result[field] != calculated:
             error('DERIVED_STATE_MISMATCH', field=field)
     peaks = {s: max([0]+[row['states'][f'sat:{s}'] for row in ledger]) for s in problem.satellites}
     return dict(valid=not errors, errors=errors, objective=total_distance,
+                **({'consolidated_handoffs': handoffs} if consolidated else {}),
                 distances=distances, cutoff_snapshots=snapshots, depot_releases=releases,
                 clean_stock=stocks, minimum_pool_for_schedule=required_pool,
                 container_ledger=ledger, terminal_state=terminal, periodic_replay=periodic,

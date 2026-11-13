@@ -58,15 +58,22 @@ def single_batch_bounds(problem, travel, domains=None):
                   (site in domains[o.customer] if domains is not None else o.satellite == site)]
         if not orders:
             continue
-        earliest = batch.start+p.e1_load_time+travel['outward'][problem.depot][site]+problem.service(site)
-        latest = {o.id: min(o.delivery_window[1], batch.cutoff-o.service_time)
+        earliest = (problem.e1_loading_start(batch, [site]) + p.e1_load_time
+                    + travel['outward'][problem.depot][site] + problem.service(site))
+        latest = {o.id: (o.delivery_window[1] if batch.cutoff is None
+                         else min(o.delivery_window[1], batch.cutoff-o.service_time))
                   -p.e2_dispatch_prep_time-travel['outward'][site][o.customer] for o in orders}
         upper = max(latest.values()) if domains is not None else min(latest.values())
         supply[site] = (earliest, upper)
         dues[site] = latest
         visits[site, 'd'] = (earliest-problem.service(site), upper-problem.service(site))
         returned = min(batch.end, p.cycle_end-p.cleaning_duration, p.cycle_end-p.e1_turnaround_time)
-        visits[site, 'p'] = (batch.cutoff, returned-problem.service(site)
+        ready = batch.cutoff
+        if ready is None:
+            ready = max(max(o.pickup_window[0], o.delivery_window[0]+o.service_time+o.min_use_time)
+                        + o.service_time + travel['inward'][site][o.customer] + p.e2_return_unload_time
+                        for o in orders)
+        visits[site, 'p'] = (ready, returned-problem.service(site)
                             -travel['outward'][site][problem.depot]-p.depot_return_unload_time)
         q = sum(o.count for o in orders)
         for cap, unit in ((f.e1_volume_cap, f.container_volume), (f.e1_weight_cap, f.container_weight)):

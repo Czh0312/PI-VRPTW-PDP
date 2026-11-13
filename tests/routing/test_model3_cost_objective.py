@@ -104,8 +104,8 @@ def test_m3_matches_m8_single_batch_when_its_cutoff_and_pool_are_fixed():
         batches=(replace(base.operating_policy.batches[0], end=base.operating_policy.cycle_end),))
     profile = synthetic_profile()
     m8 = CalendarCycleInstance(base.network, orders, policy,
-        dict(batch_count_candidates=[1]), profile, model=8)
-    r8 = solve_routing(model=8, method='exact', problem=m8, exact_time=10)
+        dict(batch_count_candidates=[1]), profile, model=5)
+    r8 = solve_routing(model=5, method='exact', problem=m8, exact_time=10)
     assert r8['audit']['valid'] and r8['info']['proven_optimal']
     selected = m8.selected_problem(r8)
     fixed = selected.project(r8['order_batch_assignment'], r8['container_pool_size'], r8['batch_cutoffs'])

@@ -1,6 +1,6 @@
 """Shared cycle rules, instances, algorithms and audits for current model families.
 
-Public model-specific solvers live in variants/model_1 through variants/model_5.
+The batch-based public solvers live in models.routing.model_1 through model_5.
 """
 
 from models.common.cycle.policy import MultiBatchPolicy

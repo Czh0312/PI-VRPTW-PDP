@@ -13,17 +13,27 @@ def run_cost(config, fleet, args):
     if any(getattr(args, key, None) is not None for key in ('data', 'time', 'extension_time', 'seed', 'fleet_config',
                                                     'distance_matrix', 'duration_matrix', 'optimized_model')):
         raise ValueError('Multibatch cost replays an existing case/result; route overrides are not supported')
-    problem = load_instance(config, fleet)
     source = resolve_project_path(args.route_result)
     result = json.loads(source.read_text(encoding='utf-8'))
+    if config['model'] in (3, 4) and getattr(args, 'no_work_window', None) is None:
+        batches = result.get('batches') or []
+        if len(batches) == 1:
+            config = {**config, 'no_work_window': batches[0].get('cutoff', 0) is None}
+    if config['model'] == 5 and getattr(args, 'no_work_window', None) is None:
+        config = {**config, 'no_work_window': result.get('calendar_config', {}).get('no_work_window', False)}
+    if not config.get('no_work_window') and config.get('legacy_operating_policy'):
+        config = {**config, 'operating_policy': config['legacy_operating_policy']}
+        fleet = {**fleet, 'operating_policy': load_json(config['operating_policy'])}
+    problem = load_instance(config, fleet)
     parameters = load_json(economic) if isinstance(economic, str) else economic
-    if getattr(problem, 'joint_batch', False) or getattr(problem, 'optimize_pool', False) or (
+    if getattr(problem, 'joint_batch', False) or (
             problem.model_number in (3, 5) and 'container_pool_cost_per_period' in parameters):
         from models.cost.comparison import evaluate_comparison_cost
         cost = evaluate_comparison_cost(problem, result, parameters)
     else:
         cost = evaluate_cycle_cost(problem, result, parameters)
-    out = resolve_project_path(args.output) if args.output else PROJECT_ROOT/'output/economic_analysis_multibatch'/datetime.now().strftime('%Y%m%dT%H%M%S_%f')
+    out = (resolve_project_path(args.output) if args.output else
+           PROJECT_ROOT/'output/current/cost'/datetime.now().strftime('%Y%m%dT%H%M%S_%f'))
     if out.exists() and any(out.iterdir()):
         raise ValueError(f'Refusing to overwrite nonempty output directory: {out}')
     out.mkdir(parents=True, exist_ok=True)

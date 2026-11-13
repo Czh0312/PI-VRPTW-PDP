@@ -30,6 +30,8 @@ def assigned_problem(problem, assignment):
         key = order.satellite, order.batch
         fixed.demands[key] += order.count
         fixed.weights[key] += order.goods_weight+order.count*fixed.fleet.container_weight
+    if fixed.operating_policy.consolidated_handoff:
+        fixed._set_site_releases()
     return fixed
 
 

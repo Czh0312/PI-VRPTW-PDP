@@ -1,7 +1,7 @@
-"""M10 inputs. Input minutes are rounded conservatively to integer seconds.
+"""M6 inputs. Input minutes are rounded conservatively to integer seconds.
 
 There are no batch fields in the physical problem. Legacy batch annotations
-may be read as source metadata, but never constrain M10 order assignments.
+may be read as source metadata, but never constrain M6 order assignments.
 """
 from dataclasses import dataclass, asdict, replace
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
@@ -10,7 +10,7 @@ import json
 import math
 
 from models.common.cycle.instance import Order
-from models.common.cycle.policy import integer, nonnegative
+from models.common.cycle.policy import daily_cycle_bounds, integer, nonnegative
 from models.common.data_loader import parse_dataset
 from models.common.domain.instance import ProblemInstance
 from models.common.matrix_loader import load_square_matrix
@@ -48,44 +48,51 @@ class NoBatchPolicy:
         return {**asdict(self), 'serialized_time_unit': 'ticks'}
 
     @classmethod
-    def from_config(cls, raw):
+    def from_config(cls, raw, *, no_work_window=False):
         if isinstance(raw, cls):
             return raw
         if not isinstance(raw, dict) or raw.get('policy_version') not in (VERSION, 'multi_batch_cutoff_v1'):
-            raise ValueError('M10 requires an explicit no-batch policy or a source cycle policy')
+            raise ValueError('M6 requires an explicit no-batch policy or a source cycle policy')
         if raw.get('time_unit', 'minutes') != 'minutes':
-            raise ValueError('M10 input time_unit must be minutes')
+            raise ValueError('M6 input time_unit must be minutes')
         tick = integer(raw.get('time_tick_seconds', 1), 'time_tick_seconds', 1)
         if raw.get('time_tick_subdivision', 1) != 1:
-            raise ValueError('M10 source clock must use whole ticks; convert subdivided results explicitly')
+            raise ValueError('M6 source clock must use whole ticks; convert subdivided results explicitly')
         def ticks(name, default=0, floor=False):
             value = nonnegative(raw.get(name, default), name)
             return int((Decimal(str(value))*60/tick).to_integral_value(rounding=ROUND_FLOOR if floor else ROUND_CEILING))
-        result = cls(ticks('cycle_start', 480), ticks('cycle_end', 1260, True),
+        repeat = ticks('repeat_interval_minutes', 1440)
+        start, end = (0, repeat) if no_work_window else (ticks('cycle_start', 480), ticks('cycle_end', 1260, True))
+        result = cls(start, end,
                      ticks('cleaning_duration', 15), ticks('e1_load_time', 2),
                      ticks('e2_dispatch_prep_time', 1), ticks('e2_return_unload_time', 1),
                      ticks('depot_return_unload_time', 1), ticks('e1_turnaround_time'),
                      ticks('e2_turnaround_time', 1), integer(raw.get('e2_max_trips_per_vehicle', 12), 'e2 trips', 1),
-                     ticks('repeat_interval_minutes', 1440), tick)
+                     repeat, tick)
         if result.cycle_end <= result.cycle_start or result.repeat_interval < result.cycle_end-result.cycle_start:
             raise ValueError('Invalid operating window/repeat interval')
         if result.e1_load_time+result.cleaning_duration <= 0:
-            raise ValueError('M10 requires positive loading or cleaning time to exclude zero-time reuse cycles')
+            raise ValueError('M6 requires positive loading or cleaning time to exclude zero-time reuse cycles')
         if raw.get('terminal_policy', 'all_clean_at_depot') != 'all_clean_at_depot':
-            raise ValueError('M10 requires all_clean_at_depot')
+            raise ValueError('M6 requires all_clean_at_depot')
         return result
 
 
 class NoBatchInstance:
-    model_number = 10
+    model_number = 6
     reusable = True
     free_assignment = False
     task_kinds = ('d', 'p')
 
-    def __init__(self, network, orders, policy, options=None):
+    def __init__(self, network, orders, policy, options=None, *, no_work_window=False):
         self.network, self.fleet = network, network.fleet
-        self.operating_policy = p = NoBatchPolicy.from_config(policy)
+        p = NoBatchPolicy.from_config(policy, no_work_window=no_work_window)
         self.orders = tuple(replace(o, batch='', allowed_batch_ids=None) for o in orders)
+        if no_work_window:
+            start, end = daily_cycle_bounds(self.orders, p.repeat_interval)
+            p = replace(p, cycle_start=start, cycle_end=end)
+        self.operating_policy = p
+        self.no_work_window = no_work_window
         self.order_map = {o.id: o for o in self.orders}
         self.satellites = tuple(s.id for s in network.satellites)
         self.depot = network.depot.id
@@ -94,24 +101,26 @@ class NoBatchInstance:
         permitted = {'pool_max', 'objective', 'transport_budget', 'e1_distance_cost', 'e2_distance_cost',
                      'e1_max_trips_per_vehicle'}
         if set(self.options)-permitted:
-            raise ValueError(f'Unknown M10 options: {sorted(set(self.options)-permitted)}')
+            raise ValueError(f'Unknown M6 options: {sorted(set(self.options)-permitted)}')
         self.pool_max = integer(self.options.get('pool_max', self.total), 'pool_max')
         self.objective_mode = self.options.get('objective', 'transport')
-        if self.objective_mode not in ('transport', 'min_pool'):
-            raise ValueError('M10 objective must be transport or min_pool')
+        if self.objective_mode not in ('total_cost', 'transport', 'min_pool'):
+            raise ValueError('M6 objective must be total_cost, transport or min_pool')
         self.transport_budget = self.options.get('transport_budget')
         if self.transport_budget is not None:
             nonnegative(self.transport_budget, 'transport_budget')
         self.distance_cost = {k: nonnegative(self.options.get(k+'_distance_cost', v), k+' cost')
                               for k, v in (('e1', .1), ('e2', .05))}
+        self.pool_unit_cost = 5.0
+        self.usage_cost = 0.02 * self.total
         self.e1_max_trips = integer(self.options.get('e1_max_trips_per_vehicle', max(1, 2*self.total)), 'e1 trips', 1)
         self.restricted_trip_domain = self.e1_max_trips < 2*self.total
         if len(self.orders) != len(self.order_map) or not self.orders:
-            raise ValueError('M10 requires nonempty orders with unique IDs')
+            raise ValueError('M6 requires nonempty orders with unique IDs')
         customers = {c.id for c in network.customers}
         for o in self.orders:
             if o.count != 1:
-                raise ValueError('M10 v1 requires one container per order')
+                raise ValueError('M6 v1 requires one container per order')
             if not o.id or o.satellite not in self.satellites or o.customer not in customers:
                 raise ValueError('Invalid order identity or fixed warehouse assignment')
             nonnegative(o.goods_weight, 'goods_weight')
@@ -119,8 +128,10 @@ class NoBatchInstance:
                 integer(value, 'order duration')
             for lo, hi in (o.delivery_window, o.pickup_window):
                 integer(lo, 'window'); integer(hi, 'window')
-                if not p.cycle_start <= lo <= hi <= p.cycle_end:
-                    raise ValueError(f'{o.id}: invalid/out-of-horizon time window')
+                if lo > hi:
+                    raise ValueError(f'{o.id}: invalid time window')
+                if not no_work_window and not p.cycle_start <= lo <= hi <= p.cycle_end:
+                    raise ValueError(f'{o.id}: time window outside cycle')
             if o.release_time is not None:
                 integer(o.release_time, 'release_time')
         for key in ('e1_count', 'e2_per_sat_count'):
@@ -149,12 +160,21 @@ class NoBatchInstance:
         o = self.order_map[oid]
         return o, self.fleet.container_weight+(o.goods_weight if kind == 'd' else 0), self.fleet.container_volume
 
+    def objective(self, transport, pool):
+        if self.objective_mode == 'min_pool':
+            return pool
+        if self.objective_mode == 'total_cost':
+            return transport + self.pool_unit_cost * pool + self.usage_cost
+        return transport
+
     def with_options(self, **options):
-        return NoBatchInstance(self.network, self.orders, self.operating_policy, {**self.options, **options})
+        return NoBatchInstance(self.network, self.orders, self.operating_policy, {**self.options, **options},
+                               no_work_window=self.no_work_window)
 
 
 def load_instance(config, fleet_config):
-    p = NoBatchPolicy.from_config(fleet_config.get('operating_policy'))
+    no_work_window = config.get('no_work_window', False)
+    p = NoBatchPolicy.from_config(fleet_config.get('operating_policy'), no_work_window=no_work_window)
     path = resolve_project_path(config['data'])
     with path.open(encoding='utf-8-sig', newline='') as f:
         rows = [r for r in csv.DictReader(f) if r.get('node_id')]
@@ -196,4 +216,4 @@ def load_instance(config, fleet_config):
                             (p.ticks(number('pickup_ready')), p.ticks(number('pickup_due'), 'floor')),
                             p.ticks(number('service_time')), p.ticks(number('min_use_time')),
                             p.ticks(number('release_time', p.minutes(p.cycle_start))), None))
-    return NoBatchInstance(network, orders, p, config.get('no_batch_options'))
+    return NoBatchInstance(network, orders, p, config.get('no_batch_options'), no_work_window=no_work_window)

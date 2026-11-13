@@ -9,16 +9,15 @@ from models.common.solver_config import MilpOptions, accept_milp_audit
 from models.common.cycle.audit import audit_solution
 from models.routing.service import solve_routing
 from tests.routing.test_exact_model_layout import instance_for
-from tests.routing.test_model6_uniform import uniform_fixture
-from tests.routing.test_model78_calendar import calendar_fixture
+from tests.routing.test_model5_calendar import calendar_fixture
 from tests.routing.test_single_batch_comparison import problem
 
 
 def instance(number):
-    return uniform_fixture() if number == 6 else instance_for(number)
+    return instance_for(number)
 
 
-@pytest.mark.parametrize('number', range(1, 9))
+@pytest.mark.parametrize('number', range(1, 6))
 @pytest.mark.parametrize('formulation', ['expanded', 'compact'])
 def test_baseline_matches_default_optimum_on_the_same_complete_problem(number, formulation):
     entry = import_module(f'models.routing.model_{number}.exact')
@@ -35,7 +34,7 @@ def test_baseline_matches_default_optimum_on_the_same_complete_problem(number, f
     assert baseline['info']['solver_config']['formulation'] == formulation
     assert baseline['info']['solver_config']['custom_callback'] is False
     json.dumps(baseline, allow_nan=False)
-    if number >= 6:
+    if number == 5:
         assert baseline['info']['batch_count_candidates'] == list(p.batch_count_candidates)
         assert baseline['info']['complete_count_domain']
         assert baseline['info']['exact_strategy'] == 'gurobi_unified_milp'
@@ -64,10 +63,10 @@ def test_baseline_passes_no_callback_and_leaves_gurobi_builtin_search_enabled(mo
 
 
 
-@pytest.mark.parametrize('number', [6, 7, 8])
+@pytest.mark.parametrize('number', [5])
 @pytest.mark.parametrize('variant', [0, 3, 6])
 def test_direct_baseline_matches_independent_calendar_oracle(number, variant):
-    from tests.routing.test_model78_independent_oracle import one_order_problem, one_order_oracle
+    from tests.routing.test_model5_independent_oracle import one_order_problem, one_order_oracle
     p = one_order_problem(number, variant)
     expected = one_order_oracle(p, number)
     result = solve_routing(model=number, method='exact', problem=p,
@@ -80,7 +79,7 @@ def test_direct_baseline_matches_independent_calendar_oracle(number, variant):
         assert result['info']['objective'] == pytest.approx(expected)
 
 
-@pytest.mark.parametrize('number', [6, 7, 8])
+@pytest.mark.parametrize('number', [5])
 def test_incomplete_unified_build_is_never_optimized_or_certified(number, monkeypatch):
     import gurobipy as gp
     import models.common.cycle.unified_milp as unified
@@ -103,7 +102,7 @@ def test_incomplete_unified_build_is_never_optimized_or_certified(number, monkey
     assert not result['info']['complete_count_domain']
 
 
-@pytest.mark.parametrize('number', range(1, 9))
+@pytest.mark.parametrize('number', range(1, 6))
 def test_tiny_budget_preserves_no_solution_and_unknown_proof(number):
     result = import_module(f'models.routing.model_{number}.exact').solve_exact(
         instance(number), time_limit=1e-12, strategy='milp')
@@ -139,7 +138,7 @@ def test_strategy_and_initial_solution_mismatch_is_rejected():
     with pytest.raises(ValueError, match='milp_options requires'):
         solve_routing(model=1, method='exact', problem=problem(1), exact_strategy='enhanced', milp_options={'threads': 2})
     with pytest.raises(TypeError, match='initial_result'):
-        import_module('models.routing.model_7.exact').solve_exact(calendar_fixture(7),
+        import_module('models.routing.model_5.exact').solve_exact(calendar_fixture(5),
             strategy='milp', initial_result={})
 
 
@@ -157,7 +156,7 @@ def test_current_cli_records_direct_baseline_configuration(tmp_path, monkeypatch
     assert result['audit']['valid']
 
 
-@pytest.mark.parametrize('number', range(1, 9))
+@pytest.mark.parametrize('number', range(1, 6))
 @pytest.mark.parametrize('strategy', ['enhanced', 'joint', 'domain_tree', 'enumeration'])
 def test_retired_strategies_are_rejected_before_any_optimization(number, strategy, monkeypatch):
     import gurobipy as gp

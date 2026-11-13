@@ -1,345 +1,427 @@
-"""Dependency-free adaptive neighborhoods over all waves, routes and cutoff waits."""
+"""Adaptive joint search of boundaries, cutoffs, order batches and routes.
+
+Calendar changes repair order domains and routes using the physical decoder.
+No mathematical solver, exact backend, or exact solution is used to initialize.
+"""
 from __future__ import annotations
 
-from models.routing.model_5.alns.parameters import ALNSParameters
+from models.routing.model_5.alns.parameters import ALNSParameters, validate_calendar_reconstruction_period
 from models.routing.model_5.alns.search_control import SearchControl
 
-from models.routing.model_5.alns.neighborhoods import (
-    move_multibatch_route as _move,
-    EvaluationCache,
-    clone_state,
-    destroy_repair,
-    state_key,
-    state_from_result,
-)
+from models.routing.model_5.alns.construction import initial_calendars, cover_delivery_batches
+from models.routing.model_5.alns.batch_initialization import balanced_assignments
 
+from models.routing.model_5.alns.calendar_moves import move_boundaries, boundary_events
+
+
+from collections import OrderedDict
 from copy import deepcopy
 import math
 import random
 import time
 
-from models.common.cycle.state import empty_result
-from models.routing.model_5.alns.evaluator import initial_state, evaluate
-from models.common.cycle.audit import audit_solution
-from models.common.cycle.precheck import (
-    check_necessary_conditions,
-    rejected_result,
-    travel_lower_bounds,
+from models.common.cycle.joint import joint_empty_result, audit_joint_solution
+from models.routing.model_5.alns.evaluator import JointEvaluator
+from models.routing.model_5.alns.state import clone_joint_state as clone_state
+from models.routing.model_5.alns.construction import (
+    _best_construction, _seed_from_result, _initial_cutoff_profiles,
 )
-from models.routing.model_5.alns.construction import chronological_state, appointment_state
+from models.routing.model_5.alns.neighborhoods import (
+    _batch_move, _route_move, _local_cost_scorer, destroy_repair,
+)
+from models.routing.model_5.alns.cutoff_moves import _cutoff_move
 
 
-def solve_alns(
-    problem,
-    max_time=10,
-    max_iterations=5000,
-    seed=42,
-    initial_result=None,
-    seed_state=None,
-    _travel_bounds=None,
-    *,
-    cache_descent_distances=False,
-    cache_e2_schedule=False,
-    critical_stock_repair=False,
-    stock_chain_strategy='stock_first',
-):
-    if stock_chain_strategy not in ('stock_first', 'cost_aware', 'cost_aware_marginal'):
-        raise ValueError('Unknown stock-chain strategy')
-    if stock_chain_strategy != 'stock_first' and not critical_stock_repair:
-        raise ValueError('A stock-chain strategy requires critical_stock_repair=True')
-    if critical_stock_repair and (
-        len(problem.operating_policy.batches) < 2 or not getattr(problem, 'optimize_pool', False)
-    ):
-        raise ValueError("Stock-chain repair requires multi-batch M5 cost optimization")
-    if len(problem.operating_policy.batches) == 1:
-        if cache_e2_schedule:
-            raise ValueError("E2 schedule cache is an experimental multi-batch option")
-        if cache_descent_distances:
-            raise ValueError("Descent distance cache is an experimental multi-batch option")
-        from models.routing.model_5.alns.single_batch_search import solve_alns as solve_single_batch
+def solve_variable_count(variable, *, max_time, max_iterations, seed, initial_result=None,
+                         calendar_reconstruction_period=1):
+    calendar_reconstruction_period = validate_calendar_reconstruction_period(calendar_reconstruction_period)
+    parent, k = variable.parent, variable.count
+    if k == 1 and not parent.no_work_window:
+        # There are no movable boundaries. Use exactly the same independent-
+        # cutoff route search, including its cutoff refinement phase.
+        from models.routing.model_5.alns.fixed_calendar_search import solve_alns
 
-        return solve_single_batch(
-            problem,
+        return solve_alns(
+            parent.fixed_calendar(1),
             max_time=max_time,
             max_iterations=max_iterations,
             seed=seed,
             initial_result=initial_result,
-            seed_state=seed_state,
-            _travel_bounds=_travel_bounds,
         )
-    if not math.isfinite(max_time) or max_time <= 0 or max_iterations < 0:
-        raise ValueError("Invalid ALNS time/iteration budget")
     begun = time.perf_counter()
-    parameters = ALNSParameters(max_time, max_iterations, seed)
+    repair_stats = dict(timing_repair_attempts=0, timing_repair_successes=0,
+                        chain_candidates=0, chain_improvements=0)
+    if len(parent.orders) <= 9:
+        from models.routing.model_5.alns.temporal_domains import temporal_assignment_bounds
+        certificate = temporal_assignment_bounds(variable)['certificate']
+        if certificate is not None:
+            result = joint_empty_result(variable, 'alns')
+            result['info'].update(status='INFEASIBLE', proven_infeasible=True,
+                proof_scope='necessary_temporal_assignment_domain', domain_certificate=certificate,
+                runtime=time.perf_counter()-begun, iterations=0)
+            return result
+    warm_iterations = 0
+    if initial_result is None and len(parent.orders) <= 16 and max_iterations > 0:
+        from models.routing.model_5.alns.fixed_calendar_search import solve_alns as solve_fixed_calendar
+        from models.common.cycle.calendar import attach_calendar_decisions
+        warm = solve_fixed_calendar(parent.fixed_calendar(k), max_time=.35*max_time,
+            max_iterations=max(1, max_iterations//3), seed=seed)
+        warm_iterations = warm['info'].get('iterations', 0)
+        for key in repair_stats:
+            repair_stats[key] += warm['info'].get(key, 0)
+        if warm.get('audit', {}).get('valid'):
+            attach_calendar_decisions(parent, warm, k, parent.balanced_boundaries(k))
+            initial_result = warm
+    if k > len(parent.orders):
+        result = joint_empty_result(variable, "alns")
+        result["info"].update(
+            status="INFEASIBLE", proven_infeasible=True,
+            proof_scope="nonempty_batch_assignment_impossible",
+            runtime=time.perf_counter() - begun, iterations=0,
+        )
+        return result
+    parameters = ALNSParameters(max_time, max_iterations, seed,
+                               calendar_reconstruction_period=calendar_reconstruction_period)
     control = SearchControl(parameters, begun, time.perf_counter)
-    travel_bounds = _travel_bounds or travel_lower_bounds(problem)
-    precheck = check_necessary_conditions(problem, travel_bounds)
-    if not precheck["passed"]:
-        return rejected_result(problem, "alns", precheck, time.perf_counter() - begun)
+    deadline = begun + max_time
+    search_deadline = deadline - (.2*max_time if len(parent.orders) <= 16 else 0.)
     rng = random.Random(seed)
-    from models.routing.model_5.alns.performance.cycle_cache import CycleEvaluator
-
-    cycle_evaluator = CycleEvaluator(problem, cache_e2_schedule=cache_e2_schedule)
-    cached = EvaluationCache(problem, cycle_evaluator)
-    current = initial_state(problem, rng)
-    score, decoded, issues = cached(current)
-    initial_strategy = "packed"
-    if issues and time.perf_counter() - begun < max_time:
-        alternative = chronological_state(problem, rng)
-        alt_score, alt_result, alt_issues = cached(alternative)
-        if not alt_issues or alt_score < score:
-            current, score, decoded, issues = alternative, alt_score, alt_result, alt_issues
-            initial_strategy = "chronological_paired_trips"
-    if issues and time.perf_counter() - begun < max_time:
-        alternative = appointment_state(problem, rng)
-        alt_score, alt_result, alt_issues = cached(alternative)
-        if not alt_issues or alt_score < score:
-            current, score, decoded, issues = alternative, alt_score, alt_result, alt_issues
-            initial_strategy = "capacity_grouped_appointments"
-    best, best_cost = None, math.inf
-    if seed_state is not None:
-        alt_score, alt_result, alt_issues = cached(seed_state)
-        if alt_score < score:
-            current, score, decoded, issues = seed_state, alt_score, alt_result, alt_issues
-            initial_strategy = "repaired_assignment_routes"
-    if initial_result is not None and audit_solution(problem, initial_result)["valid"]:
-        best, best_cost = deepcopy(initial_result), initial_result["info"]["objective"]
-        alternative = state_from_result(problem, initial_result)
-        alt_score, alt_result, alt_issues = cached(alternative)
-        if alt_score < score:
-            current, score, decoded, issues = alternative, alt_score, alt_result, alt_issues
-            initial_strategy = "audited_warm_start"
-    if not issues:
-        audited = audit_solution(problem, decoded)
-        if audited["valid"] and decoded["info"]["objective"] < best_cost:
-            best, best_cost = decoded, decoded["info"]["objective"]
-    first_feasible = time.perf_counter() - begun if best is not None else None
-    last_improvement = first_feasible
-    multibatch = len(problem.operating_policy.batches) > 1
-    best_state = (
-        (clone_state(current) if best is decoded else state_from_result(problem, best))
-        if multibatch and best is not None
-        else None
+    evaluators = OrderedDict()
+    evicted_hits = evicted_misses = 0
+    calendar_visits = set()
+    calendar_stats = dict(calendar_retiming_attempts=0, calendar_retiming_feasible=0,
+                          calendar_reconstructions=0, calendar_reconstruction_improvements=0,
+                          calendar_retiming_seconds=0.0, calendar_reconstruction_seconds=0.0,
+                          calendar_cache_hits=0, calendar_cache_misses=0, calendar_cache_evictions=0)
+    penalty = (
+        max(1.0, sum(parent.cost_profile.rates.values()))
+        * parent.total
+        * max(1, parent.cycle_duration)
+        * 100
     )
-    initial_objective = best_cost if best is not None else None
-    history = (
-        [dict(time=first_feasible, iteration=0, objective=best_cost)] if best is not None else []
-    )
-    descent = None
-    pool_descent = None
-    stock_repair = None
-    stock_improvements = []
-    if multibatch:
-        from models.routing.model_5.alns.intensification import CycleDescent
 
-        descent = CycleDescent(problem, cache_distances=cache_descent_distances)
-        if getattr(problem, 'optimize_pool', False):
-            from models.routing.model_5.alns.pool_moves import PoolReuseDescent
-            pool_descent = PoolReuseDescent(problem, travel_bounds=travel_bounds)
-            if critical_stock_repair:
-                from models.routing.model_5.alns.stock_chain import CriticalStockRepair
+    def context(boundaries):
+        nonlocal evicted_hits, evicted_misses
+        boundaries = tuple(boundaries)
+        calendar_visits.add(boundaries)
+        if boundaries not in evaluators:
+            calendar_stats['calendar_cache_misses'] += 1
+            evaluators[boundaries] = JointEvaluator(parent.fixed_calendar(k, boundaries))
+            if len(evaluators) > 24:
+                calendar_stats['calendar_cache_evictions'] += 1
+                _, old = evaluators.popitem(last=False)
+                evicted_hits += old.hits
+                evicted_misses += old.misses
+        else:
+            calendar_stats['calendar_cache_hits'] += 1
+        evaluators.move_to_end(boundaries)
+        evaluator = evaluators[boundaries]
+        if not hasattr(evaluator, 'proposal_problem'):
+            if len(parent.orders) <= 9:
+                from models.routing.model_5.alns.temporal_domains import proposal_view
+                evaluator.proposal_problem, _ = proposal_view(evaluator.problem)
+            else:
+                evaluator.proposal_problem = evaluator.problem
+        return evaluator.problem, evaluator
 
-                repair_class = CriticalStockRepair
-                if stock_chain_strategy == 'cost_aware':
-                    from models.routing.model_5.alns.cost_chain import CostAwareStockRepair
+    def repair(boundaries, assignment=None, state=None, *, profile=None):
+        child, evaluator = context(boundaries)
+        proposal_problem = evaluator.proposal_problem
+        missing = sum(not bs for bs in proposal_problem.legal_batches.values())
+        if missing:
+            return penalty * (10 + missing), None, None, None
+        proposed = {
+            oid: assignment[oid] if assignment is not None and assignment[oid] in bs else bs[-1]
+            for oid, bs in proposal_problem.legal_batches.items()
+        }
+        proposed = cover_delivery_batches(proposal_problem, proposed)
+        if proposed is None:
+            return penalty * 10, None, None, None
+        cuts = profile or (state.get("cutoffs") if state is not None else child.default_cutoffs)
+        cuts = {bid: min(hi, max(lo, cuts[bid])) for bid, (lo, hi) in child.cutoff_bounds.items()}
+        cuts = child.proposed_cutoffs(cuts)
+        chosen = None
+        diversify = False
+        if state is not None and proposed == assignment:
+            calendar_stats['calendar_retiming_attempts'] += 1
+            retiming_started = time.perf_counter()
+            trial = clone_state(state)
+            trial["cutoffs"] = cuts
+            # Explicit waits from an old calendar must not pin the new one.
+            for route in trial["e2"]:
+                route.pop("depart_after", None)
+                route.pop("return_after", None)
+            score, result, _ = evaluator(proposed, trial)
+            chosen = score, proposed, trial, result
+            calendar_stats['calendar_retiming_seconds'] += time.perf_counter() - retiming_started
+            if result is not None:
+                calendar_stats['calendar_retiming_feasible'] += 1
+                diversify = (calendar_stats['calendar_retiming_feasible']
+                             % parameters.calendar_reconstruction_period == 0)
+        # Invalid retained routes still require repair. Feasible retimings get
+        # occasional reconstruction for diversification, with no extra budget.
+        if chosen is None or (time.perf_counter() < search_deadline
+                              and (chosen[3] is None or diversify)):
+            calendar_stats['calendar_reconstructions'] += 1
+            reconstruction_started = time.perf_counter()
+            score, trial, result, _ = _best_construction(
+                child,
+                evaluator,
+                proposed,
+                rng,
+                search_deadline,
+                randomized=state is not None,
+                cutoffs=cuts,
+            )
+            calendar_stats['calendar_reconstruction_seconds'] += time.perf_counter() - reconstruction_started
+            if chosen is None or score < chosen[0]:
+                if chosen is not None:
+                    calendar_stats['calendar_reconstruction_improvements'] += 1
+                chosen = score, proposed, trial, result
+        return chosen
 
-                    repair_class = CostAwareStockRepair
-                elif stock_chain_strategy == 'cost_aware_marginal':
-                    from models.routing.model_5.alns.marginal_pickup import MarginalPickupStockRepair
+    best = best_state = best_assignment = best_boundaries = None
+    best_cost = math.inf
+    current = None
+    history = []
 
-                    repair_class = MarginalPickupStockRepair
-                stock_repair = repair_class(problem, lower_bound=precheck['pool_lower_bound'])
-    operators = [
+    def remember(score, boundaries, assignment, state, candidate, iteration, source):
+        nonlocal best, best_cost, best_state, best_assignment, best_boundaries
+        if candidate is not None and score < best_cost - 1e-8:
+            best, best_cost = deepcopy(candidate), score
+            best_boundaries, best_assignment, best_state = (
+                tuple(boundaries),
+                dict(assignment),
+                clone_state(state),
+            )
+            history.append(
+                dict(
+                    iteration=iteration,
+                    objective=score,
+                    time=time.perf_counter() - begun,
+                    source=source,
+                )
+            )
+            return True
+        return False
+
+    if initial_result is not None:
+        bounds = tuple(initial_result["batch_boundaries"])
+        child, evaluator = context(bounds)
+        candidate, assignment, state = _seed_from_result(child, initial_result)
+        remember(
+            candidate["info"]["objective"],
+            bounds,
+            assignment,
+            state,
+            candidate,
+            0,
+            "supplied_incumbent",
+        )
+        score, decoded, _ = evaluator(assignment, state)
+        current = score, bounds, assignment, state
+        remember(score, bounds, assignment, state, decoded, 0, "initial_decode")
+    from models.routing.model_5.alns.calendar_polish import deadline_calendar_seeds
+    init_deadline = min(search_deadline, time.perf_counter()
+                        +(.15 if len(parent.orders) <= 16 else .3)*max_time)
+    plans = list(deadline_calendar_seeds(variable)) if len(parent.orders) <= 16 else []
+    plans += [(bounds, None, None) for bounds in initial_calendars(variable)]
+    for bounds, preferred_assignment, preferred_cutoffs in plans:
+        if current is not None and time.perf_counter() >= init_deadline:
+            break
+        child, initializer = context(bounds)
+        profiles = _initial_cutoff_profiles(child)
+        if preferred_cutoffs is not None:
+            profiles.insert(0, {bid: min(hi, max(lo, preferred_cutoffs[bid]))
+                               for bid, (lo, hi) in child.cutoff_bounds.items()})
+        starts = ([preferred_assignment] if preferred_assignment is not None
+                  else balanced_assignments(initializer.proposal_problem, limit=4) + [None])
+        for profile, seed_assignment in [(profiles[0], a) for a in starts] + [
+                (profile, starts[0]) for profile in profiles[1:]]:
+            if current is not None and time.perf_counter() >= init_deadline:
+                break
+            score, assignment, state, candidate = repair(bounds, assignment=seed_assignment, profile=profile)
+            if len(parent.orders) <= 9 and state is not None and time.perf_counter() < init_deadline:
+                from models.routing.model_5.alns.chain_repair import recovery_frontier
+                child, evaluator = context(bounds)
+                polished, calls, gains = recovery_frontier(child, evaluator, assignment, state,
+                    min(init_deadline, time.perf_counter()+.05*max_time), max_evaluations=24)
+                repair_stats['chain_candidates'] += calls
+                repair_stats['chain_improvements'] += gains
+                value, decoded, _ = evaluator(assignment, polished)
+                if decoded is not None and value < score:
+                    score, state, candidate = value, polished, decoded
+            if current is None or score < current[0]:
+                current = score, bounds, assignment, state
+            remember(score, bounds, assignment, state, candidate, 0, "calendar_construction")
+            if state is None:
+                break
+    if current is None:
+        current = penalty * 100, parent.balanced_boundaries(k), None, None
+    boundary_ops = ["shift_boundary", "align_boundary"] if k > 1 or parent.no_work_window else []
+    if k > 1:
+        boundary_ops.append("redistribute_lengths")
+    route_ops = [
+        "destroy_random_batch",
+        "destroy_related_batch",
+        "split_batch",
+        "destroy_routes",
         "relocate",
+        "pair",
         "split_merge",
         "vehicle",
+        "wait",
         "e1_delivery",
+        "e1_pickup",
         "reverse",
-        "destroy_random",
-        "destroy_related",
+        "shift_cutoff",
+        "align_cutoff",
     ]
-    if problem.reusable:
-        operators += ["pair", "e1_pickup"]
-    if len(problem.operating_policy.batches) > 1:
-        operators.append("cutoff")
-    weights = control.initial_weights(operators)
+    operators = boundary_ops + route_ops
+    weights = control.initial_weight_dict(operators)
     attempts = {op: 0 for op in operators}
-    improved = {op: 0 for op in operators}
+    improvements = {op: 0 for op in operators}
+    rewards = {op: 0.0 for op in operators}
+    uses = {op: 0 for op in operators}
+    accepted = iterations = 0
     noops = {op: 0 for op in operators}
-    if multibatch:
-        for counts in (attempts, improved, noops):
-            counts["cycle_descent"] = 0
-            if pool_descent is not None:
-                counts['pool_reuse'] = 0
-            if stock_repair is not None:
-                counts['stock_chain'] = 0
-    restarts = 0
-    search_rng, anchor_rng = rng, random.Random(0)
-    anchor_iterations = 0
-    seen_issues, iterations, audit_rejections = set(issues), 0, 0
-    for iteration in range(max_iterations if problem.orders else 0):
-        if time.perf_counter() - begun >= max_time:
+    for iteration in range(max_iterations-warm_iterations):
+        if time.perf_counter() >= search_deadline:
             break
         iterations = iteration + 1
-        # A common, bounded construction-improvement phase gives all seeds a
-        # comparable starting quality. The user's seed controls exploration
-        # after that phase; neither phase receives an extra time budget.
-        anchor_phase = (
-            multibatch
-            and iteration < min(600, max_iterations // 3)
-            and time.perf_counter() - begun < 0.4 * max_time
-        )
-        rng = anchor_rng if anchor_phase else search_rng
-        anchor_iterations += int(anchor_phase)
-        proposed = None
-        index = None
-        pool_proposal = False
-        stock_proposal = False
-        if (stock_repair is not None and best_state is not None and iteration % 150 == 0
-                and stock_repair.seconds < 0.15 * max_time):
-            local_deadline = min(begun + max_time, time.perf_counter()
-                                 + min(0.4, 0.15 * max_time - stock_repair.seconds))
-            proposed = stock_repair.propose(best_state, best, cached, local_deadline)
-            stock_proposal = proposed is not None
-        if proposed is None and descent is not None and best_state is not None and iteration % 3 != 2:
-            if pool_descent is not None and iteration % 9 == 0:
-                proposed = pool_descent.propose(best_state, best, begun + max_time)
-                pool_proposal = proposed is not None
-            if proposed is None:
-                proposed = descent.propose(best_state, best, begun + max_time)
-        if proposed is not None:
-            op = 'stock_chain' if stock_proposal else ('pool_reuse' if pool_proposal else "cycle_descent")
-        else:
-            if time.perf_counter() - begun >= max_time:
-                break
-            index = control.select_index(rng, weights)
-            op = operators[index]
+        if iteration and iteration % 100 == 0 and best is not None:
+            current = best_cost, best_boundaries, dict(best_assignment), clone_state(best_state)
+        score, bounds, assignment, state = current
+        available = boundary_ops if state is None and boundary_ops else operators
+        op = control.select_name(rng, available, weights)
         attempts[op] += 1
-        if proposed is not None:
-            pass
-        elif multibatch and best_state is not None and iteration and iteration % 150 == 0:
-            current = clone_state(best_state)
-            score, decoded, _ = cached(current)
-            restarts += 1
-            proposed = destroy_repair(problem, current, rng, "related", begun + max_time)
-        elif not multibatch and iteration and iteration % 150 == 0:
-            proposed = initial_state(problem, rng, randomized=True)
-        elif op.startswith("destroy_"):
-            proposed = destroy_repair(problem, current, rng, op.split("_")[1], begun + max_time)
+        uses[op] += 1
+        proposed_bounds = bounds
+        if op in boundary_ops:
+            proposed_bounds = move_boundaries(variable, bounds, rng, op, best)
+            if (parameters.calendar_reconstruction_period > 1
+                    and tuple(proposed_bounds) == tuple(bounds)):
+                noops[op] += 1
+                if iterations % parameters.segment_period == 0:
+                    control.update_named_segment(operators, weights, rewards, uses)
+                continue
+            new_score, proposed_assignment, proposed, candidate = repair(
+                proposed_bounds, assignment, state
+            )
+        elif state is None:
+            new_score, proposed_assignment, proposed, candidate = repair(bounds)
         else:
-            proposed = _move(problem, current, rng, op)
-        if state_key(proposed) == state_key(current):
-            noops[op] += 1
-            if index is not None:
-                control.penalize_noop(weights, index)
-            continue
-        new_score, candidate, problems = cached(proposed)
-        seen_issues.update(problems)
-        reward = 0.5
-        if not problems and candidate["info"]["objective"] < best_cost - 1e-9:
-            audited = audit_solution(problem, candidate)
-            if audited["valid"]:
-                best, best_cost = candidate, candidate["info"]["objective"]
-                if multibatch:
-                    best_state = clone_state(proposed)
-                last_improvement = time.perf_counter() - begun
-                if first_feasible is None:
-                    first_feasible = last_improvement
-                reward = 8
-                improved[op] += 1
-                if stock_proposal:
-                    stock_improvements.append(dict(time=last_improvement, iteration=iterations,
-                        pool=best['container_pool_size'], objective=best_cost, **stock_repair.last_run))
-                if multibatch:
-                    history.append(
-                        dict(time=last_improvement, iteration=iterations, objective=best_cost)
-                    )
+            child, evaluator = context(bounds)
+            proposed_assignment = dict(assignment)
+            if "batch" in op:
+                proposed_assignment, proposed = _batch_move(
+                    evaluator.proposal_problem, evaluator, assignment, rng, op, search_deadline, state["cutoffs"]
+                )
+            elif op in ("shift_cutoff", "align_cutoff"):
+                proposed = _cutoff_move(
+                    child, evaluator, assignment, state, rng, op == "align_cutoff"
+                )
             else:
-                audit_rejections += 1
-                new_score = 1e12
-        # Expensive repair moves may hit the wall-clock budget long before the
-        # iteration cap. Cool against whichever budget is being consumed faster.
-        progress = control.progress(iteration)
-        temperature = control.route_temperature(
-            decoded["info"].get("objective") or 100, progress, multibatch=multibatch
+                fixed = evaluator.fixed(assignment, state["cutoffs"])
+                if op == "destroy_routes":
+                    fixed._joint_cost_rates = parent.cost_profile.rates
+                    proposed = destroy_repair(
+                        fixed,
+                        state,
+                        rng,
+                        rng.choice(["random", "related"]),
+                        search_deadline,
+                        scorer=_local_cost_scorer,
+                        validator=(lambda trial: evaluator(assignment, {**trial, 'cutoffs': state['cutoffs']}))
+                            if len(parent.orders) <= 9 else None,
+                        repair_stats=repair_stats,
+                    )
+                    proposed["cutoffs"] = dict(state["cutoffs"])
+                else:
+                    proposed = _route_move(fixed, state, rng, op)
+            new_score, candidate, _ = evaluator(proposed_assignment, proposed)
+        improved = remember(
+            new_score, proposed_bounds, proposed_assignment, proposed, candidate, iterations, op
         )
-        accept = control.accept(rng, score, new_score, temperature)
-        if accept:
-            current, score, decoded = proposed, new_score, candidate
-            reward = max(reward, 2)
-        if index is not None:
-            control.reward_online(weights, index, reward)
-    result = best if best is not None else empty_result(problem, "alns")
-    result["precheck"] = precheck
-    result["info"]["proven_infeasible"] = False
+        reward = 8.0 if improved else 0.0
+        improvements[op] += int(improved)
+        fraction = control.time_fraction()
+        temperature = control.joint_temperature(best_cost, score, fraction)
+        if control.accept(rng, score, new_score, temperature, joint=True):
+            reward = max(reward, 3.0 if new_score < score else 1.0)
+            current = new_score, proposed_bounds, proposed_assignment, proposed
+            accepted += 1
+        rewards[op] += reward
+        if iterations % parameters.segment_period == 0:
+            control.update_named_segment(operators, weights, rewards, uses)
+    route_polish_evaluations = route_polish_improvements = 0
+    if best is not None and len(parent.orders) <= 16:
+        from models.routing.model_5.alns.polish import polish_routes
+        child, evaluator = context(best_boundaries)
+        if len(parent.orders) <= 9:
+            from models.routing.model_5.alns.chain_repair import recovery_frontier, complete_request_repair, _distance
+            route_deadline = deadline-.12*max_time
+            fixed = evaluator.fixed(best_assignment, best_state['cutoffs'])
+            ranking = []
+            for oid in best_assignment:
+                removed = [{**row, 'tasks': [task for task in row['tasks'] if task[0] != oid]} for row in best_state['e2']]
+                ranking.append((_distance(fixed, removed), oid))
+            polished, calls, gains = complete_request_repair(child, evaluator, best_assignment, best_state,
+                [oid for _, oid in sorted(ranking)[:2]],
+                time.perf_counter()+.4*max(0., route_deadline-time.perf_counter()), max_evaluations=72)
+            repair_stats['chain_candidates'] += calls
+            repair_stats['chain_improvements'] += gains
+            value, candidate, _ = evaluator(best_assignment, polished)
+            remember(value, best_boundaries, best_assignment, polished, candidate, iterations, 'complete_cost_route_repair')
+            polished, calls, gains = recovery_frontier(child, evaluator, best_assignment, best_state,
+                time.perf_counter()+.25*max(0., route_deadline-time.perf_counter()), max_evaluations=32)
+            repair_stats['chain_candidates'] += calls
+            repair_stats['chain_improvements'] += gains
+            value, candidate, _ = evaluator(best_assignment, polished)
+            remember(value, best_boundaries, best_assignment, polished, candidate, iterations, 'joint_recovery_profile')
+        polished, route_polish_evaluations, route_polish_improvements = polish_routes(
+            evaluator.fixed(best_assignment, best_state["cutoffs"]), evaluator,
+            best_assignment, best_state, deadline-.12*max_time)
+        value, candidate, _ = evaluator(best_assignment, polished)
+        remember(value, best_boundaries, best_assignment, polished, candidate,
+                 iterations, "route_polish")
+    calendar_polish_evaluations = calendar_polish_improvements = 0
+    if best is not None and len(parent.orders) <= 16:
+        from models.routing.model_5.alns.calendar_polish import polish_calendar
+        (bounds, assignment, state, candidate), calendar_polish_evaluations, calendar_polish_improvements = polish_calendar(
+            variable, context, best_boundaries, best_assignment, best_state, best,
+            deadline, seed)
+        remember(candidate["info"]["objective"], bounds, assignment, state, candidate,
+                 iterations, "calendar_polish")
+    result = best if best is not None else joint_empty_result(variable, "alns")
     result["info"].update(
         status="FEASIBLE" if best is not None else "HEURISTIC_NO_SOLUTION",
         proven_optimal=False,
-        proof_scope=None,
+        proven_infeasible=False,
         best_bound=None,
         mip_gap=None,
+        proof_scope=None,
         runtime=time.perf_counter() - begun,
-        seed=seed,
-        iterations=iterations,
-        initial_strategy=initial_strategy,
-        time_to_first_feasible=first_feasible,
-        time_to_best=last_improvement,
-        algorithm="adaptive_destroy_repair_cycle_search",
-        cooling_schedule="max_time_and_iteration_progress",
-        evaluation_cache_hits=cached.hits,
-        evaluation_cache_misses=cached.misses,
-        operator_noops=noops,
+        iterations=iterations+warm_iterations,
+        route_polish_evaluations=route_polish_evaluations,
+        route_polish_improvements=route_polish_improvements,
+        calendar_polish_evaluations=calendar_polish_evaluations,
+        calendar_polish_improvements=calendar_polish_improvements,
         operator_attempts=attempts,
-        operator_improvements=improved,
-        encountered_violations=sorted(seen_issues),
-        audit_rejections=audit_rejections,
-        e2_max_trips_per_vehicle=problem.operating_policy.e2_max_trips_per_vehicle,
+        operator_improvements=improvements,
+        operator_weights=weights,
+        accepted_moves=accepted,
+        history=history,
+        calendar_evaluations=len(calendar_visits),
+        evaluations=evicted_misses + sum(e.misses for e in evaluators.values()),
+        cache_hits=evicted_hits + sum(e.hits for e in evaluators.values()),
+        operator_noops=noops,
+        **repair_stats,
+        calendar_reconstruction_period=parameters.calendar_reconstruction_period,
+        **calendar_stats,
     )
-    if multibatch:
-        arc_cache = descent.distance.cache_info() if cache_descent_distances else None
-        result["info"].update(
-            algorithm=("adaptive_cycle_cost_search_with_pool_optimization"
-                       if getattr(problem, 'optimize_pool', False)
-                       else "adaptive_cycle_search_with_distance_descent"),
-            initial_objective=initial_objective,
-            incumbent_history=history,
-            incumbent_restarts=restarts,
-            descent_candidates=descent.generated,
-            pool_reuse_candidates=pool_descent.generated if pool_descent is not None else 0,
-            descent_filtered=descent.filtered,
-            descent_exhausted=descent.exhausted,
-            descent_enumerations=descent.enumerations,
-            descent_site_cache_hits=descent.site_cache_hits,
-            descent_arc_cache_enabled=bool(cache_descent_distances),
-            descent_arc_cache_hits=arc_cache.hits if arc_cache else 0,
-            descent_arc_cache_misses=arc_cache.misses if arc_cache else 0,
-            e1_schedule_cache_hits=cycle_evaluator.hits,
-            e1_schedule_cache_misses=cycle_evaluator.misses,
-            e2_schedule_cache_enabled=bool(cache_e2_schedule),
-            e2_schedule_cache_hits=cycle_evaluator.e2_cache.hits if cache_e2_schedule else 0,
-            e2_schedule_cache_misses=cycle_evaluator.e2_cache.misses if cache_e2_schedule else 0,
-            shared_search_seed=0,
-            shared_search_iterations=anchor_iterations,
-        )
-        if stock_repair is not None:
-            result['info'].update(stock_chain_enabled=True, stock_chain_calls=stock_repair.calls,
-                stock_chain_strategy=stock_chain_strategy,
-                stock_chain_evaluations=stock_repair.evaluations,
-                stock_chain_feasible_evaluations=stock_repair.feasible_evaluations,
-                stock_chain_seconds=stock_repair.seconds,
-                stock_chain_best_pool=stock_repair.best_pool,
-                stock_chain_best_pool_cost=stock_repair.best_pool_cost,
-                stock_chain_improvements=stock_improvements,
-                stock_chain_last_run=stock_repair.last_run)
-            if stock_chain_strategy == 'cost_aware_marginal':
-                result['info'].update(stock_chain_marginal_generated=stock_repair.marginal_generated,
-                    stock_chain_marginal_evaluations=stock_repair.marginal_evaluations,
-                    stock_chain_marginal_feasible=stock_repair.marginal_feasible)
     if best is not None:
-        audit = audit_solution(problem, result)
-        result.update(
-            audit=audit,
-            cutoff_snapshots=audit["cutoff_snapshots"],
-            depot_releases=audit["depot_releases"],
-        )
+        result["audit"] = audit_joint_solution(parent.fixed_calendar(k, best_boundaries), result)
+        if not result["audit"]["valid"]:
+            result["info"].update(status="AUDIT_FAILED", objective=None)
     return result

@@ -8,13 +8,15 @@ from models.routing.model_3.alns.state import state_key
 from models.common.cycle.state import empty_result
 
 
-def _e1_trip(problem, batch, vehicle, deliveries, pickups, quantities, ready):
+def _e1_trip(problem, batch, vehicle, deliveries, pickups, quantities, ready, handoffs=None):
     p, f = problem.operating_policy, problem.fleet
     if not deliveries and not pickups:
         return None, []
     problems = []
-    start = batch.start + p.e1_load_time if deliveries else max(batch.cutoff, ready)
-    if deliveries and ready > batch.start:
+    loading = problem.e1_loading_start(batch, deliveries)
+    pickup_departure = ready if batch.cutoff is None else max(batch.cutoff, ready)
+    start = loading + p.e1_load_time if deliveries else pickup_departure
+    if deliveries and ready > loading:
         problems.append("E1_VEHICLE_OVERLAP")
     current, site = start, problem.depot
     trip = dict(
@@ -32,14 +34,16 @@ def _e1_trip(problem, batch, vehicle, deliveries, pickups, quantities, ready):
     if dv > f.e1_volume_cap + 1e-6 or pq * f.container_volume > f.e1_volume_cap + 1e-6:
         problems.append("E1_VOLUME_CAPACITY")
     for kind, sequence in (("d", deliveries), ("p", pickups)):
-        if kind == "p" and sequence:
+        if kind == "p" and sequence and batch.cutoff is not None:
             current = max(current, batch.cutoff)
         for s in sequence:
             current += problem.travel(site, s)
+            if kind == "p" and handoffs is not None:
+                current = max(current, handoffs[s])
             n = problem.demands[s, batch.id] if kind == "d" else quantities[s]
             trip["events"].append(dict(kind=kind, site_id=s, start=current, quantity=n))
             current += problem.service(s)
-            if kind == "d" and current > batch.cutoff:
+            if kind == "d" and batch.cutoff is not None and current > batch.cutoff:
                 problems.append("E1_DELIVERY_DEADLINE")
             site = s
     trip["return_complete"] = (
@@ -67,7 +71,7 @@ def route_distance(problem, trip, layer):
     return sum(problem.distance(a, b) for a, b in zip(sites, sites[1:]))
 
 
-def _e1_returns(problem, state, quantities):
+def _e1_returns(problem, state, quantities, handoffs=None):
     p, f = problem.operating_policy, problem.fleet
     trips, violations = [], []
     ready = [p.cycle_start] * f.e1_count
@@ -75,6 +79,7 @@ def _e1_returns(problem, state, quantities):
     for b in p.batches:
         picked = [[] for _ in range(f.e1_count)]
         q = quantities[b.id]
+        ready_by_site = None if handoffs is None else handoffs[b.id]
         for s in state["pickup_order"][b.id]:
             if not q[s]:
                 continue
@@ -84,7 +89,7 @@ def _e1_returns(problem, state, quantities):
                 for position in range(len(picked[k]) + 1):
                     proposed = picked[k][:position] + [s] + picked[k][position:]
                     trip, issues = _e1_trip(
-                        problem, b, k, state["deliveries"][b.id][k], proposed, q, ready[k]
+                        problem, b, k, state["deliveries"][b.id][k], proposed, q, ready[k], ready_by_site
                     )
                     options.append(
                         (
@@ -99,7 +104,7 @@ def _e1_returns(problem, state, quantities):
             picked[k] = chosen
         for k in range(f.e1_count):
             trip, issues = _e1_trip(
-                problem, b, k, state["deliveries"][b.id][k], picked[k], q, ready[k]
+                problem, b, k, state["deliveries"][b.id][k], picked[k], q, ready[k], ready_by_site
             )
             violations.extend(issues)
             if trip:
@@ -193,7 +198,7 @@ def evaluate(problem, state, *, _memo=None, _prepared=None):
             tasks[oid, kind] = node
             tw = o.delivery_window if kind == "d" else o.pickup_window
             bounds[node], upper[node] = tw
-            if len(p.batches) == 1 and kind == "d":
+            if len(p.batches) == 1 and p.batches[0].cutoff is not None and kind == "d":
                 upper[node] = min(upper[node], p.batches[0].cutoff - o.service_time)
             edges.append((previous, node, service + problem.travel(site, o.customer)))
             previous, site, service = node, o.customer, o.service_time
@@ -242,13 +247,18 @@ def evaluate(problem, state, *, _memo=None, _prepared=None):
     if any(t > upper.get(node, p.cycle_end) for node, t in bounds.items()):
         violations.append("E2_TIME_WINDOW")
     quantities = {b.id: {s: 0 for s in problem.satellites} for b in p.batches}
+    handoffs = ({p.batches[0].id: dict.fromkeys(problem.satellites, p.cycle_start)}
+                if p.consolidated_handoff else None)
     for r, ri, slot in parsed:
         u = bounds["end", ri]
         returned = sum(problem.order_map[o].count for o, k in r["tasks"] if k == "p")
-        batch = next((b for b in p.batches if u <= b.cutoff), None)
         if returned:
+            batch = next((b for b in p.batches if b.cutoff is None or u <= b.cutoff), None)
             if batch:
-                quantities[batch.id][r["satellite"]] += returned
+                site = r["satellite"]
+                quantities[batch.id][site] += returned
+                if handoffs is not None:
+                    handoffs[batch.id][site] = max(handoffs[batch.id][site], u)
             else:
                 violations.append("TERMINAL_OUTSTANDING")
         events = [
@@ -267,9 +277,9 @@ def evaluate(problem, state, *, _memo=None, _prepared=None):
             )
         )
     result["e1_trips"], e1_issues, releases = (
-        _memo.returns(state, quantities)
+        _memo.returns(state, quantities, handoffs)
         if _memo is not None
-        else _e1_returns(problem, state, quantities)
+        else _e1_returns(problem, state, quantities, handoffs)
     )
     violations.extend(e1_issues)
     issued, shortage = 0, 0

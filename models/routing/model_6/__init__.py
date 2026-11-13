@@ -1,1 +1,1 @@
-"""M6: independently maintained exact and ALNS implementations."""
+"""M6: calendar-free, fixed-assignment reusable-container routing."""

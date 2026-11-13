@@ -9,7 +9,7 @@ from cli.route import DEFAULT_CASE, load_config, main
 
 @pytest.mark.parametrize("model", [0, 11])
 def test_unknown_models_are_rejected_before_loading_solver(model):
-    with pytest.raises(ValueError, match="1–10"):
+    with pytest.raises(ValueError, match="1–6"):
         solve_routing(model=model, method="alns", problem=SimpleNamespace())
 
 
@@ -21,10 +21,13 @@ def test_historical_policy_requires_explicit_opt_in():
 
 
 def test_default_is_current_single_batch():
+    from models.common.cycle import load_instance
+
     cfg, fleet = load_config(DEFAULT_CASE)
     assert cfg["model"] == 3
     assert fleet["operating_policy"]["policy_version"] == "multi_batch_cutoff_v1"
-    assert len(fleet["operating_policy"]["batches"]) == 1
+    policy = load_instance(cfg, fleet).operating_policy
+    assert len(policy.batches) == 1 and policy.consolidated_handoff
 
 
 def test_current_cost_cli_prices_saved_cycle(tmp_path):

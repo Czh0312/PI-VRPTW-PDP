@@ -1,6 +1,8 @@
-"""M6 direct Gurobi public entry."""
-from models.routing.model_6.exact.solver import solve_exact
-
-__all__ = ['solve_exact']
+"""Native MILP entry; solver backends are imported only when requested."""
 MODEL_NUMBER = 6
-BATCH_MODE = 'joint_candidate_batches'
+BATCH_MODE = 'no_batch'
+
+
+def solve_exact(problem, **kwargs):
+    from .solver import solve_exact as solve
+    return solve(problem, **kwargs)

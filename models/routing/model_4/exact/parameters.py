@@ -69,22 +69,27 @@ def prepare_parameters(
                     continue
                 batch = problem.batch_map[o.batch]
                 supplied = (
-                    batch.start
+                    problem.e1_loading_start(batch, [s])
                     + p.e1_load_time
                     + outward[s]
                     + problem.service(s)
                     + p.e2_dispatch_prep_time
                 )
                 delivered = max(o.delivery_window[0], supplied + travel_out[o.customer])
+                delivery_due = o.delivery_window[1]
+                return_deadline = p.cycle_end - p.e2_turnaround_time
+                if batch.cutoff is not None:
+                    delivery_due = min(delivery_due, batch.cutoff - o.service_time)
+                    return_deadline = batch.cutoff
                 windows[o.id, "d"] = (
                     delivered,
-                    min(o.delivery_window[1], batch.cutoff - o.service_time),
+                    delivery_due,
                 )
                 windows[o.id, "p"] = (
                     max(o.pickup_window[0], delivered + o.service_time + o.min_use_time),
                     min(
                         o.pickup_window[1],
-                        p.batches[-1].cutoff
+                        return_deadline
                         - o.service_time
                         - travel_in[o.customer]
                         - p.e2_return_unload_time,

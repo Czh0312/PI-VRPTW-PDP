@@ -4,10 +4,23 @@ Local scores rank proposals only. The complete decoder and independent audit
 remain the authorities; no local estimate proves infeasibility or optimality.
 """
 
+from models.routing.model_5.alns.state import (
+    clone_joint_state,
+    clone_state,
+    state_key,
+    state_from_result,
+)
+
 from models.routing.model_5.alns.evaluator import EvaluationCache
 
-from models.routing.model_5.alns.state import clone_state, state_key, state_from_result
+from models.routing.model_5.alns.cutoff_moves import (
+    _cutoff_events, _with_cutoff, _polish_cutoff, _cutoff_move,
+)
+
+from models.routing.model_5.alns.calendar_moves import boundary_events, move_boundaries
+
 from collections import Counter, OrderedDict
+from functools import partial
 import time
 
 
@@ -23,7 +36,7 @@ def _goods_ready(problem, state):
     return ready
 
 
-def _route_score(problem, route, goods, vehicle_ready):
+def _route_score(problem, route, goods, vehicle_ready, *, supply_aware=False):
     p, f = problem.operating_policy, problem.fleet
     tasks, site = route["tasks"], route["satellite"]
     if not tasks:
@@ -42,9 +55,14 @@ def _route_score(problem, route, goods, vehicle_ready):
         window = order.delivery_window if kind == "d" else order.pickup_window
         current = max(current + problem.travel(previous, order.customer), window[0])
         if kind == "p":
+            earliest_delivery = order.delivery_window[0]+order.service_time
+            if supply_aware and len(problem.orders) <= 9:
+                earliest_delivery = max(order.delivery_window[0],
+                    goods[site, order.batch]+p.e2_dispatch_prep_time
+                    +problem.travel(site, order.customer))+order.service_time
             current = max(
                 current,
-                delivered.get(oid, order.delivery_window[0] + order.service_time)
+                delivered.get(oid, earliest_delivery)
                 + order.min_use_time,
             )
         due = window[1]
@@ -83,7 +101,9 @@ def destroy_repair(
     *,
     scorer=None,
     cache_distances=False,
-    cache_pickup_prefix=False
+    cache_pickup_prefix=False,
+    validator=None,
+    repair_stats=None,
 ):
     if not problem.orders:
         return clone_state(original)
@@ -110,6 +130,20 @@ def destroy_repair(
         cache_distances=cache_distances,
         cache_pickup_prefix=cache_pickup_prefix,
     )
+    if repaired is not None and validator is not None and len(problem.orders) <= 9:
+        _, candidate, issues = validator(repaired)
+        if candidate is None and 'TIMING_CYCLE' in issues and time.perf_counter() < deadline:
+            if repair_stats is not None:
+                repair_stats['timing_repair_attempts'] = repair_stats.get('timing_repair_attempts', 0)+1
+            rescued = repair_orders(problem, original, removed, deadline, scorer=scorer,
+                cache_distances=cache_distances, cache_pickup_prefix=cache_pickup_prefix,
+                avoid_precedence_cycles=True)
+            if rescued is not None:
+                _, feasible, _ = validator(rescued)
+                if feasible is not None:
+                    repaired = rescued
+                    if repair_stats is not None:
+                        repair_stats['timing_repair_successes'] = repair_stats.get('timing_repair_successes', 0)+1
     return repaired if repaired is not None else clone_state(original)
 
 
@@ -124,7 +158,8 @@ def repair_orders(
     fast_scores=True,
     scorer=None,
     cache_distances=False,
-    cache_pickup_prefix=False
+    cache_pickup_prefix=False,
+    avoid_precedence_cycles=False,
 ):
     """Reinsert complete requests; interruption never exposes a partial state.
 
@@ -153,9 +188,15 @@ def repair_orders(
         score_route = scorer
         # A distance floor cannot screen an externally supplied cost score.
         screen = False
+    if avoid_precedence_cycles and len(problem.orders) <= 9:
+        if scorer is not None:
+            score_route = scorer
+            screen = False
+        if score_route is _route_score or score_route is _local_cost_scorer:
+            score_route = partial(score_route, supply_aware=True)
     distance = problem.distance
     prefix_enabled = False
-    if tasks and fast_scores and len(p.batches) == 1:
+    if tasks and fast_scores and len(p.batches) == 1 and not avoid_precedence_cycles:
         from models.routing.model_5.alns.performance.scoring import SingleBatchRouteScorer
 
         score_route = scorer if scorer is not None else SingleBatchRouteScorer(problem)
@@ -173,6 +214,8 @@ def repair_orders(
             return None
         oid, kind = task
         order, routes = problem.order_map[oid], state["e2"]
+        delivery_route = next(((index, route['vehicle']) for index, route in enumerate(routes)
+                               if (oid, 'd') in route['tasks']), None) if avoid_precedence_cycles and kind == 'p' and len(problem.orders) <= 9 else None
         ready, before, scores, distances = {}, {}, {}, {}
         counts = Counter((r["satellite"], r["vehicle"]) for r in routes)
         for index, route in enumerate(routes):
@@ -206,6 +249,8 @@ def repair_orders(
             if route["satellite"] != order.satellite:
                 continue
             existing = route["tasks"]
+            if delivery_route is not None and route['vehicle'] == delivery_route[1] and index < delivery_route[0]:
+                continue
             if kind == "d" and any(
                 k == "d" and problem.order_map[i].batch != order.batch for i, k in existing
             ):
@@ -287,11 +332,17 @@ def repair_orders(
                 ),
                 len(routes),
             )
+            if delivery_route is not None and vehicle == delivery_route[1]:
+                pos = max(pos, delivery_route[0]+1)
             begin = (
-                before[pos]
+                before.get(pos, ready.get((order.satellite, vehicle), p.cycle_start))
                 if pos < len(routes)
                 else ready.get((order.satellite, vehicle), p.cycle_start)
             )
+            if delivery_route is not None:
+                begin = next((before[index] for index in range(pos, len(routes))
+                              if routes[index]['satellite'] == order.satellite and routes[index]['vehicle'] == vehicle),
+                             ready.get((order.satellite, vehicle), p.cycle_start))
             score, _ = score_route(problem, candidate, goods, begin)
             if best is None or score < best[0]:
                 best = (score, pos, candidate, True)
@@ -305,167 +356,164 @@ def repair_orders(
     return state
 
 
-def move_route(problem, original, rng, operator):
-    state = clone_state(original)
-    p, f = problem.operating_policy, problem.fleet
-    routes = state["e2"]
+def _batch_move(problem, evaluator, assignment, rng, operator, deadline, cutoffs=None):
+    from models.routing.model_5.alns.construction import _best_construction
+
+    proposed = dict(assignment)
+    ids = list(proposed)
+    if operator == "split_batch":
+        chosen = rng.choice(sorted(set(proposed.values())))
+        members = [oid for oid in ids if proposed[oid] == chosen]
+        ids = rng.sample(members, max(1, len(members) // 2))
+    elif operator == "destroy_related_batch":
+        anchor = problem.order_map[rng.choice(ids)]
+        ids.sort(
+            key=lambda oid: (
+                problem.order_map[oid].satellite != anchor.satellite,
+                problem.distance(anchor.customer, problem.order_map[oid].customer),
+            )
+        )
+        ids = ids[: min(len(ids), max(2, min(5, len(ids) // 3)))]
+    else:
+        ids = rng.sample(ids, min(len(ids), max(1, min(4, len(ids) // 3))))
+    rng.shuffle(ids)
+    built = None
+    for oid in ids:
+        if time.perf_counter() >= deadline:
+            break
+        singleton = sum(bid == proposed[oid] for bid in proposed.values()) == 1
+        choices = [b for b in problem.legal_batches[oid] if b != proposed[oid]]
+        if not choices:
+            continue
+        rng.shuffle(choices)
+        best = None
+        for bid in choices:
+            if time.perf_counter() >= deadline:
+                break
+            trial = {**proposed, oid: bid}
+            if singleton:
+                # Exchange orders when moving the last one would empty its
+                # batch. This keeps fixed-K assignments searchable at K=|O|.
+                partners = [other for other, current in proposed.items()
+                            if current == bid and proposed[oid] in problem.legal_batches[other]]
+                if not partners:
+                    continue
+                trial[rng.choice(partners)] = proposed[oid]
+            construction = _best_construction(
+                problem, evaluator, trial, rng, deadline, cutoffs=cutoffs
+            )
+            if best is None or construction[0] < best[0]:
+                best = (construction[0], trial, construction)
+        if best is not None:
+            _, proposed, built = best
+    if built is None:
+        built = _best_construction(problem, evaluator, proposed, rng, deadline, cutoffs=cutoffs)
+    return proposed, built[1]
+
+
+def _route_move(problem, state, rng, operator):
+    proposed = clone_joint_state(state)
+    routes = proposed["e2"]
+    f, p = problem.fleet, problem.operating_policy
     if operator in ("relocate", "pair") and routes:
-        chosen = rng.choice(routes)
-        oid, kind = rng.choice(chosen["tasks"])
-        items = [(oid, k) for k in problem.task_kinds] if operator == "pair" else [(oid, kind)]
+        source = rng.choice(routes)
+        oid, kind = rng.choice(source["tasks"])
+        items = [(oid, "d"), (oid, "p")] if operator == "pair" else [(oid, kind)]
         for r in routes:
             r["tasks"] = [t for t in r["tasks"] if t not in items]
         routes[:] = [r for r in routes if r["tasks"]]
-        o = problem.order_map[oid]
-        destinations = [r for r in routes if r["satellite"] == o.satellite]
-        if any(k == "d" for _, k in items):
-            destinations = [
-                r
-                for r in destinations
-                if all(k != "d" or problem.order_map[i].batch == o.batch for i, k in r["tasks"])
-            ]
-        if not destinations or rng.random() < 0.15:
+        order = problem.order_map[oid]
+        candidates = [
+            r
+            for r in routes
+            if r["satellite"] == order.satellite
+            and (
+                not any(k == "d" for _, k in items)
+                or all(k != "d" or problem.order_map[o].batch == order.batch for o, k in r["tasks"])
+            )
+        ]
+        if not candidates or rng.random() < 0.2:
             target = dict(
-                satellite=o.satellite, vehicle=rng.randrange(f.e2_per_sat_count), tasks=[]
+                satellite=order.satellite, vehicle=rng.randrange(f.e2_per_sat_count), tasks=[]
             )
             routes.append(target)
         else:
-            target = rng.choice(destinations)
-        where = rng.randrange(len(target["tasks"]) + 1)
-        target["tasks"][where:where] = items
+            target = rng.choice(candidates)
+        position = rng.randrange(len(target["tasks"]) + 1)
+        target["tasks"][position:position] = items
     elif operator == "split_merge" and routes:
         source = rng.choice(routes)
-        if len(source["tasks"]) > 1 and rng.random() < 0.5:
-            index = rng.randrange(1, len(source["tasks"]))
-            target = dict(
-                satellite=source["satellite"],
-                vehicle=rng.randrange(f.e2_per_sat_count),
-                tasks=source["tasks"][index:],
+        others = [r for r in routes if r is not source and r["satellite"] == source["satellite"]]
+        if len(source["tasks"]) > 1 and (not others or rng.random() < 0.5):
+            i = rng.randrange(1, len(source["tasks"]))
+            routes.insert(
+                routes.index(source) + 1,
+                dict(
+                    satellite=source["satellite"],
+                    vehicle=rng.randrange(f.e2_per_sat_count),
+                    tasks=source["tasks"][i:],
+                ),
             )
-            source["tasks"] = source["tasks"][:index]
-            routes.insert(routes.index(source) + 1, target)
-        else:
-            others = [
-                r for r in routes if r is not source and r["satellite"] == source["satellite"]
-            ]
-            if others:
-                other = rng.choice(others)
-                source["tasks"] += other["tasks"]
-                routes.remove(other)
+            source["tasks"] = source["tasks"][:i]
+        elif others:
+            other = rng.choice(others)
+            source["tasks"] += other["tasks"]
+            routes.remove(other)
     elif operator == "vehicle" and routes:
         if rng.random() < 0.5:
             rng.choice(routes)["vehicle"] = rng.randrange(f.e2_per_sat_count)
         elif len(routes) > 1:
             a, b = rng.sample(range(len(routes)), 2)
             routes[a], routes[b] = routes[b], routes[a]
-    elif operator == "cutoff" and routes:
+    elif operator == "wait" and routes:
         r = rng.choice(routes)
-        boundary = rng.choice(p.batches).cutoff
-        target = rng.choice(
-            [p.cycle_start, max(p.cycle_start, boundary - 1), boundary, boundary + 1]
-        )
-        r[rng.choice(["depart_after", "return_after"])] = min(target, p.cycle_end)
+        boundary = rng.choice(p.batches)
+        t = rng.choice([p.cycle_start, boundary.cutoff, boundary.cutoff + 1, boundary.start])
+        r[rng.choice(["depart_after", "return_after"])] = min(t, p.cycle_end)
     elif operator == "e1_delivery":
-        b = rng.choice(p.batches)
-        rows = state["deliveries"][b.id]
+        rows = proposed["deliveries"][rng.choice(p.batches).id]
         nonempty = [r for r in rows if r]
         if nonempty:
             source = rng.choice(nonempty)
             site = source.pop(rng.randrange(len(source)))
-            destination = rng.choice(rows)
-            destination.insert(rng.randrange(len(destination) + 1), site)
+            target = rng.choice(rows)
+            target.insert(rng.randrange(len(target) + 1), site)
     elif operator == "e1_pickup":
         b = rng.choice(p.batches)
-        rng.shuffle(state["pickup_order"][b.id])
-        if problem.satellites:
-            s = rng.choice(problem.satellites)
-            state["pickup_vehicle"][b.id][s] = rng.randrange(f.e1_count)
+        rng.shuffle(proposed["pickup_order"][b.id])
+        proposed["pickup_vehicle"][b.id][rng.choice(problem.satellites)] = rng.randrange(f.e1_count)
     elif operator == "reverse" and routes:
         r = rng.choice(routes)
         if len(r["tasks"]) >= 2:
             a, b = sorted(rng.sample(range(len(r["tasks"])), 2))
             r["tasks"][a : b + 1] = reversed(r["tasks"][a : b + 1])
-    return state
+    return proposed
 
 
-def move_multibatch_route(problem, original, rng, operator):
-    state = clone_state(original)
-    p, f = problem.operating_policy, problem.fleet
-    routes = state["e2"]
-    if operator in ("relocate", "pair") and routes:
-        chosen = rng.choice(routes)
-        oid, kind = rng.choice(chosen["tasks"])
-        items = [(oid, k) for k in problem.task_kinds] if operator == "pair" else [(oid, kind)]
-        for r in routes:
-            r["tasks"] = [t for t in r["tasks"] if t not in items]
-        routes[:] = [r for r in routes if r["tasks"]]
-        o = problem.order_map[oid]
-        destinations = [r for r in routes if r["satellite"] == o.satellite]
-        if any(k == "d" for _, k in items):
-            destinations = [
-                r
-                for r in destinations
-                if all(k != "d" or problem.order_map[i].batch == o.batch for i, k in r["tasks"])
-            ]
-        if not destinations or rng.random() < 0.15:
-            target = dict(
-                satellite=o.satellite, vehicle=rng.randrange(f.e2_per_sat_count), tasks=[]
-            )
-            routes.append(target)
-        else:
-            target = rng.choice(destinations)
-        where = rng.randrange(len(target["tasks"]) + 1)
-        target["tasks"][where:where] = items
-    elif operator == "split_merge" and routes:
-        source = rng.choice(routes)
-        if len(source["tasks"]) > 1 and rng.random() < 0.5:
-            index = rng.randrange(1, len(source["tasks"]))
-            target = dict(
-                satellite=source["satellite"],
-                vehicle=rng.randrange(f.e2_per_sat_count),
-                tasks=source["tasks"][index:],
-            )
-            source["tasks"] = source["tasks"][:index]
-            routes.insert(routes.index(source) + 1, target)
-        else:
-            others = [
-                r for r in routes if r is not source and r["satellite"] == source["satellite"]
-            ]
-            if others:
-                other = rng.choice(others)
-                source["tasks"] += other["tasks"]
-                routes.remove(other)
-    elif operator == "vehicle" and routes:
-        if rng.random() < 0.5:
-            rng.choice(routes)["vehicle"] = rng.randrange(f.e2_per_sat_count)
-        elif len(routes) > 1:
-            a, b = rng.sample(range(len(routes)), 2)
-            routes[a], routes[b] = routes[b], routes[a]
-    elif operator == "cutoff" and routes:
-        r = rng.choice(routes)
-        boundary = rng.choice(p.batches).cutoff
-        target = rng.choice(
-            [p.cycle_start, max(p.cycle_start, boundary - 1), boundary, boundary + 1]
+def _local_cost_scorer(problem, route, goods, ready, *, supply_aware=False):
+    """Insertion surrogate; only complete audited cost ranks final solutions."""
+    score, end = _route_score(problem, route, goods, ready, supply_aware=supply_aware)
+    ids = (
+        [route["satellite"]]
+        + [problem.order_map[o].customer for o, _ in route["tasks"]]
+        + [route["satellite"]]
+    )
+    distance = sum(problem.distance(a, b) for a, b in zip(ids, ids[1:]))
+    delivered = [problem.order_map[o].batch for o, k in route["tasks"] if k == "d"]
+    start = max(problem.operating_policy.cycle_start, ready, route.get("depart_after", 0))
+    if delivered:
+        start = (
+            max(start, max(goods[route["satellite"], b] for b in delivered))
+            + problem.operating_policy.e2_dispatch_prep_time
         )
-        r[rng.choice(["depart_after", "return_after"])] = min(target, p.cycle_end)
-    elif operator == "e1_delivery":
-        b = rng.choice(p.batches)
-        rows = state["deliveries"][b.id]
-        nonempty = [r for r in rows if r]
-        if nonempty:
-            source = rng.choice(nonempty)
-            site = source.pop(rng.randrange(len(source)))
-            destination = rng.choice(rows)
-            destination.insert(rng.randrange(len(destination) + 1), site)
-    elif operator == "e1_pickup":
-        b = rng.choice(p.batches)
-        rng.shuffle(state["pickup_order"][b.id])
-        if problem.satellites:
-            s = rng.choice(problem.satellites)
-            state["pickup_vehicle"][b.id][s] = rng.randrange(f.e1_count)
-    elif operator == "reverse" and routes:
-        r = rng.choice(routes)
-        if len(r["tasks"]) >= 2:
-            a, b = sorted(rng.sample(range(len(r["tasks"])), 2))
-            r["tasks"][a : b + 1] = reversed(r["tasks"][a : b + 1])
-    return state
+    rates = problem._joint_cost_rates
+    return (
+        distance * rates["distance_scale_to_km"] * rates["e2_distance_cost_per_km"]
+        + problem.operating_policy.minutes(
+            max(0, end - start)
+            + (problem.operating_policy.e2_dispatch_prep_time if delivered else 0)
+        )
+        * rates["e2_work_cost_per_minute"]
+        + rates["e2_trip_cost"]
+        + max(0, score - distance)
+    ), end

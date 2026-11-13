@@ -77,7 +77,9 @@ def main(argv=None):
     if args.iterations < 0 or any(s < 0 or s > 2_000_000_000 for s in args.seeds):
         parser.error('Invalid iterations or seed')
     cfg, fleet = load_routing_case(args.case)
-    if len(MultiBatchPolicy.from_config(fleet['operating_policy']).batches) != 1:
+    comparison_policy = (load_json(cfg['legacy_operating_policy']) if cfg.get('legacy_operating_policy')
+                         else fleet['operating_policy'])
+    if len(MultiBatchPolicy.from_config(comparison_policy).batches) != 1:
         raise ValueError('Four-model comparison requires B=1')
     parameters = load_json(args.economic_config)
     source = resolve_project_path(args.case).resolve()
@@ -86,9 +88,14 @@ def main(argv=None):
     variants = []
     for model in range(1, 5):
         config = deepcopy(cfg)
-        config.update(model=model, alns_iter=args.iterations, save_plots=False)
+        # The four-model economics comparison requires the same batch calendar.
+        config.update(model=model, alns_iter=args.iterations, save_plots=False, no_work_window=False)
+        if config.get('legacy_operating_policy'):
+            config['operating_policy'] = config['legacy_operating_policy']
+            policy_path = resolve_project_path(config['operating_policy']).resolve()
+            hashes[str(policy_path)] = hashlib.sha256(policy_path.read_bytes()).hexdigest()
         variants.append(dict(config=config, _source_hashes=hashes, model=model))
-    out = resolve_project_path(args.output) if args.output else ROOT/'output/experiments/single_batch_comparison_v1'/datetime.now().strftime('%Y%m%dT%H%M%S_%f')
+    out = resolve_project_path(args.output) if args.output else ROOT/'output/current/single_batch_comparison'/datetime.now().strftime('%Y%m%dT%H%M%S_%f')
     if out.exists() and any(out.iterdir()):
         raise ValueError(f'Refusing to overwrite nonempty output directory: {out}')
     out.mkdir(parents=True, exist_ok=True)

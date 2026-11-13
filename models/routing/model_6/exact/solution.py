@@ -1,54 +1,49 @@
-"""Decode joint decisions through the existing independently audited projection."""
-from models.common.cycle.joint import lift_result
-from models.common.cycle.state import empty_result
+"""Extract MILP visits, preserving grouped handling and physical vehicle IDs."""
+from models.common.no_batch.instance import VERSION
 
 
-def extract_solution(problem, m, ctx, info):
-    """Extract routes, allocation, pool and calendar; preserve projection audit."""
-    import gurobipy as gp
-
-    def integral(v):
-        value=v if isinstance(v,int) else v.getValue() if isinstance(v,gp.LinExpr) else v.X
-        if abs(value-round(value))>1e-4:
-            raise RuntimeError(f'Nonintegral M6 schedule or quantity: {value}')
-        return int(round(value))
-
-    assignment={oid:bid for (oid,bid),v in ctx['assignments'].items() if v.X>.5}
-    pool=integral(ctx['pool'])
-    cutoffs={bid:integral(value) for bid,value in ctx['cutoffs'].items()}
-    selected_problem = problem
-    if getattr(problem, 'variable_calendar', False):
-        boundaries = [integral(ctx['batch_starts'][b.id]) for b in problem.operating_policy.batches]
-        boundaries.append(problem.operating_policy.cycle_end)
-        selected_problem = problem.with_boundaries(boundaries)
-        info['proof_scope'] = 'variable_boundaries_independent_cutoffs_joint_cost_integer_time_MILP'
-    fixed=selected_problem.project(assignment,pool,cutoffs)
-    raw=empty_result(fixed,'exact')
-    raw['info']={**info,'objective':None}
-    for layer in ('e1','e2'):
-        for r in ctx[layer]:
-            if r['used'].X<.5:
+def extract_solution(context, x):
+    problem = context['problem']
+    offset = problem.operating_policy.cycle_start
+    def time(var):
+        value = var.value(x)
+        if abs(value-round(value)) > 1e-4:
+            raise ValueError('Nonintegral solver time')
+        return int(round(value))+offset
+    result = dict(schema_version=3, model=6, policy_version=VERSION, batch_mode='no_batch',
+                  time_unit='ticks', e1_trips=[], e2_trips=[])
+    for layer, routes in context['routes'].items():
+        for r in routes:
+            if r['used'].value(x) < .5:
                 continue
-            following={a:b for (a,b),v in r['x'].items() if v.X>.5}
-            order,cursor=[],-1
-            while following.get(cursor,-2)!=-2:
-                cursor=following[cursor]
-                if cursor in order:
-                    raise RuntimeError('Cycle in M6 incumbent')
-                order.append(cursor)
-            if set(order)!={i for i,v in r['visit'].items() if v.X>.5}:
-                raise RuntimeError('Disconnected M6 incumbent')
-            trip=dict(trip_id=r['label'],vehicle_id=r['vehicle'],departure=integral(r['start']),
-                      return_complete=integral(r['end']),events=[])
-            if layer=='e1':
-                trip['batch_id']=r['batch'].id
-            else:
-                trip.update(satellite_id=r['satellite'],trip_index=r['slot'])
-            for i in order:
-                n=r['nodes'][i]
-                event=dict(kind=n['kind'],start=integral(r['times'][i]),quantity=integral(n['quantity']))
-                event['site_id' if layer=='e1' else 'order_id']=n['site'] if layer=='e1' else n['order'].id
-                trip['events'].append(event)
-            raw[layer+'_trips'].append(trip)
-    result=lift_result(selected_problem,raw,assignment,pool,'exact',cutoffs)
+            first = [a for a,v in r['first'].items() if v.value(x) > .5]
+            if len(first) != 1:
+                raise ValueError('Invalid route start')
+            a, sequence = first[0], []
+            while True:
+                if a in sequence:
+                    raise ValueError('MILP route subtour')
+                sequence.append(a)
+                if r['last'][a].value(x) > .5:
+                    break
+                following = [b for (left,b),v in r['arcs'].items() if left == a and v.value(x) > .5]
+                if len(following) != 1:
+                    raise ValueError('Invalid MILP arc')
+                a = following[0]
+            visits = []
+            for oid, kind in sequence:
+                start = time(context['times'][layer][oid,kind])
+                if layer == 'e1':
+                    site = problem.order_map[oid].satellite
+                    if visits and (visits[-1]['site_id'],visits[-1]['kind'],visits[-1]['start']) == (site,kind,start):
+                        visits[-1]['order_ids'].append(oid); visits[-1]['quantity'] += 1
+                    else:
+                        visits.append(dict(site_id=site, kind=kind, start=start, order_ids=[oid], quantity=1))
+                else:
+                    visits.append(dict(order_id=oid, kind=kind, start=start))
+            vehicle = next(i for i,v in enumerate(r['vehicle']) if v.value(x) > .5)
+            trip = dict(trip_id=r['label'], vehicle_id=vehicle, loading_start=time(r['start']),
+                        departure=time(r['departure']), return_complete=time(r['end']), events=visits)
+            if layer == 'e2': trip['satellite_id'] = r['base']
+            result[layer+'_trips'].append(trip)
     return result

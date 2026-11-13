@@ -20,7 +20,9 @@ class SingleBatchRouteScorer:
             for kind in problem.task_kinds:
                 _, weight, volume = problem.task(order.id, kind)
                 window = order.delivery_window if kind == 'd' else order.pickup_window
-                due = min(window[1], self.batch.cutoff-order.service_time) if kind == 'd' else window[1]
+                due = window[1]
+                if kind == 'd' and self.batch.cutoff is not None:
+                    due = min(due, self.batch.cutoff-order.service_time)
                 self.tasks[order.id, kind] = (order, weight, volume, kind, window[0], due)
         # Bounded and context-local. Distances still come through the problem's
         # API, supporting directed/nonmetric matrices and custom travel data.
@@ -69,7 +71,7 @@ class SingleBatchRouteScorer:
         completed = max(current+travel_to(previous, site)+p.e2_return_unload_time,
                         route.get('return_after', p.cycle_start))
         late += max(0, completed+p.e2_turnaround_time-p.cycle_end)
-        if any(t[3] == 'p' for t in tasks):
+        if self.batch.cutoff is not None and any(t[3] == 'p' for t in tasks):
             late += max(0, completed-self.batch.cutoff)
         distance += distance_to(previous, site)
         return distance+1e6*(load_penalty+0)+p.minutes(late)*1e4, completed
@@ -148,6 +150,7 @@ class _PickupInsertions:
             load_penalty += max(0, volume-volume_cap)/volume_scale
         completed = max(current+travel_to(previous, self.site)+p.e2_return_unload_time, self.return_after)
         late += max(0, completed+p.e2_turnaround_time-p.cycle_end)
-        late += max(0, completed-scorer.batch.cutoff)
+        if scorer.batch.cutoff is not None:
+            late += max(0, completed-scorer.batch.cutoff)
         distance += distance_to(previous, self.site)
         return distance+1e6*(load_penalty+0)+p.minutes(late)*1e4, completed

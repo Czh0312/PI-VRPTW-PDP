@@ -11,6 +11,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 LEGACY_CONFIG_ROOT = PROJECT_ROOT / 'archive/config/20261007_before_classification'
 LEGACY_DATA_ROOT = PROJECT_ROOT / 'archive/datasets/legacy_20261015/data'
 RETIRED_CASE_ROOT = PROJECT_ROOT / 'archive/datasets/retired_20261024'
+PRE_RENUMBERING_ROOT = PROJECT_ROOT / 'archive/datasets/pre_renumbering_20261113'
+RUN_HISTORY = PROJECT_ROOT / 'output/history/pre_renumbering_20261113'
 
 
 def resolve_project_path(path: str | Path) -> Path:
@@ -28,9 +30,21 @@ def resolve_project_path(path: str | Path) -> Path:
             pass
         else:
             if relative.parts and relative.parts[0] in ('data', 'config'):
+                archived = PRE_RENUMBERING_ROOT / relative
+                if archived.exists():
+                    return archived
                 retired = RETIRED_CASE_ROOT / relative
                 if retired.exists():
                     return retired
+            if relative.parts[:3] == ('output', 'single_runs', 'model10'):
+                archived_run = RUN_HISTORY.joinpath(*relative.parts[2:])
+                if archived_run.exists():
+                    return archived_run
+            if relative.parts[:2] in (('output', 'experiments'), ('output', 'reports'),
+                                      ('output', 'visualizations')):
+                archived_run = RUN_HISTORY.joinpath('local_20261031', *relative.parts[1:])
+                if archived_run.exists():
+                    return archived_run
         try:
             relative = candidate.resolve().relative_to(PROJECT_ROOT / 'config')
         except ValueError:
@@ -117,10 +131,6 @@ def load_routing_case(path: str | Path, *, use_pool_config=True) -> tuple[dict[s
 
     algorithm = load_json(case["algorithm_config"]) if case.get("algorithm_config") else {}
     run_config = {**algorithm, **case}
-    # Old distance-only inputs have no economic contract. Mark that diagnostic
-    # explicitly when loading them; new M5 inputs must declare their prices.
-    if case['model'] == 5 and not run_config.get('economic_config') and 'objective_mode' not in run_config:
-        run_config['objective_mode'] = 'distance'
     fleet_config = load_json(case["routing_config"])
     if "operating_policy" in case:
         policy = case["operating_policy"]
@@ -130,16 +140,15 @@ def load_routing_case(path: str | Path, *, use_pool_config=True) -> tuple[dict[s
     if version in ('multi_batch_cutoff_v1', 'no_batch_container_cycle_v1'):
         if case.get('schema_version') != 2 or not case.get('orders'):
             raise ValueError('Multibatch cases require schema_version=2 and orders')
-        if version == 'no_batch_container_cycle_v1' and case['model'] != 10:
-            raise ValueError('The no-batch policy requires model 10')
+        if version == 'no_batch_container_cycle_v1' and case['model'] != 6:
+            raise ValueError('The no-batch policy requires model 6')
     elif case.get('schema_version', 1) != 1 or case.get('orders'):
         raise ValueError('schema_version=2/orders requires multi_batch_cutoff_v1')
-    fixed_pool = case['model'] not in (5, 6, 7, 8, 9, 10) or (
-        case['model'] == 5 and run_config.get('objective_mode') == 'distance')
+    fixed_pool = case['model'] in (1, 2, 3, 4)
     if version == 'multi_batch_cutoff_v1' and use_pool_config and fixed_pool:
         from .container_pools import apply_pool_config
         run_config, fleet_config = apply_pool_config(run_config, fleet_config)
-    elif 'container_pool_size' in run_config and case['model'] != 10:
+    elif 'container_pool_size' in run_config and case['model'] != 6:
         run_config, fleet_config = apply_container_pool_size(
             run_config, fleet_config, run_config['container_pool_size'])
     return run_config, fleet_config

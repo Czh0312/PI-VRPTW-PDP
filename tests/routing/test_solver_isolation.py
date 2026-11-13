@@ -44,15 +44,15 @@ if method == 'shared':
     assert not any(name.startswith('models.routing.model_') for name in sys.modules)
 else:
     from models.routing.service import solve_routing
-    if number <= 5:
-        case = 'config/experiments/examples/multibatch_demo.json' if number == 5 else 'config/experiments/examples/single_batch_demo.json'
-        config, fleet = load_routing_case(case)
-        problem = load_instance({**config, 'model': number}, fleet)
-    elif number == 6:
-        from tests.routing.test_model6_uniform import uniform_fixture
-        problem = uniform_fixture()
+    if number < 5:
+        from tests.routing.test_single_batch_comparison import problem as tiny_problem
+        problem = tiny_problem(number)
+        if number in (3, 4):
+            from models.common.cycle import MultiBatchInstance
+            problem = MultiBatchInstance(problem.network, problem.orders, problem.operating_policy,
+                                         model=number, no_work_window=True)
     else:
-        from tests.routing.test_model78_calendar import calendar_fixture
+        from tests.routing.test_model5_calendar import calendar_fixture
         problem = calendar_fixture(number)
     result = solve_routing(model=number, method=method, problem=problem,
                            exact_time=10, alns_time=.3, alns_iter=200, seed=42)
@@ -60,7 +60,7 @@ else:
     own = f'models.routing.model_{number}.{method}'
     assert result['model_module'] == own
     assert result['solver_module'].startswith(own+'.')
-    assert audit_solution(problem, result)['valid']
+    assert audit_solution(problem, result)['valid'], result
     assert result['audit']['periodic_replay']['valid']
     if method == 'alns':
         assert not result['info']['proven_optimal'] and result['info']['mip_gap'] is None
@@ -78,7 +78,7 @@ def test_solver_runs_without_importing_the_other_algorithm(method):
             model.dispose()
         except gp.GurobiError as exc:
             pytest.skip(f'Gurobi unavailable: {exc}')
-    for number in ([0] if method == 'shared' else range(1, 9)):
+    for number in ([0] if method == 'shared' else range(1, 6)):
         completed = subprocess.run([sys.executable, '-c', SCRIPT, method, str(number)], cwd=ROOT,
                                    capture_output=True, text=True, timeout=60)
         assert completed.returncode == 0, completed.stdout+'\n'+completed.stderr

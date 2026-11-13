@@ -1,4 +1,4 @@
-"""Positive-integer batch domains and a common per-count clock for M6--M8."""
+"""Positive-integer batch domains and the per-count clock for Model 5."""
 from dataclasses import replace
 import math
 
@@ -27,10 +27,9 @@ def batch_count_domain(options, duration, minimum):
 def equal_batch_clock(problem, count):
     """Use the smallest refinement that can represent an equal K partition.
 
-    M8 uses this same grid while leaving its boundaries free, so equal M6/M7
-    calendars remain representable. Physical minutes and already-rounded input
-    travel times are preserved. Only this K's clock is refined, rather than an
-    LCM across all counts. Results serialize the subdivision for replay.
+    This keeps equal partitions feasible alongside unequal partitions.
+    Physical minutes and rounded input travel times are preserved.
+    Results record each count's clock subdivision for replay.
     """
     p = problem.operating_policy
     factor = count // math.gcd(problem.cycle_duration, count)
@@ -39,6 +38,8 @@ def equal_batch_clock(problem, count):
     fields = ('cycle_start', 'cycle_end', 'cleaning_duration', 'e1_load_time',
               'e2_dispatch_prep_time', 'e2_return_unload_time',
               'depot_return_unload_time', 'e1_turnaround_time', 'e2_turnaround_time')
+    if p.repeat_interval is not None:
+        fields += ('repeat_interval',)
     policy = replace(p, **{key: getattr(p, key) * factor for key in fields},
                      time_tick_subdivision=p.time_tick_subdivision * factor,
                      batches=tuple(replace(b, start=b.start * factor,

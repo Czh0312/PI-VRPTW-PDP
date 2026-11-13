@@ -27,11 +27,12 @@ class CycleEvaluator:
             raise ValueError('Cycle evaluator belongs to one problem instance')
         return evaluate(problem, state, _memo=self)
 
-    def returns(self, state, quantities):
+    def returns(self, state, quantities, handoffs=None):
         key = tuple((b.id, tuple(map(tuple, state['deliveries'][b.id])),
                      tuple(state['pickup_order'][b.id]),
                      tuple(sorted(state['pickup_vehicle'][b.id].items())),
-                     tuple(sorted(quantities[b.id].items())))
+                     tuple(sorted(quantities[b.id].items())),
+                     tuple(sorted(handoffs[b.id].items())) if handoffs is not None else ())
                     for b in self.problem.operating_policy.batches)
         if key in self.entries:
             self.hits += 1
@@ -39,7 +40,7 @@ class CycleEvaluator:
             # Results are caller-owned; never expose mutable cached schedules.
             return _copy_schedule(self.entries[key])
         self.misses += 1
-        result = _e1_returns(self.problem, state, quantities)
+        result = _e1_returns(self.problem, state, quantities, handoffs)
         self.entries[key] = _copy_schedule(result)
         if len(self.entries) > self.capacity:
             self.entries.popitem(last=False)

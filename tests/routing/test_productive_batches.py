@@ -15,11 +15,10 @@ from models.common.cycle.instance import Order
 from models.common.cycle.joint import JointBatchInstance, lift_result
 from models.common.cycle.policy import MultiBatchPolicy
 from models.common.cycle.state import empty_result
-from models.common.cycle.uniform import UniformCycleInstance
 from models.common.domain.instance import ProblemInstance
 from models.common.domain.node import Customer, Depot, Satellite
 from models.routing.service import solve_routing
-from tests.routing.test_model6_joint import exact_available
+from tests.routing.calendar_fixtures import exact_available
 from tools.data.build_model6_demo_suite import synthetic_profile
 
 
@@ -44,15 +43,12 @@ def productive_fixture(number, *, count=2, orders=2, two_sites=False):
         e2_max_trips_per_vehicle=4, time_tick_seconds=60,
     ))
     options = dict(batch_count_candidates=[count])
-    if number == 6:
-        return UniformCycleInstance(ProblemInstance(nodes, fleet), rows, policy,
-                                    dict(options, schedule_mode='uniform_cycle'), synthetic_profile())
     return CalendarCycleInstance(ProblemInstance(nodes, fleet), rows, policy,
                                  options, synthetic_profile(), model=number)
 
 
 def fixed_child(problem, count=2):
-    return problem.for_count(count) if problem.model_number == 6 else problem.fixed_calendar(count)
+    return problem.fixed_calendar(count)
 
 
 def explicit_plan(child, assignment, pickup_times, *, pool=None):
@@ -87,7 +83,7 @@ def explicit_plan(child, assignment, pickup_times, *, pool=None):
     return fixed, raw
 
 
-@pytest.mark.parametrize('number', [6, 7, 8])
+@pytest.mark.parametrize('number', [5])
 def test_independent_audit_rejects_a_completely_idle_calendar_batch(number):
     child = fixed_child(productive_fixture(number))
     assignment = {'o0': 'b2', 'o1': 'b2'}
@@ -99,7 +95,7 @@ def test_independent_audit_rejects_a_completely_idle_calendar_batch(number):
     assert lifted['info']['status'] == 'AUDIT_FAILED'
 
 
-@pytest.mark.parametrize('number', [6, 7, 8])
+@pytest.mark.parametrize('number', [5])
 def test_delivery_without_any_recovery_does_not_count_as_a_productive_batch(number):
     child = fixed_child(productive_fixture(number))
     fixed, raw = explicit_plan(child, {'o0': 'b1', 'o1': 'b2'}, {'o0': 80, 'o1': 85})
@@ -108,7 +104,7 @@ def test_delivery_without_any_recovery_does_not_count_as_a_productive_batch(numb
     assert audited['errors'] == [dict(code='EMPTY_BATCH_RECOVERY', batch='b1')]
 
 
-@pytest.mark.parametrize('number', [6, 7, 8])
+@pytest.mark.parametrize('number', [5])
 def test_decoder_penalizes_empty_delivery_and_recovery_batches(number):
     child = fixed_child(productive_fixture(number))
     fixed, _ = explicit_plan(child, {'o0': 'b2', 'o1': 'b2'}, {'o0': 80, 'o1': 85})
@@ -117,7 +113,7 @@ def test_decoder_penalizes_empty_delivery_and_recovery_batches(number):
     assert 'EMPTY_BATCH_DELIVERY' in issues and 'EMPTY_BATCH_RECOVERY' in issues
 
 
-@pytest.mark.parametrize('number', [6, 7, 8])
+@pytest.mark.parametrize('number', [5])
 def test_cross_batch_recovery_is_allowed_when_every_batch_performs_both_tasks(number):
     child = fixed_child(productive_fixture(number, orders=3))
     assignment = {'o0': 'b1', 'o1': 'b1', 'o2': 'b2'}
@@ -129,7 +125,7 @@ def test_cross_batch_recovery_is_allowed_when_every_batch_performs_both_tasks(nu
     assert [r['demand'] for r in audited['clean_stock']] == [2, 1]
 
 
-@pytest.mark.parametrize('number', [6, 7, 8])
+@pytest.mark.parametrize('number', [5])
 def test_cutoff_equality_and_next_cutoff_assignment_are_preserved(number):
     child = fixed_child(productive_fixture(number, orders=3))
     assignment = {'o0': 'b1', 'o1': 'b1', 'o2': 'b2'}
@@ -139,7 +135,7 @@ def test_cutoff_equality_and_next_cutoff_assignment_are_preserved(number):
     assert [r['quantity'] for r in audited['cutoff_snapshots']] == [1, 2]
 
 
-@pytest.mark.parametrize('number', [6, 7, 8])
+@pytest.mark.parametrize('number', [5])
 def test_covering_assignment_matches_independent_exhaustive_domain_check(number):
     cover = import_module(f'models.routing.model_{number}.alns.construction').cover_delivery_batches
     batches = ('b1', 'b2', 'b3')
@@ -155,7 +151,7 @@ def test_covering_assignment_matches_independent_exhaustive_domain_check(number)
             assert all(bid in legal[oid] for oid, bid in repaired.items())
 
 
-@pytest.mark.parametrize('number', [6, 7, 8])
+@pytest.mark.parametrize('number', [5])
 def test_last_order_can_swap_batches_without_creating_an_empty_batch(number):
     child = fixed_child(productive_fixture(number))
     evaluator = import_module(f'models.routing.model_{number}.alns.evaluator').JointEvaluator(child)
@@ -168,7 +164,7 @@ def test_last_order_can_swap_batches_without_creating_an_empty_batch(number):
     assert candidate['audit']['valid']
 
 
-@pytest.mark.parametrize('number', [6, 7, 8])
+@pytest.mark.parametrize('number', [5])
 @pytest.mark.parametrize('count', [1, 2])
 def test_alns_returns_only_productive_batches(number, count):
     problem = productive_fixture(number, count=count)
@@ -179,7 +175,7 @@ def test_alns_returns_only_productive_batches(number, count):
     assert audit_solution(problem, result)['valid']
 
 
-@pytest.mark.parametrize('number', [6, 7, 8])
+@pytest.mark.parametrize('number', [5])
 @pytest.mark.parametrize('method', ['alns', 'exact'])
 def test_one_order_cannot_populate_two_actual_batches(number, method, request):
     if method == 'exact':
@@ -191,7 +187,7 @@ def test_one_order_cannot_populate_two_actual_batches(number, method, request):
     assert result['info']['objective'] is None
 
 
-@pytest.mark.parametrize('number', [6, 7, 8])
+@pytest.mark.parametrize('number', [5])
 def test_multiple_satellites_in_one_round_are_counted_once(number):
     problem = productive_fixture(number, count=1, two_sites=True)
     result = solve_routing(model=number, method='alns', problem=problem, alns_time=.2, alns_iter=20)
@@ -203,7 +199,7 @@ def test_multiple_satellites_in_one_round_are_counted_once(number):
     assert not audit_solution(problem, forged)['valid']
 
 
-@pytest.mark.parametrize('number', [6, 7, 8])
+@pytest.mark.parametrize('number', [5])
 def test_exact_solver_enforces_positive_delivery_and_recovery(number, exact_available):
     problem = productive_fixture(number)
     result = solve_routing(model=number, method='exact', problem=problem, exact_time=5)
@@ -212,14 +208,14 @@ def test_exact_solver_enforces_positive_delivery_and_recovery(number, exact_avai
     assert audit_solution(problem, result)['valid']
 
 
-@pytest.mark.parametrize('number', [6, 7, 8])
+@pytest.mark.parametrize('number', [5])
 def test_exact_solver_rejects_a_delivery_batch_with_no_possible_return(number, exact_available):
     problem = productive_fixture(number)
     problem.orders = tuple(replace(o, pickup_window=(80, 90)) for o in problem.orders)
     problem.order_map = {o.id: o for o in problem.orders}
     # Rebuild rather than alter a cached child or physical travel data.
-    factory = UniformCycleInstance if number == 6 else CalendarCycleInstance
-    kwargs = {} if number == 6 else dict(model=number)
+    factory = CalendarCycleInstance
+    kwargs = dict(model=number)
     problem = factory(problem.network, problem.orders, problem.operating_policy,
                       problem.options, problem.cost_profile.config, **kwargs)
     child = fixed_child(problem)

@@ -1,85 +1,47 @@
-"""Public numbered folders must enforce and dispatch the user's model design."""
-from copy import deepcopy
+"""Public solver numbers, case routing, and the boundary with historical cases."""
 from importlib import import_module
 
 import pytest
 
+from models.common.cycle import load_instance
+from models.common.no_batch import load_instance as load_no_batch
 from models.routing.catalog import MODEL_SPECS
 from models.routing.service import solve_routing
-from models.common.cycle.audit import audit_solution
-from models.common.cycle.migration import migrate_former_m3_result
-from models.common.cycle import MultiBatchInstance, load_instance
-from tools.configuration.loader import load_routing_case
-from tests.routing.test_multibatch_cycle import fixture, hand_solution
-from tests.routing.test_single_batch_comparison import problem
+from tools.configuration.loader import PROJECT_ROOT, load_routing_case
 
 
-@pytest.mark.parametrize('number', [1, 2, 3, 4, 5])
+def test_catalog_matches_active_package_directories():
+    packages = {path.name for path in (PROJECT_ROOT/'models/routing').glob('model_*') if path.is_dir()}
+    assert packages == {f'model_{i}' for i in range(1, 7)}
+    assert tuple(MODEL_SPECS) == tuple(range(1, 7))
+
+
+@pytest.mark.parametrize('number', range(1, 7))
 def test_dispatch_uses_each_numbered_public_entry(monkeypatch, number):
-    instance = fixture() if number == 5 else problem(number)
-    mode = 'multi_batch' if number == 5 else 'single_batch'
-    called = []
-    for method in ('alns', 'exact'):
-        path = MODEL_SPECS[number].module_path(mode, method)
-        assert path == f'models.routing.model_{number}.{method}'
-        module = import_module(path)
-        assert module.MODEL_NUMBER == number and module.BATCH_MODE == mode
-        assert import_module(path+'.solver')
-        def spy(p, **kwargs):
-            called.append(p)
-            return {'entry': path}
-        monkeypatch.setattr(module, 'solve_'+method, spy)
-        assert solve_routing(model=number, method=method, problem=instance) == {'entry': path}
-    assert called == [instance, instance]
+    config, fleet = load_routing_case(f'data/benchmark27_models_1_6_v1/model_{number}/small/S01/case.json')
+    problem = (load_no_batch if number == 6 else load_instance)(config, fleet)
+    for method in ('exact', 'alns'):
+        module = import_module(f'models.routing.model_{number}.{method}')
+        sentinel = object()
+        monkeypatch.setattr(module, f'solve_{method}', lambda *args, **kwargs: sentinel)
+        assert solve_routing(model=number, method=method, problem=problem) is sentinel
 
 
-@pytest.mark.parametrize('number', [1, 2, 3, 4, 5])
-def test_real_entry_emits_its_model_identity(number):
-    instance = fixture() if number == 5 else problem(number)
-    module = import_module(f'models.routing.model_{number}.alns')
-    result = module.solve_alns(instance, max_time=.1, max_iterations=30)
-    assert result['model'] == number
-    assert result['model_module'] == module.__name__
-    assert result['batch_mode'] == module.BATCH_MODE
-    assert result['audit']['valid'] and result['audit']['periodic_replay']['valid']
+@pytest.mark.parametrize('number', [7, 8, 9, 10])
+def test_retired_numbers_are_rejected(number):
+    with pytest.raises(ValueError, match='1–6'):
+        solve_routing(model=number, method='alns', problem=None)
 
 
-def test_single_and_multi_entries_cannot_be_interchanged():
-    single, multi = fixture(one_batch=True), fixture()
-    m3, m5 = (import_module(f'models.routing.model_{n}.alns') for n in (3, 5))
-    with pytest.raises(ValueError, match='M3 entry'):
-        m3.solve_alns(multi)
-    with pytest.raises(ValueError, match='M5 entry'):
-        m5.solve_alns(single)
-    with pytest.raises(ValueError, match='Model 5'):
-        MultiBatchInstance(multi.network, multi.orders, multi.operating_policy, model=3)
-    with pytest.raises(ValueError, match='Model 5'):
-        MultiBatchInstance(single.network, single.orders, single.operating_policy, model=5)
-    with pytest.raises(ValueError, match='historical M5 was retired'):
-        from types import SimpleNamespace
-        solve_routing(model=5, method='alns', problem=SimpleNamespace(), allow_baseline=True)
+def test_old_model5_case_requires_its_frozen_source():
+    case = 'data/formal_benchmark27_uniform_7_20_50_v1/model_5/small/S01/case.json'
+    with pytest.raises(ValueError, match='archived solver'):
+        load_instance(*load_routing_case(case))
 
 
-def test_multibatch_default_case_selects_new_model5():
-    cfg, fleet = load_routing_case('config/experiments/examples/multibatch_demo.json')
-    assert cfg['model'] == 5
-    instance = load_instance(cfg, fleet)
-    assert instance.model_number == 5 and instance.reusable and not instance.free_assignment
+def test_old_uniform_model6_case_is_rejected_by_no_batch_cli():
+    from cli.route import main
 
-
-def test_former_m3_output_requires_explicit_audited_migration():
-    instance = fixture()
-    old = hand_solution(instance)
-    old['model'] = 3
-    original = deepcopy(old)
-    assert not audit_solution(instance, old)['valid']
-    updated = migrate_former_m3_result(instance, old)
-    assert updated['model'] == 5 and updated['audit']['valid']
-    assert updated['e1_trips'] == old['e1_trips'] and updated['e2_trips'] == old['e2_trips']
-    assert old == original
-    for changed in ({**old, 'model': 5}, {**old, 'schema_version': 1}, {**old, 'policy_version': 'legacy'}):
-        with pytest.raises(ValueError, match='former M3'):
-            migrate_former_m3_result(instance, changed)
-    old['e1_trips'][0]['events'][1]['quantity'] += 1
-    with pytest.raises(ValueError, match='failed independent audit'):
-        migrate_former_m3_result(instance, old)
+    case = 'data/formal_benchmark27_uniform_7_20_50_v1/model_6/small/S01/case.json'
+    with pytest.raises(ValueError, match='archived solver'):
+        main(['--case', case])

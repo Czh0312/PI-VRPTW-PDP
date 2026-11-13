@@ -13,6 +13,7 @@ def assignment_domains(problem, travel_bounds=None):
     if len(p.batches) != 1:
         raise ValueError('Assignment domains require B=1')
     batch = p.batches[0]
+    cutoff = batch.cutoff
     travel_bounds = travel_bounds or travel_lower_bounds(problem)
     outward, inward = travel_bounds['outward'], travel_bounds['inward']
     grouped = defaultdict(list)
@@ -27,36 +28,43 @@ def assignment_domains(problem, travel_bounds=None):
         errors.append(dict(code='POOL_BELOW_NECESSARY_BOUND', lower_bound=problem.total))
     for customer, orders in sorted(grouped.items()):
         domains[customer] = []
+        loading = (max(o.release_time or batch.start for o in orders)
+                   if cutoff is None else batch.start)
         for site in problem.satellites:
             reasons = set()
             if (sum(o.goods_weight+o.count*f.container_weight for o in orders) > f.e1_weight_cap+1e-6 or
                     sum(o.count*f.container_volume for o in orders) > f.e1_volume_cap+1e-6):
                 reasons.add('UNSPLIT_CUSTOMER_E1_CAPACITY')
-            supply = batch.start+p.e1_load_time+outward[problem.depot][site]+problem.service(site)
-            if supply > batch.cutoff:
+            supply = loading+p.e1_load_time+outward[problem.depot][site]+problem.service(site)
+            if cutoff is not None and supply > cutoff:
                 reasons.add('E1_DELIVERY_DEADLINE')
+            latest_unload = (min(p.cycle_end-p.e2_turnaround_time,
+                                 p.cycle_end-max(p.cleaning_duration, p.e1_turnaround_time)
+                                 - problem.service(site)-outward[site][problem.depot]
+                                 - p.depot_return_unload_time) if cutoff is None else cutoff)
             for o in orders:
                 _, w, v = problem.task(o.id, 'd')
                 if w > f.e2_weight_cap+1e-6 or v > f.e2_volume_cap+1e-6:
                     reasons.add('UNSPLIT_E2_ORDER_CAPACITY')
                 delivered = max(o.delivery_window[0], supply+p.e2_dispatch_prep_time+outward[site][customer])
-                due = min(o.delivery_window[1], batch.cutoff-o.service_time)
+                due = (o.delivery_window[1] if cutoff is None
+                       else min(o.delivery_window[1], cutoff-o.service_time))
                 windows[site, o.id, 'd'] = (delivered, due)
                 if delivered > due:
                     reasons.add('DELIVERY_WINDOW_UNREACHABLE')
                 if problem.reusable:
                     picked = max(o.pickup_window[0], delivered+o.service_time+o.min_use_time)
-                    latest = min(o.pickup_window[1], batch.cutoff-o.service_time-inward[site][customer]-p.e2_return_unload_time)
+                    latest = min(o.pickup_window[1], latest_unload-o.service_time-inward[site][customer]-p.e2_return_unload_time)
                     windows[site, o.id, 'p'] = (picked, latest)
                     if picked > latest:
-                        reasons.add('PICKUP_OR_CUTOFF_UNREACHABLE')
+                        reasons.add('PICKUP_OR_RETURN_UNREACHABLE' if cutoff is None else 'PICKUP_OR_CUTOFF_UNREACHABLE')
                     returned = picked+o.service_time+inward[site][customer]+p.e2_return_unload_time
                 else:
                     returned = delivered+o.service_time+inward[site][customer]+p.e2_return_unload_time
                 if returned+p.e2_turnaround_time > p.cycle_end:
                     reasons.add('E2_TERMINAL_UNREACHABLE')
-            if problem.reusable:
-                returned = batch.cutoff+problem.service(site)+outward[site][problem.depot]+p.depot_return_unload_time
+            if problem.reusable and cutoff is not None:
+                returned = cutoff+problem.service(site)+outward[site][problem.depot]+p.depot_return_unload_time
                 if (returned > batch.end or returned+p.e1_turnaround_time > p.cycle_end
                         or returned+p.cleaning_duration > p.cycle_end):
                     reasons.add('NO_POSSIBLE_CLEAN_RETURN')

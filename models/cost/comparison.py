@@ -1,4 +1,4 @@
-"""Compare distance baselines and directly optimized M3/M5–M8 cost schedules."""
+"""Compare audited Model 3 and Model 5 cost schedules."""
 from __future__ import annotations
 
 from tools.configuration.loader import load_json
@@ -7,10 +7,10 @@ from models.common.cycle.audit import audit_solution
 
 
 def evaluate_comparison_cost(problem, result, parameters, *, audit=None):
-    if problem.model_number not in (3, 5, 6, 7, 8, 9):
-        raise ValueError('Matched joint-cost comparison requires M3 or M5–M9')
+    if problem.model_number not in (3, 5):
+        raise ValueError('Matched joint-cost comparison requires M3 or M5')
     joint = getattr(problem, 'joint_batch', False)
-    optimized = joint or getattr(problem, 'optimize_pool', False)
+    optimized = joint
     cost_optimized = optimized or getattr(problem, 'cost_objective', False)
     profile = JointCostProfile(load_json(parameters) if isinstance(parameters, str) else parameters)
     if cost_optimized and profile.hash != problem.cost_profile.hash:

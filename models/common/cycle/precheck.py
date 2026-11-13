@@ -35,6 +35,7 @@ def travel_lower_bounds(problem):
 
 def check_necessary_conditions(problem, travel_bounds=None):
     p, f = problem.operating_policy, problem.fleet
+    consolidated = p.consolidated_handoff
     from models.common.cycle.availability import fixed_order_availability_errors
     errors, order_bounds = fixed_order_availability_errors(problem), []
     productive = getattr(problem, 'require_productive_batches', False)
@@ -57,8 +58,9 @@ def check_necessary_conditions(problem, travel_bounds=None):
             total_volume += volume
             if weight > f.e1_weight_cap + 1e-6 or volume > f.e1_volume_cap + 1e-6:
                 fail('UNSPLIT_E1_DELIVERY_CAPACITY', satellite_id=satellite, batch_id=batch.id)
-            earliest = batch.start + p.e1_load_time + outward[problem.depot][satellite] + problem.service(satellite)
-            if count and earliest > batch.cutoff:
+            earliest = (problem.e1_loading_start(batch, [satellite]) + p.e1_load_time
+                        + outward[problem.depot][satellite] + problem.service(satellite))
+            if count and not consolidated and earliest > batch.cutoff:
                 fail('E1_DELIVERY_DEADLINE', satellite_id=satellite, batch_id=batch.id,
                      earliest_complete=earliest, deadline=batch.cutoff)
         if (total_weight > f.e1_count * (f.e1_weight_cap + 1e-6)
@@ -72,12 +74,12 @@ def check_necessary_conditions(problem, travel_bounds=None):
             _, weight, volume = problem.task(order.id, kind)
             if weight > f.e2_weight_cap + 1e-6 or volume > f.e2_volume_cap + 1e-6:
                 fail('UNSPLIT_E2_ORDER_CAPACITY', order_id=order.id, kind=kind)
-        supplied = (batch.start + p.e1_load_time + outward[problem.depot][site]
+        supplied = (problem.e1_loading_start(batch, [site]) + p.e1_load_time + outward[problem.depot][site]
                     + problem.service(site) + p.e2_dispatch_prep_time)
         delivered = max(order.delivery_window[0], supplied + outward[site][order.customer])
         picked = max(order.pickup_window[0], delivered + order.service_time + order.min_use_time)
         unloaded = picked + order.service_time + inward[site][order.customer] + p.e2_return_unload_time
-        if len(p.batches) == 1 and delivered+order.service_time > batch.cutoff:
+        if len(p.batches) == 1 and not consolidated and delivered+order.service_time > batch.cutoff:
             fail('DELIVERY_PHASE_UNREACHABLE', order_id=order.id)
         if delivered > order.delivery_window[1]:
             fail('DELIVERY_WINDOW_UNREACHABLE', order_id=order.id, earliest=delivered,
@@ -90,18 +92,19 @@ def check_necessary_conditions(problem, travel_bounds=None):
         if picked > order.pickup_window[1]:
             fail('PICKUP_WINDOW_UNREACHABLE', order_id=order.id, earliest=picked,
                  deadline=order.pickup_window[1])
-        if unloaded > p.batches[-1].cutoff:
+        if not consolidated and unloaded > p.batches[-1].cutoff:
             fail('FINAL_CUTOFF_UNREACHABLE', order_id=order.id, earliest=unloaded,
                  deadline=p.batches[-1].cutoff)
         if unloaded + p.e2_turnaround_time > p.cycle_end:
             fail('E2_TERMINAL_UNREACHABLE', order_id=order.id)
-        # Optimistically place E1 at this satellite at the cutoff. Ignore
-        # competing orders/vehicles; this can only make reuse earlier.
+        # Optimistically place E1 at this satellite when collection is allowed.
+        # Competing orders and vehicles can only delay cleaning.
         releases = []
         for wave in p.batches:
-            if unloaded > wave.cutoff:
+            if not consolidated and unloaded > wave.cutoff:
                 continue
-            depot_return = (wave.cutoff + problem.service(site) + outward[site][problem.depot]
+            handoff = unloaded if consolidated else wave.cutoff
+            depot_return = (handoff + problem.service(site) + outward[site][problem.depot]
                             + p.depot_return_unload_time)
             if (depot_return <= wave.end and depot_return + p.e1_turnaround_time <= p.cycle_end
                     and depot_return + p.cleaning_duration <= p.cycle_end):

@@ -21,8 +21,6 @@ def freeze_schedule_domain(problem, reference, *, fix_assignment=False, fixed_po
         raise ValueError('Fixed-calendar ablation uses standard batch-start loading')
     if getattr(problem, 'calendar_cycle', False):
         child = problem.selected_problem(reference)
-    elif getattr(problem, 'uniform_cycle', False):
-        child = problem.for_count(reference['cycle_batch_count'])
     else:
         child = problem
     cutoffs = child.validated_cutoffs(reference['batch_cutoffs'])

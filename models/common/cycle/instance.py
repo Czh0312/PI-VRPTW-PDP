@@ -30,24 +30,27 @@ class Order:
 
 
 class MultiBatchInstance:
-    def __init__(self, network, orders, policy, model=None, *, _physical_source=None):
+    def __init__(self, network, orders, policy, model=None, *, no_work_window=False, _physical_source=None):
         if _physical_source is not None and (
                 not isinstance(_physical_source,MultiBatchInstance) or _physical_source.network is not network):
             raise ValueError('Physical cache source must be a validated instance of the same network')
         self.network = network
-        self.operating_policy = MultiBatchPolicy.from_config(policy)
+        policy = MultiBatchPolicy.from_config(policy, no_work_window=no_work_window)
         if model is None:
-            model = 3 if len(self.operating_policy.batches) == 1 else 5
-        self.operating_policy.require_model(model)
-        self.model_number = int(model)
-        self.reusable = self.model_number in (3, 4, 5, 6, 7, 8, 9)
-        self.free_assignment = self.model_number in (2, 4, 9)
-        self.task_kinds = ('d', 'p') if self.reusable else ('d',)
+            model = 3 if len(policy.batches) == 1 else 5
         # Direct Python callers can supply an integral float, just as JSON/CSV
         # loaders accept 1.0. Canonicalize it before quantities enter schedules
         # and MILP extraction, which require actual integer container counts.
         self.orders = tuple(o if isinstance(o.count, int) else
                             replace(o, count=integer(o.count, 'container_count', 1)) for o in orders)
+        if no_work_window or policy.consolidated_handoff:
+            policy = policy.for_consolidated_handoff(self.orders)
+        policy.require_model(model)
+        self.operating_policy = policy
+        self.model_number = int(model)
+        self.reusable = self.model_number in (3, 4, 5)
+        self.free_assignment = self.model_number in (2, 4)
+        self.task_kinds = ('d', 'p') if self.reusable else ('d',)
         self.order_map = {o.id: o for o in self.orders}
         self.fleet = network.fleet
         self.satellites = tuple(s.id for s in network.satellites)
@@ -90,8 +93,10 @@ class MultiBatchInstance:
                     raise ValueError(f'{o.id}: invalid time window after rounding')
                 for t in tw:
                     integer(t, 'time window')
-                if tw[0] < p.cycle_start or tw[1] > p.cycle_end:
+                if p.repeat_interval is None and (tw[0] < p.cycle_start or tw[1] > p.cycle_end):
                     raise ValueError(f'{o.id}: time window outside cycle')
+        if p.consolidated_handoff:
+            self._set_site_releases()
         from models.common.cycle.availability import fixed_order_availability_errors
         # Orders and their batch bindings are immutable within an instance;
         # projections construct a new instance. Avoid an extra scan per move.
@@ -138,6 +143,19 @@ class MultiBatchInstance:
             self._service_ticks[key] = self.operating_policy.ticks(raw)
         return self._service_ticks[key]
 
+    def _set_site_releases(self):
+        start = self.operating_policy.cycle_start
+        self.site_release = dict.fromkeys(self.satellites, start)
+        for order in self.orders:
+            self.site_release[order.satellite] = max(
+                self.site_release[order.satellite], order.release_time or start)
+
+    def e1_loading_start(self, batch, sites):
+        """Earliest loading time for a first-echelon trip serving these sites."""
+        if self.operating_policy.consolidated_handoff:
+            return max((self.site_release[site] for site in sites), default=batch.start)
+        return batch.start
+
     def task(self, order_id, kind):
         o = self.order_map[order_id]
         if kind not in self.task_kinds:
@@ -179,7 +197,7 @@ def load_orders(path, policy, *, joint=False):
             raise ValueError('UNBALANCED_ORDER_COUNTS: delivery and pickup counts must match')
         release, allowed = None, None
         if joint and ('release_time' not in row or 'allowed_batch_ids' not in row):
-            raise ValueError('M6 orders require explicit release_time and allowed_batch_ids')
+            raise ValueError('M5 orders require explicit release_time and allowed_batch_ids')
         if 'release_time' in row:
             release = policy.ticks(number('release_time'))
         if 'allowed_batch_ids' in row:
@@ -200,7 +218,10 @@ def load_orders(path, policy, *, joint=False):
 def load_instance(config, fleet_config):
     if config.get('schema_version') != 2 or 'orders' not in config:
         raise ValueError('Multibatch requires schema_version=2 and a separate orders file')
-    policy = MultiBatchPolicy.from_config(fleet_config.get('operating_policy'))
+    model = config['model']
+    no_work_window = model in (3, 4, 5) and config.get('no_work_window', False)
+    policy = MultiBatchPolicy.from_config(fleet_config.get('operating_policy'),
+                                        no_work_window=no_work_window, flexible_calendar=model == 5)
     policy.require_model(config['model'])
     # Validate raw vehicle counts before the legacy FleetConfig casts to int.
     for name in ('E1_vehicle_count', 'vehicles_per_satellite'):
@@ -229,34 +250,23 @@ def load_instance(config, fleet_config):
         raise ValueError('duration_matrix requires distance_matrix')
     network = ProblemInstance(nodes, {k: v for k, v in fleet_config.items() if k != 'operating_policy'},
                               speed=speed, distance_matrix=distance, travel_time_matrix=duration)
-    orders = load_orders(resolve_project_path(config['orders']), policy, joint=config['model'] in (6, 7, 8, 9))
-    if config['model'] in (6, 7, 8, 9):
-        from models.common.cycle.joint import JointBatchInstance
-        from models.common.cycle.uniform import UniformCycleInstance
+    orders = load_orders(resolve_project_path(config['orders']), policy, joint=config['model'] == 5)
+    if config['model'] == 5:
         if not config.get('economic_config'):
-            raise ValueError('M6–M9 require economic_config')
-        options = config.get('joint_batch_options', {})
-        if config['model'] in (7, 8, 9):
-            from models.common.cycle.calendar import CalendarCycleInstance
-            return CalendarCycleInstance(network, orders, policy, options, config['economic_config'], model=config['model'])
-        factory = UniformCycleInstance if options.get('schedule_mode') == 'uniform_cycle' else JointBatchInstance
-        return factory(network, orders, policy, options,
-                                  config['economic_config'])
+            raise ValueError('M5 requires economic_config')
+        if config.get('objective_mode', 'cost') != 'cost' or 'pool_options' in config:
+            raise ValueError('M5 requires flexible-cycle inputs; use the archived solver for old M5 cases')
+        from models.common.cycle.calendar import CalendarCycleInstance
+        return CalendarCycleInstance(network, orders, policy, config.get('joint_batch_options', {}),
+                                     config['economic_config'], model=5, no_work_window=no_work_window)
     if config['model'] == 3:
         if config.get('objective_mode', 'distance') not in ('cost', 'distance'):
             raise ValueError('M3 objective_mode must be cost or distance')
         if config.get('objective_mode') == 'cost':
             if not config.get('economic_config'):
-                raise ValueError('M3 cost objective requires economic_config shared with M5–M8')
+                raise ValueError('M3 cost objective requires economic_config')
             from models.common.cycle.single_batch_cost import SingleBatchCostInstance
-            return SingleBatchCostInstance(network, orders, policy, config['economic_config'])
-    if config['model'] == 5 and config.get('objective_mode', 'cost') not in ('cost', 'distance'):
-        raise ValueError('M5 objective_mode must be cost or historical distance')
-    if config['model'] == 5 and config.get('objective_mode') != 'distance':
-        from models.common.cycle.fixed_pool import FixedBatchPoolInstance
-        if not config.get('economic_config'):
-            raise ValueError('M5 requires economic_config for joint pool/routing cost optimization; '
-                             'objective_mode=distance is only for historical fixed-pool diagnostics')
-        return FixedBatchPoolInstance(network, orders, policy, config.get('pool_options', {}),
-                                      config['economic_config'])
-    return MultiBatchInstance(network, orders, policy, model=config['model'])
+            return SingleBatchCostInstance(network, orders, policy, config['economic_config'],
+                                           no_work_window=no_work_window)
+        return MultiBatchInstance(network, orders, policy, model=3, no_work_window=no_work_window)
+    return MultiBatchInstance(network, orders, policy, model=config['model'], no_work_window=no_work_window)

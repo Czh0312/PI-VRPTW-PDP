@@ -1,4 +1,4 @@
-"""M6 input, projection and audit. Contains no optimization/search dependency."""
+"""Fixed-calendar projections and independent audit for Model 5."""
 from __future__ import annotations
 
 from copy import deepcopy
@@ -19,12 +19,12 @@ class JointBatchInstance(MultiBatchInstance):
 
     def __init__(self, network, orders, policy, options, economic_config, *, _physical_source=None,
                  _calendar_grid_seconds=None):
-        super().__init__(network, orders, policy, model=6, _physical_source=_physical_source)
+        super().__init__(network, orders, policy, model=5, _physical_source=_physical_source)
         from models.common.cycle.decision_grid import decision_step
         self.calendar_decision_grid_seconds = _calendar_grid_seconds
         self.calendar_decision_step = decision_step(self.operating_policy, _calendar_grid_seconds)
         if not self.orders:
-            raise ValueError('M6 requires at least one order')
+            raise ValueError('M5 requires at least one order')
         self.options = deepcopy(options)
         if set(options)-{'pool_min', 'pool_max', 'fixed_assignment',
                          'optimize_cutoffs', 'cutoff_bounds_minutes', 'shared_cutoff', 'shared_min_phase_ticks',
@@ -92,7 +92,7 @@ class JointBatchInstance(MultiBatchInstance):
         self.economic_config_path = economic_config if isinstance(economic_config, str) else None
         for o in self.orders:
             if o.release_time is None or o.allowed_batch_ids is None:
-                raise ValueError(f'{o.id}: M6 requires explicit release_time and allowed_batch_ids')
+                raise ValueError(f'{o.id}: M5 requires explicit release_time and allowed_batch_ids')
             integer(o.release_time, 'release_time')
             if len(set(o.allowed_batch_ids)) != len(o.allowed_batch_ids) or any(
                     b not in self.batch_map for b in o.allowed_batch_ids):
@@ -191,7 +191,7 @@ class JointBatchInstance(MultiBatchInstance):
         orders = [replace(o, batch=assignment[o.id]) for o in self.orders]
         fixed = MultiBatchInstance(self.network, orders, p, model=3 if len(p.batches)==1 else 5,
                                    _physical_source=self)
-        # Calendar slots in M6–M8 are actual delivery/recovery rounds. Keep
+        # Calendar slots are actual delivery/recovery rounds. Keep
         # that business rule when projecting onto the physical decoder.
         fixed.require_productive_batches = self.require_productive_batches
         if self.optimize_loading:
@@ -202,7 +202,7 @@ class JointBatchInstance(MultiBatchInstance):
 def joint_empty_result(problem, method):
     result = empty_result(problem, method)
     result.update(strategy=STRATEGY, objective_mode='cost',
-                  model_module=f'models.routing.model_6.{method}',
+                  model_module=f'models.routing.model_{problem.model_number}.{method}',
                   candidate_schedule=[dict(id=b.id, start=b.start, cutoff=b.cutoff, end=b.end)
                                       for b in problem.operating_policy.batches],
                   economic_profile_hash=problem.cost_profile.hash,
@@ -218,10 +218,10 @@ def lift_result(problem, raw, assignment, pool, method, cutoffs=None, loading_st
     checked = problem.validated_cutoffs(cutoffs)
     fixed = problem.project(assignment, pool, checked, loading_starts)
     result = deepcopy(raw)
-    result.update(model=6, strategy=STRATEGY, solver=method, objective_mode='cost',
+    result.update(model=problem.model_number, strategy=STRATEGY, solver=method, objective_mode='cost',
                   operating_policy=fixed.operating_policy.as_dict(),
                   batches=empty_result(fixed, method)['batches'],
-                  model_module=f'models.routing.model_6.{method}',
+                  model_module=f'models.routing.model_{problem.model_number}.{method}',
                   batch_mode='joint_candidate_batches',
                   order_batch_assignment=dict(assignment), container_pool_size=pool,
                   delivery_batch_activation={b.id: bool(fixed.batch_demands[b.id]) for b in fixed.operating_policy.batches},
@@ -264,7 +264,7 @@ def _audit_joint_solution(problem, result, repeat, *, physical=None):
     """Only lift_result may reuse its freshly audited, caller-owned replay."""
     try:
         errors = []
-        if result.get('model') != 6 or result.get('strategy') != STRATEGY or result.get('objective_mode') != 'cost':
+        if result.get('model') != problem.model_number or result.get('strategy') != STRATEGY or result.get('objective_mode') != 'cost':
             errors.append(dict(code='INVALID_JOINT_SCHEMA'))
         assignment = result.get('order_batch_assignment')
         pool = integer(result.get('container_pool_size'), 'container_pool_size', 1)

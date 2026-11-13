@@ -141,7 +141,7 @@ def main(argv=None):
         print(json.dumps(plan, ensure_ascii=False, indent=2))
         return plan
     out = (resolve_project_path(args.output) if args.output else
-           ROOT/'output/experiments/single_batch_exact'/datetime.now().strftime('%Y%m%dT%H%M%S_%f')).resolve()
+           ROOT/'output/current/single_batch_exact'/datetime.now().strftime('%Y%m%dT%H%M%S_%f')).resolve()
     if out.exists() and any(out.iterdir()):
         parser.error(f'Refusing to overwrite nonempty output directory: {out}')
     out.mkdir(parents=True, exist_ok=True)

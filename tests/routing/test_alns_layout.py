@@ -5,16 +5,17 @@ import random
 
 import pytest
 
-from tests.routing.test_multibatch_cycle import fixture
+from tests.routing.single_batch_fixtures import fixture
+from tests.routing.test_model5_calendar import calendar_fixture
 
 
-@pytest.mark.parametrize("number", range(1, 9))
+@pytest.mark.parametrize("number", range(1, 6))
 def test_state_construction_and_cloning_keep_independent_route_lists(number):
     package = f"models.routing.model_{number}.alns"
     construction = import_module(package + ".construction")
     state_api = import_module(package + ".state")
     evaluator = import_module(package + ".evaluator")
-    problem = fixture(one_batch=True)
+    problem = fixture() if number < 5 else calendar_fixture().fixed_calendar(1)
     state = construction.initial_state(problem, random.Random(42))
     assert evaluator.initial_state(problem, random.Random(42)) == state
     before = state_api.state_key(state)
@@ -25,7 +26,7 @@ def test_state_construction_and_cloning_keep_independent_route_lists(number):
     assert state_api.state_key(cloned) != before
 
 
-@pytest.mark.parametrize("number", range(1, 9))
+@pytest.mark.parametrize("number", range(1, 6))
 def test_acceptance_preserves_short_circuit_and_progress_uses_both_budgets(number):
     package = f"models.routing.model_{number}.alns"
     parameter_type = import_module(package + ".parameters").ALNSParameters

@@ -1,5 +1,8 @@
-"""ALNS schedule decoder with optional exact reuse of E2 event schedules."""
+"""ALNS schedule decoder. Entire downstream state is rebuilt on every move."""
 from __future__ import annotations
+
+from models.common.cycle.joint import lift_result
+from models.common.cycle.audit import audit_solution
 
 from collections import OrderedDict, defaultdict
 from models.routing.model_5.alns.state import state_key
@@ -150,12 +153,37 @@ def _e1_returns(problem, state, quantities):
     return trips, violations, releases
 
 
-def _e2_schedule(problem, state, goods_ready, *, _prepared=None):
-    """Decode coupled E2 event times; cutoff assignment stays in evaluate."""
+def evaluate(problem, state, *, _memo=None, _prepared=None):
+    """Return (penalized score, result, violations), never silently relax a rule."""
     p, f = problem.operating_policy, problem.fleet
     task = problem.task if _prepared is None else _prepared.task
     summary_of = getattr(_prepared, "load_summary", None)
-    trips, violations = [], []
+    result = empty_result(problem, "alns")
+    violations, goods_ready = [], {}
+    if problem._availability_codes:
+        return 1e12, result, list(problem._availability_codes)
+    if getattr(problem, "require_productive_batches", False):
+        violations.extend(
+            "EMPTY_BATCH_DELIVERY" for b in p.batches if not problem.batch_demands[b.id]
+        )
+    # E1 deliveries do not depend on reverse flow; delivery times are explicit.
+    for b in p.batches:
+        seen = []
+        for k, sites in enumerate(state["deliveries"][b.id]):
+            trip, issues = _e1_trip(problem, b, k, sites, [], {}, p.cycle_start)
+            # A delivery-only return may be late whereas the eventual mixed
+            # route fits. Validate final return only after inserting pickups.
+            violations.extend(
+                x for x in issues if x not in ("E1_RETURN_DEADLINE", "E1_TERMINAL_VEHICLE")
+            )
+            if trip:
+                for e in trip["events"]:
+                    goods_ready[e["site_id"], b.id] = e["start"] + problem.service(e["site_id"])
+            seen.extend(sites)
+        expected = [s for s in problem.satellites if problem.demands[s, b.id]]
+        if sorted(seen) != sorted(expected):
+            return 1e12, result, ["E1_DELIVERY_COVERAGE"]
+
     # Difference constraints propagate cross-route customer precedence and
     # physical-vehicle reuse; deliberate departure/return waits are preserved.
     bounds, edges, upper, tasks = {}, [], {}, {}
@@ -165,7 +193,7 @@ def _e2_schedule(problem, state, goods_ready, *, _prepared=None):
     for ri, r in enumerate(plans):
         s, v = r["satellite"], r["vehicle"]
         if s not in problem.satellites or not 0 <= v < f.e2_per_sat_count:
-            return [], True, ["INVALID_E2_VEHICLE"]
+            return 1e12, result, ["INVALID_E2_VEHICLE"]
         key = (s, v)
         slot = slots[key]
         slots[key] += 1
@@ -182,7 +210,7 @@ def _e2_schedule(problem, state, goods_ready, *, _prepared=None):
             else loads[0]
         )
         if len(dbatches) > 1:
-            return [], True, ["MIXED_DELIVERY_BATCHES"]
+            return 1e12, result, ["MIXED_DELIVERY_BATCHES"]
         if key in previous_vehicle:
             edges.append(
                 (
@@ -206,7 +234,7 @@ def _e2_schedule(problem, state, goods_ready, *, _prepared=None):
         for j, (oid, kind) in enumerate(r["tasks"]):
             o, w, vol = task(oid, kind)
             if o.satellite != s or (oid, kind) in tasks:
-                return [], True, ["E2_TASK_COVERAGE"]
+                return 1e12, result, ["E2_TASK_COVERAGE"]
             node = (ri, j)
             tasks[oid, kind] = node
             tw = o.delivery_window if kind == "d" else o.pickup_window
@@ -233,7 +261,7 @@ def _e2_schedule(problem, state, goods_ready, *, _prepared=None):
         else _prepared.expected_tasks
     )
     if set(tasks) != expected:
-        return [], True, ["E2_TASK_COVERAGE"]
+        return 1e12, result, ["E2_TASK_COVERAGE"]
     for o in problem.orders if problem.reusable else ():
         edges.append((tasks[o.id, "d"], tasks[o.id, "p"], o.service_time + o.min_use_time))
     if _prepared is not None and problem.reusable:
@@ -256,16 +284,24 @@ def _e2_schedule(problem, state, goods_ready, *, _prepared=None):
                     queue.append(child)
         acyclic = visited == len(bounds)
     if not acyclic:
-        return [], True, ["TIMING_CYCLE"]
+        return 1e12, result, ["TIMING_CYCLE"]
     if any(t > upper.get(node, p.cycle_end) for node, t in bounds.items()):
         violations.append("E2_TIME_WINDOW")
+    quantities = {b.id: {s: 0 for s in problem.satellites} for b in p.batches}
     for r, ri, slot in parsed:
         u = bounds["end", ri]
+        returned = sum(problem.order_map[o].count for o, k in r["tasks"] if k == "p")
+        batch = next((b for b in p.batches if u <= b.cutoff), None)
+        if returned:
+            if batch:
+                quantities[batch.id][r["satellite"]] += returned
+            else:
+                violations.append("TERMINAL_OUTSTANDING")
         events = [
             dict(order_id=o, kind=k, start=bounds[ri, j], quantity=problem.order_map[o].count)
             for j, (o, k) in enumerate(r["tasks"])
         ]
-        trips.append(
+        result["e2_trips"].append(
             dict(
                 trip_id=f'e2_{r["satellite"]}_{r["vehicle"]}_{slot}',
                 satellite_id=r["satellite"],
@@ -276,60 +312,10 @@ def _e2_schedule(problem, state, goods_ready, *, _prepared=None):
                 events=events,
             )
         )
-    return trips, False, violations
-
-
-def evaluate(problem, state, *, _memo=None, _prepared=None):
-    """Return (penalized score, result, violations), never silently relax a rule."""
-    p, f = problem.operating_policy, problem.fleet
-    result = empty_result(problem, "alns")
-    violations, goods_ready = [], {}
-    if problem._availability_codes:
-        return 1e12, result, list(problem._availability_codes)
-    productive = getattr(problem, 'require_productive_batches', False)
-    if productive:
-        violations.extend('EMPTY_BATCH_DELIVERY' for b in p.batches
-                          if not problem.batch_demands[b.id])
-    # E1 deliveries do not depend on reverse flow; delivery times are explicit.
-    for b in p.batches:
-        seen = []
-        for k, sites in enumerate(state["deliveries"][b.id]):
-            trip, issues = _e1_trip(problem, b, k, sites, [], {}, p.cycle_start)
-            # A delivery-only return may be late whereas the eventual mixed
-            # route fits. Validate final return only after inserting pickups.
-            violations.extend(
-                x for x in issues if x not in ("E1_RETURN_DEADLINE", "E1_TERMINAL_VEHICLE")
-            )
-            if trip:
-                for e in trip["events"]:
-                    goods_ready[e["site_id"], b.id] = e["start"] + problem.service(e["site_id"])
-            seen.extend(sites)
-        expected = [s for s in problem.satellites if problem.demands[s, b.id]]
-        if sorted(seen) != sorted(expected):
-            return 1e12, result, ["E1_DELIVERY_COVERAGE"]
-
-    e2_cache = getattr(_memo, "e2_cache", None)
-    trips, failed, e2_issues = (
-        e2_cache.decode(state, goods_ready) if e2_cache is not None
-        else _e2_schedule(problem, state, goods_ready, _prepared=_prepared)
-    )
-    if failed:
-        return 1e12, result, e2_issues
-    result["e2_trips"] = trips
-    violations.extend(e2_issues)
-    # Reclassify returns against the fixed cutoff calendar on every evaluation.
-    quantities = {b.id: {s: 0 for s in problem.satellites} for b in p.batches}
-    for trip in trips:
-        returned = sum(e["quantity"] for e in trip["events"] if e["kind"] == "p")
-        batch = next((b for b in p.batches if trip["return_complete"] <= b.cutoff), None)
-        if returned:
-            if batch:
-                quantities[batch.id][trip["satellite_id"]] += returned
-            else:
-                violations.append("TERMINAL_OUTSTANDING")
-    if productive:
-        violations.extend('EMPTY_BATCH_RECOVERY' for b in p.batches
-                          if not sum(quantities[b.id].values()))
+    if getattr(problem, "require_productive_batches", False):
+        violations.extend(
+            "EMPTY_BATCH_RECOVERY" for b in p.batches if not sum(quantities[b.id].values())
+        )
     result["e1_trips"], e1_issues, releases = (
         _memo.returns(state, quantities)
         if _memo is not None
@@ -337,11 +323,8 @@ def evaluate(problem, state, *, _memo=None, _prepared=None):
     )
     violations.extend(e1_issues)
     issued, shortage = 0, 0
-    pool_mode = getattr(problem, 'optimize_pool', False)
-    required_pool = problem.pool_min if pool_mode else p.container_pool_size
     for b in p.batches if problem.reusable else ():
         issued += problem.batch_demands[b.id]
-        required_pool = max(required_pool, issued - sum(n for t, n in releases if t <= b.start))
         gap = issued - p.container_pool_size - sum(n for t, n in releases if t <= b.start)
         if gap > 0:
             violations.append("CLEAN_STOCK_SHORTAGE")
@@ -351,22 +334,6 @@ def evaluate(problem, state, *, _memo=None, _prepared=None):
         distance_of(problem, r, layer) for layer in ("e1", "e2") for r in result[layer + "_trips"]
     )
     result["info"]["objective"] = distance
-    if pool_mode:
-        if violations:
-            # Infeasible search proposals may lie outside the time horizon;
-            # the physical auditor only accepts complete, bounded schedules.
-            return distance + len(violations) * 1e6 + shortage * 1e5, result, violations
-        # N is the exact conditional minimum for each candidate schedule. The
-        # search compares full costs, so changing routes/times can change N.
-        from models.common.cycle.fixed_pool import attach_pool_cost
-        pool = min(problem.pool_max, required_pool)
-        try:
-            physical = attach_pool_cost(problem, result, pool)
-        except ValueError:
-            return 1e12, result, ['INVALID_SCHEDULE']
-        if not physical['valid']:
-            violations.extend(e['code'] for e in physical['errors'])
-        return result['info']['objective'] + len(violations) * 1e6 + shortage * 1e5, result, violations
     return distance + len(violations) * 1e6 + shortage * 1e5, result, violations
 
 
@@ -395,3 +362,142 @@ def initial_state(problem, rng, randomized=False):
     from models.routing.model_5.alns.construction import initial_state as construct
 
     return construct(problem, rng, randomized=randomized)
+
+
+def _delay_departures(problem, result):
+    """Move pre-service waiting to the satellite, preserving every event/end.
+
+    A later departure cannot reduce supply or vehicle readiness. All customer
+    starts, returns, cutoff bins and clean releases remain fixed. This removes
+    avoidable paid route time without changing the causal task graph.
+    """
+    for trip in result["e2_trips"]:
+        first = trip["events"][0]
+        customer = problem.order_map[first["order_id"]].customer
+        latest = first["start"] - problem.travel(trip["satellite_id"], customer)
+        trip["departure"] = max(trip["departure"], latest)
+
+
+def _required_pool(problem, raw):
+    """Propose the inventory peak; the lifted plan still gets a full audit.
+
+    Only depot cleaning releases can finance a later loading. Equal-time clean
+    releases are available, matching the inventory audit's half-open clock.
+    This is a sizing calculation, never a schedule-feasibility certificate.
+    """
+    p = problem.operating_policy
+    releases = [
+        (trip["return_complete"] + p.cleaning_duration,
+         sum(event["quantity"] for event in trip["events"] if event["kind"] == "p"))
+        for trip in raw["e1_trips"]
+    ]
+    loading = getattr(problem, "batch_loading_starts", None)
+    issued = required = 0
+    for batch in p.batches:
+        issued += problem.batch_demands[batch.id]
+        start = batch.start if loading is None else loading[batch.id]
+        required = max(required, issued - sum(n for ready, n in releases if ready <= start))
+    return required
+
+
+class JointEvaluator:
+    def __init__(self, problem, capacity=512):
+        self.problem, self.capacity = problem, capacity
+        self.cache = OrderedDict()
+        self.projections = OrderedDict()
+        self.hits = self.misses = 0
+        self.single_audit_accepts = self.reference_fallbacks = 0
+        # Feasibility penalty is search-only and scaled to declared cost units.
+        rates = problem.cost_profile.rates
+        self.penalty = (
+            max(1.0, sum(rates.values()))
+            * max(1, problem.total)
+            * max(1, problem.operating_policy.minutes(problem.operating_policy.cycle_end))
+            * 100
+        )
+
+    def fixed(self, assignment, cutoffs=None):
+        cutoffs = self.problem.validated_cutoffs(cutoffs)
+        key = (tuple(sorted(assignment.items())), tuple(sorted(cutoffs.items())))
+        if key not in self.projections:
+            self.projections[key] = self.problem.project(assignment, self.problem.total, cutoffs)
+            if len(self.projections) > 64:
+                self.projections.popitem(last=False)
+        return self.projections[key]
+
+    def __call__(self, assignment, state):
+        cutoffs = self.problem.validated_cutoffs(state.get("cutoffs"))
+        key = (
+            tuple(sorted(assignment.items())),
+            tuple(sorted(cutoffs.items())),
+            state_key(state),
+            self.problem.cost_profile.hash,
+        )
+        if key in self.cache:
+            self.hits += 1
+            self.cache.move_to_end(key)
+            return self.cache[key]
+        self.misses += 1
+        fixed = self.fixed(assignment, cutoffs)
+        _, raw, issues = evaluate(fixed, state)
+        distance = raw["info"].get("objective") or 0.0
+        fallback = distance * max(
+            self.problem.cost_profile.rates["e1_distance_cost_per_km"],
+            self.problem.cost_profile.rates["e2_distance_cost_per_km"],
+            1.0,
+        )
+        if issues:
+            value = (fallback + self.penalty * len(issues), None, tuple(issues))
+        elif len(self.problem.orders) > 9:
+            # Short-budget quality gains were validated on small instances.
+            # Preserve the established evaluation path for larger searches.
+            _delay_departures(fixed, raw)
+            value = self._reference_value(fixed, raw, assignment, cutoffs, fallback)
+        else:
+            _delay_departures(fixed, raw)
+            required = _required_pool(fixed, raw)
+            pool = max(self.problem.pool_min, required)
+            value = None
+            if pool <= self.problem.pool_max:
+                # lift_result performs the complete physical/two-cycle replay
+                # at the proposed pool and validates the full joint contract.
+                candidate = lift_result(self.problem, raw, assignment, pool, "alns", cutoffs)
+                if (candidate["audit"]["valid"]
+                        and candidate["audit"]["minimum_pool_for_schedule"] == required):
+                    self.single_audit_accepts += 1
+                    value = (candidate["info"]["objective"], candidate, ())
+            if value is None:
+                # Failed prechecks retain the original error codes and penalty
+                # arithmetic. A failed proposed audit is never a feasible plan.
+                self.reference_fallbacks += 1
+                value = self._reference_value(fixed, raw, assignment, cutoffs, fallback)
+        self.cache[key] = value
+        if len(self.cache) > self.capacity:
+            self.cache.popitem(last=False)
+        return value
+
+    def _reference_value(self, fixed, raw, assignment, cutoffs, fallback):
+        """Original two-replay path for sizing failures or infeasible schedules."""
+        physical = audit_solution(fixed, raw)
+        if not physical["valid"]:
+            value = (
+                fallback + self.penalty * max(1, len(physical["errors"])),
+                None,
+                tuple(e["code"] for e in physical["errors"]),
+            )
+        else:
+            pool = max(self.problem.pool_min, physical["minimum_pool_for_schedule"])
+            cost = self.problem.cost_profile.evaluate(physical, pool)["total"]
+            if pool > self.problem.pool_max:
+                value = (
+                    cost + self.penalty * (pool - self.problem.pool_max),
+                    None,
+                    ("POOL_BOUNDS",),
+                )
+            else:
+                candidate = lift_result(self.problem, raw, assignment, pool, "alns", cutoffs)
+                if candidate["audit"]["valid"]:
+                    value = (candidate["info"]["objective"], candidate, ())
+                else:
+                    value = (cost + self.penalty, None, ("JOINT_AUDIT_FAILED",))
+        return value

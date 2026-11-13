@@ -80,7 +80,7 @@ def random_input(seed):
     return problem, state, quantities
 
 
-@pytest.mark.parametrize('number', [5, 6, 7, 8])
+@pytest.mark.parametrize('number', [5])
 def test_insertion_agrees_with_full_decode_including_violations_and_ties(number):
     module = import_module(f'models.routing.model_{number}.alns.evaluator')
     violations = set()
@@ -96,11 +96,11 @@ def test_insertion_agrees_with_full_decode_including_violations_and_ties(number)
             'TERMINAL_DIRTY'} <= violations
 
 
-def test_lift_uses_two_replays_and_public_audit_still_distrusts_results(monkeypatch):
+def test_lift_reuses_physical_replay_and_public_audit_still_distrusts_results(monkeypatch):
     from models.common.cycle import audit as physical
     from models.common.cycle.joint import audit_joint_solution
-    from models.routing.model_6.alns.evaluator import JointEvaluator, initial_state
-    from tests.routing.test_model6_joint import joint_fixture
+    from models.routing.model_5.alns.evaluator import JointEvaluator, initial_state
+    from tests.routing.calendar_fixtures import joint_fixture
 
     problem = joint_fixture()
     assignment = {'o1': 'b1', 'o2': 'b2'}
@@ -116,9 +116,9 @@ def test_lift_uses_two_replays_and_public_audit_still_distrusts_results(monkeypa
     monkeypatch.setattr(physical, '_audit', counted)
     _, candidate, issues = evaluator(assignment, state)
     assert not issues and candidate['audit']['periodic_replay']['valid']
-    assert len(calls) == 2
+    assert len(calls) == 1
     assert audit_joint_solution(problem, candidate) == candidate['audit']
-    assert len(calls) == 3
+    assert len(calls) == 2
     for change in ('event', 'cost', 'pool', 'batch', 'distance'):
         bad = deepcopy(candidate)
         if change == 'event':

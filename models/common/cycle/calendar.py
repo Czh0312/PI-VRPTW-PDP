@@ -1,4 +1,4 @@
-"""M7/M8/M9 calendar domains and independent reconstruction, without solvers.
+"""Flexible batch calendar and independent reconstruction for Model 5.
 
 Public instances own the allowed domain. Fixed-calendar children use the shared
 joint cost/physical contract; only the public result carries the numbered model.
@@ -11,41 +11,47 @@ from dataclasses import replace
 import math
 
 from models.common.cycle.joint import JointBatchInstance, audit_joint_solution, STRATEGY
-from models.common.cycle.policy import Batch, integer, nonnegative
+from models.common.cycle.policy import Batch, MultiBatchPolicy, daily_cycle_bounds, integer, nonnegative
 from models.common.cycle.batch_counts import batch_count_domain, equal_batch_clock
 
-SCHEDULE_MODES = {7: 'uniform_independent_cutoffs', 8: 'flexible_cycle', 9: 'flexible_cycle'}
-STRATEGIES = {7: 'independent_cutoff_cost_v1', 8: 'flexible_batch_cost_v1',
-              9: 'free_flexible_batch_cost_v1'}
+SCHEDULE_MODE = 'flexible_cycle'
+STRATEGIES = {5: 'flexible_batch_cost_v1'}
 
 
 class CalendarCycleInstance(JointBatchInstance):
     calendar_cycle = True
 
-    def __init__(self, network, orders, policy, options, economic_config, *, model):
-        if model not in SCHEDULE_MODES:
-            raise ValueError('CalendarCycleInstance requires model 7, 8 or 9')
+    def __init__(self, network, orders, policy, options, economic_config, *, model=5,
+                 no_work_window=False):
+        if model != 5:
+            raise ValueError('CalendarCycleInstance requires Model 5')
         allowed = {'schedule_mode', 'batch_count_candidates', 'min_phase_minutes', 'pool_min', 'pool_max',
                    'loading_mode', 'calendar_decision_grid_seconds'}
-        if model == 9:
-            allowed.add('fixed_customer_assignment')
         if not isinstance(options, dict) or set(options)-allowed:
             raise ValueError('Unknown calendar joint_batch_options')
         grid = options.get('calendar_decision_grid_seconds')
-        if grid is not None and model not in (8, 9):
-            raise ValueError('A calendar decision grid is supported only by M8/M9')
-        mode = SCHEDULE_MODES[model]
-        loading_mode = options.get('loading_mode', 'batch_start')
-        if loading_mode not in ('batch_start', 'optimized') or (model != 7 and loading_mode != 'batch_start'):
-            raise ValueError('Optimized loading is defined only for the M7 extended baseline')
-        if options.get('schedule_mode', mode) != mode:
-            raise ValueError(f'M{model} requires schedule_mode={mode}')
+        if options.get('loading_mode', 'batch_start') != 'batch_start':
+            raise ValueError('M5 loads at the start of each batch')
+        if options.get('schedule_mode', SCHEDULE_MODE) != SCHEDULE_MODE:
+            raise ValueError(f'M5 requires schedule_mode={SCHEDULE_MODE}')
+        self.no_work_window = no_work_window
+        if no_work_window:
+            policy = MultiBatchPolicy.from_config(policy, no_work_window=True, flexible_calendar=True)
+            orders = tuple(orders)
+            repeat = policy.repeat_interval or policy.ticks(1440, 'exact')
+            start, end = daily_cycle_bounds(orders, repeat)
+            if repeat < 2 * len(policy.batches):
+                raise ValueError('Repeat interval must allow both batch phases')
+            bounds = [start + repeat*i//len(policy.batches) for i in range(len(policy.batches)+1)]
+            batches = tuple(Batch(b.id, a, (a+z)//2, z)
+                            for b, a, z in zip(policy.batches, bounds, bounds[1:]))
+            policy = replace(policy, cycle_start=start, cycle_end=end, repeat_interval=repeat, batches=batches)
         super().__init__(network, orders, policy,
                          {k: options[k] for k in ('pool_min', 'pool_max', 'loading_mode') if k in options}, economic_config)
         from models.common.cycle.decision_grid import decision_step
         self.calendar_decision_grid_seconds = grid
         self.calendar_decision_step = decision_step(self.operating_policy, grid)
-        if grid is not None and any(t % self.calendar_decision_step for t in
+        if grid is not None and not no_work_window and any(t % self.calendar_decision_step for t in
                 (self.operating_policy.cycle_start, self.operating_policy.cycle_end)):
             raise ValueError('Cycle endpoints must lie on the calendar decision grid')
         if any(set(o.allowed_batch_ids) != set(self.batch_map) for o in self.orders):
@@ -55,15 +61,14 @@ class CalendarCycleInstance(JointBatchInstance):
             raise ValueError('min_phase_minutes must be positive')
         self.minimum_phase_ticks = self.operating_policy.ticks(minimum)
         self.cycle_duration = self.operating_policy.cycle_end-self.operating_policy.cycle_start
-        self.model_number = model
-        self.free_assignment = model == 9
-        if self.free_assignment:
-            from models.common.cycle.free_calendar import assignment_domains
-            self.customer_assignment_domains = assignment_domains(
-                self, options.get('fixed_customer_assignment'))
-        self.schedule_mode = mode
-        self.batch_count_candidates = batch_count_domain(options, self.cycle_duration, self.minimum_phase_ticks)
-        self.options = deepcopy({**options, 'schedule_mode': mode})
+        self.schedule_mode = SCHEDULE_MODE
+        duration = self.cycle_duration
+        minimum = self.minimum_phase_ticks
+        if no_work_window and self.calendar_decision_step > 1:
+            lo, hi, _, minimum = self._boundary_limits(self.operating_policy, 1)
+            duration = hi-lo
+        self.batch_count_candidates = batch_count_domain(options, duration, minimum)
+        self.options = deepcopy({**options, 'schedule_mode': self.schedule_mode})
         self._calendars = OrderedDict()
         self._counts = OrderedDict()
 
@@ -74,18 +79,11 @@ class CalendarCycleInstance(JointBatchInstance):
                     batch_count_candidates=list(self.batch_count_candidates),
                     minimum_phase_ticks=self.minimum_phase_ticks, cycle_start=p.cycle_start,
                     cycle_end=p.cycle_end, time_tick_seconds=p.time_tick_seconds)
-        if self.optimize_loading:
-            contract['loading_mode'] = self.loading_mode
-        if self.model_number in (8, 9):
-            # The old M8 grid omitted equal partitions at nondivisible K.
-            # Identify the expanded domain in saved results and proof inputs.
-            contract['count_clock_rule'] = 'equal_partition_refinement_v1'
-            if self.calendar_decision_grid_seconds is not None:
-                contract['calendar_decision_grid_seconds'] = self.calendar_decision_grid_seconds
-        if self.free_assignment:
-            contract['assignment_rule'] = 'one_satellite_per_customer_all_orders_v1'
-            contract['customer_assignment_domains'] = {
-                customer: list(sites) for customer, sites in self.customer_assignment_domains.items()}
+        contract['count_clock_rule'] = 'equal_partition_refinement_v1'
+        if self.no_work_window:
+            contract.update(no_work_window=True, repeat_interval=p.repeat_interval)
+        if self.calendar_decision_grid_seconds is not None:
+            contract['calendar_decision_grid_seconds'] = self.calendar_decision_grid_seconds
         return contract
 
     def balanced_boundaries(self, count):
@@ -94,21 +92,32 @@ class CalendarCycleInstance(JointBatchInstance):
         bounds = tuple(p.cycle_start+i*self.cycle_duration*factor//count for i in range(count+1))
         return self.proposed_boundaries(count, bounds) if self.calendar_decision_grid_seconds is not None else bounds
 
+    def _boundary_limits(self, policy, factor):
+        from models.common.cycle.decision_grid import decision_step
+        step = decision_step(policy, self.calendar_decision_grid_seconds)
+        start = -(-policy.cycle_start // step)*step
+        end = (policy.cycle_end // step)*step
+        minimum = -(-self.minimum_phase_ticks*factor // step)*step
+        return start, end, step, minimum
+
     def proposed_boundaries(self, count, boundaries):
         """Quantize ALNS proposals without changing any physical input times."""
         if self.calendar_decision_grid_seconds is None:
             return self.validated_boundaries(count, boundaries)
         from models.common.cycle.decision_grid import decision_step, snap_decision
         p, _, factor = self.count_clock(count)
-        step = decision_step(p, self.calendar_decision_grid_seconds)
-        minimum = 2*(-(-self.minimum_phase_ticks*factor // step))*step
-        if p.cycle_end-p.cycle_start < count*minimum:
+        start, end, step, phase = self._boundary_limits(p, factor)
+        minimum = 2*phase
+        if end-start < count*minimum:
             raise ValueError('Count cannot fit the minimum phases on the calendar grid')
-        changed = [p.cycle_start]
+        if self.no_work_window:
+            end = snap_decision(boundaries[-1], start+count*minimum, end, step)
+            start = snap_decision(boundaries[0], start, end-count*minimum, step)
+        changed = [start]
         for i in range(1, count):
             changed.append(snap_decision(boundaries[i], changed[-1]+minimum,
-                                         p.cycle_end-(count-i)*minimum, step))
-        return self.validated_boundaries(count, changed+[p.cycle_end])
+                                         end-(count-i)*minimum, step))
+        return self.validated_boundaries(count, changed+[end])
 
     def count_clock(self, count):
         return equal_batch_clock(self, self.validate_count(count))
@@ -125,16 +134,17 @@ class CalendarCycleInstance(JointBatchInstance):
             raise ValueError('batch_boundaries must contain K+1 integer ticks')
         checked = tuple(integer(v, 'batch_boundary') for v in boundaries)
         p, _, factor = self.count_clock(count)
-        from models.common.cycle.decision_grid import decision_step
-        step = decision_step(p, self.calendar_decision_grid_seconds)
+        start, end, step, minimum = self._boundary_limits(p, factor)
         if any(t % step for t in checked):
             raise ValueError('Boundary outside the calendar decision grid')
-        if checked[0] != p.cycle_start or checked[-1] != p.cycle_end:
+        if self.no_work_window:
+            if checked[0] < start or checked[-1] > end:
+                raise ValueError('Batch calendar is outside the daily reset horizon')
+        elif checked[0] != p.cycle_start or checked[-1] != p.cycle_end:
             raise ValueError('Batch calendar must cover the entire original cycle')
-        if any(b-a < 2*self.minimum_phase_ticks*factor for a, b in zip(checked, checked[1:])):
+        required = minimum if self.no_work_window else self.minimum_phase_ticks*factor
+        if any(b-a < 2*required for a, b in zip(checked, checked[1:])):
             raise ValueError('Batch lengths must leave both minimum phases')
-        if self.model_number == 7 and checked != self.balanced_boundaries(count):
-            raise ValueError('M7 requires equal batch lengths')
         return checked
 
     def fixed_calendar(self, count, boundaries=None):
@@ -146,18 +156,15 @@ class CalendarCycleInstance(JointBatchInstance):
             minimum = self.minimum_phase_ticks*factor
             batches = tuple(Batch(f'b{i+1}', a, (a+b)//2, b)
                             for i, (a, b) in enumerate(zip(key, key[1:])))
+            if self.no_work_window:
+                p = replace(p, cycle_start=key[0], cycle_end=key[-1])
             ids = tuple(b.id for b in batches)
             orders = [replace(o, batch=ids[0], allowed_batch_ids=ids) for o in source_orders]
-            factory, extra = JointBatchInstance, {}
-            if self.free_assignment:
-                from models.common.cycle.free_calendar import FreeJointBatchInstance
-                factory = FreeJointBatchInstance
-                extra['customer_assignment_domains'] = self.customer_assignment_domains
-            child = factory(self.network, orders, replace(p, batches=batches),
+            child = JointBatchInstance(self.network, orders, replace(p, batches=batches),
                         dict(pool_min=self.pool_min, pool_max=self.pool_max, optimize_cutoffs=True,
                              min_phase_ticks=minimum, loading_mode=self.loading_mode),
                         self.cost_profile.config, _physical_source=self,
-                        _calendar_grid_seconds=self.calendar_decision_grid_seconds, **extra)
+                        _calendar_grid_seconds=self.calendar_decision_grid_seconds)
             child.calendar_model_number = self.model_number
             self._calendars[key] = child
             if len(self._calendars) > 64:
@@ -165,10 +172,15 @@ class CalendarCycleInstance(JointBatchInstance):
         self._calendars.move_to_end(key)
         return self._calendars[key]
 
+    @staticmethod
+    def finish_tick(p, result):
+        finish = [t['return_complete'] + p.e1_turnaround_time for t in result['e1_trips']]
+        finish.extend(t['return_complete'] + p.e2_turnaround_time for t in result['e2_trips'])
+        finish.extend(r['clean_ready'] for r in result['depot_releases'])
+        return max(finish, default=p.cycle_start)
+
     def for_count(self, count):
         count = self.validate_count(count)
-        if self.model_number == 7:
-            return self.fixed_calendar(count)
         if count not in self._counts:
             self._counts[count] = VariableCalendarInstance(self, count)
             if len(self._counts) > 8:
@@ -177,8 +189,7 @@ class CalendarCycleInstance(JointBatchInstance):
         return self._counts[count]
 
     def selected_problem(self, result):
-        child = self.fixed_calendar(result['cycle_batch_count'], result['batch_boundaries'])
-        return child.assigned(result.get('assignment')) if self.free_assignment else child
+        return self.fixed_calendar(result['cycle_batch_count'], result['batch_boundaries'])
 
 
 class VariableCalendarInstance(JointBatchInstance):
@@ -192,21 +203,22 @@ class VariableCalendarInstance(JointBatchInstance):
                          _calendar_grid_seconds=parent.calendar_decision_grid_seconds)
         self.parent, self.count = parent, count
         self.calendar_model_number = parent.model_number
-        self.free_assignment = parent.free_assignment
-        if self.free_assignment:
-            self.customer_assignment_domains = parent.customer_assignment_domains
         factor = (reference.operating_policy.time_tick_subdivision
                   // parent.operating_policy.time_tick_subdivision)
         self.minimum_phase_ticks = minimum = parent.minimum_phase_ticks * factor
         p = self.operating_policy
-        self.start_bounds = {b.id: ((p.cycle_start, p.cycle_start) if i == 0 else
-                                  (p.cycle_start+2*minimum*i, p.cycle_end-2*minimum*(count-i)))
+        self.no_work_window = parent.no_work_window
+        start, end, _, phase = (parent._boundary_limits(p, factor) if self.no_work_window
+                                else (p.cycle_start, p.cycle_end, 1, minimum))
+        self.start_bounds = {b.id: ((start, start) if i == 0 and not self.no_work_window else
+                                  (start+2*phase*i, end-2*phase*(count-i)))
                              for i, b in enumerate(p.batches)}
-        self.end_bounds = {b.id: ((p.cycle_end, p.cycle_end) if i == count-1 else
+        last_end = (start+2*phase*count, end) if self.no_work_window else (end, end)
+        self.end_bounds = {b.id: (last_end if i == count-1 else
                                 self.start_bounds[p.batches[i+1].id])
                            for i, b in enumerate(p.batches)}
-        self.cutoff_bounds = {b.id: (self.start_bounds[b.id][0]+minimum,
-                                    self.end_bounds[b.id][1]-minimum) for b in p.batches}
+        self.cutoff_bounds = {b.id: (self.start_bounds[b.id][0]+phase,
+                                    self.end_bounds[b.id][1]-phase) for b in p.batches}
         # Never screen against the reference equal calendar. In particular a
         # late release may become feasible when the batch boundary moves.
         self.legal_batches = {o.id: tuple(b.id for b in p.batches
@@ -233,6 +245,8 @@ def attach_calendar_decisions(problem, result, count, boundaries):
                   cutoff_ratios={f'b{i+1}': offsets[f'b{i+1}']/d for i, d in enumerate(durations)},
                   actual_recovery_round_count=len({row['batch_id'] for row in result['recovery_rounds']
                                                    if row['quantity'] > 0}))
+    if problem.no_work_window:
+        result['operations_complete'] = problem.finish_tick(problem.count_clock(count)[0], result)
     return result
 
 
@@ -252,7 +266,12 @@ def audit_calendar_solution(problem, result, repeat=True):
                 not math.isclose(ratios[b.id], offsets[b.id]/(b.end-b.start), rel_tol=1e-12, abs_tol=1e-12)
                 for b in child.operating_policy.batches):
             raise ValueError('Calendar cutoff ratio mismatch')
-        physical = audit_joint_solution(child, {**result, 'model': 6, 'strategy': STRATEGY}, repeat)
+        physical = audit_joint_solution(child, {**result, 'strategy': STRATEGY}, repeat)
+        if physical['valid'] and problem.no_work_window:
+            finish = problem.finish_tick(child.operating_policy, result)
+            if result.get('operations_complete') != finish or finish > child.operating_policy.batches[-1].end:
+                physical['errors'].append(dict(code='CALENDAR_OPERATIONS_COMPLETE_MISMATCH'))
+                physical['valid'] = False
         recovery_count = len({row['batch_id'] for row in physical.get('cutoff_snapshots', [])
                               if row['quantity'] > 0})
         if result.get('actual_recovery_round_count') != recovery_count:

@@ -8,30 +8,26 @@ from .audit import audit_solution
 
 
 def migrate_cycle_result(source, result, *, options=None):
-    if source.model_number not in (3,5,6,7,8) or source.free_assignment:
-        raise ValueError('M10 conversion requires a fixed-assignment reusable cycle model')
+    if source.model_number not in (3, 5) or source.free_assignment:
+        raise ValueError('M6 conversion requires a fixed-assignment reusable cycle model')
     original_audit=audit_cycle(source,result)
     if not original_audit['valid']:
         raise ValueError(f'Source cycle failed audit: {original_audit["errors"][:3]}')
     fixed=source
     if getattr(source,'calendar_cycle',False):
         fixed=source.selected_problem(result)
-    elif getattr(source,'uniform_cycle',False):
-        fixed=source.for_count(result['cycle_batch_count'])
     if getattr(fixed,'joint_batch',False):
         fixed=fixed.project(result['order_batch_assignment'],result['container_pool_size'],
                             result.get('batch_cutoffs'),result.get('batch_loading_starts'))
-    if getattr(fixed,'optimize_pool',False):
-        # Pool-optimization sources expose the selected physical projection.
-        fixed=fixed.project_pool(result['container_pool_size'])
     p=fixed.operating_policy
     if p.time_tick_subdivision!=1:
         raise ValueError('Source uses subsecond ticks; explicit clock conversion is required')
     names={x.name for x in fields(NoBatchPolicy)}-{'repeat_interval','policy_version','terminal_policy'}
     policy=NoBatchPolicy(**{name:getattr(p,name) for name in names},
-                         repeat_interval=1440*60//p.time_tick_seconds)
-    problem=NoBatchInstance(fixed.network,fixed.orders,policy,options)
-    new=dict(schema_version=3,model=10,policy_version=VERSION,batch_mode='no_batch',time_unit='ticks',
+                         repeat_interval=p.repeat_interval or 1440*60//p.time_tick_seconds)
+    problem=NoBatchInstance(fixed.network,fixed.orders,policy,options,
+                            no_work_window=p.consolidated_handoff or p.repeat_interval is not None)
+    new=dict(schema_version=3,model=6,policy_version=VERSION,batch_mode='no_batch',time_unit='ticks',
              e1_trips=[],e2_trips=[],source_model=source.model_number,
              source_container_pool=p.container_pool_size)
     empty=[]
@@ -61,7 +57,7 @@ def migrate_cycle_result(source, result, *, options=None):
         collected.update(event['order_ids'])
     checked=audit_solution(problem,new)
     if not checked['valid']:
-        raise ValueError(f'M10 migrated solution failed audit: {checked["errors"][:3]}')
+        raise ValueError(f'M6 migrated solution failed audit: {checked["errors"][:3]}')
     if checked['minimum_pool_for_schedule']>p.container_pool_size:
         raise ValueError('Migration unexpectedly increased the initial pool')
     new.update(container_pool_size=checked['minimum_pool_for_schedule'],audit=checked,feasible=True)

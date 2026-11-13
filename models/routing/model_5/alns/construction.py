@@ -1,4 +1,8 @@
 """Alternative starting schedule for orders spread across a long static cycle."""
+
+from copy import deepcopy
+import time
+from models.common.cycle.joint import joint_empty_result, lift_result
 from models.routing.model_5.alns.evaluator import _e1_trip, route_distance
 
 
@@ -279,3 +283,245 @@ def initial_state(problem, rng, randomized=False):
                 )
                 route_count += 1
     return state
+
+
+def cover_delivery_batches(problem, assignment):
+    """Assign a distinct eligible order to every batch, preserving preferences.
+
+    Augmenting paths can move an earlier representative to another order, so
+    restricted domains cannot strand a batch merely because of greedy choices.
+    Remaining orders retain their proposed batches. No route feasibility or
+    optimality is inferred from this necessary assignment condition.
+    """
+    proposed = dict(assignment)
+    batches = tuple(problem.batch_map)
+    if len(batches) > len(proposed):
+        return None
+    candidates = {
+        bid: sorted(
+            (oid for oid, choices in problem.legal_batches.items() if bid in choices),
+            key=lambda oid: (proposed[oid] != bid, len(problem.legal_batches[oid]), oid),
+        )
+        for bid in batches
+    }
+    representatives = {}
+
+    def augment(bid, seen):
+        for oid in candidates[bid]:
+            if oid in seen:
+                continue
+            seen.add(oid)
+            previous = representatives.get(oid)
+            if previous is None or augment(previous, seen):
+                representatives[oid] = bid
+                return True
+        return False
+
+    for bid in sorted(batches, key=lambda b: (len(candidates[b]), b)):
+        if not augment(bid, set()):
+            return None
+    proposed.update(representatives)
+    return proposed
+
+
+def _best_construction(
+    problem, evaluator, assignment, rng, deadline, *, randomized=False, cutoffs=None
+):
+    cutoffs = problem.proposed_cutoffs(cutoffs)
+    fixed = evaluator.fixed(assignment, cutoffs)
+    best = None
+    for construct in (initial_state, appointment_state, chronological_state):
+        if time.perf_counter() >= deadline and best is not None:
+            break
+        state = (
+            construct(fixed, rng, randomized=randomized)
+            if construct is initial_state
+            else construct(fixed, rng)
+        )
+        state["cutoffs"] = dict(cutoffs)
+        score, result, issues = evaluator(assignment, state)
+        if best is None or score < best[0]:
+            best = (score, state, result, issues)
+    return best
+
+
+def _initial_cutoff_profiles(problem):
+    profiles = [dict(problem.default_cutoffs)]
+    if not problem.optimize_cutoffs:
+        return profiles
+    if all(problem.legal_batches[o.id] for o in problem.orders):
+        # A late pickup can make every 25/50/75% initialization infeasible.
+        # Seed from the necessary last-return boundary without restricting
+        # the optimization domain or claiming the seed is feasible.
+        p = problem.operating_policy
+        earliest_returns = []
+        for order in problem.orders:
+            supply = min(
+                problem.batch_map[b].start
+                + p.e1_load_time
+                + problem.travel_bounds["outward"][problem.depot][order.satellite]
+                + problem.service(order.satellite)
+                for b in problem.legal_batches[order.id]
+            )
+            delivered = max(
+                order.delivery_window[0],
+                supply
+                + p.e2_dispatch_prep_time
+                + problem.travel_bounds["outward"][order.satellite][order.customer],
+            )
+            picked = max(
+                order.pickup_window[0], delivered + order.service_time + order.min_use_time
+            )
+            earliest_returns.append(
+                picked
+                + order.service_time
+                + problem.travel_bounds["inward"][order.satellite][order.customer]
+                + p.e2_return_unload_time
+            )
+        if problem.shared_cutoff:
+            lo, hi = problem.shared_cutoff_bounds
+            offset = min(hi, max(lo, max(earliest_returns) - p.batches[-1].start))
+            profiles.append({b.id: b.start + offset for b in p.batches})
+        else:
+            last = p.batches[-1].id
+            lo, hi = problem.cutoff_bounds[last]
+            late = {**problem.default_cutoffs, last: min(hi, max(lo, max(earliest_returns)))}
+            if late not in profiles:
+                profiles.append(late)
+    fractions = (0.25, 0.5, 0.75, 0.9, 0.95) if problem.shared_cutoff else (0.25, 0.5, 0.75)
+    for fraction in fractions:
+        profile = {
+            bid: lo + round((hi - lo) * fraction) for bid, (lo, hi) in problem.cutoff_bounds.items()
+        }
+        if profile not in profiles:
+            profiles.append(profile)
+    return [problem.proposed_cutoffs(profile) for profile in profiles]
+
+
+def _seed_from_result(problem, initial_result):
+    """Audit a supplied fixed-window plan under the new domain, retaining it.
+
+    This is a solver-independent incumbent, not a call to an exact backend.
+    Cached objectives/proofs are discarded; physical schedule/cost are replayed.
+    """
+    if initial_result.get("economic_profile_hash") != problem.cost_profile.hash:
+        raise ValueError("Initial solution economic profile differs")
+    if (
+        initial_result.get("candidate_schedule")
+        != joint_empty_result(problem, "alns")["candidate_schedule"]
+    ):
+        raise ValueError("Initial solution has different candidate starts/ends")
+    assignment = dict(initial_result["order_batch_assignment"])
+    cutoffs = initial_result.get("batch_cutoffs") or {
+        b["id"]: b["cutoff"] for b in initial_result["operating_policy"]["batches"]
+    }
+    pool = initial_result["container_pool_size"]
+    fixed = problem.project(assignment, pool, cutoffs)
+    from models.common.cycle.audit import _audit
+
+    physical = _audit(
+        fixed,
+        {
+            **initial_result,
+            "model": fixed.model_number,
+            "info": {**initial_result["info"], "objective": None},
+        },
+        True,
+    )
+    if not physical["valid"] or not problem.pool_min <= pool <= problem.pool_max:
+        raise ValueError("Initial solution fails physical replay or pool bounds")
+    raw = deepcopy(initial_result)
+    raw["info"] = dict(
+        status="FEASIBLE",
+        proven_optimal=False,
+        proven_infeasible=False,
+        best_bound=None,
+        mip_gap=None,
+        proof_scope=None,
+        objective=None,
+        initial_source_solver=initial_result.get("solver"),
+    )
+    candidate = lift_result(problem, raw, assignment, pool, "alns", cutoffs)
+    if not candidate["audit"]["valid"]:
+        raise ValueError("Initial solution fails joint audit")
+    state = dict(
+        deliveries={
+            b.id: [[] for _ in range(problem.fleet.e1_count)]
+            for b in problem.operating_policy.batches
+        },
+        pickup_order={b.id: [] for b in problem.operating_policy.batches},
+        pickup_vehicle={b.id: {} for b in problem.operating_policy.batches},
+        e2=[],
+        cutoffs=dict(cutoffs),
+    )
+    for trip in candidate["e1_trips"]:
+        bid, k = trip["batch_id"], trip["vehicle_id"]
+        for event in trip["events"]:
+            site = event["site_id"]
+            if event["kind"] == "d":
+                state["deliveries"][bid][k].append(site)
+            else:
+                state["pickup_order"][bid].append(site)
+                state["pickup_vehicle"][bid][site] = k
+    for b in problem.operating_policy.batches:
+        for site in problem.satellites:
+            if site not in state["pickup_order"][b.id]:
+                state["pickup_order"][b.id].append(site)
+            state["pickup_vehicle"][b.id].setdefault(site, 0)
+    for trip in sorted(
+        candidate["e2_trips"],
+        key=lambda t: (t["departure"], t["satellite_id"], t["vehicle_id"], t["trip_index"]),
+    ):
+        state["e2"].append(
+            dict(
+                satellite=trip["satellite_id"],
+                vehicle=trip["vehicle_id"],
+                tasks=[(e["order_id"], e["kind"]) for e in trip["events"]],
+                depart_after=trip["departure"],
+                return_after=trip["return_complete"],
+            )
+        )
+    return candidate, assignment, state
+
+
+def initial_calendars(variable):
+    from models.routing.model_5.alns.neighborhoods import boundary_events
+
+    parent, k = variable.parent, variable.count
+    balanced = parent.balanced_boundaries(k)
+    minimum = 2 * variable.minimum_phase_ticks
+    calendars = [balanced]
+    if parent.no_work_window and k > 1:
+        p = variable.operating_policy
+        outward, inward = variable.travel_bounds['outward'], variable.travel_bounds['inward']
+        last_clean = max(
+            o.pickup_window[1] + o.service_time + inward[o.satellite][o.customer]
+            + p.e2_return_unload_time + variable.service(o.satellite)
+            + outward[o.satellite][variable.depot] + p.depot_return_unload_time + p.cleaning_duration
+            for o in variable.orders
+        )
+        span = min(balanced[-1]-balanced[0], max(k*minimum, last_clean-balanced[0]))
+        demand_aligned = parent.proposed_boundaries(
+            k, [balanced[0] + span*i//k for i in range(k)] + [balanced[-1]]
+        )
+        if demand_aligned != balanced:
+            calendars.insert(0, demand_aligned)
+    yield from calendars
+    # Event-aligned seeds can cross a release-time barrier even when every
+    # assignment in the reference equal calendar is impossible.
+    events = boundary_events(variable)
+    seen = set(calendars)
+    balanced = calendars[0]
+    for index in range(0 if parent.no_work_window else 1, k):
+        lo = balanced[index - 1] + minimum if index else variable.operating_policy.cycle_start
+        hi = balanced[index + 1] - minimum
+        targets = sorted(
+            (t for t in events if lo <= t <= hi), key=lambda t: abs(t - balanced[index])
+        )
+        for t in targets[:6]:
+            boundaries = list(balanced)
+            boundaries[index] = t
+            key = parent.proposed_boundaries(k, boundaries)
+            if key not in seen:
+                seen.add(key)
+                yield key

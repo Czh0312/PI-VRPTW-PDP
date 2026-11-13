@@ -9,12 +9,12 @@ from tools.configuration.loader import load_json
 
 
 class SingleBatchCostInstance(MultiBatchInstance):
-    """Keep M3's physical decisions; price them with the M5–M8 contract."""
+    """Keep Model 3's physical decisions and apply the shared cost profile."""
 
     cost_objective = True
 
-    def __init__(self, network, orders, policy, economic_config):
-        super().__init__(network, orders, policy, model=3)
+    def __init__(self, network, orders, policy, economic_config, *, no_work_window=False):
+        super().__init__(network, orders, policy, model=3, no_work_window=no_work_window)
         self.cost_profile = JointCostProfile(
             load_json(economic_config) if isinstance(economic_config, str) else economic_config)
 

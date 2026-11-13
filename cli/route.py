@@ -1,55 +1,55 @@
-"""Run the current fixed-batch container model; B=1 is the single-batch case."""
+"""Solve a current two-echelon routing case."""
 import argparse
 import sys
 from tools.configuration.loader import PROJECT_ROOT, apply_container_pool_size, load_json, load_routing_case
 from tools.configuration.container_pools import apply_pool_config
 
 DEFAULT_CASE = PROJECT_ROOT / "config/experiments/examples/single_batch_demo.json"
+DEMO_CASES = {4: DEFAULT_CASE.with_name('model4_demo.json'),
+              5: DEFAULT_CASE.with_name('model5_demo.json')}
+
 
 def load_config(case_path=DEFAULT_CASE, **kwargs):
     return load_routing_case(case_path, **kwargs)
 
+
 def main(argv=None):
     arguments = list(sys.argv[1:] if argv is None else argv)
-    # M10 has no calendar options; keep its parser isolated from M1-M9.
+    # The no-batch model uses its own solver options.
     probe = argparse.ArgumentParser(add_help=False)
     probe.add_argument('--model', type=int)
-    probe.add_argument('--case', default=str(DEFAULT_CASE))
+    probe.add_argument('--case')
     selected, _ = probe.parse_known_args(arguments)
-    number = selected.model if selected.model is not None else load_json(selected.case).get('model')
-    if number == 10:
+    case_path = selected.case or DEMO_CASES.get(selected.model, DEFAULT_CASE)
+    number = selected.model if selected.model is not None else load_json(case_path).get('model')
+    if number == 6:
         from .no_batch import main as no_batch_main
         return no_batch_main(arguments)
     if "--baseline" in arguments:
         from .baseline_route import main as baseline_main
         return baseline_main([arg for arg in arguments if arg != "--baseline"])
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--case", default=str(DEFAULT_CASE))
-    parser.add_argument("--model", type=int, choices=range(1, 11), help="M1–M5 原模型；M6–M9 批次扩展；M10 无批次（用 --model 10 --help 查看）")
-    parser.add_argument("--economic-config", help="M3 成本对照及 M5–M9 成本参数与证据配置")
+    parser.add_argument("--case", default=str(case_path))
+    parser.add_argument("--model", type=int, choices=range(1, 7), help="M1–M4 单批次，M5 可变批次，M6 无批次")
+    parser.add_argument("--economic-config", help="M3/M5 总成本参数")
     parser.add_argument('--objective-mode', choices=('cost', 'distance'),
-                        help='M3 可选 distance/cost（默认 distance）；M5 默认 cost')
-    parser.add_argument('--pool-min', type=int, help='M5–M9 容器池决策下界')
-    parser.add_argument('--pool-max', type=int, help='M5–M9 容器池决策上界')
-    schedules=parser.add_mutually_exclusive_group()
-    schedules.add_argument('--uniform-cycle',dest='uniform_cycle',action='store_true',default=None,
-                           help='M6 基础版：优化周期批次数，均分周期，各批共用相对分界点')
-    schedules.add_argument('--candidate-slots',dest='uniform_cycle',action='store_false',default=None,
-                           help='M6 历史候选时段模式，保留输入批次起止')
+                        help='M3 选择 distance 或 cost，M5 使用 cost')
+    work_window = parser.add_mutually_exclusive_group()
+    work_window.add_argument('--no-work-window', dest='no_work_window', action='store_true', default=None,
+                             help='M3/M4/M5 按订单和作业时序排程，次日首单释放前复位')
+    work_window.add_argument('--fixed-work-window', dest='no_work_window', action='store_false', default=None,
+                             help='M3/M4/M5 复现配置中的固定外层作业窗口')
+    parser.add_argument('--pool-min', type=int, help='M5 容器池决策下界')
+    parser.add_argument('--pool-max', type=int, help='M5 容器池决策上界')
     counts = parser.add_mutually_exclusive_group()
     counts.add_argument('--batch-count-candidates',type=int,nargs='+',help='显式指定用于诊断的 K 子集')
-    counts.add_argument('--all-batch-counts',action='store_true',help='M6–M9 允许全部满足周期及最短阶段约束的正整数 K')
-    parser.add_argument('--min-phase-minutes',type=float,help='M6–M9 各阶段最短时长，默认1分钟（场景假设）')
-    cutoffs=parser.add_mutually_exclusive_group()
-    cutoffs.add_argument('--optimize-cutoffs',dest='optimize_cutoffs',action='store_true',default=None,
-                         help='M6 优化两窗截点，保持候选批次起止与顾客窗口不变')
-    cutoffs.add_argument('--fixed-cutoffs',dest='optimize_cutoffs',action='store_false',default=None,
-                         help='M6 使用原固定截点，作为对照')
-    parser.add_argument('--initial-joint-result',help='M6–M8 同模型已有可行解 JSON；审计后用于 ALNS 初解；默认直接Gurobi不接收初解')
+    counts.add_argument('--all-batch-counts',action='store_true',help='M5 允许全部满足周期及最短阶段约束的正整数 K')
+    parser.add_argument('--min-phase-minutes',type=float,help='M5 各阶段最短时长，默认1分钟')
+    parser.add_argument('--initial-joint-result',help='M5 ALNS 初解，使用独立审计过的同模型结果 JSON')
     parser.add_argument("--solver", choices=("alns", "exact"))
     parser.add_argument("--exact-time", type=float)
     parser.add_argument("--exact-strategy", choices=("auto", "milp"),
-                        help="直接Gurobi（默认milp，auto为兼容别名）；M6–M9统一优化批次数")
+                        help="直接 Gurobi，M5 在同一 MILP 中优化批次数")
     parser.add_argument("--milp-threads", type=int, help="直接MILP基线的线程数，默认1")
     parser.add_argument("--milp-formulation", choices=("expanded", "compact"),
                         help="直接MILP的等价表达，M3/M4默认compact，其余默认expanded")
@@ -84,9 +84,22 @@ def main(argv=None):
     if args.objective_mode is not None:
         if config['model'] not in (3, 5):
             raise ValueError('--objective-mode is only supported for M3 and M5')
+        if config['model'] == 5 and args.objective_mode != 'cost':
+            raise ValueError('Model 5 uses the total-cost objective')
         config['objective_mode'] = args.objective_mode
     elif args.economic_config and config['model'] in (3, 5):
         config['objective_mode'] = 'cost'
+    if args.no_work_window is not None:
+        if config['model'] not in (3, 4, 5):
+            raise ValueError('Work window flags here apply to M3/M4/M5')
+        config['no_work_window'] = args.no_work_window
+    elif config['model'] in (3, 4, 5):
+        config.setdefault('no_work_window', True)
+    else:
+        config.pop('no_work_window', None)
+    if not config.get('no_work_window') and config.get('legacy_operating_policy'):
+        config['operating_policy'] = config['legacy_operating_policy']
+        fleet = {**fleet, 'operating_policy': load_json(config['operating_policy'])}
     if args.m4_strengthening is not None:
         if config['model'] != 4 or config.get('solver') != 'exact':
             raise ValueError('--m4-strengthening requires M4 --solver exact')
@@ -98,26 +111,13 @@ def main(argv=None):
         milp_options['formulation'] = args.milp_formulation
     if milp_options:
         config['milp_options'] = milp_options
-    if config['model'] == 9 and config.get('solver') != 'exact':
-        raise ValueError('M9 currently supports --solver exact only')
     if args.fleet_config:
         fleet = {**load_json(args.fleet_config), "operating_policy": fleet["operating_policy"]}
         config["routing_config"] = args.fleet_config
     options=dict(config.get('joint_batch_options',{}))
-    if args.model in (7, 8, 9):
-        from models.common.cycle.calendar import SCHEDULE_MODES
-        options['schedule_mode'] = SCHEDULE_MODES[args.model]
-        config['joint_batch_options'] = options
-    if args.uniform_cycle is not None:
-        if config['model']!=6:
-            raise ValueError('Schedule optimization flags require M6')
-        options={key:value for key,value in options.items() if key in ('pool_min','pool_max')}
-        if args.uniform_cycle:
-            options['schedule_mode']='uniform_cycle'
-        config['joint_batch_options']=options
     if args.all_batch_counts or args.batch_count_candidates is not None or args.min_phase_minutes is not None:
-        if config['model'] not in (7, 8, 9) and (config['model']!=6 or options.get('schedule_mode')!='uniform_cycle'):
-            raise ValueError('Batch-count and phase-minimum options require M6 --uniform-cycle or M7/M8/M9')
+        if config['model'] != 5:
+            raise ValueError('Batch-count and phase-minimum options require M5')
         if args.batch_count_candidates is not None:
             options['batch_count_candidates']=args.batch_count_candidates
         elif args.all_batch_counts:
@@ -125,23 +125,12 @@ def main(argv=None):
         if args.min_phase_minutes is not None:
             options['min_phase_minutes']=args.min_phase_minutes
         config['joint_batch_options']=options
-    if args.optimize_cutoffs is not None:
-        if config['model']!=6:
-            raise ValueError('Cutoff optimization flags require M6')
-        if options.get('schedule_mode')=='uniform_cycle':
-            raise ValueError('Uniform cycle always optimizes a shared cutoff; individual cutoff flags are incompatible')
-        options={**config.get('joint_batch_options',{}),'optimize_cutoffs':args.optimize_cutoffs}
-        if not args.optimize_cutoffs:
-            options.pop('cutoff_bounds_minutes',None)
-        config['joint_batch_options']=options
     if args.initial_joint_result:
         config['initial_joint_result']=args.initial_joint_result
     if args.pool_min is not None or args.pool_max is not None:
-        if config['model'] not in (5, 6, 7, 8, 9):
-            raise ValueError('Pool decision bounds require M5–M9')
-        if config['model'] == 5 and config.get('objective_mode') == 'distance':
-            raise ValueError('M5 pool decision bounds require cost mode and --economic-config')
-        key = 'pool_options' if config['model'] == 5 else 'joint_batch_options'
+        if config['model'] != 5:
+            raise ValueError('Pool decision bounds require M5')
+        key = 'joint_batch_options'
         bounds = dict(config.get(key, {}))
         for name in ('pool_min', 'pool_max'):
             if getattr(args, name) is not None:
@@ -149,14 +138,13 @@ def main(argv=None):
         config[key] = bounds
     if args.container_pool_size is not None:
         config, fleet = apply_container_pool_size(config, fleet, args.container_pool_size)
-        if config['model'] in (5, 6, 7, 8, 9):
-            key = 'pool_options' if config['model'] == 5 else 'joint_batch_options'
+        if config['model'] == 5:
+            key = 'joint_batch_options'
             config[key] = {**config.get(key, {}),
                                            'pool_min': args.container_pool_size, 'pool_max': args.container_pool_size}
-    elif config['model'] not in (5, 6, 7, 8, 9) or (
-            config['model'] == 5 and config.get('objective_mode') == 'distance'):
+    elif config['model'] != 5:
         config, fleet = apply_pool_config(config, fleet, args.pool_config)
     elif args.pool_config:
-        raise ValueError('M5–M9 optimize N; use --pool-min/--pool-max instead of --pool-config')
+        raise ValueError('Use --pool-min/--pool-max for M5')
     from .multibatch import run_case
     return run_case(config, fleet, case_path=args.case, output=args.output)

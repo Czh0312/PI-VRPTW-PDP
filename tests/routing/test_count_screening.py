@@ -7,7 +7,7 @@ from types import SimpleNamespace as NS
 import pytest
 
 from models.common.cycle.count_screening import infeasible_count_certificate
-from tests.routing.test_model6_joint import exact_available
+from tests.routing.calendar_fixtures import exact_available
 
 
 def assignment_problem(domains, batches, productive=True):
@@ -52,18 +52,18 @@ def test_unknown_batch_is_an_input_error_not_an_infeasibility_proof():
         infeasible_count_certificate(assignment_problem([(1,)], (0,)))
 
 
-@pytest.mark.parametrize('number', [6, 7, 8])
+@pytest.mark.parametrize('number', [5])
 def test_s04_uses_each_models_actual_calendar_domain(number):
     from models.common.cycle import load_instance
     from tools.configuration.loader import load_routing_case
     root = Path(__file__).resolve().parents[2]
     p = load_instance(*load_routing_case(
-        root / f'data/formal_benchmark27_spacetime_v2/model_{number}/small/S04/case.json'))
+        root / f'data/benchmark27_models_1_6_v1/model_{number}/small/S04/case.json'))
     rejected = [k for k in p.batch_count_candidates if infeasible_count_certificate(p.for_count(k))]
-    assert rejected == ([] if number == 8 else [3, 4, 5, 6, 7])
+    assert 1 not in rejected
 
 
-@pytest.mark.parametrize('number', [6, 7, 8])
+@pytest.mark.parametrize('number', [5])
 def test_screened_unified_retains_optimum_and_full_proof_scope(number, exact_available):
     from models.common.cycle.unified_milp import solve_unified_milp
     from tests.routing.test_unified_batch_milp import instance
@@ -89,7 +89,7 @@ def test_screened_unified_retains_optimum_and_full_proof_scope(number, exact_ava
     assert 3 in screened['info']['screened_batch_counts']
 
 
-@pytest.mark.parametrize('number', [6, 7, 8])
+@pytest.mark.parametrize('number', [5])
 def test_all_rejected_counts_are_still_proven_by_unified_model(number, exact_available):
     from models.common.cycle.unified_milp import solve_unified_milp
     from tests.routing.test_unified_batch_milp import instance

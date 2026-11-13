@@ -1,73 +1,53 @@
-"""Search-state cloning, keys and result conversion for this model."""
+"""Route topology, physical vehicle order, and optional container-wait links."""
+from dataclasses import dataclass, field
+from copy import deepcopy
 
 
-def clone_state(state):
-    return dict(
-        deliveries={b: [list(r) for r in rows] for b, rows in state["deliveries"].items()},
-        pickup_order={b: list(row) for b, row in state["pickup_order"].items()},
-        pickup_vehicle={b: dict(row) for b, row in state["pickup_vehicle"].items()},
-        e2=[{**r, "tasks": list(r["tasks"])} for r in state["e2"]],
-    )
+@dataclass
+class Route:
+    layer: str
+    base: str
+    vehicle: int
+    actions: list
 
 
-def state_key(state):
-    return (
-        tuple((b, tuple(map(tuple, rows))) for b, rows in state["deliveries"].items()),
-        tuple((b, tuple(row)) for b, row in state["pickup_order"].items()),
-        tuple((b, tuple(sorted(row.items()))) for b, row in state["pickup_vehicle"].items()),
-        tuple(
-            (
-                r["satellite"],
-                r["vehicle"],
-                tuple(r["tasks"]),
-                r.get("depart_after"),
-                r.get("return_after"),
-            )
-            for r in state["e2"]
-        ),
-    )
+@dataclass
+class State:
+    routes: dict = field(default_factory=lambda: dict(e1=[], e2=[]))
+    reuse: list = field(default_factory=list)
+
+    def copy(self):
+        return deepcopy(self)
 
 
-def state_from_result(problem, result):
-    state = dict(
-        deliveries={
-            b.id: [[] for _ in range(problem.fleet.e1_count)]
-            for b in problem.operating_policy.batches
-        },
-        pickup_order={b.id: [] for b in problem.operating_policy.batches},
-        pickup_vehicle={b.id: {} for b in problem.operating_policy.batches},
-        e2=[],
-    )
-    for trip in result["e1_trips"]:
-        batch, vehicle = trip["batch_id"], trip["vehicle_id"]
-        for event in trip["events"]:
-            site = event["site_id"]
-            if event["kind"] == "d":
-                state["deliveries"][batch][vehicle].append(site)
-            else:
-                state["pickup_order"][batch].append(site)
-                state["pickup_vehicle"][batch][site] = vehicle
-    for sites in state["pickup_order"].values():
-        sites.extend(s for s in problem.satellites if s not in sites)
-    for trip in sorted(
-        result["e2_trips"], key=lambda r: (r["trip_index"], r["satellite_id"], r["vehicle_id"])
-    ):
-        state["e2"].append(
-            dict(
-                satellite=trip["satellite_id"],
-                vehicle=trip["vehicle_id"],
-                tasks=[(e["order_id"], e["kind"]) for e in trip["events"]],
-            )
-        )
-        if len(problem.operating_policy.batches) > 1:
-            state["e2"][-1].update(
-                depart_after=trip["departure"], return_after=trip["return_complete"]
-            )
-    return state
+def groups(problem, route):
+    result = []
+    for oid, kind in route.actions:
+        o = problem.order_map[oid]
+        site = o.satellite if route.layer == 'e1' else o.customer
+        if route.layer == 'e1' and result and result[-1][:2] == (site,kind):
+            result[-1][2].append(oid)
+        else:
+            result.append((site, kind, [oid]))
+    return result
 
 
-def clone_joint_state(state):
-    copied = clone_state(state)
-    if "cutoffs" in state:
-        copied["cutoffs"] = dict(state["cutoffs"])
-    return copied
+def route_distance(problem, route):
+    sites = [route.base]+[x[0] for x in groups(problem,route)]+[route.base]
+    return sum(problem.distance(a,b) for a,b in zip(sites,sites[1:]))
+
+
+def capacity_ok(problem, route):
+    f = problem.fleet
+    capw = f.e1_weight_cap if route.layer == 'e1' else f.e2_weight_cap
+    capv = f.e1_volume_cap if route.layer == 'e1' else f.e2_volume_cap
+    w = sum(problem.task(oid,kind)[1] for oid,kind in route.actions if kind == 'd')
+    v = sum(f.container_volume for _,kind in route.actions if kind == 'd')
+    if w > capw+1e-7 or v > capv+1e-7:
+        return False
+    for oid,kind in route.actions:
+        sign = -1 if kind == 'd' else 1
+        w += sign*problem.task(oid,kind)[1]; v += sign*f.container_volume
+        if not -1e-7 <= w <= capw+1e-7 or not -1e-7 <= v <= capv+1e-7:
+            return False
+    return True

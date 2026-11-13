@@ -5,32 +5,26 @@ from importlib import import_module
 import pytest
 
 from tests.routing.test_single_batch_comparison import problem
-from tests.routing.test_multibatch_cycle import fixture
-from tests.routing.test_model6_uniform import uniform_fixture
-from tests.routing.test_model78_calendar import calendar_fixture
+from tests.routing.test_model5_calendar import calendar_fixture
 
 
 def instance_for(number):
     if number < 5:
         return problem(number)
-    if number == 5:
-        return fixture()
-    if number == 6:
-        return uniform_fixture().for_count(2)
     return calendar_fixture(number)
 
 
-@pytest.mark.parametrize("number", range(1, 9))
+@pytest.mark.parametrize("number", range(1, 6))
 def test_public_builder_exposes_its_actual_parameters_and_variables(number):
     instance = instance_for(number)
     package = f"models.routing.model_{number}.exact"
     module = import_module(package + ".model")
     build = module.build_joint_model if number in (2, 4) else module.build_model
-    model, context = build(instance, **({"batch_count": 2} if number >= 7 else {}))
+    model, context = build(instance, **({"batch_count": 2} if number == 5 else {}))
     try:
         parameters = context["parameters"]
         variables = context["variables"]
-        if number >= 7:
+        if number == 5:
             # Public calendar entries create their own fixed-K projection.
             assert parameters.problem.network is instance.network
             instance = parameters.problem
@@ -57,7 +51,7 @@ def test_public_builder_exposes_its_actual_parameters_and_variables(number):
             for route in routes:
                 assert route["used"].sameAs(actual[route["used"].index])
         assert model.NumQNZs == 0
-        if number >= 6:
+        if number == 5:
             assert variables.pool is context["pool"]
             assert variables.calendar["starts"] is context["batch_starts"]
             assert variables.calendar["cutoffs"] is context["cutoffs"]

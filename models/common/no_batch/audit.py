@@ -1,4 +1,4 @@
-"""Independent M10 audit: no optimization or schedule-construction imports.
+"""Independent M6 audit: no optimization or schedule-construction imports.
 
 Each empty return carries order IDs only as custody tokens. Identical physical
 containers are allocated through the common clean-stock ledger after washing.
@@ -22,7 +22,7 @@ def audit_solution(problem, result, *, repeat=True):
 
 def _audit(problem, result, errors, fail, repeat):
     p, f = problem.operating_policy, problem.fleet
-    if result.get('model') != 10 or result.get('policy_version') != VERSION:
+    if result.get('model') != 6 or result.get('policy_version') != VERSION:
         fail('MODEL_IDENTITY')
     def tick(t):
         if isinstance(t, bool) or not isinstance(t, int):

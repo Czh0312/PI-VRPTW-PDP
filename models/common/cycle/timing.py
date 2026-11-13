@@ -1,4 +1,4 @@
-"""Canonical earliest schedule for fixed B=1 routes (not a cost optimizer).
+"""Earliest timing of fixed routes with the same collection eligibility.
 
 Remove arbitrary MILP time slack before pricing, without altering route order,
 assignments, vehicle usage, distance or any independently audited requirement.
@@ -18,11 +18,24 @@ def normalize_schedule(problem, result):
     if problem.free_assignment:
         from models.common.cycle.assignment import assigned_problem
         problem = assigned_problem(problem, result['assignment'])
+    updated = earliest_trip_schedule(problem, result)
+    updated['schedule_convention'] = 'earliest_feasible_fixed_route_B1'
+    updated['audit'] = audit_solution(root, updated)
+    if not updated['audit']['valid']:
+        raise ValueError(f'Normalized schedule failed independent audit: {updated["audit"]["errors"]}')
+    if problem.operating_policy.consolidated_handoff:
+        for field in ('cutoff_snapshots', 'consolidated_handoffs', 'depot_releases'):
+            updated[field] = updated['audit'][field]
+    return updated
+
+
+def earliest_trip_schedule(problem, result):
+    """Retain batch loading and each E2 return's E1 collection round."""
     p = problem.operating_policy
-    batch = p.batches[0]
     updated = deepcopy(result)
     bounds, children, indegree = {}, defaultdict(list), defaultdict(int)
     tasks, supply, vehicles = {}, {}, defaultdict(list)
+    handoffs, empty_returns = {}, []
 
     def node(key, lower):
         bounds[key] = max(bounds.get(key, p.cycle_start), lower)
@@ -35,22 +48,32 @@ def normalize_schedule(problem, result):
     for layer in ('e1', 'e2'):
         for trip in updated[layer+'_trips']:
             rid = trip['trip_id']
+            batch = (problem.batch_map[trip.get('batch_id', p.batches[0].id)] if layer == 'e1' else None)
             delivery = any(e['kind'] == 'd' for e in trip['events'])
             prep = (p.e1_load_time if layer == 'e1' else p.e2_dispatch_prep_time) if delivery else 0
-            earliest = (batch.start+prep if delivery else batch.cutoff) if layer == 'e1' else p.cycle_start+prep
+            earliest = p.cycle_start+prep
+            if layer == 'e1' and delivery:
+                sites = [e['site_id'] for e in trip['events'] if e['kind'] == 'd']
+                earliest = problem.e1_loading_start(batch, sites)+prep
+            elif layer == 'e1' and batch.cutoff is not None:
+                earliest = batch.cutoff
             begin = node((rid, 'start'), earliest)
-            end = node((rid, 'end'), p.cycle_start)
+            return_floor = p.cycle_start
+            if layer == 'e2' and not p.consolidated_handoff and any(e['kind'] == 'p' for e in trip['events']):
+                return_floor = max((b.cutoff+1 for b in p.batches if b.cutoff < trip['return_complete']),
+                                   default=return_floor)
+            end = node((rid, 'end'), return_floor)
             base = problem.depot if layer == 'e1' else trip['satellite_id']
             key = (layer, base, trip['vehicle_id'])
-            slot = 0 if layer == 'e1' else trip['trip_index']
+            slot = problem.batch_index[batch.id] if layer == 'e1' else trip['trip_index']
             vehicles[key].append((slot, begin, end, prep))
             previous, site, service, kind_before = begin, base, 0, None
             for i, event in enumerate(trip['events']):
                 kind = event['kind']
                 if layer == 'e1':
                     target = event['site_id']
-                    lower = batch.start if kind == 'd' else batch.cutoff
-                    if kind == 'p' and kind_before != 'p':
+                    lower = batch.start if kind == 'd' or batch.cutoff is None else batch.cutoff
+                    if kind == 'p' and batch.cutoff is not None and kind_before != 'p':
                         lower += problem.travel(site, target)
                     duration = problem.service(target)
                 else:
@@ -61,13 +84,22 @@ def normalize_schedule(problem, result):
                 current = node((rid, i), lower)
                 edge(previous, current, service+problem.travel(site, target))
                 if layer == 'e1' and kind == 'd':
-                    supply[target] = (current, duration)
+                    supply[target, batch.id] = (current, duration)
+                if layer == 'e1' and kind == 'p':
+                    handoffs[target] = current
                 previous, site, service, kind_before = current, target, duration, kind
             unload = p.depot_return_unload_time if layer == 'e1' else p.e2_return_unload_time
             edge(previous, end, service+problem.travel(site, base)+unload)
+            if layer == 'e2' and any(e['kind'] == 'p' for e in trip['events']):
+                empty_returns.append((end, base))
+    if p.consolidated_handoff:
+        for end, site in empty_returns:
+            edge(end, handoffs[site], 0)
     for trip in updated['e2_trips']:
-        if any(e['kind'] == 'd' for e in trip['events']):
-            source, service = supply[trip['satellite_id']]
+        delivery = next((e for e in trip['events'] if e['kind'] == 'd'), None)
+        if delivery:
+            bid = problem.order_map[delivery['order_id']].batch
+            source, service = supply[trip['satellite_id'], bid]
             edge(source, (trip['trip_id'], 'start'), service+p.e2_dispatch_prep_time)
     for order in problem.orders if problem.reusable else ():
         edge(tasks[order.id, 'd'], tasks[order.id, 'p'], order.service_time+order.min_use_time)
@@ -94,10 +126,6 @@ def normalize_schedule(problem, result):
             trip['departure'], trip['return_complete'] = bounds[rid, 'start'], bounds[rid, 'end']
             for i, event in enumerate(trip['events']):
                 event['start'] = bounds[rid, i]
-    for field in ('audit', 'cutoff_snapshots', 'depot_releases'):
+    for field in ('audit', 'cutoff_snapshots', 'consolidated_handoffs', 'depot_releases'):
         updated.pop(field, None)
-    updated['schedule_convention'] = 'earliest_feasible_fixed_route_B1'
-    updated['audit'] = audit_solution(root, updated)
-    if not updated['audit']['valid']:
-        raise ValueError(f'Normalized schedule failed independent audit: {updated["audit"]["errors"]}')
     return updated

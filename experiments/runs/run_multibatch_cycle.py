@@ -1,4 +1,4 @@
-"""Run frozen static multibatch cases in isolated, wall-clock bounded processes."""
+"""Run fixed-pool scenarios in isolated, wall-clock bounded processes."""
 from __future__ import annotations
 
 import argparse
@@ -26,7 +26,8 @@ from models.common.cycle import load_instance, MultiBatchPolicy
 from tools.data.static_batch_dataset import load_manifest, check_pairing, suggested_pool_sizes
 
 INPUT_KEYS = ('data', 'orders', 'routing_config', 'operating_policy', 'algorithm_config',
-              'distance_matrix', 'duration_matrix', 'dataset_metadata', 'pool_config', 'economic_config')
+              'distance_matrix', 'duration_matrix', 'dataset_metadata', 'pool_config', 'economic_config',
+              'legacy_operating_policy', 'batch_count_certificate')
 
 
 def write_json(path, value):
@@ -37,10 +38,10 @@ def prepare_variants(args, records):
     variants = []
     for index, source in enumerate(args.case):
         cfg, fleet = load_routing_case(source, use_pool_config=False)
-        # This runner explicitly scans fixed pools for historical distance
-        # diagnostics. Current M5 cost optimization runs through main.py route.
-        if cfg['model'] == 5:
-            cfg['objective_mode'] = 'distance'
+        if cfg['model'] not in (1, 2, 3, 4):
+            if records:
+                continue
+            raise ValueError('The fixed-pool study accepts M1–M4. Use route for M5/M6.')
         if (fleet.get('operating_policy') or {}).get('policy_version') != 'multi_batch_cutoff_v1':
             raise ValueError(f'{source} is not a multibatch case')
         if not args.pool_sizes and not args.suggested_pools:
@@ -66,7 +67,8 @@ def prepare_variants(args, records):
                 copied['operating_policy'] = {**fleet['operating_policy'],
                                               'container_pool_size': pool, 'cleaning_duration': cleaning}
                 copied['container_pool_size'] = pool
-                parsed = MultiBatchPolicy.from_config(copied['operating_policy'])
+                parsed = MultiBatchPolicy.from_config(copied['operating_policy'],
+                                                     no_work_window=problem.operating_policy.consolidated_handoff)
                 if args.iterations is not None:
                     copied['alns_iter'] = args.iterations
                 variants.append(dict(case_variant=f'{scenario}_N{pool}', scenario_id=scenario, model=problem.model_number,
@@ -110,6 +112,9 @@ def freeze_inputs(variants, out, dataset_manifest=None):
         hashes.update(records)
     for variant in variants:
         cfg = variant['config']
+        # Match the policy used by load_instance when the snapshot is run via route.
+        if cfg.get('model') in (3, 4):
+            cfg.setdefault('no_work_window', False)
         for key in INPUT_KEYS:
             if isinstance(cfg.get(key), str):
                 cfg[key] = copies[str(resolve_project_path(cfg[key]).resolve())]
@@ -230,7 +235,7 @@ def main(argv=None):
     elif any((args.groups, args.sizes, args.batch_counts, args.families, args.suggested_pools, args.source_kinds)):
         parser.error('Dataset filters and suggested pools require --dataset-manifest')
     else:
-        args.case = args.case or ['config/experiments/examples/multibatch_demo.json']
+        args.case = args.case or ['config/experiments/examples/single_batch_demo.json']
     variants = prepare_variants(args, selected)
     if args.list_only:
         for item in selected or [dict(case_path=p) for p in args.case]:
@@ -254,7 +259,7 @@ def main(argv=None):
         print(json.dumps(plan, ensure_ascii=False, indent=2))
         return plan
     out = (resolve_project_path(args.output) if args.output else
-           ROOT/'output/experiments/multi_batch_cutoff_v1'/datetime.now().strftime('%Y%m%dT%H%M%S_%f')).resolve()
+           ROOT/'output/current/pool_studies'/datetime.now().strftime('%Y%m%dT%H%M%S_%f')).resolve()
     if out.exists() and any(out.iterdir()):
         parser.error(f'Output directory is not empty: {out}')
     out.mkdir(parents=True, exist_ok=True)

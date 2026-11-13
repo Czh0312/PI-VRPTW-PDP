@@ -64,9 +64,10 @@ def plot_result(problem, result, path):
                      transform=axes[2].transAxes, ha='center')
     for ax in axes:
         for b in p.batches:
-            ax.axvline(p.minutes(b.cutoff), color='#d9534f', ls='--', alpha=.5)
+            if b.cutoff is not None:
+                ax.axvline(p.minutes(b.cutoff), color='#d9534f', ls='--', alpha=.5)
         ax.set_xlim(p.minutes(p.cycle_start), p.minutes(p.cycle_end))
-        ax.set_xlabel('Minutes (dashed = eligibility cutoff for E1 recovery)')
+        ax.set_xlabel('Minutes' if p.consolidated_handoff else 'Minutes (dashed = eligibility cutoff for E1 recovery)')
     fig.savefig(path, dpi=160)
     plt.close(fig)
     # Two maps per wave: E1 assigned to that wave; E2 departures in its interval.
@@ -100,19 +101,19 @@ def plot_result(problem, result, path):
 
 def run_case(config, fleet, *, case_path=None, output=None):
     instance = load_instance(config, fleet)
-    out = resolve_project_path(output) if output else PROJECT_ROOT / 'output/single_runs/multi_batch_cutoff_v1' / (
+    out = resolve_project_path(output) if output else PROJECT_ROOT / 'output/current' / f'model_{instance.model_number}' / (
         datetime.now().strftime('%Y%m%dT%H%M%S_%f')+'_'+config['solver'])
     if out.exists() and any(out.iterdir()):
         raise ValueError(f'Refusing to overwrite nonempty output directory: {out}')
     out.mkdir(parents=True, exist_ok=True)
     input_paths = [resolve_project_path(config[key]) for key in (
-        'data', 'orders', 'routing_config', 'operating_policy', 'algorithm_config', 'distance_matrix', 'duration_matrix', 'dataset_metadata', 'pool_config', 'economic_config', 'initial_joint_result')
+        'data', 'orders', 'routing_config', 'operating_policy', 'legacy_operating_policy', 'algorithm_config',
+        'distance_matrix', 'duration_matrix', 'dataset_metadata', 'pool_config', 'economic_config',
+        'batch_count_certificate', 'initial_joint_result')
                    if isinstance(config.get(key), str)]
     if case_path:
         input_paths.append(resolve_project_path(case_path))
     if getattr(instance, 'joint_batch', False) and instance.cost_profile.config.get('evidence_file'):
-        input_paths.append(resolve_project_path(instance.cost_profile.config['evidence_file']))
-    if getattr(instance, 'optimize_pool', False) and instance.cost_profile.config.get('evidence_file'):
         input_paths.append(resolve_project_path(instance.cost_profile.config['evidence_file']))
     if getattr(instance, 'cost_objective', False) and instance.cost_profile.config.get('evidence_file'):
         input_paths.append(resolve_project_path(instance.cost_profile.config['evidence_file']))
@@ -146,21 +147,10 @@ def run_case(config, fleet, *, case_path=None, output=None):
                         cutoff_bounds_ticks=instance.cutoff_bounds,
                         legal_order_batches=instance.legal_batches,
                         release_times={o.id:o.release_time for o in instance.orders})
-        if getattr(instance,'uniform_cycle',False):
-            manifest.update(uniform_cycle_config=instance.uniform_contract,
-                            cutoff_bounds_ticks=None,legal_order_batches=None,
-                            source_calendar_note='Reference only; solver rebuilds the entire cycle for each K')
         if getattr(instance, 'calendar_cycle', False):
             manifest.update(calendar_config=instance.calendar_contract,
                             cutoff_bounds_ticks=None, legal_order_batches=None,
                             source_calendar_note='Reference only; calendar models optimize the entire cycle')
-    if getattr(instance, 'optimize_pool', False):
-        manifest.update(economic_profile=instance.cost_profile.config,
-                        economic_profile_hash=instance.cost_profile.hash,
-                        evidence_hash=instance.cost_profile.evidence_hash,
-                        pool_options=instance.options,
-                        pool_bounds=dict(min=instance.pool_min, max=instance.pool_max),
-                        objective_mode='cost')
     if getattr(instance, 'cost_objective', False):
         manifest.update(economic_profile=instance.cost_profile.config,
                         economic_profile_hash=instance.cost_profile.hash,
@@ -189,10 +179,9 @@ def run_case(config, fleet, *, case_path=None, output=None):
         (out/'solver.log').write_text(log.getvalue(), encoding='utf-8')
         audit = result.get('audit', {})
         joint = getattr(instance, 'joint_batch', False)
-        pool_optimized = getattr(instance, 'optimize_pool', False)
         fixed_cost = getattr(instance, 'cost_objective', False)
         pool = result.get('container_pool_size', instance.operating_policy.container_pool_size)
-        objective_label = '总成本' if joint or pool_optimized or fixed_cost else '距离'
+        objective_label = '总成本' if joint or fixed_cost else '距离'
         lines = [f'M{instance.model_number} {"联合分批成本" if joint else "固定批次"}运行结果', '',
                  f"包装：{'循环' if instance.reusable else '一次性'}；批次数：{result.get('cycle_batch_count',len(instance.operating_policy.batches))}。",
                  f"状态：{result['info']['status']}。",
@@ -207,6 +196,13 @@ def run_case(config, fleet, *, case_path=None, output=None):
             lines.append(f"| {row['batch_id']} | {row['available']} | {row['demand']} | {row['after']} |")
         lines += ['', f"连续两个大周期重放：{audit.get('periodic_replay', {}).get('valid', False)}。",
                   '', '时间表 JSON 使用整数 ticks；分钟 = ticks × time_tick_seconds / (60 × time_tick_subdivision)，细分倍率缺省为1。']
+        if audit.get('consolidated_handoffs'):
+            minutes = instance.operating_policy.minutes
+            lines += ['', '| 前置仓 | 空箱收齐（分钟） | 一级车取箱（分钟） | 箱数 |',
+                      '| --- | ---: | ---: | ---: |']
+            for row in audit['consolidated_handoffs']:
+                lines.append(f"| {row['satellite_id']} | {minutes(row['last_unload']):.2f} | "
+                             f"{minutes(row['pickup_time']):.2f} | {row['quantity']} |")
         if not instance.reusable:
             lines += ['一次性包装的重放检查车辆与配送服务；每个周期重新购入包装，不声明容器闭环。']
         if instance.free_assignment:
@@ -216,13 +212,8 @@ def run_case(config, fleet, *, case_path=None, output=None):
                 lines.extend(f'| {customer} | {site} |'
                              for customer, site in sorted(result['assignment'].items()))
         if fixed_cost:
-            lines += ['', 'M3 成本对照：固定分仓、单批次日历和箱池，按 M5–M8 相同费用口径直接优化。',
+            lines += ['', '模型 3 在固定分仓、单批次和箱池的条件下直接优化总成本。',
                       f'总距离：{result.get("total_distance")}；费用配置哈希：{instance.cost_profile.hash}。']
-            lines.extend(f'- {key}: {value}' for key, value in result.get('cost_components', {}).items())
-        if pool_optimized:
-            lines += ['', '固定订单分批和批次日历，联合优化箱池规模、两级路线与调度。',
-                      f'箱池决策范围：{instance.pool_min}–{instance.pool_max}；总距离：{result.get("total_distance")}。',
-                      f'成本单位：{instance.cost_profile.config["currency"]}；来源：{instance.cost_profile.config["source_type"]}。']
             lines.extend(f'- {key}: {value}' for key, value in result.get('cost_components', {}).items())
         if joint:
             lines += ['', f"启用配送批次数：{result.get('delivery_batch_count')}；总距离：{result.get('total_distance')}。",
@@ -230,25 +221,25 @@ def run_case(config, fleet, *, case_path=None, output=None):
                       '每个计入批次数的批次都必须有配送和回运；纯回收趟次显式计费。初始箱体投资单列。',
                       '截点仅决定本轮回运资格；二级车辆在第二阶段仍可配送和回收。', '']
             if result.get('batch_cutoffs'):
-                lines += [f"截点模式：{result.get('cutoff_mode', 'fixed')}。", '',
-                          '| 批次 | 开始/分钟 | 回运截点/分钟 | 第一窗/分钟 | 第二窗/分钟 | 结束/分钟 |',
-                          '| --- | ---: | ---: | ---: | ---: | ---: |']
-                calendar = (instance.for_count(result['cycle_batch_count']) if getattr(instance, 'uniform_cycle', False)
-                            else instance.selected_problem(result) if getattr(instance, 'calendar_cycle', False) else instance)
+                calendar = instance.selected_problem(result)
                 minutes=calendar.operating_policy.minutes
+                lines += [f"截点模式：{result.get('cutoff_mode', 'fixed')}。", '']
+                if instance.no_work_window:
+                    reset = instance.operating_policy.minutes(instance.operating_policy.cycle_end)
+                    lines += [f"实际完成复位 {minutes(result['operations_complete']):g} 分钟，"
+                              f"次日首单释放 {reset:g} 分钟。", '']
+                lines += ['| 批次 | 开始/分钟 | 回运截点/分钟 | 第一窗/分钟 | 第二窗/分钟 | 结束/分钟 |',
+                          '| --- | ---: | ---: | ---: | ---: | ---: |']
                 for b in result['batches']:
                     lines.append(f"| {b['id']} | {minutes(b['start']):g} | {minutes(b['cutoff']):g} | "
                                  f"{minutes(b['cutoff']-b['start']):g} | {minutes(b['end']-b['cutoff']):g} | {minutes(b['end']):g} |")
                 lines.append('')
             lines.extend(f"- {key}: {value}" for key, value in result.get('cost_components', {}).items())
-            if getattr(instance, 'uniform_cycle', False) or getattr(instance, 'calendar_cycle', False):
+            if getattr(instance, 'calendar_cycle', False):
                 lines += ['', f"批次数允许域：{list(instance.batch_count_candidates)}；选定周期批次数：{result.get('cycle_batch_count')}。",
                           f"实际空箱回运轮数：{result.get('actual_recovery_round_count')}。"]
-                if getattr(instance, 'uniform_cycle', False):
-                    lines += [f"统一分界比例：{result.get('shared_cutoff_ratio')}。"]
-                else:
-                    lines += [f"日历模式：{instance.schedule_mode}；逐批长度/ticks：{result.get('batch_durations_ticks')}；"
-                              f"逐批分界比例：{result.get('cutoff_ratios')}。"]
+                lines += [f"日历模式：{instance.schedule_mode}；逐批长度/ticks：{result.get('batch_durations_ticks')}；"
+                          f"逐批分界比例：{result.get('cutoff_ratios')}。"]
                 if result['info'].get('exact_strategy') == 'gurobi_unified_milp':
                     lines += ['批次数、路线、箱池和日历在一个 MILP 中联合优化；一次 Gurobi 求解。',
                               f"完整候选域已建模：{result['info'].get('complete_count_domain')}；"
@@ -266,12 +257,8 @@ def run_case(config, fleet, *, case_path=None, output=None):
                       json.dumps(result['precheck']['errors'], ensure_ascii=False, indent=2), '```']
         (out/'report.md').write_text('\n'.join(lines)+'\n', encoding='utf-8')
         if audit.get('valid') and config.get('save_plots', True):
-            selected = instance.for_count(result['cycle_batch_count']) if getattr(instance,'uniform_cycle',False) else instance
-            if getattr(instance, 'calendar_cycle', False):
-                selected = instance.selected_problem(result)
+            selected = instance.selected_problem(result) if joint else instance
             plotted = selected.project(result['order_batch_assignment'], pool,result.get('batch_cutoffs')) if joint else instance
-            if pool_optimized:
-                plotted = instance.project_pool(pool)
             plot_result(plotted, result, out/'timeline.png')
         print(f"{result['info']['status']} | valid={audit.get('valid', False)} | {objective_label}={result['info']['objective']}")
         return result

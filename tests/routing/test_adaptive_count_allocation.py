@@ -1,10 +1,10 @@
-"""M8 must refine promising K without shrinking the declared search domain."""
+"""Model 5 refines promising K while preserving the declared search domain."""
 from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
 
-from models.routing.model_8.alns.k_search import scheduler as batch_search
+from models.routing.model_5.alns.k_search import scheduler as batch_search
 from tests.routing.test_count_budget_recycling import Clock, candidate
 
 
@@ -17,7 +17,7 @@ def scheduler(monkeypatch):
     monkeypatch.setattr(batch_search, '_attach', lambda p, c, r, k: r.update(cycle_batch_count=k))
     monkeypatch.setattr(batch_search, '_metadata', lambda *a: None)
     monkeypatch.setattr(batch_search, 'joint_empty_result', lambda *a: candidate())
-    problem = SimpleNamespace(model_number=8, batch_count_candidates=tuple(range(1, 101)),
+    problem = SimpleNamespace(model_number=5, orders=tuple(range(20)), batch_count_candidates=tuple(range(1, 101)),
                               for_count=lambda k: k)
 
     def run(solve, **kwargs):

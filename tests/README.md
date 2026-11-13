@@ -4,11 +4,11 @@
 检查清单在 [Makefile](../Makefile)，分组执行见[开发指南](../docs/development.md)。
 
 ```sh
-# 基础检查：M1–M8 入口、求解器隔离、周期审计、批次数域、费用和数据读取
+# 六模型入口、求解器隔离、周期审计、批次数域、费用和数据读取
 make test
 
 # 改动相关文件：指定文件时只运行这些测试
-make test TESTS="tests/routing/test_model5_cycle_cache.py"
+make test TESTS="tests/routing/test_model5_calendar.py"
 
 # 完整回归：穷举、参数组合、历史基线和完整数据集检查
 make test-full
@@ -24,14 +24,13 @@ make test-full
 | 精确模型的参数／变量类及实际模型上下文 | `routing/test_exact_model_layout.py` |
 | ALNS 状态隔离、预算与接受规则 | `routing/test_alns_layout.py` |
 | 精确 / ALNS 依赖隔离 | `routing/test_solver_isolation.py` |
-| M6–M8 日历、K 域与独立参考枚举 | `routing/test_batch_count_domain.py`、`routing/test_model78_calendar.py`、`routing/test_model78_independent_oracle.py` |
-| 单批 / 多批求解与证明边界 | `routing/test_single_batch_*.py`、`routing/test_multibatch_*.py` |
+| 模型 5 的日历、K 域与独立参考枚举 | `routing/test_batch_count_domain.py`、`routing/test_model5_calendar.py`、`routing/test_model5_independent_oracle.py` |
+| 模型 3、4、6 的每日调度 | `routing/test_unrestricted_work_window.py`、`routing/test_model6_no_batch.py` |
+| 单批求解与证明边界 | `routing/test_single_batch_*.py` |
 | 费用与生命周期 | `cost/` |
 | 数据生成、清单与冻结源码恢复 | `data/` |
 
-当前周期与数据验收：`routing/test_multibatch_cycle.py`、`data/test_static_batch_suite.py`、`routing/test_model_scope.py`。
-历史 M1–M4 算法测试导入 archive.routing_baselines，证明仅适用于相应旧规则。
-旧定义 M5–M8 的专属测试已随历史模型归档；当前同编号模型由现行多批与日历测试覆盖。
+全量算例输入可通过 `python -m tools.audit.audit_current_benchmark` 验证。历史实验测试和源码按旧编号保存。[归档](../archive/experiments/pre_renumbering_20261113/README.md)
 
 `routing/test_single_batch_comparison.py` 覆盖四模型任务差异、自由分仓修复不可行、未闭合枚举的证明边界、时间规范化、寿命补购、价格敏感性及冻结执行。
 

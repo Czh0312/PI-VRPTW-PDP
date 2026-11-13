@@ -1,25 +1,16 @@
-# 模型代码边界
+# 模型编号与代码
 
-现行结构是 `models/routing/model_1/` 至 `model_10/`；M9 当前仅有 `exact/`，其余模型各自拥有 `alns/` 和 `exact/`。
-逐文件用途见[模型导航](../models/routing/README.md)。
+| 当前编号 | 原编号 | 定义 |
+| --- | --- | --- |
+| 1 | 1 | 固定分仓，一次性包装，单批配送 |
+| 2 | 2 | 顾客级自由分仓，一次性包装，单批配送 |
+| 3 | 3 | 固定分仓，单批循环箱，各仓集中交接 |
+| 4 | 4 | 顾客级自由分仓，单批循环箱，各仓集中交接 |
+| 5 | 8 | 固定分仓，可变批次和逐批独立截点 |
+| 6 | 10 | 固定分仓，无批次，按实际回收、清洗和领用排程 |
 
-M10 使用独立的无批次业务层 `models/common/no_batch/` 和 `cli/no_batch.py`，支持原生 HiGHS/Gurobi MILP 及 ALNS。其事件库存、回收数量、证明范围和运行方式见[模型10](model10_no_batch.md)。
-统一目录结构、阅读入口和内部路径迁移见[求解代码目录指南](solver_directory_guide.md)。
+公共入口由 `models/routing/catalog.py` 和 `models/routing/service.py` 管理。每个模型的代码位于 `models/routing/model_N/`，含独立的 `exact/` 和 `alns/`。业务规则与审计在 `models/common/`，成本在 `models/cost/`。
 
-精确模型按参数、变量、约束、目标函数和组装职责拆分。各文件的阅读顺序、
-约束组及参数／变量类用法见[精确模型结构](exact_model_layout.md)。
+模型 4 在模型 3 的集中交接规则上增加自由分仓，同一顾客的所有订单由同一前置仓配送和回收。一级车在所服务订单已释放后装货，在对应仓的最后一次二级卸箱完成后取回全部空箱。各仓交接时间独立。箱子回总仓清洗，车辆完成周转，最迟在次日首单释放时恢复初始状态。
 
-ALNS 按参数、状态、构造、邻域、评价及搜索控制职责组织，兼容入口与阅读顺序见
-[ALNS 模型结构](alns_model_layout.md)。
-
-修改 M3 的 ALNS，就进入 `model_3/alns/`；修改 M3 的数学建模，就进入 `model_3/exact/`。
-不存在求解算法公用目录，不跨模型导入；M7/M8 的固定 K 求解已复制为本模型内部实现。
-相同组件是独立普通文件，后续修复是否同步到其他模型需要明确决定。
-
-`catalog.py` 和 `service.py` 只负责登记与选择入口。`models/common/` 的数据／业务规则／独立审计、
-`models/cost/` 的成本口径仍然统一，修改这些基础部分会影响使用它们的模型。
-如果要改变某个模型的业务定义，还需明确对应的审计和成本口径，不仅修改求解器。
-
-历史 M1–M4 在 `archive/routing_baselines/`，通过 `--baseline` 显式调用。
-已有结果和冻结源码不随当前目录修改。`make test` 复用现有隔离测试，检查八个模型两种算法的实际调用，
-禁止加载其他编号模型的算法，并检查 ALNS 不加载精确后端。
+旧模型 5、6、7、9 的求解器已归档。[退役源码](../archive/models/pre_renumbering_20261113/README.md) · [历史结果](../output/history/pre_renumbering_20261113/README.md)

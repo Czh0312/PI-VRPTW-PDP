@@ -22,7 +22,7 @@ python3 -m venv .venv
 依赖尚未锁定版本；复现实验还应核对原运行保存的 Python、依赖、输入及源码信息。
 精确求解需要 Gurobi 许可证，ALNS 入口按需加载，不导入 Gurobi。
 
-M10另支持通过SciPy调用原生HiGHS，无需Gurobi许可证。其独立业务层位于 `models/common/no_batch/`，CLI位于 `cli/no_batch.py`，两种算法位于 `models/routing/model_10/`。规则与专项检查见[模型10说明](model10_no_batch.md)。
+模型 6 也支持通过 SciPy 调用 HiGHS。业务层位于 `models/common/no_batch/`，CLI 位于 `cli/no_batch.py`，两种算法位于 `models/routing/model_6/`。[模型 6 说明](model6_no_batch.md)
 
 根目录保留项目入口 `main.py`、说明 `README.md`、统一工程配置 `pyproject.toml` 和 `Makefile`，
 供安装、运行和测试使用。`.gitignore`、`.gitattributes`、`.gitmodules` 是仓库级 Git 配置；
@@ -36,7 +36,7 @@ M10另支持通过SciPy调用原生HiGHS，无需Gurobi许可证。其独立业�
 | 增加命令参数或调整单次运行输出 | `cli/main.py`、`cli/route.py`、`cli/multibatch.py`、`cli/multibatch_cost.py` |
 | 修改模型编号、分流或输入范围 | `models/routing/catalog.py`、`service.py`、两种算法的 `model_n/` |
 | 修改 M1–M5 求解实现 | 对应 `models/routing/model_n/exact/` 或 `alns/` |
-| 修改 M6–M8 日历搜索及成本内核 | 精确：统一 MILP 与各模型 formulation；ALNS：各模型自己的 `k_search/scheduler.py` |
+| 修改模型 5 的日历搜索 | 精确模型位于 `model_5/exact/`，ALNS 批次数搜索位于 `model_5/alns/k_search/` |
 | 修改业务约束或独立审计 | `models/common/cycle/` |
 | 调整场景参数 / 配置加载逻辑 | `config/` / `tools/configuration/` |
 | 增加批量实验 / 分析 | `experiments/runs/` / `experiments/analysis/` |
@@ -71,7 +71,7 @@ git diff --check
 make test
 
 # 按本次改动选择专项测试；多个文件放在同一对引号内
-make test TESTS="tests/routing/test_model5_cycle_cache.py tests/routing/test_model5_intensification.py"
+make test TESTS="tests/routing/test_model5_calendar.py tests/routing/test_unrestricted_work_window.py"
 
 # 需要完整回归时显式运行
 make test-full
