@@ -22,12 +22,9 @@ def finish_result(problem, result, *, solver_module=None):
     mode = batch_mode_for(problem)
     if mode == 'single_batch' and result.get('audit', {}).get('valid'):
         cost = getattr(problem, 'cost_objective', False)
-        # Consolidated handoff has no fixed recovery time. Report the earliest
-        # execution of the chosen routes when occupied time carries no fee.
-        unpriced_time = (problem.operating_policy.consolidated_handoff and cost
-                         and all(problem.cost_profile.rates[f'{layer}_work_cost_per_minute'] == 0
-                                 for layer in ('e1', 'e2')))
-        if not cost or unpriced_time:
+        # The earliest schedule preserves the objective when time carries no fee.
+        if not cost or all(problem.cost_profile.rates[f'{layer}_work_cost_per_minute'] == 0
+                           for layer in ('e1', 'e2')):
             from models.common.cycle.timing import normalize_schedule
             result = normalize_schedule(problem, result)
     result['batch_mode'] = mode

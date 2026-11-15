@@ -27,10 +27,10 @@ def build_model(problem, *, deadline=None, verbose=False):
     clean = {o.id:m.var('clean_'+o.id, 0, H) for o in problem.orders}
     routes = dict(e1=[], e2=[])
     coverage = {layer:{a:[] for a in nodes} for layer in routes}
-    cost = Expr()
+    distances = {layer: Expr() for layer in routes}
+    vehicle_counts = {layer: 0 for layer in routes}
 
     def route_group(layer, actions, base, vehicles, trip_cap):
-        nonlocal cost
         count = min(len(actions), vehicles*trip_cap)
         cap_w = f.e1_weight_cap if layer == 'e1' else f.e2_weight_cap
         cap_v = f.e1_volume_cap if layer == 'e1' else f.e2_volume_cap
@@ -101,8 +101,8 @@ def build_model(problem, *, deadline=None, verbose=False):
                 w, v = problem.task(a[0], a[1])[1:]
                 m.conditional_eq(first[a], weight[a], initial_w+sign*w, big_w)
                 m.conditional_eq(first[a], volume[a], initial_v+sign*v, big_v)
-                cost += problem.distance_cost[layer]*(problem.distance(base,site(a))*first[a]+
-                                                       problem.distance(site(a),base)*last[a])
+                distances[layer] += (problem.distance(base,site(a))*first[a]
+                                     + problem.distance(site(a),base)*last[a])
             for (a,b), x in arcs.items():
                 m.conditional_ge(x, rank[b], rank[a]+1, len(actions)+1)
                 same_operation = layer == 'e1' and a[1] == b[1] and site(a) == site(b)
@@ -114,7 +114,8 @@ def build_model(problem, *, deadline=None, verbose=False):
                 w,v = problem.task(b[0],b[1])[1:]
                 m.conditional_eq(x, weight[b], weight[a]+sign*w, big_w)
                 m.conditional_eq(x, volume[b], volume[a]+sign*v, big_v)
-                cost += problem.distance_cost[layer]*problem.distance(site(a),site(b))*x
+                if not same_operation:
+                    distances[layer] += problem.distance(site(a),site(b))*x
             route = dict(label=label, base=base, used=used, start=start, departure=depart, end=end,
                          assignments=assigned, first=first, last=last, arcs=arcs, vehicle=vehicle)
             routes[layer].append(route); group.append(route)
@@ -122,7 +123,13 @@ def build_model(problem, *, deadline=None, verbose=False):
             m.ge(before['used'], after['used'])
             m.le(before['start'], after['start'])
         for v in range(vehicles):
-            m.le(sum(r['vehicle'][v] for r in group), trip_cap)
+            uses = [r['vehicle'][v] for r in group]
+            m.le(sum(uses), trip_cap)
+            if group and problem.cost_profile.rates[f'{layer}_vehicle_cost_per_cycle']:
+                active = m.var(f'active_{layer}_{base}_{v}')
+                m.le(active, sum(uses))
+                m.le(sum(uses), trip_cap*active)
+                vehicle_counts[layer] += active
             for i, a in enumerate(group):
                 for b in group[i+1:]:
                     m.ge(b['start'], a['end']+turn-M*(2-a['vehicle'][v]-b['vehicle'][v]))
@@ -166,8 +173,16 @@ def build_model(problem, *, deadline=None, verbose=False):
     pool = m.var('container_pool', 0, min(Q, problem.pool_max))
     m.eq(pool, Q-sum(links.values()))
     m.ge(pool,physical['pool_lower_bound'])
+    profile = problem.cost_profile
+    parts = profile.period_components(
+        distances=distances,
+        working_minutes={layer: sum(r['end']-r['start'] for r in group)*p.minutes(1)
+                         for layer, group in routes.items()},
+        vehicles=vehicle_counts, trips={layer: sum(r['used'] for r in group) for layer, group in routes.items()},
+        pool=pool, issued=Q, returned=Q)
+    transport_cost = sum(parts[layer+'_distance'] for layer in routes)
     if problem.transport_budget is not None:
-        m.le(cost, problem.transport_budget)
-    m.objective = problem.objective(cost, pool)
+        m.le(transport_cost, problem.transport_budget)
+    m.objective = problem.objective(transport_cost, pool, sum(parts.values()))
     return m, dict(routes=routes, times=times, issue=issue, clean=clean, pool=pool,
-                   links=links, transport_cost=cost, problem=problem,physical_bounds=physical)
+                   links=links, transport_cost=transport_cost, problem=problem,physical_bounds=physical)

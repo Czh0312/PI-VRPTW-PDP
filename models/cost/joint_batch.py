@@ -1,4 +1,4 @@
-"""Cost contract for Models 3 and 5 with independent schedule evaluation."""
+"""Shared per-period prices for routing objectives and independent audits."""
 from __future__ import annotations
 
 from copy import deepcopy
@@ -8,6 +8,8 @@ import json
 from tools.configuration.loader import load_json
 from models.common.cycle.policy import nonnegative, integer
 
+DEFAULT_ECONOMIC_CONFIG = 'config/cost/synthetic/daily_routing.json'
+
 RATE_FIELDS = (
     'distance_scale_to_km', 'container_pool_cost_per_period',
     'e1_distance_cost_per_km', 'e2_distance_cost_per_km',
@@ -16,6 +18,7 @@ RATE_FIELDS = (
     'e1_trip_cost', 'e2_trip_cost', 'cleaning_cost_per_return',
     'tracking_cost_per_use', 'container_price',
 )
+PAPER_RATE_FIELDS = ('single_use_package_price', 'single_use_disposal_cost_per_package')
 
 CALIBRATED_UNITS = {
     'distance_scale_to_km':'km/matrix_unit',
@@ -29,6 +32,7 @@ CALIBRATED_UNITS = {
     'cleaning_cost_per_return':'CNY/returned_container_use',
     'tracking_cost_per_use':'CNY/container_issue',
     'container_price':'CNY/container', 'container_lifetime_uses':'uses/container',
+    'single_use_package_price':'CNY/package', 'single_use_disposal_cost_per_package':'CNY/package',
 }
 
 
@@ -46,6 +50,9 @@ class JointCostProfile:
         if config['pool_cost_basis'] not in ('rental', 'owned_capital_charge', 'synthetic_pool_charge'):
             raise ValueError('Unsupported pool_cost_basis; purchase depreciation is not a pool holding cost')
         self.rates = {key: nonnegative(config.get(key), key) for key in RATE_FIELDS}
+        for key in PAPER_RATE_FIELDS:
+            if key in config:
+                self.rates[key] = nonnegative(config[key], key)
         if self.rates['distance_scale_to_km'] <= 0:
             raise ValueError('distance_scale_to_km must be positive and justified')
         self.lifetime = config.get('container_lifetime_uses')
@@ -87,6 +94,7 @@ class JointCostProfile:
                 raise ValueError('Calibrated profile requires a ready evidence register')
             entries = self.evidence.get('parameter_register', {})
             checked = RATE_FIELDS + (('container_lifetime_uses',) if self.lifetime is not None else ())
+            checked += tuple(key for key in PAPER_RATE_FIELDS if key in config)
             units = dict(CALIBRATED_UNITS)
             values = dict(self.rates, container_lifetime_uses=self.lifetime)
             if 'container_wear_cost_per_use' in config:
@@ -113,28 +121,44 @@ class JointCostProfile:
         self.hash = _hash(self.config)
         self.evidence_hash = _hash(self.evidence) if self.evidence is not None else None
 
-    def constant_cost(self, total):
-        values = dict(cleaning=total*self.rates['cleaning_cost_per_return'],
+    def constant_cost(self, total, *, returned=None):
+        if returned is None:
+            returned = total
+        values = dict(cleaning=returned*self.rates['cleaning_cost_per_return'],
                       tracking=total*self.rates['tracking_cost_per_use'])
         values['container_wear'] = total*self.wear_cost_per_use
         return values
 
-    def evaluate(self, physical_audit, pool):
-        """Physical metrics come from schedule replay, never solver expressions."""
-        parts = dict(container_pool=pool*self.rates['container_pool_cost_per_period'])
+    def period_components(self, *, distances, working_minutes, vehicles, trips,
+                          pool, issued, returned, reusable=True):
+        """Use the same rates for audited quantities and linear solver expressions."""
+        if reusable:
+            parts = dict(container_pool=pool*self.rates['container_pool_cost_per_period'])
+        else:
+            parts = dict(single_use_purchase=issued*self.rates['single_use_package_price'],
+                         single_use_disposal=issued*self.rates.get('single_use_disposal_cost_per_package', 0))
         for layer in ('e1', 'e2'):
-            parts[layer+'_distance'] = (physical_audit['distances'][layer]
+            parts[layer+'_distance'] = (distances[layer]
                 *self.rates['distance_scale_to_km']*self.rates[layer+'_distance_cost_per_km'])
-            parts[layer+'_work'] = physical_audit['time_metrics']['working_minutes'][layer]*self.rates[layer+'_work_cost_per_minute']
-            parts[layer+'_vehicles'] = physical_audit[layer+'_vehicle_count']*self.rates[layer+'_vehicle_cost_per_cycle']
-            parts[layer+'_trips'] = physical_audit[layer+'_trip_count']*self.rates[layer+'_trip_cost']
+            parts[layer+'_work'] = working_minutes[layer]*self.rates[layer+'_work_cost_per_minute']
+            parts[layer+'_vehicles'] = vehicles[layer]*self.rates[layer+'_vehicle_cost_per_cycle']
+            parts[layer+'_trips'] = trips[layer]*self.rates[layer+'_trip_cost']
+        if reusable:
+            parts.update(self.constant_cost(issued, returned=returned))
+        return parts
+
+    def evaluate(self, physical_audit, pool, *, reusable=True):
+        """Price independently replayed quantities."""
+        layers = ('e1', 'e2')
         balance = physical_audit['container_balance']
-        parts['cleaning'] = balance['returned_to_depot']*self.rates['cleaning_cost_per_return']
-        parts['tracking'] = balance['issued']*self.rates['tracking_cost_per_use']
-        parts['container_wear'] = balance['issued']*self.wear_cost_per_use
+        parts = self.period_components(
+            distances=physical_audit['distances'], working_minutes=physical_audit['time_metrics']['working_minutes'],
+            vehicles={layer: physical_audit[layer+'_vehicle_count'] for layer in layers},
+            trips={layer: physical_audit[layer+'_trip_count'] for layer in layers},
+            pool=pool, issued=balance['issued'], returned=balance['returned_to_depot'], reusable=reusable)
         return dict(total=sum(parts.values()), components=parts, currency=self.config['currency'],
                     initial_pool_investment=(pool*self.rates['container_price']
-                        if self.config['pool_cost_basis']!='rental' else 0.0),
+                        if reusable and self.config['pool_cost_basis']!='rental' else 0.0),
                     cost_basis=self.config['cost_basis'], source_type=self.config['source_type'],
                     price_basis=self.config['price_basis'], evaluation_period=self.config['evaluation_period'],
                     work_time_basis=self.config['work_time_basis'], economic_profile_hash=self.hash,

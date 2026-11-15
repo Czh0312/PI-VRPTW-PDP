@@ -19,7 +19,7 @@ def solve_alns(problem,max_time=120,max_iterations=5000,seed=42,*,initial_result
     weights={k:1. for k in DESTROY+REPAIR};uses={k:0 for k in weights};rewards={k:0. for k in weights}
     history=[];evaluations=0;accepted=0
     def key(v):
-        objective = problem.objective(v['cost'], v['pool'])
+        objective = v['objective']
         tie = v['cost'] if problem.objective_mode == 'min_pool' else v['pool']
         return round(objective, 10), round(tie, 10)
     def consider(s,v):
@@ -33,7 +33,7 @@ def solve_alns(problem,max_time=120,max_iterations=5000,seed=42,*,initial_result
         if not v:return math.inf
         penalty=max(0,v['pool']-problem.pool_max)*max(100.,v['cost']*10)
         if problem.transport_budget is not None:penalty+=max(0,v['cost']-problem.transport_budget)*100
-        objective = problem.objective(v['cost'], v['pool'])
+        objective = v['objective']
         if problem.objective_mode == 'min_pool':
             objective = objective*10000+v['cost']
         return objective+penalty
@@ -94,9 +94,13 @@ def solve_alns(problem,max_time=120,max_iterations=5000,seed=42,*,initial_result
                                           batch_mode='no_batch',e1_trips=[],e2_trips=[],feasible=False)
     result.update(solver='alns',model_module='models.routing.model_6.alns',solver_module=__name__,info=info)
     if best:
-        result['audit']=audit_solution(problem,result)
-        if not result['audit']['valid']:raise RuntimeError('M6 ALNS incumbent failed final independent audit')
-        info.update(objective=problem.objective(best['cost'], best['pool']),transport_cost=best['cost'])
+        audit = audit_solution(problem, result)
+        if not audit['valid']:
+            raise RuntimeError('M6 ALNS incumbent failed final independent audit')
+        result.update(audit=audit, cost=audit['cost'], cost_components=audit['cost']['components'],
+                      economic_profile_hash=problem.cost_profile.hash,
+                      total_distance=sum(audit['distances'].values()))
+        info.update(objective=audit['objective'], transport_cost=audit['transport_cost'])
     return result
 
 

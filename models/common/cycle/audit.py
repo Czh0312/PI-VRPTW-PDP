@@ -47,19 +47,23 @@ def audit_solution(problem, result, repeat=True):
                 return audit_calendar_solution(problem, result, repeat)
             from models.common.cycle.joint import audit_joint_solution
             return audit_joint_solution(problem, result, repeat)
-        if problem.free_assignment:
-            from models.common.cycle.assignment import assigned_problem, validate_assignment
-            assignment = validate_assignment(problem, result.get('assignment'))
-            if result.get('model') != problem.model_number:
-                raise ValueError('Model/assignment result mismatch')
-            fixed = assigned_problem(problem, assignment)
-            copied = {**result, 'model': fixed.model_number}
-            audited = _audit(fixed, copied, repeat)
-            audited['assignment'] = assignment
-            return audited
-        return _audit(problem, result, repeat)
+        return _audit_with_assignment(problem, result, repeat)
     except (KeyError, TypeError, ValueError, IndexError, AttributeError) as exc:
         return dict(valid=False, errors=[dict(code='MALFORMED_SOLUTION', detail=str(exc))])
+
+
+def _audit_with_assignment(problem, result, repeat):
+    if not problem.free_assignment:
+        return _audit(problem, result, repeat)
+    from models.common.cycle.assignment import assigned_problem
+
+    if result.get('model') != problem.model_number:
+        raise ValueError('Model/assignment result mismatch')
+    assignment = result.get('assignment')
+    fixed = assigned_problem(problem, assignment)
+    audited = _audit(fixed, {**result, 'model': fixed.model_number}, repeat)
+    audited['assignment'] = dict(assignment)
+    return audited
 
 
 def _audit(problem, result, repeat):

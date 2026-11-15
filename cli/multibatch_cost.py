@@ -24,10 +24,10 @@ def run_cost(config, fleet, args):
     if not config.get('no_work_window') and config.get('legacy_operating_policy'):
         config = {**config, 'operating_policy': config['legacy_operating_policy']}
         fleet = {**fleet, 'operating_policy': load_json(config['operating_policy'])}
-    problem = load_instance(config, fleet)
+    replay_distance = config['model'] in (1, 2, 3, 4) and result.get('objective_mode', 'distance') == 'distance'
+    problem = load_instance(config, fleet, replay_distance=replay_distance)
     parameters = load_json(economic) if isinstance(economic, str) else economic
-    if getattr(problem, 'joint_batch', False) or (
-            problem.model_number in (3, 5) and 'container_pool_cost_per_period' in parameters):
+    if getattr(problem, 'joint_batch', False) or 'container_pool_cost_per_period' in parameters:
         from models.cost.comparison import evaluate_comparison_cost
         cost = evaluate_comparison_cost(problem, result, parameters)
     else:

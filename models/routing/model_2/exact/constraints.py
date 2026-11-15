@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import time
 from models.routing.model_2.exact.preprocessing.model_bounds import trip_slot_limits
-from models.routing.model_2.exact.objective import add_distance_cost
 
 
 def add_assignment_constraints(parameters, variables):
@@ -89,7 +88,6 @@ def add_route_constraints(
     factor_loads,
     linear_boundary,
     linear_schedule,
-    objective,
     route_arcs,
     batch=None,
 ):
@@ -233,8 +231,6 @@ def add_route_constraints(
             check_budget()
         left = base if a == -1 else nodes[a]["site"]
         right = base if b == -2 else nodes[b]["site"]
-        if not (shared and compressed and a >= 0 and b >= 0):
-            objective = add_distance_cost(objective, parameters.problem, left, right, x[a, b])
         if a == -1:
             travel = parameters.problem.travel(left, right)
             if shared and linear_boundary:
@@ -301,21 +297,18 @@ def add_route_constraints(
                 (x[a, b] == 1)
                 >> (times[b] >= batch.cutoff + parameters.problem.travel(left, right))
             )
-    return (
-        dict(
-            nodes=nodes,
-            base=base,
-            used=used,
-            start=start,
-            end=end,
-            global_internal_arcs=shared and compressed,
-            departure_loads=departure_loads,
-            visit=visit,
-            times=times,
-            x=x,
-            label=label,
-        ),
-        objective,
+    return dict(
+        nodes=nodes,
+        base=base,
+        used=used,
+        start=start,
+        end=end,
+        global_internal_arcs=shared and compressed,
+        departure_loads=departure_loads,
+        visit=visit,
+        times=times,
+        x=x,
+        label=label,
     )
 
 
@@ -544,6 +537,7 @@ def add_second_echelon_constraints(
                 previous = r
                 batches = {o.batch for o in orders}
                 selects = {b: variables.create_r() for b in batches}
+                r['has_delivery'] = gp.quicksum(selects.values())
                 variables.model.addConstr(gp.quicksum(selects.values()) <= 1)
                 # Dispatch preparation for a loaded trip occupies its vehicle.
                 # It starts after both inbound goods and the previous trip are ready.
@@ -680,7 +674,6 @@ def add_shared_route_constraints(
     e2_nodes,
     linear_identity,
     linear_internal,
-    objective,
     step_slack,
     task_step_bounds,
 ):
@@ -740,13 +733,6 @@ def add_shared_route_constraints(
             check_budget()
             if compressed:
                 active = variables.global_arcs[left, right]
-                objective = add_distance_cost(
-                    objective,
-                    parameters.problem,
-                    parameters.problem.order_map[left[0]].customer,
-                    parameters.problem.order_map[right[0]].customer,
-                    active,
-                )
             else:
                 active = variables.create_r()
                 variables.model.addConstr(active == gp.quicksum(indexed))
@@ -802,7 +788,7 @@ def add_shared_route_constraints(
                 variables.model.addConstr(
                     (active == 1) >> (variables.task_steps[right] >= variables.task_steps[left] + 1)
                 )
-    return objective, identities, site_arcs
+    return identities, site_arcs
 
 
 def add_task_and_return_coverage_constraints(

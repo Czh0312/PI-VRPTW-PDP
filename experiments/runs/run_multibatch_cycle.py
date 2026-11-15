@@ -84,8 +84,13 @@ def prepare_variants(args, records):
 
 def freeze_inputs(variants, out, dataset_manifest=None):
     """Copy every input before the first worker; all jobs read these copies."""
+    from models.cost.joint_batch import DEFAULT_ECONOMIC_CONFIG
+
     expected = {}
     for variant in variants:
+        config = variant['config']
+        if not config.get('economic_config'):
+            config['economic_config'] = DEFAULT_ECONOMIC_CONFIG
         for path, digest in variant['_source_hashes'].items():
             if path in expected and expected[path] != digest:
                 raise ValueError(f'INPUT_CHANGED_DURING_PLANNING: {path}')

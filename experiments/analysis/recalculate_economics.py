@@ -173,11 +173,11 @@ def run_lade(out, args):
 
 def load_run(job, base):
     config, fleet = load_routing_case(job['case_path'], use_pool_config=False)
-    problem = load_instance(config, fleet)
     path = base/job['run']/'result.json'
-    if path.exists():
-        result = read(path)
-    else:
+    result = read(path) if path.exists() else None
+    legacy = config['model'] in (1, 2, 3, 4) and (result or {}).get('objective_mode', 'distance') == 'distance'
+    problem = load_instance(config, fleet, replay_distance=legacy)
+    if result is None:
         result = empty_result(problem, job['solver'])
         row_path = base/(job['run']+'.row.json')
         if row_path.exists():

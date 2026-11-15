@@ -44,7 +44,7 @@ def solve_exact(problem, time_limit=60, seed=42, verbose=False, *, backend='high
             result['audit'] = audit
             result['feasible'] = audit['valid']
             native_objective=m.objective.value(raw['x'])
-            physical_objective=problem.objective(audit['transport_cost'], audit['minimum_pool_for_schedule'])
+            physical_objective = audit['objective']
             info['native_objective']=native_objective
             info['native_pool_certificate']=ctx['pool'].value(raw['x'])
             mismatch=(not math.isclose(native_objective,physical_objective,rel_tol=1e-6,abs_tol=1e-5)
@@ -61,6 +61,9 @@ def solve_exact(problem, time_limit=60, seed=42, verbose=False, *, backend='high
                     info['gap']=max(0.,(physical_objective-info['bound'])/max(abs(physical_objective),1e-10))
             if audit['valid']:
                 result['container_pool_size'] = audit['minimum_pool_for_schedule']
+                result.update(cost=audit['cost'], cost_components=audit['cost']['components'],
+                              economic_profile_hash=problem.cost_profile.hash,
+                              total_distance=sum(audit['distances'].values()))
                 info.update(transport_cost=audit['transport_cost'],
                             objective=physical_objective,
                             proven_optimal=raw['status']=='OPTIMAL')

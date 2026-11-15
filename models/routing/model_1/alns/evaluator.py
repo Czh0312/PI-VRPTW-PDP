@@ -283,8 +283,8 @@ def evaluate(problem, state, *, _memo=None, _prepared=None):
     distance = sum(
         distance_of(problem, r, layer) for layer in ("e1", "e2") for r in result[layer + "_trips"]
     )
-    result["info"]["objective"] = distance
-    return distance + len(violations) * 1e6 + shortage * 1e5, result, violations
+    from models.common.cycle.single_batch_cost import score_single_batch
+    return score_single_batch(problem, result, distance, violations, shortage)
 
 
 class EvaluationCache:

@@ -30,6 +30,8 @@ python main.py route --model 6 --solver alns --time 2
 python -m tools.audit.audit_current_benchmark
 ```
 
-指定其他算例时传入 `--case`。模型 3、5、6 的正式示例按每期总成本 \(0.1D_1+0.05D_2+5N+0.02Q\) 优化。模型 1–4 的生命周期经济对照可用 `compare-single-batch`，该入口使用共同的固定日历。[生命周期比较](docs/single_batch_comparison.md)
+指定其他算例时传入 `--case`，用 `--economic-config` 指定费用配置。六个模型的正式求解都最小化每期总成本。基准情景中，两个层级的运输费为 \(0.1D_1+0.05D_2\)，M1、M2 加当期纸箱费用 \(5Q\)，M3–M6 加箱池日使用费 \(5N\) 和清洗等费用 \(0.01Q\)。其中 \(Q\) 为配送箱次，\(N\) 为当期需要配置的实体循环箱数。系数都使用模拟单位。[每期费用](docs/model3_cost_comparison.md)
+
+模型 1–4 的生命周期经济对照可用 `compare-single-batch`，该入口使用共同的固定日历。[生命周期比较](docs/single_batch_comparison.md)
 
 单次运行默认写入 `output/current/model_N/`。已冻结的旧实验按各自当时的输入、目标函数和模型编号解读。[结果索引](output/README.md) · [历史档案](output/history/pre_renumbering_20261113/README.md) · [文档导航](docs/README.md)

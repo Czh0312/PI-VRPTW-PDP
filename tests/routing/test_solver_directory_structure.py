@@ -9,7 +9,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 CORE = {
     'exact': {'__init__', 'solver', 'model', 'formulation', 'milp_solver', 'solution',
-              'parameters', 'variables', 'constraints', 'objective'},
+              'parameters', 'variables', 'constraints'},
     'alns': {'__init__', 'solver', 'search', 'parameters', 'state', 'construction',
              'neighborhoods', 'evaluator', 'search_control'},
 }

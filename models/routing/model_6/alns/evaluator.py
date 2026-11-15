@@ -97,6 +97,7 @@ def evaluate(problem, state):
     result['container_pool_size']=audit['minimum_pool_for_schedule']
     result['feasible']=audit['valid']
     return dict(result=result,pool=result['container_pool_size'],cost=audit['transport_cost'],
+                objective=audit['objective'],
                 issue={o.id:lower[task_nodes['e1',o.id,'d'][2]] for o in problem.orders},
                 issue_latest={o.id:latest[task_nodes['e1',o.id,'d'][2]] for o in problem.orders},
                 clean={o.id:lower[task_nodes['e1',o.id,'p'][3]]+p.cleaning_duration for o in problem.orders})
@@ -114,7 +115,8 @@ def improve_pool(problem,state,value,deadline=None,attempts=40):
             if tried>=attempts or (deadline is not None and time.perf_counter()>=deadline): return state,value
             candidate=state.copy();candidate.reuse.append((a,b));tried+=1
             tested=evaluate(problem,candidate)
-            if tested and tested['pool']<value['pool']:
+            if tested and tested['pool']<value['pool'] and (
+                    value['pool'] > problem.pool_max or tested['objective'] <= value['objective'] + 1e-8):
                 state,value,changed=candidate,tested,True
                 break
         if not changed: break

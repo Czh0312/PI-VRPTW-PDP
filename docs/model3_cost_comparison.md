@@ -1,17 +1,15 @@
-# 模型3的成本目标对照
+# 六模型的每期成本目标
 
-正式算例用 `objective_mode="cost"` 与模型 5、6 对照。MILP 和 ALNS 都直接按总成本选方案。只比较距离时可指定 `--objective-mode distance`。
+正式算例的 MILP 和 ALNS 按同一运营周期的总成本选择方案。
 
 ## 共同目标
 
-模型 3 和模型 5 使用同一个 `JointCostProfile`，包含箱池、一级/二级运输、
-占用工时、启用车辆、趟次、清洗、追踪及磨损费用。具体项目是否启用由同一份
-`economic_config` 决定；不得在模型间换用不同费用文件或不同租赁/购置口径。
+六个模型使用 `JointCostProfile`。两种包装方案都按各自作业计算两级运输、占用工时、启用车辆和趟次成本。
+纸箱费按当期消耗量乘以纸箱购价。循环箱费按配置的实体箱池乘以单箱日使用费，清洗和追踪使用单独的费率。
+每组对照共用同一 `economic_config` 文件、计费周期和单位。
 
-当前基础费用为 `0.1*D1 + 0.05*D2 + 5*N + 0.02*Q`。
-单批次、完整回收且固定箱池 `N=Q` 时，等价于优化 `0.1*D1 + 0.05*D2`；
-一级、二级运输费率不同，不能用原来的 `D1+D2` 最优解替代成本优化解。
-跨模型成本对照须使用相同的费率与计费周期。当前模型 6 的箱池及箱次费率采用上述基础费用。
+基准的运输项为 `0.1*D1 + 0.05*D2`。M1、M2 的包装项为 `5*Q`，M3–M6 的箱池和清洗项为 `5*N + 0.01*Q`。
+数值为模拟费率。M3、M4 给定箱池 `N`，M5、M6 求解箱池规模。两级运输费率不同，分仓及路线按加权运输成本评价。
 
 模型 3 固定分仓、单批次和初始箱池。命令行默认由每个前置仓在当批空箱全部卸毕后一次交接给一级车。装货遵循订单释放时间，配送和取箱遵循顾客时间窗，次日首单释放前完成回仓清洗和车辆转场。
 历史固定截点的实验可以用 `--fixed-work-window` 复现。要验证模型 5 在固定批内分界下的退化关系，须对齐该分界和其余物理条件。
@@ -24,20 +22,17 @@
 ```json
 {
   "model": 3,
-  "objective_mode": "cost",
   "no_work_window": true,
   "economic_config": "data/benchmark27_models_1_6_v1/shared/small/S01/economic.json"
 }
 ```
 
 可运行示例为 `config/experiments/examples/single_batch_cost_demo.json`。
-对既有案例可使用 `main.py route --case <案例> --objective-mode cost`；案例须已提供费用文件，
-也可用 `--economic-config <共同费用文件>` 指定。对模型3显式传入此参数会启用成本模式，
-除非同时显式指定 `--objective-mode distance`。
+使用 `main.py route --case <案例>` 运行，可传入 `--economic-config <共同费用文件>`。
 
 每期费用应使用同一口径。旧批量对照保存在[历史结果索引](../output/history/pre_renumbering_20261113/README.md)。
 
-结果中 `info.objective` 是总成本，`total_distance` 是物理总距离；同时保存
+正式运行的 `info.objective` 是每期总成本，`total_distance` 记录物理总距离。同时保存
 `cost_components`、费用哈希及固定箱池。独立审计重新检查路线、连续两个周期和全部费用。
 精确求解的上下界和最优性针对成本目标；ALNS 只报告所找到的可行成本。
 集中交接且工时费为零时，输出按既定路线推算最早可行的时间表。收齐时刻和一级取箱时刻见审计的 `consolidated_handoffs`。工时计费时，输出采用求解器的时间表。

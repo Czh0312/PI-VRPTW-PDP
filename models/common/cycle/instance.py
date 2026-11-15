@@ -215,7 +215,7 @@ def load_orders(path, policy, *, joint=False):
     return result
 
 
-def load_instance(config, fleet_config):
+def load_instance(config, fleet_config, *, replay_distance=False):
     if config.get('schema_version') != 2 or 'orders' not in config:
         raise ValueError('Multibatch requires schema_version=2 and a separate orders file')
     model = config['model']
@@ -259,14 +259,12 @@ def load_instance(config, fleet_config):
         from models.common.cycle.calendar import CalendarCycleInstance
         return CalendarCycleInstance(network, orders, policy, config.get('joint_batch_options', {}),
                                      config['economic_config'], model=5, no_work_window=no_work_window)
-    if config['model'] == 3:
-        if config.get('objective_mode', 'distance') not in ('cost', 'distance'):
-            raise ValueError('M3 objective_mode must be cost or distance')
-        if config.get('objective_mode') == 'cost':
-            if not config.get('economic_config'):
-                raise ValueError('M3 cost objective requires economic_config')
-            from models.common.cycle.single_batch_cost import SingleBatchCostInstance
-            return SingleBatchCostInstance(network, orders, policy, config['economic_config'],
-                                           no_work_window=no_work_window)
-        return MultiBatchInstance(network, orders, policy, model=3, no_work_window=no_work_window)
-    return MultiBatchInstance(network, orders, policy, model=config['model'], no_work_window=no_work_window)
+    if replay_distance:
+        return MultiBatchInstance(network, orders, policy, model=model, no_work_window=no_work_window)
+    if config.get('objective_mode', 'cost') != 'cost':
+        raise ValueError('Current M1–M4 objective_mode must be cost')
+    from models.common.cycle.single_batch_cost import SingleBatchCostInstance
+    from models.cost.joint_batch import DEFAULT_ECONOMIC_CONFIG
+
+    return SingleBatchCostInstance(network, orders, policy, config.get('economic_config') or DEFAULT_ECONOMIC_CONFIG,
+                                   model=model, no_work_window=no_work_window)

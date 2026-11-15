@@ -1,4 +1,4 @@
-"""Compare audited Model 3 and Model 5 cost schedules."""
+"""Price audited schedules with a matched period cost profile."""
 from __future__ import annotations
 
 from tools.configuration.loader import load_json
@@ -7,8 +7,8 @@ from models.common.cycle.audit import audit_solution
 
 
 def evaluate_comparison_cost(problem, result, parameters, *, audit=None):
-    if problem.model_number not in (3, 5):
-        raise ValueError('Matched joint-cost comparison requires M3 or M5')
+    if problem.model_number not in (1, 2, 3, 4, 5):
+        raise ValueError('Matched period cost comparison requires M1–M5')
     joint = getattr(problem, 'joint_batch', False)
     optimized = joint
     cost_optimized = optimized or getattr(problem, 'cost_objective', False)
@@ -18,14 +18,14 @@ def evaluate_comparison_cost(problem, result, parameters, *, audit=None):
     audited = audit_solution(problem, result) if audit is None else audit
     if not audited['valid']:
         raise ValueError(f'Cannot price an invalid route: {audited["errors"]}')
-    pool = (result['container_pool_size'] if optimized
-            else problem.operating_policy.container_pool_size)
-    cost = profile.evaluate(audited, pool)
+    pool = (result['container_pool_size'] if optimized else
+            problem.operating_policy.container_pool_size if problem.reusable else 0)
+    cost = profile.evaluate(audited, pool, reusable=problem.reusable)
     cost.update(model=problem.model_number, container_pool_size=pool,
                 minimum_pool_for_schedule=audited['minimum_pool_for_schedule'],
                 route_objective_mode='cost' if cost_optimized else 'distance',
                 cost_is_optimized=cost_optimized,
-                pool_basis='optimized_pool' if optimized else 'configured_pool')
+                pool_basis=('optimized_pool' if optimized else 'configured_pool' if problem.reusable else 'single_use'))
     if problem.model_number in (3, 5) and not cost_optimized:
         # This changes only the price of the pool, never the distance solution.
         reference = profile.evaluate(audited, audited['minimum_pool_for_schedule'])

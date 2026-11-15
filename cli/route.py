@@ -5,7 +5,9 @@ from tools.configuration.loader import PROJECT_ROOT, apply_container_pool_size, 
 from tools.configuration.container_pools import apply_pool_config
 
 DEFAULT_CASE = PROJECT_ROOT / "config/experiments/examples/single_batch_demo.json"
-DEMO_CASES = {4: DEFAULT_CASE.with_name('model4_demo.json'),
+DEMO_CASES = {1: PROJECT_ROOT / 'data/benchmark27_models_1_6_v1/model_1/small/S01/case.json',
+              2: PROJECT_ROOT / 'data/benchmark27_models_1_6_v1/model_2/small/S01/case.json',
+              4: DEFAULT_CASE.with_name('model4_demo.json'),
               5: DEFAULT_CASE.with_name('model5_demo.json')}
 
 
@@ -31,9 +33,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--case", default=str(case_path))
     parser.add_argument("--model", type=int, choices=range(1, 7), help="M1–M4 单批次，M5 可变批次，M6 无批次")
-    parser.add_argument("--economic-config", help="M3/M5 总成本参数")
-    parser.add_argument('--objective-mode', choices=('cost', 'distance'),
-                        help='M3 选择 distance 或 cost，M5 使用 cost')
+    parser.add_argument("--economic-config", help="每期成本参数")
+    parser.add_argument('--objective-mode', choices=('cost',), help=argparse.SUPPRESS)
     work_window = parser.add_mutually_exclusive_group()
     work_window.add_argument('--no-work-window', dest='no_work_window', action='store_true', default=None,
                              help='M3/M4/M5 按订单和作业时序排程，次日首单释放前复位')
@@ -82,13 +83,7 @@ def main(argv=None):
         if value is not None:
             config[key] = value
     if args.objective_mode is not None:
-        if config['model'] not in (3, 5):
-            raise ValueError('--objective-mode is only supported for M3 and M5')
-        if config['model'] == 5 and args.objective_mode != 'cost':
-            raise ValueError('Model 5 uses the total-cost objective')
         config['objective_mode'] = args.objective_mode
-    elif args.economic_config and config['model'] in (3, 5):
-        config['objective_mode'] = 'cost'
     if args.no_work_window is not None:
         if config['model'] not in (3, 4, 5):
             raise ValueError('Work window flags here apply to M3/M4/M5')

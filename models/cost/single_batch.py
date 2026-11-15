@@ -69,13 +69,16 @@ def compare_single_batch(problems, results, config):
     for model, problem in problems.items():
         result = results[model]
         audit = audit_solution(problem, result)
+        objective_mode = result.get('objective_mode', 'distance')
+        proven = bool(result['info'].get('proven_optimal'))
         proofs[model] = dict(status=result['info']['status'],
-                             distance_proven_optimal=bool(result['info'].get('proven_optimal')),
+                             objective_mode=objective_mode, objective_proven_optimal=proven,
+                             distance_proven_optimal=proven and objective_mode == 'distance',
                              proof_scope=result['info'].get('proof_scope'))
         if not audit['valid'] or result['info'].get('objective') is None:
             failures[model] = dict(status=result['info']['status'], audit_errors=audit['errors'])
             continue
-        canonical = normalize_schedule(problem, result)
+        canonical = normalize_schedule(problem, result) if objective_mode == 'distance' else result
         # Lifecycle cash totals below replace, and never add to, amortization.
         rates = {key: value for key, value in config.items() if key != 'pool_amortization_cycles'}
         costs[model] = evaluate_cycle_cost(problem, canonical, rates)

@@ -100,6 +100,9 @@ def plot_result(problem, result, path):
 
 
 def run_case(config, fleet, *, case_path=None, output=None):
+    from models.cost.joint_batch import DEFAULT_ECONOMIC_CONFIG
+
+    config = {**config, 'economic_config': config.get('economic_config') or DEFAULT_ECONOMIC_CONFIG}
     instance = load_instance(config, fleet)
     out = resolve_project_path(output) if output else PROJECT_ROOT / 'output/current' / f'model_{instance.model_number}' / (
         datetime.now().strftime('%Y%m%dT%H%M%S_%f')+'_'+config['solver'])
@@ -156,7 +159,7 @@ def run_case(config, fleet, *, case_path=None, output=None):
                         economic_profile_hash=instance.cost_profile.hash,
                         evidence_hash=instance.cost_profile.evidence_hash,
                         objective_mode='cost',
-                        container_pool_size=instance.operating_policy.container_pool_size)
+                        container_pool_size=instance.operating_policy.container_pool_size if instance.reusable else 0)
     _json(out/'manifest.json', manifest)
     print(f'M{instance.model_number} {"single_batch" if len(instance.operating_policy.batches) == 1 else "multi_batch"} {config["solver"]}: {out}')
     log, begun = io.StringIO(), time.perf_counter()
@@ -179,14 +182,12 @@ def run_case(config, fleet, *, case_path=None, output=None):
         (out/'solver.log').write_text(log.getvalue(), encoding='utf-8')
         audit = result.get('audit', {})
         joint = getattr(instance, 'joint_batch', False)
-        fixed_cost = getattr(instance, 'cost_objective', False)
         pool = result.get('container_pool_size', instance.operating_policy.container_pool_size)
-        objective_label = '总成本' if joint or fixed_cost else '距离'
         lines = [f'M{instance.model_number} {"联合分批成本" if joint else "固定批次"}运行结果', '',
                  f"包装：{'循环' if instance.reusable else '一次性'}；批次数：{result.get('cycle_batch_count',len(instance.operating_policy.batches))}。",
                  f"状态：{result['info']['status']}。",
                  f"独立审计：{audit.get('valid', False)}；已证明最优：{result['info']['proven_optimal']}。",
-                 f"{objective_label}：{result['info']['objective']}；循环箱池：{pool if instance.reusable else '不适用'}。",
+                 f"每期总成本：{result['info']['objective']}；循环箱池：{pool if instance.reusable else '不适用'}。",
                  f"已证明不可行：{result['info'].get('proven_infeasible', False)}；"
                  f"证明范围：{result['info'].get('proof_scope') or '无'}。",
                  f"必要容器池下界：{result.get('precheck', {}).get('pool_lower_bound', '未计算')}；"
@@ -211,9 +212,10 @@ def run_case(config, fleet, *, case_path=None, output=None):
                 lines += ['', '| 顾客 | 选定前置仓 |', '| --- | --- |']
                 lines.extend(f'| {customer} | {site} |'
                              for customer, site in sorted(result['assignment'].items()))
-        if fixed_cost:
-            lines += ['', '模型 3 在固定分仓、单批次和箱池的条件下直接优化总成本。',
-                      f'总距离：{result.get("total_distance")}；费用配置哈希：{instance.cost_profile.hash}。']
+        if not joint:
+            lines += ['', f'总距离为 {result.get("total_distance")}。费用单位为 '
+                      f'{instance.cost_profile.config["currency"]}。',
+                      f'费用配置哈希为 {instance.cost_profile.hash}。']
             lines.extend(f'- {key}: {value}' for key, value in result.get('cost_components', {}).items())
         if joint:
             lines += ['', f"启用配送批次数：{result.get('delivery_batch_count')}；总距离：{result.get('total_distance')}。",
@@ -260,7 +262,7 @@ def run_case(config, fleet, *, case_path=None, output=None):
             selected = instance.selected_problem(result) if joint else instance
             plotted = selected.project(result['order_batch_assignment'], pool,result.get('batch_cutoffs')) if joint else instance
             plot_result(plotted, result, out/'timeline.png')
-        print(f"{result['info']['status']} | valid={audit.get('valid', False)} | {objective_label}={result['info']['objective']}")
+        print(f"{result['info']['status']} | valid={audit.get('valid', False)} | 每期总成本={result['info']['objective']}")
         return result
     except Exception as exc:
         _json(out/'error.json', dict(error=f'{type(exc).__name__}: {exc}', wall_time=time.perf_counter()-begun))

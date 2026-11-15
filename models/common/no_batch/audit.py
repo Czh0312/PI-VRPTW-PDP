@@ -206,13 +206,21 @@ def _audit(problem, result, errors, fail, repeat):
             if trips[-1][1] > trips[0][0]+p.repeat_interval:
                 fail('PERIODIC_VEHICLE_OVERLAP')
         periodic['valid'] = not errors and stock == first_terminal
-    cost = sum(distances[k]*problem.distance_cost[k] for k in distances)
-    if problem.transport_budget is not None and cost > problem.transport_budget+1e-7:
-        fail('TRANSPORT_BUDGET', cost=cost)
     claimed = result.get('container_pool_size')
     if claimed is not None and (isinstance(claimed, bool) or not isinstance(claimed, int) or not required <= claimed <= problem.pool_max):
         fail('CLAIMED_POOL', claimed=claimed, required=required)
-    return dict(valid=not errors, errors=errors, minimum_pool_for_schedule=required,
-                distances=distances, transport_cost=cost, container_ledger=ledger,
+    physical = dict(minimum_pool_for_schedule=required, distances=distances, container_ledger=ledger,
                 terminal_state=first_terminal, periodic_replay=periodic,
-                working_ticks=working, e1_trip_count=len(result['e1_trips']), e2_trip_count=len(result['e2_trips']))
+                working_ticks=working, time_metrics=dict(working_minutes={k: p.minutes(v) for k, v in working.items()}),
+                container_balance=dict(issued=sum(n for _, n, _ in issues),
+                                       returned_to_depot=sum(n for _, n, _ in clean_returns)))
+    for layer in distances:
+        physical[layer+'_vehicle_count'] = sum(key[0] == layer for key in vehicles)
+        physical[layer+'_trip_count'] = len(result[layer+'_trips'])
+    cost = problem.cost_profile.evaluate(physical, required)
+    transport = sum(cost['components'][layer+'_distance'] for layer in distances)
+    if problem.transport_budget is not None and transport > problem.transport_budget+1e-7:
+        fail('TRANSPORT_BUDGET', cost=transport)
+    periodic['valid'] = periodic['valid'] and not errors
+    return dict(**physical, valid=not errors, errors=errors, transport_cost=transport, cost=cost,
+                objective=problem.objective(transport, required, cost['total']))

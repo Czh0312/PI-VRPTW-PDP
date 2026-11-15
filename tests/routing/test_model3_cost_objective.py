@@ -1,4 +1,4 @@
-"""M3 directly optimizes the same economic contract as M5–M8."""
+"""Per-period optimization and audit of fixed-calendar routing."""
 from copy import deepcopy
 from dataclasses import replace
 import json
@@ -20,38 +20,41 @@ from tools.configuration.loader import PROJECT_ROOT, load_json, load_routing_cas
 from tools.data.build_model6_demo_suite import synthetic_profile
 
 
-def cost_problem(*, general=False):
-    base = tiny_problem(3, 1)
+def cost_problem(*, general=False, model=3):
+    base = tiny_problem(model, 1)
     profile = (synthetic_profile(5) if general else
                load_json('config/experiments/benchmark27_v1/economic.json'))
-    return SingleBatchCostInstance(base.network, base.orders, base.operating_policy, profile)
+    profile = {**profile, 'single_use_package_price': 3, 'single_use_disposal_cost_per_package': .25}
+    return SingleBatchCostInstance(base.network, base.orders, base.operating_policy, profile, model=model)
 
 
 @pytest.mark.parametrize('method', ['exact', 'alns'])
 @pytest.mark.parametrize('general', [False, True])
-def test_direct_cost_solve_matches_hand_arithmetic_and_two_cycles(method, general):
-    p = cost_problem(general=general)
-    r = solve_routing(model=3, method=method, problem=p,
+@pytest.mark.parametrize('model', [1, 2, 3, 4])
+def test_direct_cost_solve_matches_hand_arithmetic_and_two_cycles(method, general, model):
+    p = cost_problem(general=general, model=model)
+    r = solve_routing(model=model, method=method, problem=p,
                       alns_time=.5, alns_iter=100, exact_time=10)
     a = audit_solution(p, r)
     assert a['valid'], a['errors']
     assert a['periodic_replay']['valid']
     assert r['objective_mode'] == 'cost'
     assert r['total_distance'] == pytest.approx(sum(a['distances'].values()))
-    assert r['container_pool_size'] == p.total
+    assert r['container_pool_size'] == (p.total if p.reusable else 0)
+    packaging = (5.5 if general else 5.02) * p.total if p.reusable else 3.25*p.total
     if general:
-        expected = (sum(a['distances'].values()) + 5*p.total + .5*p.total
+        expected = (sum(a['distances'].values()) + packaging
                     + .1*sum(a['time_metrics']['working_minutes'].values())
                     + 10*a['e1_vehicle_count'] + 5*a['e2_vehicle_count']
                     + a['e1_trip_count'] + a['e2_trip_count'])
         assert r['cost_components']['e1_work'] > 0
         assert r['cost_components']['e2_vehicles'] > 0
     else:
-        expected = .1*a['distances']['e1'] + .05*a['distances']['e2'] + 5.02*p.total
+        expected = .1*a['distances']['e1'] + .05*a['distances']['e2'] + packaging
     assert r['info']['objective'] == pytest.approx(expected)
     priced = evaluate_comparison_cost(p, r, p.cost_profile.config)
     assert priced['cost_is_optimized'] and priced['route_objective_mode'] == 'cost'
-    assert priced['pool_basis'] == 'configured_pool'
+    assert priced['pool_basis'] == ('configured_pool' if p.reusable else 'single_use')
     assert 'schedule_minimum_pool_reference' not in priced
     if method == 'exact':
         assert r['info']['proven_optimal']
@@ -147,28 +150,28 @@ def test_cost_audit_rejects_tampering(field, value):
         evaluate_comparison_cost(p, r, changed_price)
 
 
-def test_explicit_case_and_cli_cost_modes_preserve_the_distance_default(monkeypatch):
+def test_current_single_batch_cases_and_cli_default_to_one_cost_objective(monkeypatch):
     from cli import multibatch
     from cli.route import main
 
     cfg, fleet = load_routing_case('config/experiments/examples/single_batch_cost_demo.json')
     assert load_instance(cfg, fleet).cost_objective
     cfg.pop('economic_config')
-    with pytest.raises(ValueError, match='M3 cost objective requires economic_config'):
-        load_instance(cfg, fleet)
-    with pytest.raises(ValueError, match='M3 objective_mode'):
-        load_instance({**cfg, 'objective_mode': 'other'}, fleet)
+    assert load_instance(cfg, fleet).cost_objective
+    with pytest.raises(ValueError, match='objective_mode must be cost'):
+        load_instance({**cfg, 'objective_mode': 'distance'}, fleet)
     monkeypatch.setattr(multibatch, 'run_case', lambda cfg, fleet, **kw: load_instance(cfg, fleet))
     base = ['--case', 'config/experiments/examples/single_batch_demo.json']
-    # The active demo may explicitly select cost. The API default without an
-    # objective flag and the CLI's explicit distance override remain distance.
-    default_cfg, default_fleet = load_routing_case(base[1])
-    default_cfg.pop('objective_mode', None)
-    assert not getattr(load_instance(default_cfg, default_fleet), 'cost_objective', False)
-    assert not getattr(main(base + ['--objective-mode', 'distance']), 'cost_objective', False)
+    for model in range(1, 5):
+        current_case = f'data/benchmark27_models_1_6_v1/model_{model}/small/S01/case.json'
+        current_config, current_fleet = load_routing_case(current_case)
+        current_config.pop('objective_mode', None)
+        assert load_instance(current_config, current_fleet).cost_objective
+        assert main(['--model', str(model)]).cost_objective
+    with pytest.raises(SystemExit):
+        main(base + ['--objective-mode', 'distance'])
     priced = base + ['--economic-config', 'config/experiments/benchmark27_v1/economic.json']
     assert main(priced).cost_objective
-    assert not getattr(main(priced + ['--objective-mode', 'distance']), 'cost_objective', False)
 
 
 def test_cost_alns_keeps_solver_and_model_import_isolation():

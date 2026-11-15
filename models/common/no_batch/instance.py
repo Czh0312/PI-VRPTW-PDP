@@ -14,7 +14,8 @@ from models.common.cycle.policy import daily_cycle_bounds, integer, nonnegative
 from models.common.data_loader import parse_dataset
 from models.common.domain.instance import ProblemInstance
 from models.common.matrix_loader import load_square_matrix
-from tools.configuration.loader import resolve_project_path
+from models.cost.joint_batch import DEFAULT_ECONOMIC_CONFIG, JointCostProfile
+from tools.configuration.loader import load_json, resolve_project_path
 
 VERSION = 'no_batch_container_cycle_v1'
 
@@ -84,7 +85,7 @@ class NoBatchInstance:
     free_assignment = False
     task_kinds = ('d', 'p')
 
-    def __init__(self, network, orders, policy, options=None, *, no_work_window=False):
+    def __init__(self, network, orders, policy, options=None, *, no_work_window=False, economic_config=None):
         self.network, self.fleet = network, network.fleet
         p = NoBatchPolicy.from_config(policy, no_work_window=no_work_window)
         self.orders = tuple(replace(o, batch='', allowed_batch_ids=None) for o in orders)
@@ -103,16 +104,20 @@ class NoBatchInstance:
         if set(self.options)-permitted:
             raise ValueError(f'Unknown M6 options: {sorted(set(self.options)-permitted)}')
         self.pool_max = integer(self.options.get('pool_max', self.total), 'pool_max')
-        self.objective_mode = self.options.get('objective', 'transport')
+        self.objective_mode = self.options.get('objective', 'total_cost' if economic_config else 'transport')
         if self.objective_mode not in ('total_cost', 'transport', 'min_pool'):
             raise ValueError('M6 objective must be total_cost, transport or min_pool')
         self.transport_budget = self.options.get('transport_budget')
         if self.transport_budget is not None:
             nonnegative(self.transport_budget, 'transport_budget')
-        self.distance_cost = {k: nonnegative(self.options.get(k+'_distance_cost', v), k+' cost')
-                              for k, v in (('e1', .1), ('e2', .05))}
-        self.pool_unit_cost = 5.0
-        self.usage_cost = 0.02 * self.total
+        economic = economic_config or DEFAULT_ECONOMIC_CONFIG
+        profile = JointCostProfile(load_json(economic) if isinstance(economic, str) else economic)
+        scale = profile.rates['distance_scale_to_km']
+        overrides = {f'{layer}_distance_cost_per_km': nonnegative(self.options[key], key)/scale
+                     for layer in ('e1', 'e2') if (key := f'{layer}_distance_cost') in self.options}
+        self.cost_profile = JointCostProfile({**profile.config, **overrides}) if overrides else profile
+        self.distance_cost = {layer: self.cost_profile.rates[f'{layer}_distance_cost_per_km']*scale
+                              for layer in ('e1', 'e2')}
         self.e1_max_trips = integer(self.options.get('e1_max_trips_per_vehicle', max(1, 2*self.total)), 'e1 trips', 1)
         self.restricted_trip_domain = self.e1_max_trips < 2*self.total
         if len(self.orders) != len(self.order_map) or not self.orders:
@@ -160,16 +165,17 @@ class NoBatchInstance:
         o = self.order_map[oid]
         return o, self.fleet.container_weight+(o.goods_weight if kind == 'd' else 0), self.fleet.container_volume
 
-    def objective(self, transport, pool):
+    def objective(self, transport, pool, period_cost):
         if self.objective_mode == 'min_pool':
             return pool
         if self.objective_mode == 'total_cost':
-            return transport + self.pool_unit_cost * pool + self.usage_cost
+            return period_cost
         return transport
 
     def with_options(self, **options):
-        return NoBatchInstance(self.network, self.orders, self.operating_policy, {**self.options, **options},
-                               no_work_window=self.no_work_window)
+        return NoBatchInstance(self.network, self.orders, self.operating_policy,
+                               {'objective': self.objective_mode, **self.options, **options},
+                               no_work_window=self.no_work_window, economic_config=self.cost_profile.config)
 
 
 def load_instance(config, fleet_config):
@@ -216,4 +222,5 @@ def load_instance(config, fleet_config):
                             (p.ticks(number('pickup_ready')), p.ticks(number('pickup_due'), 'floor')),
                             p.ticks(number('service_time')), p.ticks(number('min_use_time')),
                             p.ticks(number('release_time', p.minutes(p.cycle_start))), None))
-    return NoBatchInstance(network, orders, p, config.get('no_batch_options'), no_work_window=no_work_window)
+    return NoBatchInstance(network, orders, p, config.get('no_batch_options'), no_work_window=no_work_window,
+                           economic_config=config.get('economic_config') or DEFAULT_ECONOMIC_CONFIG)

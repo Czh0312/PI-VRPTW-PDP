@@ -86,7 +86,7 @@ def test_late_cleaning_is_allowed_beyond_former_closing_time(model, method):
         assert result['batches'][0]['cutoff'] is None
     else:
         assert not audit_m10(daily_problem(6, no_work_window=False), result)['valid']
-        objective = result['audit']['transport_cost'] + 5*result['container_pool_size'] + 0.02*problem.total
+        objective = result['audit']['transport_cost'] + 5*result['container_pool_size'] + 0.01*problem.total
         assert result['info']['objective'] == pytest.approx(objective)
         if method == 'exact':
             assert result['info']['bound'] == pytest.approx(objective)
@@ -99,8 +99,8 @@ def test_model6_highs_total_cost_includes_the_constant_in_its_bound():
     result = solve_routing(model=6, method='exact', problem=problem, exact_backend='highs', exact_time=10)
     assert result['info']['proven_optimal'], result
     assert result['container_pool_size'] == 1
-    assert result['info']['objective'] == pytest.approx(5.64)
-    assert result['info']['bound'] == pytest.approx(5.64)
+    assert result['info']['objective'] == pytest.approx(5.62)
+    assert result['info']['bound'] == pytest.approx(5.62)
 
 
 def test_m3_audit_requires_one_collection_after_last_unload():

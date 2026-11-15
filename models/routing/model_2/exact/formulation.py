@@ -23,7 +23,7 @@ from models.routing.model_2.exact.constraints import (
     add_task_and_return_coverage_constraints,
     add_inventory_constraints,
 )
-from models.routing.model_2.exact.objective import set_distance_objective
+from models.cost.fixed_calendar_milp import set_fixed_calendar_cost_objective
 
 
 def build_model(
@@ -67,7 +67,7 @@ def build_model(
     m.Params.MIPGap = 0
     m.Params.MIPGapAbs = 0
     m.Params.Threads = 1
-    routes1, routes2, objective = [], [], gp.LinExpr()
+    routes1, routes2 = [], []
     variables.routes["e1"] = routes1
     variables.routes["e2"] = routes2
     assignments, active_sites, counts, weights = add_assignment_constraints(parameters, variables)
@@ -178,8 +178,7 @@ def build_model(
     identities = {}
 
     def route(nodes, base, cap_w, cap_v, unload, label, layer, batch=None):
-        nonlocal objective
-        result, objective = add_route_constraints(
+        return add_route_constraints(
             parameters,
             variables,
             nodes=nodes,
@@ -195,11 +194,9 @@ def build_model(
             factor_loads=factor_loads,
             linear_boundary=linear_boundary,
             linear_schedule=linear_schedule,
-            objective=objective,
             route_arcs=route_arcs,
             batch=batch,
         )
-        return result
 
     add_first_echelon_constraints(
         parameters,
@@ -218,7 +215,7 @@ def build_model(
         step_slack=step_slack,
         task_step_bounds=task_step_bounds,
     )
-    objective, identities, site_arcs = add_shared_route_constraints(
+    identities, site_arcs = add_shared_route_constraints(
         parameters,
         variables,
         check_budget=check_budget,
@@ -227,7 +224,6 @@ def build_model(
         e2_nodes=e2_nodes,
         linear_identity=linear_identity,
         linear_internal=linear_internal,
-        objective=objective,
         step_slack=step_slack,
         task_step_bounds=task_step_bounds,
     )
@@ -237,7 +233,7 @@ def build_model(
         check_budget=check_budget,
     )
     add_inventory_constraints(parameters, variables)
-    set_distance_objective(m, objective)
+    set_fixed_calendar_cost_objective(parameters, variables, check_budget)
     m.update()
     return m, dict(
         parameters=parameters,

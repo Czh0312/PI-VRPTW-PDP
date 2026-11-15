@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import shutil
 
+from models.cost.joint_batch import DEFAULT_ECONOMIC_CONFIG
 from tools.configuration.loader import PROJECT_ROOT, resolve_project_path
 
 SOURCE = 'data/formal_benchmark27_uniform_7_20_50_v1'
@@ -42,9 +43,10 @@ def build(target=TARGET):
         shared = target/'shared'/size/case_id
         shared.mkdir(parents=True)
         old_shared = source/'shared'/size/case_id
-        for name in ('network.csv', 'fleet.json', 'economic.json', 'provenance.json',
+        for name in ('network.csv', 'fleet.json', 'provenance.json',
                      'batch_count_certificate.json', 'design_metrics.json'):
             shutil.copyfile(old_shared/name, shared/name)
+        shutil.copyfile(resolve_project_path(DEFAULT_ECONOMIC_CONFIG), shared/'economic.json')
         for model, old_model in MODEL_MAP.items():
             reference = 8 if model == 6 else old_model
             row = lookup[case_id, reference]
@@ -53,12 +55,13 @@ def build(target=TARGET):
             case_dir.mkdir(parents=True)
             config = read(old_dir/'case.json')
             config.update(model=model, case_name=f'{VERSION}_{case_id}_M{model}', dataset_version=VERSION)
-            for key in ('data', 'routing_config', 'economic_config', 'dataset_metadata',
+            for key in ('data', 'routing_config', 'dataset_metadata',
                         'orders', 'operating_policy', 'batch_count_certificate'):
                 if key in config:
                     destination = (case_dir if key in ('orders', 'operating_policy') else shared)
                     config[key] = (destination/Path(config[key]).name).relative_to(PROJECT_ROOT).as_posix()
             config.pop('parameter_contract', None)
+            config['economic_config'] = (shared/'economic.json').relative_to(PROJECT_ROOT).as_posix()
             if model in (3, 4, 5, 6):
                 config['no_work_window'] = True
             if model in (3, 4, 5):
@@ -79,7 +82,7 @@ def build(target=TARGET):
                 policy.update(repeat_interval_minutes=1440, description=description)
                 write(case_dir/'policy.json', policy)
             if model == 6:
-                for key in ('joint_batch_options', 'batch_count_certificate', 'container_pool_size', 'economic_config'):
+                for key in ('joint_batch_options', 'batch_count_certificate', 'container_pool_size'):
                     config.pop(key, None)
                 config.update(exact_backend='gurobi', no_batch_options={'objective': 'total_cost'})
                 policy = read(old_dir/'policy.json')

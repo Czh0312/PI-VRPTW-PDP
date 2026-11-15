@@ -56,6 +56,30 @@ def test_hand_reuse_and_true_daily_repeat():
     assert all(sum(x['states'].values())==1 for x in a['container_ledger'])
 
 
+@pytest.mark.parametrize('method', ['exact', 'alns'])
+def test_box_day_profile_prices_peak_pool_and_actual_work(method):
+    base = tiny(pool=1, objective='total_cost')
+    profile = {**base.cost_profile.config, 'container_pool_cost_per_period': 2.5,
+               'e1_work_cost_per_minute': .1, 'e2_work_cost_per_minute': .2,
+               'e1_vehicle_cost_per_cycle': 3, 'e2_vehicle_cost_per_cycle': 4,
+               'e1_trip_cost': .3, 'e2_trip_cost': .4, 'cleaning_cost_per_return': .5}
+    problem = NoBatchInstance(base.network, base.orders, base.operating_policy, base.options,
+                              economic_config=profile)
+    if method == 'exact':
+        result = solve_exact(problem, time_limit=10, backend='gurobi')
+        assert result['info']['proven_optimal'], result['info']
+    else:
+        result = solve_alns(problem, max_time=.5, max_iterations=0, initial_result=hand_result(problem))
+    audit, parts = result['audit'], result['cost_components']
+    assert audit['valid'] and result['container_pool_size'] == 1
+    assert parts['container_pool'] == pytest.approx(2.5)
+    assert parts['cleaning'] == pytest.approx(1)
+    assert parts['e1_work'] == pytest.approx(.1*audit['time_metrics']['working_minutes']['e1'])
+    assert parts['e2_work'] == pytest.approx(.2*audit['time_metrics']['working_minutes']['e2'])
+    assert parts['e1_vehicles'] == 3 and parts['e2_vehicles'] == 4
+    assert result['info']['objective'] == pytest.approx(sum(parts.values()))
+
+
 def test_boxes_are_reserved_at_loading_start_not_departure():
     p=tiny();r=hand_result(p)
     first,second=r['e1_trips']

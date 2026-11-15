@@ -57,4 +57,4 @@ def evaluate_cycle_cost(problem, result, config):
                 period_cost_with_use_depreciation=operating+use_depreciation if use_depreciation is not None else None,
                 container_pool_size=problem.operating_policy.container_pool_size if problem.reusable else 0,
                 container_uses=audit['container_balance']['issued'],
-                route_objective_mode='distance', cost_is_optimized=False)
+                route_objective_mode=result.get('objective_mode', 'distance'), cost_is_optimized=False)

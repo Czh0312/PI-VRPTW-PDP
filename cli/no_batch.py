@@ -11,6 +11,7 @@ from importlib.metadata import version, PackageNotFoundError
 
 from tools.configuration.loader import PROJECT_ROOT, load_json, load_routing_case, resolve_project_path, config_sources
 from models.common.no_batch.instance import load_instance
+from models.cost.joint_batch import DEFAULT_ECONOMIC_CONFIG
 from models.routing.service import solve_routing
 
 DEFAULT_CASE = PROJECT_ROOT/'config/experiments/examples/model6_demo.json'
@@ -46,16 +47,20 @@ shared; a restricted-point proof is never promoted to a different point.
 
 
 def run_case(config,fleet,*,output=None,case_path=None,pool_caps=None,initial_result=None):
+    config = {**config, 'economic_config': config.get('economic_config') or DEFAULT_ECONOMIC_CONFIG}
     problem=load_instance(config,fleet)
     out=resolve_project_path(output) if output else PROJECT_ROOT/'output/current/model_6'/datetime.now().strftime('%Y%m%dT%H%M%S_%f')
     if out.exists() and any(out.iterdir()):raise ValueError(f'Refusing to overwrite nonempty output directory: {out}')
     out.mkdir(parents=True,exist_ok=True)
-    source_roots=('models/common','models/routing/model_6','tools/configuration','cli')
+    source_roots=('models/common','models/cost','models/routing/model_6','tools/configuration','cli')
     sources=sorted({p for folder in source_roots for p in (PROJECT_ROOT/folder).rglob('*.py')}|
                    {PROJECT_ROOT/'models/routing/catalog.py',PROJECT_ROOT/'models/routing/service.py',PROJECT_ROOT/'main.py'})
     inputs=[]
-    for key in ('data','orders','routing_config','operating_policy','distance_matrix','duration_matrix','algorithm_config'):
+    for key in ('data','orders','routing_config','operating_policy','distance_matrix','duration_matrix','algorithm_config',
+                'economic_config'):
         if isinstance(config.get(key),str):inputs.extend(config_sources(config[key]))
+    if problem.cost_profile.config.get('evidence_file'):
+        inputs.extend(config_sources(problem.cost_profile.config['evidence_file']))
     if case_path:inputs.extend(config_sources(case_path))
     for source in sources:
         target=out/'source_snapshot'/source.relative_to(PROJECT_ROOT)
@@ -68,6 +73,7 @@ def run_case(config,fleet,*,output=None,case_path=None,pool_caps=None,initial_re
         except PackageNotFoundError:versions[package]=None
     write_json(out/'manifest.json',dict(model=6,config=config,fleet=fleet,python=sys.version,
                policy=problem.operating_policy.as_dict(),options=problem.options,package_versions=versions,
+               economic_profile=problem.cost_profile.config,economic_profile_hash=problem.cost_profile.hash,
                source_sha256={str(p.relative_to(PROJECT_ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sources},
                input_sha256={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(set(inputs))},
                scope='Fixed assignment; one container/order; no batches; all orders known; unlimited cleaning/storage'))
@@ -116,13 +122,15 @@ def main(argv=None):
     parser.add_argument('--time',type=float)
     parser.add_argument('--iterations',type=int)
     parser.add_argument('--seed',type=int)
+    parser.add_argument('--economic-config', help='每期成本参数')
     work_window = parser.add_mutually_exclusive_group()
     work_window.add_argument('--no-work-window', dest='no_work_window', action='store_true', default=None,
                              help='次日首单释放前恢复初始状态')
     work_window.add_argument('--fixed-work-window', dest='no_work_window', action='store_false', default=None,
                              help='复现配置中的固定作业窗口')
     parser.add_argument('--pool-max',type=int)
-    parser.add_argument('--objective-mode',choices=('total_cost','transport','min_pool'))
+    parser.add_argument('--objective-mode',choices=('total_cost','transport','min_pool'),
+                        help='正式求解使用 total_cost，其余选项用于诊断')
     parser.add_argument('--transport-budget',type=float)
     parser.add_argument('--e1-max-trips',type=int,help='Optional restriction; default safe total-demand bound')
     parser.add_argument('--milp-threads',type=int)
@@ -142,7 +150,7 @@ def main(argv=None):
     if config.get('exact_backend') not in ('highs','gurobi'):
         config['exact_backend']='highs'
     for arg,key in (('solver','solver'),('exact_backend','exact_backend'),('exact_time','exact_time'),
-                    ('time','alns_time'),('iterations','alns_iter'),('seed','seed')):
+                    ('time','alns_time'),('iterations','alns_iter'),('seed','seed'),('economic_config','economic_config')):
         if getattr(args,arg) is not None:config[key]=getattr(args,arg)
     options=dict(config.get('no_batch_options',{}))
     for arg,key in (('pool_max','pool_max'),('objective_mode','objective'),('transport_budget','transport_budget'),('e1_max_trips','e1_max_trips_per_vehicle')):

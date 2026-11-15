@@ -1,4 +1,4 @@
-"""M3 cost comparison with its original fixed assignment and calendar."""
+"""Per-period cost and audited schedule scoring for M1–M4."""
 from __future__ import annotations
 
 import math
@@ -9,24 +9,26 @@ from tools.configuration.loader import load_json
 
 
 class SingleBatchCostInstance(MultiBatchInstance):
-    """Keep Model 3's physical decisions and apply the shared cost profile."""
+    """Add period prices to the selected model's physical inputs."""
 
     cost_objective = True
 
-    def __init__(self, network, orders, policy, economic_config, *, no_work_window=False):
-        super().__init__(network, orders, policy, model=3, no_work_window=no_work_window)
+    def __init__(self, network, orders, policy, economic_config, *, model=3, no_work_window=False):
+        super().__init__(network, orders, policy, model=model, no_work_window=no_work_window)
         self.cost_profile = JointCostProfile(
             load_json(economic_config) if isinstance(economic_config, str) else economic_config)
+        if not self.reusable and 'single_use_package_price' not in self.cost_profile.rates:
+            raise ValueError('M1/M2 require single_use_package_price in economic_config')
 
 
 def attach_single_batch_cost(problem, result):
     """Price the explicit schedule, including occupied time and activations."""
-    from models.common.cycle.audit import _audit
+    from models.common.cycle.audit import _audit_with_assignment
 
-    physical = _audit(problem, result, False)
-    pool = problem.operating_policy.container_pool_size
+    physical = _audit_with_assignment(problem, {**result, 'info': {}}, False)
+    pool = problem.operating_policy.container_pool_size if problem.reusable else 0
     distance = sum(physical['distances'].values())
-    cost = problem.cost_profile.evaluate(physical, pool)
+    cost = problem.cost_profile.evaluate(physical, pool, reusable=problem.reusable)
     result.update(objective_mode='cost', total_distance=distance,
                   container_pool_size=pool, cost=cost, cost_components=cost['components'],
                   economic_profile_hash=problem.cost_profile.hash,
@@ -35,16 +37,28 @@ def attach_single_batch_cost(problem, result):
     return physical
 
 
+def score_single_batch(problem, result, distance, violations, shortage):
+    result['info']['objective'] = distance
+    if getattr(problem, 'cost_objective', False) and not violations:
+        try:
+            physical = attach_single_batch_cost(problem, result)
+        except ValueError:
+            return 1e12, result, ['INVALID_SCHEDULE']
+        violations.extend(error['code'] for error in physical['errors'])
+    score = result['info']['objective'] + len(violations) * 1e6 + shortage * 1e5
+    return score, result, violations
+
+
 def audit_single_batch_cost(problem, result, repeat=True):
     """Independently replay and recompute all claimed costs and metadata."""
-    from models.common.cycle.audit import _audit
+    from models.common.cycle.audit import _audit_with_assignment
 
-    physical = _audit(problem, {**result, 'info': {
+    physical = _audit_with_assignment(problem, {**result, 'info': {
         **result.get('info', {}), 'objective': result.get('total_distance')}}, repeat)
     errors = physical['errors']
     distance = sum(physical['distances'].values())
-    pool = problem.operating_policy.container_pool_size
-    cost = problem.cost_profile.evaluate(physical, pool)
+    pool = problem.operating_policy.container_pool_size if problem.reusable else 0
+    cost = problem.cost_profile.evaluate(physical, pool, reusable=problem.reusable)
 
     def matches(value, expected):
         return (not isinstance(value, bool) and isinstance(value, (int, float))

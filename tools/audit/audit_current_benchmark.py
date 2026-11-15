@@ -20,7 +20,7 @@ def audit(dataset=TARGET):
         raise ValueError('Source dataset manifest differs')
     seen = set()
     sizes = Counter()
-    physical = {}
+    inputs_by_case = {}
     for row in manifest['cases']:
         case_id, model = row['base_case_id'], row['model']
         key = case_id, model
@@ -30,10 +30,10 @@ def audit(dataset=TARGET):
         config, fleet = load_routing_case(row['case_path'], use_pool_config=False)
         if config['model'] != model:
             raise ValueError(f'Model number mismatch: {key}')
-        inputs = config['data'], config['routing_config']
-        if physical.setdefault(case_id, inputs) != inputs:
-            raise ValueError(f'Network or fleet differs within case {case_id}')
         instance = (load_no_batch if model == 6 else load_instance)(config, fleet)
+        inputs = config['data'], config['routing_config'], instance.cost_profile.hash
+        if inputs_by_case.setdefault(case_id, inputs) != inputs:
+            raise ValueError(f'Network, fleet or pricing differs within case {case_id}')
         if instance.total != row['total_container_uses'] or len(instance.orders) != row['customer_count']:
             raise ValueError(f'Demand mismatch: {key}')
         if model in (3, 4) and not instance.operating_policy.consolidated_handoff:
@@ -43,9 +43,9 @@ def audit(dataset=TARGET):
         if model == 6 and (not instance.no_work_window or instance.objective_mode != 'total_cost'):
             raise ValueError(f'Incorrect no-batch policy or objective: {key}')
         sizes[row['size'], model] += 1
-    if len(physical) != 27 or len(seen) != 162 or set(sizes.values()) != {9}:
+    if len(inputs_by_case) != 27 or len(seen) != 162 or set(sizes.values()) != {9}:
         raise ValueError('Expected 27 cases with six models and nine cases per size')
-    return dict(base_cases=len(physical), model_cases=len(seen), files_verified=len(manifest['sha256']))
+    return dict(base_cases=len(inputs_by_case), model_cases=len(seen), files_verified=len(manifest['sha256']))
 
 
 if __name__ == '__main__':

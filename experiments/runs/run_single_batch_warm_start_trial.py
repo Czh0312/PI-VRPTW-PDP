@@ -51,7 +51,7 @@ def trial(case, number, mode, args, folder):
     dataset = getattr(args, 'dataset', 'data/formal_benchmark27_spacetime_v3')
     case_file = ROOT/dataset/f'model_{number}/small/{case}/case.json'
     config, fleet = load_routing_case(str(case_file), use_pool_config=False)
-    problem = load_instance(config, fleet)
+    problem = load_instance(config, fleet, replay_distance=True)
     write(folder/'config.json', config)
     begun = time.perf_counter()
     seed, seed_info = None, dict(mode=mode, valid=False)
