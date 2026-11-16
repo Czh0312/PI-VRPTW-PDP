@@ -30,10 +30,11 @@ def harness(request, monkeypatch):
     monkeypatch.setattr(module, 'time', clock)
     monkeypatch.setattr(module, '_audit', lambda p, r: dict(
         valid=not r.get('reject', False), objective=r['info']['objective'], errors=['injected'] if r.get('reject') else []))
-    monkeypatch.setattr(module, '_attach', lambda p, c, r, k: r.update(cycle_batch_count=k))
+    monkeypatch.setattr(module, '_attach', lambda p, r, k: r.update(cycle_batch_count=k))
     monkeypatch.setattr(module, '_metadata', lambda *a: None)
     monkeypatch.setattr(module, 'joint_empty_result', lambda *a: candidate())
-    problem = SimpleNamespace(model_number=number, batch_count_candidates=(1, 2), for_count=lambda k: k)
+    problem = SimpleNamespace(model_number=number, batch_count_candidates=(1, 2),
+                              no_work_window=False, for_count=lambda k: k)
     solve = module.solve_counts
 
     def run(fn, **kwargs):

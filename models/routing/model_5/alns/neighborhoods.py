@@ -24,6 +24,39 @@ from functools import partial
 import time
 
 
+BATCH_ROUTE_OPERATORS = (
+    "destroy_random_batch", "destroy_related_batch", "split_batch", "destroy_routes",
+    "relocate", "pair", "split_merge", "vehicle", "wait", "e1_delivery", "e1_pickup", "reverse",
+)
+CUTOFF_OPERATORS = ("shift_cutoff", "align_cutoff")
+
+
+def propose_batch_routes(evaluator, proposal_problem, assignment, state, rng, operator,
+                         deadline, repair_stats):
+    """Propose orders, routes or cutoffs on the evaluator's current calendar."""
+    problem = evaluator.problem
+    cutoffs = state.get("cutoffs")
+    if "batch" in operator:
+        return _batch_move(proposal_problem, evaluator, assignment, rng, operator, deadline, cutoffs)
+    if operator in CUTOFF_OPERATORS:
+        return dict(assignment), _cutoff_move(
+            problem, evaluator, assignment, state, rng, operator == "align_cutoff"
+        )
+    fixed = evaluator.fixed(assignment, cutoffs)
+    if operator != "destroy_routes":
+        return dict(assignment), _route_move(fixed, state, rng, operator)
+    fixed._joint_cost_rates = problem.cost_profile.rates
+    proposed = destroy_repair(
+        fixed, state, rng, rng.choice(["random", "related"]), deadline,
+        scorer=_local_cost_scorer,
+        validator=(lambda trial: evaluator(assignment, {**trial, "cutoffs": state["cutoffs"]}))
+            if len(problem.orders) <= 9 else None,
+        repair_stats=repair_stats,
+    )
+    proposed["cutoffs"] = dict(state["cutoffs"])
+    return dict(assignment), proposed
+
+
 def _goods_ready(problem, state):
     ready = {}
     for b in problem.operating_policy.batches:

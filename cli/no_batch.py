@@ -52,7 +52,7 @@ def run_case(config,fleet,*,output=None,case_path=None,pool_caps=None,initial_re
     out=resolve_project_path(output) if output else PROJECT_ROOT/'output/current/model_6'/datetime.now().strftime('%Y%m%dT%H%M%S_%f')
     if out.exists() and any(out.iterdir()):raise ValueError(f'Refusing to overwrite nonempty output directory: {out}')
     out.mkdir(parents=True,exist_ok=True)
-    source_roots=('models/common','models/cost','models/routing/model_6','tools/configuration','cli')
+    source_roots=('models/common','models/cost','models/routing/model_6','models/routing/alns','tools/configuration','cli')
     sources=sorted({p for folder in source_roots for p in (PROJECT_ROOT/folder).rglob('*.py')}|
                    {PROJECT_ROOT/'models/routing/catalog.py',PROJECT_ROOT/'models/routing/service.py',PROJECT_ROOT/'main.py'})
     inputs=[]

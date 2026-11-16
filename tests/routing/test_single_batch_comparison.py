@@ -11,6 +11,7 @@ from models.common.domain.instance import ProblemInstance
 from models.routing.service import solve_routing
 from models.common.cycle import MultiBatchInstance, MultiBatchPolicy, Order, load_instance
 from models.common.cycle.audit import audit_solution
+from models.common.cycle.single_batch_cost import SingleBatchCostInstance
 from models.common.cycle.state import empty_result
 from models.common.cycle.timing import normalize_schedule
 from models.cost.multibatch import evaluate_cycle_cost
@@ -157,18 +158,90 @@ def test_comparison_checks_shared_inputs_and_keeps_failed_pairs():
         compare_single_batch(problems, results, rates)
 
 
-def test_runner_freezes_all_models_and_reports_each_seed(tmp_path):
+@pytest.mark.parametrize(('pool_basis', 'method'), [
+    ('owned_capital_charge', 'exact'), ('rental', 'alns'), ('synthetic_pool_charge', 'alns'),
+])
+def test_period_comparison_preserves_objective_and_handles_pool_accounting(pool_basis, method):
+    rates = load_json('config/cost/synthetic/daily_routing.json')
+    rates.update(pool_cost_basis=pool_basis, container_pool_cost_per_period=2,
+                 e1_trip_cost=1.25, e2_trip_cost=2.5, e1_work_cost_per_minute=.1,
+                 container_price=10, container_lifetime_uses=20, evaluation_cycles=3)
+    if pool_basis == 'owned_capital_charge':
+        rates['pool_lifetime_cycles'] = 2
+    problems = {}
+    for i in range(1, 5):
+        base = problem(i)
+        problems[i] = SingleBatchCostInstance(base.network, base.orders, base.operating_policy, rates, model=i)
+    results = {i: solve(p, method, seed=42) for i, p in problems.items()}
+    compared = compare_single_batch(problems, results, rates)
+    assert compared['cost_is_optimized']
+    for i, result in results.items():
+        cost = compared['costs'][i]
+        assert cost['total'] == pytest.approx(result['info']['objective'])
+        assert cost['economic_profile_hash'] == result['economic_profile_hash']
+        assert cost['components']['e1_trips'] == pytest.approx(result['audit']['e1_trip_count'] * 1.25)
+        assert cost['components']['e2_trips'] == pytest.approx(result['audit']['e2_trip_count'] * 2.5)
+    pure, reuse = compared['costs'][1], compared['costs'][3]
+    assert reuse['components']['container_pool'] == 2
+    assert reuse['components']['container_wear'] == .5
+    pair = compared['comparisons']['M1_vs_M3']
+    saving = pure['total'] - reuse['total']
+    assert pair['period_saving'] == pytest.approx(saving)
+    assert pair['period_saving_per_delivery'] == pytest.approx(saving)
+    assert pair['period_single_use_purchase_price_threshold'] == pytest.approx(5 - saving)
+    if pool_basis == 'owned_capital_charge':
+        assert pair['timeline'][-1]['pool_purchases'] == 2
+        assert pair['horizon_saving'] == pytest.approx(3 * (saving + .5) - 20)
+    elif pool_basis == 'rental':
+        assert pair['initial_pool_investment'] == 0
+        assert pair['timeline'][-1]['pool_purchases'] == 0
+        assert pair['horizon_saving'] == pytest.approx(3 * saving)
+    else:
+        assert not pair['lifecycle_available']
+        assert 'horizon_saving' not in pair
+
+
+@pytest.mark.parametrize('economic_override', [False, True])
+def test_runner_freezes_all_models_and_reports_each_seed(tmp_path, economic_override):
     from experiments.runs.run_single_batch_comparison import main
     out = tmp_path/'study'
-    report = main(['--solver', 'alns', '--time', '.05', '--iterations', '0', '--seeds', '42',
-                   '--output', str(out)])
+    args = ['--solver', 'alns', '--time', '.2', '--iterations', '0', '--seeds', '42', '--output', str(out),
+            '--loss-rates', '0', '0.04', '--other-incidental-cost-per-use', '0.1']
+    if economic_override:
+        args.extend(['--economic-config', 'config/cost/synthetic/single_batch_synthetic.json'])
+        args.extend(['--loss-replacement-cost-per-box', '20'])
+    report = main(args)
     assert len(report['runs']) == 4 and set(report['comparisons']) == {'alns_seed42'}
-    assert (out/'report.md').is_file() and (out/'runs.csv').is_file()
-    manifest = json.loads((out/'manifest.json').read_text())
+    comparison = report['comparisons']['alns_seed42']
+    assert all(row['valid'] for row in report['runs'])
+    for row in report['runs']:
+        assert comparison['costs'][row['model']]['total'] == pytest.approx(row['objective'])
+    markdown = (out/'report.md').read_text(encoding='utf-8')
+    assert '成本目标值' in markdown and '纸箱单价持平阈值' in markdown
+    assert '偶然成本情景' in markdown and '4.00%' in markdown
+    assert (out/'runs.csv').is_file()
+    manifest = json.loads((out/'manifest.json').read_text(encoding='utf-8'))
     assert len(manifest['jobs']) == 4 and manifest['source_sha256']
+    parameters = manifest['economic_parameters']
+    assert parameters['e1_distance_cost_per_km'] == (1 if economic_override else .1)
+    assert parameters['container_pool_cost_per_period'] == (0 if economic_override else 5)
+    incidental = comparison['incidental_costs']['M1_vs_M3']
+    assumptions = manifest['incidental_cost_parameters']
+    price = 20 if economic_override else parameters['container_price']
+    assert assumptions == dict(loss_rates=[0, .04], other_cost_per_use=.1, replacement_cost_per_box=price)
+    pair = comparison['comparisons']['M1_vs_M3']
+    scenario = incidental['scenarios'][1]
+    extra = incidental['packages_per_period']*(.04*price+.1)
+    assert scenario['period_incidental_cost'] == pytest.approx(extra)
+    assert scenario['period_saving'] == pytest.approx(pair['period_saving']-extra)
+    if economic_override:
+        assert scenario['horizon_saving'] == pytest.approx(pair['horizon_saving']-pair['evaluation_cycles']*extra)
+    else:
+        assert scenario['horizon_saving'] is None
     for model in range(1, 5):
         cfg, fleet = load_routing_case(out/f'case_M{model}.json')
         assert cfg['model'] == model
         assert str(out/'inputs') in cfg['orders']
+        assert load_json(cfg['economic_config']) == parameters
     with pytest.raises(ValueError, match='overwrite'):
         main(['--output', str(out)])

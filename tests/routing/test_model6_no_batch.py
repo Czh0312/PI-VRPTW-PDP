@@ -232,7 +232,10 @@ def test_cli_saves_frontier_and_does_not_stop_on_unknown(monkeypatch,tmp_path):
     run_case(cfg,fleet,output=tmp_path/'run',pool_caps=[3,2,1])
     assert calls==[3,2,1]
     assert (tmp_path/'run/frontier.csv').is_file()
-    assert (tmp_path/'run/manifest.json').is_file()
+    manifest = json.loads((tmp_path/'run/manifest.json').read_text(encoding='utf-8'))
+    engine_path = 'models/routing/alns/engine.py'
+    assert (tmp_path/'run/source_snapshot'/engine_path).is_file()
+    assert engine_path in {path.replace('\\', '/') for path in manifest['source_sha256']}
 
 
 def test_nonmetric_shortest_path_bound_is_optimistic():

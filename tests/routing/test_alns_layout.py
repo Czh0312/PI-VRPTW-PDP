@@ -5,6 +5,8 @@ import random
 
 import pytest
 
+from models.routing.alns.engine import Evaluation, OperatorWeights, Proposal, run_search
+from models.routing.alns.search_control import ALNSParameters, SearchControl
 from tests.routing.single_batch_fixtures import fixture
 from tests.routing.test_model5_calendar import calendar_fixture
 
@@ -57,3 +59,36 @@ def test_acceptance_preserves_short_circuit_and_progress_uses_both_budgets(numbe
     assert rng.draws == 2
     with pytest.raises(FrozenInstanceError):
         parameters.seed = 0
+
+
+@pytest.mark.parametrize("credit_rejected_best, expected", [
+    (True, {"destroy": 2.4, "repair": 1.6}),
+    (False, {"destroy": 0.8, "repair": 0.8}),
+])
+def test_shared_search_records_incumbent_and_credits_paired_operators(credit_rejected_best, expected):
+    control = SearchControl(ALNSParameters(10, 2, 42, segment_period=2), 0.0, lambda: 0.0)
+    weights = OperatorWeights(control, ("destroy", "repair"), segmented=True,
+                              credit_rejected_best=credit_rejected_best)
+    start = Evaluation(10, "initial", None)
+    candidate = Evaluation(11, "neighbor", "feasible")
+    incumbents = []
+
+    def propose(current, iteration):
+        assert current is start
+        if iteration == 0:
+            return Proposal(current, candidate, ("destroy", "repair"))
+        return Proposal(current, operators=("repair",))
+
+    def remember(proposal, _iterations):
+        incumbents.append(proposal.candidate)
+        return True
+
+    def accept(proposal, _iteration, improved):
+        assert improved and incumbents == [proposal.candidate]
+        return False
+
+    assert run_search(start, control, weights, propose, remember, accept) == (start, 2, 0)
+    assert weights.attempts == {"destroy": 1, "repair": 2}
+    assert weights.improvements == {"destroy": 1, "repair": 1}
+    assert weights.noops == {"destroy": 0, "repair": 1}
+    assert weights.weights == pytest.approx(expected)

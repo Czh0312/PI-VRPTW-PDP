@@ -1,24 +1,20 @@
 # M5 — ALNS 阅读导航
 
-先看 `solver.py` 确认入口，再看 **`search.py`** 理解主要迭代流程；遇到构造、邻域、评价和搜索控制时，再进入对应文件。
-本目录独立拥有本模型算法，不导入其他编号模型的求解实现。
-
 ## 实际调用路径
 
-`solver.py` → `k_search/scheduler.py` → `search.py`（给定 K，联合改变日历边界、分批、批内分界与路线）。K=1 和小实例热启动使用 `fixed_calendar_search.py`。
+`solver.py` → `k_search/scheduler.py` → `search.py`。固定营业窗口下的 K=1 和小实例热启动使用 `fixed_calendar_search.py`。两种日历策略都进入[共用 ALNS 主循环](../../alns/engine.py)。
 
 ## 核心文件
 
 | 文件 | 用途 |
 | --- | --- |
 | [solver.py](solver.py) | 公开求解入口、输入校验与搜索分派 |
-| [search.py](search.py) | 本模型的主要 ALNS 迭代：选算子、生成候选、评价、接受、更新最好解 |
-| [parameters.py](parameters.py) | 时间与迭代预算、温度和自适应权重参数 |
+| [search.py](search.py) | 给定 K，处理可变日历初解、边界移动和精修，向引擎提供候选 |
+| [parameters.py](parameters.py) | 日历重构间隔与校验 |
 | [state.py](state.py) | 搜索状态的复制、缓存键与已有解转换 |
 | [construction.py](construction.py) | 初解构造、方案修复与热启动转换 |
 | [neighborhoods.py](neighborhoods.py) | 订单破坏／修复、路线移动；联合模型还包含订单分批移动 |
 | [evaluator.py](evaluator.py) | 完整解码、成本与可行性评价、候选评价缓存 |
-| [search_control.py](search_control.py) | 算子选择、温度、接受准则与权重更新 |
 
 ## 本模型的专门搜索与局部改进
 
@@ -80,6 +76,4 @@ Python 入口可传 `calendar_reconstruction_period=8` 试验快速修复：保�
 实例的 `joint_batch_options.calendar_decision_grid_seconds=60` 可将批次边界与批内分界限制为整分钟。
 该选项同时约束精确模型、ALNS候选与独立审计；行驶、服务及时间窗继续使用原始物理时钟。
 不设置时保持原来的整数物理刻度域。K域仍由 `batch_count_candidates` 单独指定。
-`__init__.py` 导出公开入口；内部模块路径随本次整理调整。
-完整职责与迁移说明见 [ALNS 模型结构](../../../../docs/alns_model_layout.md)；
-两类算法的整体阅读入口见 [目录指南](../../../../docs/solver_directory_guide.md)。
+各编号模型的 ALNS 接入方式见[求解器目录](../../README.md)。

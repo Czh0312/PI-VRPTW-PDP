@@ -6,53 +6,24 @@ inventory. No exact backend or Gurobi is loaded.
 """
 from __future__ import annotations
 
-from models.routing.model_5.alns.parameters import ALNSParameters
-from models.routing.model_5.alns.search_control import SearchControl
-
-from models.routing.model_5.alns.cutoff_moves import (
-    _cutoff_move, _polish_cutoff, _with_cutoff, _cutoff_events,
-)
-
-from models.routing.model_5.alns.neighborhoods import (
-    _local_cost_scorer,
-    _route_move,
-    _batch_move,
-    clone_state as _physical_clone,
-    state_key,
-    destroy_repair,
-    _route_score,
-)
-
-
-from models.routing.model_5.alns.construction import (
-    cover_delivery_batches,
-    _seed_from_result,
-    _initial_cutoff_profiles,
-    _best_construction,
-    chronological_state,
-    appointment_state,
-)
-
-
-from models.routing.model_5.alns.evaluator import (
-    JointEvaluator,
-    _delay_departures,
-    initial_state,
-    evaluate,
-)
-
-from models.routing.model_5.alns.state import clone_joint_state as clone_state
-
-from collections import OrderedDict
 from copy import deepcopy
 import math
 import random
 import time
 
-from models.common.cycle.scope import require_fixed_calendar
-from models.common.cycle.joint import joint_empty_result, lift_result
 from models.common.cycle.audit import audit_solution
+from models.common.cycle.joint import joint_empty_result
 from models.common.cycle.pool_bound import forced_batch_pool_violation
+from models.common.cycle.scope import require_fixed_calendar
+from models.routing.alns.engine import Evaluation, OperatorWeights, Proposal, run_search
+from models.routing.alns.search_control import SearchControl
+
+from .construction import _best_construction, _initial_cutoff_profiles, _seed_from_result, cover_delivery_batches
+from .cutoff_moves import _polish_cutoff
+from .evaluator import JointEvaluator
+from .neighborhoods import BATCH_ROUTE_OPERATORS, CUTOFF_OPERATORS, propose_batch_routes
+from .parameters import ALNSParameters
+from .state import clone_joint_state as clone_state
 
 
 def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_result=None):
@@ -149,7 +120,7 @@ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_resul
         best, best_assignment, best_state = _seed_from_result(problem, initial_result)
         best_cost = initial_cost = best["info"]["objective"]
         score, candidate, issues = evaluator(best_assignment, best_state)
-        current = (score, dict(best_assignment), clone_state(best_state))
+        current = Evaluation(score, (dict(best_assignment), clone_state(best_state)), candidate)
         if candidate is not None and score < best_cost:
             best, best_cost = deepcopy(candidate), score
         history.append(
@@ -175,101 +146,52 @@ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_resul
             problem, evaluator, assignment, rng, search_deadline, cutoffs=cutoffs
         )
         seen.update(issues)
-        if current is None or score < current[0]:
-            current = (score, assignment, state)
+        if current is None or score < current.score:
+            current = Evaluation(score, (assignment, state), result)
         if result is not None and score < best_cost:
             best, best_cost = deepcopy(result), score
             best_assignment, best_state = dict(assignment), clone_state(state)
             history.append(dict(iteration=0, objective=score, time=time.perf_counter() - begun))
-    operators = [
-        "destroy_random_batch",
-        "destroy_related_batch",
-        "split_batch",
-        "destroy_routes",
-        "relocate",
-        "pair",
-        "split_merge",
-        "vehicle",
-        "wait",
-        "e1_delivery",
-        "e1_pickup",
-        "reverse",
-    ]
-    if problem.optimize_cutoffs:
-        operators += ["shift_cutoff", "align_cutoff"]
-    weights = control.initial_weights(operators)
-    rewards = [0.0] * len(operators)
-    uses = [0] * len(operators)
-    attempts = {op: 0 for op in operators}
-    improvements = {op: 0 for op in operators}
-    accepted = iterations = restarts = 0
-    score, assignment, state = current
-    for iteration in range(max_iterations):
-        if time.perf_counter() >= search_deadline:
-            break
-        iterations = iteration + 1
-        index = control.select_index(rng, weights)
-        op = operators[index]
-        attempts[op] += 1
-        uses[index] += 1
+    operators = BATCH_ROUTE_OPERATORS + (CUTOFF_OPERATORS if problem.optimize_cutoffs else ())
+    weights = OperatorWeights(control, operators, segmented=True)
+    restarts = 0
+
+    def propose(trial, iteration):
+        nonlocal restarts
+        op = weights.choose(rng)
         if iteration and iteration % 100 == 0 and best is not None:
             assignment, state = dict(best_assignment), clone_state(best_state)
-            score = evaluator(assignment, state)[0]
+            score, decoded, _ = evaluator(assignment, state)
+            trial = Evaluation(score, (assignment, state), decoded)
             restarts += 1
-        proposed_assignment = dict(assignment)
-        if "batch" in op:
-            proposed_assignment, proposed = _batch_move(
-                proposal_problem, evaluator, assignment, rng, op, search_deadline, state.get("cutoffs")
-            )
-        elif op in ("shift_cutoff", "align_cutoff"):
-            proposed = _cutoff_move(
-                problem, evaluator, assignment, state, rng, op == "align_cutoff"
-            )
-        else:
-            fixed = evaluator.fixed(assignment, state.get("cutoffs"))
-            if op == "destroy_routes":
-                fixed._joint_cost_rates = problem.cost_profile.rates
-                proposed = destroy_repair(
-                    fixed,
-                    state,
-                    rng,
-                    rng.choice(["random", "related"]),
-                    search_deadline,
-                    scorer=_local_cost_scorer,
-                    validator=(lambda trial: evaluator(assignment, {**trial, 'cutoffs': state['cutoffs']}))
-                        if len(problem.orders) <= 9 else None,
-                    repair_stats=repair_stats,
-                )
-                proposed["cutoffs"] = dict(state["cutoffs"])
-            else:
-                proposed = _route_move(fixed, state, rng, op)
+        assignment, state = trial.state
+        proposed_assignment, proposed = propose_batch_routes(
+            evaluator, proposal_problem, assignment, state, rng, op,
+            search_deadline, repair_stats,
+        )
         if time.perf_counter() >= search_deadline:
-            break
+            return Proposal(trial, operators=(op,), stop=True)
         new_score, candidate, issues = evaluator(proposed_assignment, proposed)
         seen.update(issues)
-        reward = 0.0
-        if candidate is not None and new_score < best_cost - 1e-8:
-            best, best_cost = deepcopy(candidate), new_score
-            best_assignment, best_state = dict(proposed_assignment), clone_state(proposed)
-            history.append(
-                dict(iteration=iterations, objective=best_cost, time=time.perf_counter() - begun)
-            )
-            improvements[op] += 1
-            reward = 8.0
-        fraction = control.time_fraction()
-        temperature = control.joint_temperature(best_cost, score, fraction)
-        if control.accept(rng, score, new_score, temperature, joint=True):
-            if new_score < score:
-                reward = max(reward, 3.0)
-            else:
-                reward = max(reward, 1.0)
-            score, assignment, state = new_score, proposed_assignment, proposed
-            accepted += 1
-        rewards[index] += reward
-        if iterations % parameters.segment_period == 0:
-            weights = control.update_segment(weights, rewards, uses)
-            rewards = [0.0] * len(operators)
-            uses = [0] * len(operators)
+        return Proposal(trial, Evaluation(new_score, (proposed_assignment, proposed), candidate), (op,))
+
+    def remember(proposal, iterations):
+        nonlocal best, best_cost, best_assignment, best_state
+        evaluation = proposal.candidate
+        if evaluation.result is None or not evaluation.score < best_cost - 1e-8:
+            return False
+        assignment, state = evaluation.state
+        best, best_cost = deepcopy(evaluation.result), evaluation.score
+        best_assignment, best_state = dict(assignment), clone_state(state)
+        history.append(dict(iteration=iterations, objective=best_cost, time=time.perf_counter() - begun))
+        return True
+
+    def accept(proposal, _iteration, _improved):
+        return control.accept_joint(rng, proposal.current.score, proposal.candidate.score, best_cost)
+
+    _, iterations, accepted = run_search(
+        current, control, weights, propose, remember, accept, deadline=search_deadline,
+    )
     route_polish_evaluations = route_polish_improvements = 0
     if route_polish_share and best is not None:
         from models.routing.model_5.alns.polish import polish_routes
@@ -349,9 +271,9 @@ def solve_alns(problem, max_time=10, max_iterations=5000, seed=42, initial_resul
         accepted_moves=accepted,
         restarts=restarts,
         **repair_stats,
-        operator_attempts=attempts,
-        operator_improvements=improvements,
-        operator_weights=dict(zip(operators, weights)),
+        operator_attempts=weights.attempts,
+        operator_improvements=weights.improvements,
+        operator_weights=weights.weights,
         cache_hits=evaluator.hits,
         evaluations=evaluator.misses,
         route_polish_evaluations=route_polish_evaluations,

@@ -35,14 +35,15 @@ python3 -m venv .venv
 | --- | --- |
 | 增加命令参数或调整单次运行输出 | `cli/main.py`、`cli/route.py`、`cli/multibatch.py`、`cli/multibatch_cost.py` |
 | 修改模型编号、分流或输入范围 | `models/routing/catalog.py`、`service.py`、两种算法的 `model_n/` |
-| 修改 M1–M5 求解实现 | 对应 `models/routing/model_n/exact/` 或 `alns/` |
+| 修改模型初解、算子、评价或精确求解 | 对应 `models/routing/model_N/alns/` 或 `exact/` |
+| 修改 ALNS 主迭代、退火或算子权重 | `models/routing/alns/` |
 | 修改模型 5 的日历搜索 | 精确模型位于 `model_5/exact/`，ALNS 批次数搜索位于 `model_5/alns/k_search/` |
 | 修改业务约束或独立审计 | `models/common/cycle/` |
 | 调整场景参数 / 配置加载逻辑 | `config/` / `tools/configuration/` |
 | 增加批量实验 / 分析 | `experiments/runs/` / `experiments/analysis/` |
 | 构造数据、审计或恢复已有材料 | `tools/data/`、`tools/audit/` |
 
-编号模型保留独立公开入口，求解服务经这些入口调用。基础业务层不导入求解器；普通精确与 ALNS 入口互不导入，求解算法不跨模型导入。旧 M5 混合入口已退役。各模型独立实现的位置详见[逐文件说明](../models/routing/README.md)。
+求解服务通过各编号模型的公开入口调用求解器，ALNS 入口使用共用引擎。基础业务层独立于求解器，编号模型之间保持导入隔离，精确求解与 ALNS 分别加载。旧 M5 混合入口已退役。[求解器目录](../models/routing/README.md)
 
 ## 源码检索
 

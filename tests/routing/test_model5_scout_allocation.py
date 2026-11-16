@@ -11,9 +11,9 @@ def simulate(monkeypatch, orders=7, counts=(1, 2, 3, 4), strategy='adaptive', it
     clock.perf_counter = lambda: clock.value
     monkeypatch.setattr(scheduler, 'time', clock)
     monkeypatch.setattr(scheduler, '_audit', lambda p, r: dict(valid=True, errors=[], objective=r['info']['objective']))
-    monkeypatch.setattr(scheduler, '_attach', lambda p, c, r, k: r.update(cycle_batch_count=k))
+    monkeypatch.setattr(scheduler, '_attach', lambda p, r, k: r.update(cycle_batch_count=k))
     monkeypatch.setattr(scheduler, '_metadata', lambda *args: None)
-    p = SimpleNamespace(model_number=5, batch_count_candidates=counts,
+    p = SimpleNamespace(model_number=5, batch_count_candidates=counts, no_work_window=False,
                         orders=tuple(range(orders)), for_count=lambda k: k)
     calls = []
     def solve(k, **kwargs):

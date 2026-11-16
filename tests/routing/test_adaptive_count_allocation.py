@@ -14,11 +14,12 @@ def scheduler(monkeypatch):
     monkeypatch.setattr(batch_search, 'time', clock)
     monkeypatch.setattr(batch_search, '_audit', lambda p, r: dict(
         valid=True, objective=r['info']['objective'], errors=[]))
-    monkeypatch.setattr(batch_search, '_attach', lambda p, c, r, k: r.update(cycle_batch_count=k))
+    monkeypatch.setattr(batch_search, '_attach', lambda p, r, k: r.update(cycle_batch_count=k))
     monkeypatch.setattr(batch_search, '_metadata', lambda *a: None)
     monkeypatch.setattr(batch_search, 'joint_empty_result', lambda *a: candidate())
-    problem = SimpleNamespace(model_number=5, orders=tuple(range(20)), batch_count_candidates=tuple(range(1, 101)),
-                              for_count=lambda k: k)
+    problem = SimpleNamespace(model_number=5, orders=tuple(range(20)),
+                              batch_count_candidates=tuple(range(1, 101)),
+                              no_work_window=False, for_count=lambda k: k)
 
     def run(solve, **kwargs):
         return batch_search.solve_counts(problem, solve_candidate=solve, method='alns',

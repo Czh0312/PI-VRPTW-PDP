@@ -5,15 +5,6 @@ No mathematical solver, exact backend, or exact solution is used to initialize.
 """
 from __future__ import annotations
 
-from models.routing.model_5.alns.parameters import ALNSParameters, validate_calendar_reconstruction_period
-from models.routing.model_5.alns.search_control import SearchControl
-
-from models.routing.model_5.alns.construction import initial_calendars, cover_delivery_batches
-from models.routing.model_5.alns.batch_initialization import balanced_assignments
-
-from models.routing.model_5.alns.calendar_moves import move_boundaries, boundary_events
-
-
 from collections import OrderedDict
 from copy import deepcopy
 import math
@@ -21,15 +12,18 @@ import random
 import time
 
 from models.common.cycle.joint import joint_empty_result, audit_joint_solution
-from models.routing.model_5.alns.evaluator import JointEvaluator
-from models.routing.model_5.alns.state import clone_joint_state as clone_state
-from models.routing.model_5.alns.construction import (
-    _best_construction, _seed_from_result, _initial_cutoff_profiles,
+from models.routing.alns.engine import Evaluation, OperatorWeights, Proposal, run_search
+from models.routing.alns.search_control import SearchControl
+
+from .batch_initialization import balanced_assignments
+from .calendar_moves import move_boundaries
+from .construction import (
+    _best_construction, _initial_cutoff_profiles, _seed_from_result, cover_delivery_batches, initial_calendars,
 )
-from models.routing.model_5.alns.neighborhoods import (
-    _batch_move, _route_move, _local_cost_scorer, destroy_repair,
-)
-from models.routing.model_5.alns.cutoff_moves import _cutoff_move
+from .evaluator import JointEvaluator
+from .neighborhoods import BATCH_ROUTE_OPERATORS, CUTOFF_OPERATORS, propose_batch_routes
+from .parameters import ALNSParameters, validate_calendar_reconstruction_period
+from .state import clone_joint_state as clone_state
 
 
 def solve_variable_count(variable, *, max_time, max_iterations, seed, initial_result=None,
@@ -81,7 +75,7 @@ def solve_variable_count(variable, *, max_time, max_iterations, seed, initial_re
         )
         return result
     parameters = ALNSParameters(max_time, max_iterations, seed,
-                               calendar_reconstruction_period=calendar_reconstruction_period)
+                                calendar_reconstruction_period=calendar_reconstruction_period)
     control = SearchControl(parameters, begun, time.perf_counter)
     deadline = begun + max_time
     search_deadline = deadline - (.2*max_time if len(parent.orders) <= 16 else 0.)
@@ -219,7 +213,7 @@ def solve_variable_count(variable, *, max_time, max_iterations, seed, initial_re
             "supplied_incumbent",
         )
         score, decoded, _ = evaluator(assignment, state)
-        current = score, bounds, assignment, state
+        current = Evaluation(score, (bounds, assignment, state), decoded)
         remember(score, bounds, assignment, state, decoded, 0, "initial_decode")
     from models.routing.model_5.alns.calendar_polish import deadline_calendar_seeds
     init_deadline = min(search_deadline, time.perf_counter()
@@ -251,109 +245,62 @@ def solve_variable_count(variable, *, max_time, max_iterations, seed, initial_re
                 value, decoded, _ = evaluator(assignment, polished)
                 if decoded is not None and value < score:
                     score, state, candidate = value, polished, decoded
-            if current is None or score < current[0]:
-                current = score, bounds, assignment, state
+            if current is None or score < current.score:
+                current = Evaluation(score, (bounds, assignment, state), candidate)
             remember(score, bounds, assignment, state, candidate, 0, "calendar_construction")
             if state is None:
                 break
     if current is None:
-        current = penalty * 100, parent.balanced_boundaries(k), None, None
+        current = Evaluation(penalty * 100, (parent.balanced_boundaries(k), None, None), None)
     boundary_ops = ["shift_boundary", "align_boundary"] if k > 1 or parent.no_work_window else []
     if k > 1:
         boundary_ops.append("redistribute_lengths")
-    route_ops = [
-        "destroy_random_batch",
-        "destroy_related_batch",
-        "split_batch",
-        "destroy_routes",
-        "relocate",
-        "pair",
-        "split_merge",
-        "vehicle",
-        "wait",
-        "e1_delivery",
-        "e1_pickup",
-        "reverse",
-        "shift_cutoff",
-        "align_cutoff",
-    ]
-    operators = boundary_ops + route_ops
-    weights = control.initial_weight_dict(operators)
-    attempts = {op: 0 for op in operators}
-    improvements = {op: 0 for op in operators}
-    rewards = {op: 0.0 for op in operators}
-    uses = {op: 0 for op in operators}
-    accepted = iterations = 0
-    noops = {op: 0 for op in operators}
-    for iteration in range(max_iterations-warm_iterations):
-        if time.perf_counter() >= search_deadline:
-            break
-        iterations = iteration + 1
+    operators = tuple(boundary_ops) + BATCH_ROUTE_OPERATORS + CUTOFF_OPERATORS
+    weights = OperatorWeights(control, operators, segmented=True)
+
+    def propose(trial, iteration):
         if iteration and iteration % 100 == 0 and best is not None:
-            current = best_cost, best_boundaries, dict(best_assignment), clone_state(best_state)
-        score, bounds, assignment, state = current
+            trial = Evaluation(best_cost, (best_boundaries, dict(best_assignment), clone_state(best_state)), best)
+        bounds, assignment, state = trial.state
         available = boundary_ops if state is None and boundary_ops else operators
-        op = control.select_name(rng, available, weights)
-        attempts[op] += 1
-        uses[op] += 1
+        op = weights.choose(rng, available)
         proposed_bounds = bounds
         if op in boundary_ops:
             proposed_bounds = move_boundaries(variable, bounds, rng, op, best)
             if (parameters.calendar_reconstruction_period > 1
                     and tuple(proposed_bounds) == tuple(bounds)):
-                noops[op] += 1
-                if iterations % parameters.segment_period == 0:
-                    control.update_named_segment(operators, weights, rewards, uses)
-                continue
+                return Proposal(trial, operators=(op,))
             new_score, proposed_assignment, proposed, candidate = repair(
                 proposed_bounds, assignment, state
             )
         elif state is None:
             new_score, proposed_assignment, proposed, candidate = repair(bounds)
         else:
-            child, evaluator = context(bounds)
-            proposed_assignment = dict(assignment)
-            if "batch" in op:
-                proposed_assignment, proposed = _batch_move(
-                    evaluator.proposal_problem, evaluator, assignment, rng, op, search_deadline, state["cutoffs"]
-                )
-            elif op in ("shift_cutoff", "align_cutoff"):
-                proposed = _cutoff_move(
-                    child, evaluator, assignment, state, rng, op == "align_cutoff"
-                )
-            else:
-                fixed = evaluator.fixed(assignment, state["cutoffs"])
-                if op == "destroy_routes":
-                    fixed._joint_cost_rates = parent.cost_profile.rates
-                    proposed = destroy_repair(
-                        fixed,
-                        state,
-                        rng,
-                        rng.choice(["random", "related"]),
-                        search_deadline,
-                        scorer=_local_cost_scorer,
-                        validator=(lambda trial: evaluator(assignment, {**trial, 'cutoffs': state['cutoffs']}))
-                            if len(parent.orders) <= 9 else None,
-                        repair_stats=repair_stats,
-                    )
-                    proposed["cutoffs"] = dict(state["cutoffs"])
-                else:
-                    proposed = _route_move(fixed, state, rng, op)
+            _, evaluator = context(bounds)
+            proposed_assignment, proposed = propose_batch_routes(
+                evaluator, evaluator.proposal_problem, assignment, state, rng, op,
+                search_deadline, repair_stats,
+            )
             new_score, candidate, _ = evaluator(proposed_assignment, proposed)
-        improved = remember(
-            new_score, proposed_bounds, proposed_assignment, proposed, candidate, iterations, op
+        return Proposal(trial, Evaluation(
+            new_score, (proposed_bounds, proposed_assignment, proposed), candidate
+        ), (op,))
+
+    def remember_move(proposal, iterations):
+        evaluation = proposal.candidate
+        bounds, assignment, state = evaluation.state
+        return remember(
+            evaluation.score, bounds, assignment, state, evaluation.result, iterations,
+            proposal.operators[0],
         )
-        reward = 8.0 if improved else 0.0
-        improvements[op] += int(improved)
-        fraction = control.time_fraction()
-        temperature = control.joint_temperature(best_cost, score, fraction)
-        if control.accept(rng, score, new_score, temperature, joint=True):
-            reward = max(reward, 3.0 if new_score < score else 1.0)
-            current = new_score, proposed_bounds, proposed_assignment, proposed
-            accepted += 1
-        rewards[op] += reward
-        if iterations % parameters.segment_period == 0:
-            control.update_named_segment(operators, weights, rewards, uses)
+
+    def accept_move(proposal, _iteration, _improved):
+        return control.accept_joint(rng, proposal.current.score, proposal.candidate.score, best_cost)
+
+    _, iterations, accepted = run_search(
+        current, control, weights, propose, remember_move, accept_move,
+        max_iterations=max_iterations - warm_iterations, deadline=search_deadline,
+    )
     route_polish_evaluations = route_polish_improvements = 0
     if best is not None and len(parent.orders) <= 16:
         from models.routing.model_5.alns.polish import polish_routes
@@ -407,15 +354,15 @@ def solve_variable_count(variable, *, max_time, max_iterations, seed, initial_re
         route_polish_improvements=route_polish_improvements,
         calendar_polish_evaluations=calendar_polish_evaluations,
         calendar_polish_improvements=calendar_polish_improvements,
-        operator_attempts=attempts,
-        operator_improvements=improvements,
-        operator_weights=weights,
+        operator_attempts=weights.attempts,
+        operator_improvements=weights.improvements,
+        operator_weights=weights.weights,
         accepted_moves=accepted,
         history=history,
         calendar_evaluations=len(calendar_visits),
         evaluations=evicted_misses + sum(e.misses for e in evaluators.values()),
         cache_hits=evicted_hits + sum(e.hits for e in evaluators.values()),
-        operator_noops=noops,
+        operator_noops=weights.noops,
         **repair_stats,
         calendar_reconstruction_period=parameters.calendar_reconstruction_period,
         **calendar_stats,

@@ -14,50 +14,107 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-from tools.configuration.loader import load_routing_case, load_json, resolve_project_path
+from tools.configuration.loader import config_sources, load_routing_case, load_json, resolve_project_path
 from experiments.runs.run_multibatch_cycle import (
     INPUT_KEYS, freeze_inputs, source_snapshot, run_worker, write_json)
 from models.common.cycle import load_instance, MultiBatchPolicy
 from models.common.cycle.state import empty_result
-from models.cost.single_batch import compare_single_batch
+from models.cost.joint_batch import DEFAULT_ECONOMIC_CONFIG
+from models.cost.single_batch import compare_single_batch, incidental_cost_sensitivity
+
+
+def _loss_limit_text(rate):
+    return f'{rate:.2%}' if rate is not None else '无法持平'
+
+
+def _incidental_report(comparison):
+    costs = comparison.get('incidental_costs', {})
+    if not costs:
+        return []
+    rates = next(iter(costs.values()))
+    lines = ['', '### 偶然成本情景', '',
+             f"补购一只箱计 {rates['replacement_cost_per_box']:g}，每发箱箱次其他偶然支出计 {rates['other_cost_per_use']:g}。",
+             '损耗率按基准费用之外的额外补购估计。各情景沿用同一组已审计方案。', '',
+             '| 对照 | 每期损耗率上限 | 评价期末损耗率上限 |', '| --- | ---: | ---: |']
+    for pair, cost in costs.items():
+        period = _loss_limit_text(cost['period_max_loss_rate']) if cost['packages_per_period'] else '—'
+        horizon = (_loss_limit_text(cost['horizon_max_loss_rate'])
+                   if cost['packages_per_period'] and comparison['comparisons'][pair]['lifecycle_available'] else '—')
+        lines.append(f'| {pair} | {period} | {horizon} |')
+    lines += ['', '| 对照 | 损耗率 | 每期偶然成本 | 调整后每期节省 | 每期纸箱持平单价 | 评价期末节省 |',
+              '| --- | ---: | ---: | ---: | ---: | ---: |']
+    for pair, cost in costs.items():
+        for scenario in cost['scenarios']:
+            threshold = scenario['period_paper_price_threshold']
+            threshold = f'{threshold:.6f}' if threshold is not None else '—'
+            cumulative = scenario['horizon_saving']
+            cumulative = f'{cumulative:.6f}' if cumulative is not None else '—'
+            lines.append(f"| {pair} | {scenario['loss_rate']:.2%} | {scenario['period_incidental_cost']:.6f} | "
+                         f"{scenario['period_saving']:.6f} | {threshold} | {cumulative} |")
+    return lines
 
 
 def report(comparisons, rows, out, parameters):
     lines = ['# 单批次 M1–M4 对照', '',
-             f"费用来源：`{parameters['source_type']}`；单位：`{parameters['currency']}`。",
-             '这是固定输入和参数下的条件分析。当前演示参数不能证明真实业务盈利。', '',
-             '| 求解器/种子 | 模型 | 状态 | 审计 | 距离 | 距离最优已证明 |',
-             '| --- | --- | --- | --- | ---: | --- |']
+             f"费率来源类型为 `{parameters['source_type']}`，成本单位为 `{parameters['currency']}`。", '',
+             '| 求解器/种子 | 模型 | 状态 | 审计 | 物理距离 | 成本目标值 | 成本最优已证明 |',
+             '| --- | --- | --- | --- | ---: | ---: | --- |']
     for row in rows:
+        distance = f"{row['e1_distance'] + row['e2_distance']:.6f}" if row['valid'] else '—'
+        objective = f"{row['objective']:.6f}" if row['valid'] else '—'
         lines.append(f"| {row['solver']}/{row['seed']} | M{row['model']} | {row['status']} | "
-                     f"{row['valid']} | {row['objective']} | {row['proven_optimal']} |")
+                     f"{row['valid']} | {distance} | {objective} | {row['proven_optimal']} |")
     for name, comparison in comparisons.items():
         lines += ['', f'## {name}', '',
-                  '| 模型 | 每周期运营费用 | 初始箱池投资 |', '| --- | ---: | ---: |']
+                  '| 模型 | 每期总成本 | 实体箱池数 | 箱池购置估值 |', '| --- | ---: | ---: | ---: |']
         for model, cost in comparison['costs'].items():
-            lines.append(f"| M{model} | {cost['period_operating_cost']:.6f} | {cost['initial_pool_investment']:.6f} |")
-        lines += ['', '| 对照 | 评价周期数 | 循环方案累计节省 | 期内首次回本周期 | 此后至期末不再亏损的起点 |',
-                  '| --- | ---: | ---: | ---: | ---: |']
+            lines.append(f"| M{model} | {cost['total']:.6f} | {cost['container_pool_size']} | "
+                         f"{cost['initial_pool_investment']:.6f} |")
+        lines += ['', '| 对照 | 循环方案每期节省 | 每配送一箱节省 | 纸箱单价持平阈值 |',
+                  '| --- | ---: | ---: | ---: |']
         for pair, data in comparison['comparisons'].items():
-            if not data['available']:
-                lines.append(f'| {pair} | — | 缺少双方可行方案 | — | — |')
+            if data['available']:
+                per_delivery = data['period_saving_per_delivery']
+                threshold = data['period_single_use_purchase_price_threshold']
+                per_delivery_text = f'{per_delivery:.6f}' if per_delivery is not None else '—'
+                threshold_text = f'{threshold:.6f}' if threshold is not None else '—'
+                lines.append(f"| {pair} | {data['period_saving']:.6f} | {per_delivery_text} | {threshold_text} |")
             else:
+                lines.append(f'| {pair} | 缺少成对的审计合格方案 | — | — |')
+        lifecycle = {pair: data for pair, data in comparison['comparisons'].items()
+                     if data.get('lifecycle_available')}
+        if lifecycle:
+            lines += ['', '| 对照 | 评价周期数 | 循环方案累计节省 | 期内首次持平周期 | 此后至期末不再亏损的起点 |',
+                      '| --- | ---: | ---: | ---: | ---: |']
+            for pair, data in lifecycle.items():
                 lines.append(f"| {pair} | {data['evaluation_cycles']} | {data['horizon_saving']:.6f} | "
                              f"{data['first_break_even_within_horizon']} | {data['no_more_expensive_from_cycle_through_horizon']} |")
-        lines += ['', '固定路线的包装价格 × 容器寿命敏感性：', '',
-                  '| 对照 | 一次性包装单价 | 箱池寿命（周期） | 评价期累计节省 | 首次回本周期 |',
-                  '| --- | ---: | ---: | ---: | ---: |']
-        for data in comparison['sensitivity']:
-            lines.append(f"| M{data['single_use_model']}/M{data['reusable_model']} | {data['single_use_package_price']:g} | "
-                         f"{data['pool_lifetime_cycles']} | {data['horizon_saving']:.6f} | {data['first_break_even_within_horizon']} |")
-    lines += ['', '成本包含距离、占用工时、实际启用车辆和包装相关费用。一次性包装每周期重新购买；',
-              '循环箱按固定池购入，并按声明寿命整池更新。累计费用不再叠加摊销。负节省表示循环方案更贵。',
-              '各方法/种子分别报告，不从多个运行中挑出一个经济最有利方案。',
-              '距离最优不等于费用最优；固定路线采用最早可行时间表，尚未优化工时。',
-              '同质包装的正向重量/体积暂取相同。未计随机损耗、资金折现、融资、通胀和残值。',
-              '完整逐周期费用、寿命阈值和证明范围见 comparison_*.json；失败也保存在 runs.csv。',
-              '单批次大周期的时长由输入决定，不自动等于一天。']
+        if comparison['sensitivity']:
+            lines += ['', '敏感性分析沿用同一组已审计路线和时间表。', '',
+                      '| 对照 | 一次性包装单价 | 箱池寿命（周期） | 评价期累计节省 | 首次持平周期 |',
+                      '| --- | ---: | ---: | ---: | ---: |']
+            for data in comparison['sensitivity']:
+                lifetime = data['pool_lifetime_cycles'] or '—'
+                lines.append(f"| M{data['single_use_model']}/M{data['reusable_model']} | {data['single_use_package_price']:g} | "
+                             f"{lifetime} | {data['horizon_saving']:.6f} | {data['first_break_even_within_horizon']} |")
+        lines += _incidental_report(comparison)
+    lines += ['', '基准每期费用与求解目标同口径。负节省表示循环方案更贵。',
+              '累计费用采用注明评价期的租赁或自有箱池场景。自有箱池按给定周期寿命补购，箱体购置折旧由初购与补购金额替代。',
+              '费用明细和证明范围见 comparison_*.json。运行状态见 runs.csv。']
     (out/'report.md').write_text('\n'.join(lines)+'\n', encoding='utf-8')
+
+
+def _period_profile(parameters):
+    """Lift legacy B=1 prices into the shared objective schema."""
+    if 'container_pool_cost_per_period' in parameters:
+        return parameters
+    source_type = parameters['source_type']
+    if source_type not in ('synthetic_mechanism', 'public_proxy_scenario', 'calibrated'):
+        source_type = 'synthetic_mechanism' if parameters['currency'] == 'synthetic_units' else 'public_proxy_scenario'
+    return {'price_basis': parameters['description'],
+            'evaluation_period': 'one operating cycle', 'pool_cost_basis': 'owned_capital_charge',
+            'work_time_basis': 'occupied_route_minutes', 'container_pool_cost_per_period': 0,
+            'e1_trip_cost': 0, 'e2_trip_cost': 0, **parameters, 'source_type': source_type}
 
 
 def main(argv=None):
@@ -69,21 +126,36 @@ def main(argv=None):
     parser.add_argument('--exact-time', type=float, default=30)
     parser.add_argument('--iterations', type=int, default=5000)
     parser.add_argument('--timeout-overhead', type=float, default=30)
-    parser.add_argument('--economic-config', default='config/cost/synthetic/single_batch_synthetic.json')
+    parser.add_argument('--economic-config', help='Shared pricing profile used for all four solves and their comparison')
+    parser.add_argument('--loss-rates', type=float, nargs='+', default=[0.0],
+                        help='Incremental replacement rates per issued box (e.g. 0.03 for 3%%)')
+    parser.add_argument('--loss-replacement-cost-per-box', type=float,
+                        help='Cost of one loss, defaulting to the profile container price')
+    parser.add_argument('--other-incidental-cost-per-use', type=float, default=0.0,
+                        help='Expected additional operating cost per issued box')
     parser.add_argument('--output')
     args = parser.parse_args(argv)
     if any(not math.isfinite(x) or x <= 0 for x in (args.time, args.exact_time, args.timeout_overhead)):
         parser.error('Budgets and overhead must be finite and positive')
     if args.iterations < 0 or any(s < 0 or s > 2_000_000_000 for s in args.seeds):
         parser.error('Invalid iterations or seed')
+    if any(not 0 <= rate <= 1 for rate in args.loss_rates):
+        parser.error('Loss rates must be between 0 and 1')
+    if any(value is not None and (not math.isfinite(value) or value < 0)
+           for value in (args.loss_replacement_cost_per_box, args.other_incidental_cost_per_use)):
+        parser.error('Incidental cost rates must be finite and nonnegative')
     cfg, fleet = load_routing_case(args.case)
     comparison_policy = (load_json(cfg['legacy_operating_policy']) if cfg.get('legacy_operating_policy')
                          else fleet['operating_policy'])
     if len(MultiBatchPolicy.from_config(comparison_policy).batches) != 1:
         raise ValueError('Four-model comparison requires B=1')
-    parameters = load_json(args.economic_config)
+    economic = args.economic_config or cfg.get('economic_config') or DEFAULT_ECONOMIC_CONFIG
+    cfg['economic_config'] = economic
+    parameters = load_json(economic) if isinstance(economic, str) else economic
     source = resolve_project_path(args.case).resolve()
     paths = {source} | {resolve_project_path(cfg[key]).resolve() for key in INPUT_KEYS if isinstance(cfg.get(key), str)}
+    if parameters.get('evidence_file'):
+        paths.update(config_sources(parameters['evidence_file']))
     hashes = {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
     variants = []
     for model in range(1, 5):
@@ -101,7 +173,16 @@ def main(argv=None):
     out.mkdir(parents=True, exist_ok=True)
     inputs = freeze_inputs(variants, out)
     sources = source_snapshot(out)
-    write_json(out/'economic_parameters.json', parameters)
+    economic = variants[0]['config']['economic_config']
+    parameters = _period_profile(load_json(economic) if isinstance(economic, str) else economic)
+    replacement = args.loss_replacement_cost_per_box
+    incidental = dict(loss_rates=args.loss_rates, other_cost_per_use=args.other_incidental_cost_per_use,
+                      replacement_cost_per_box=parameters['container_price'] if replacement is None else replacement)
+    if parameters.get('evidence_file'):
+        evidence = inputs[str(resolve_project_path(parameters['evidence_file']).resolve())]
+        parameters = {**parameters, 'evidence_file': str(out/evidence.get('resolved_snapshot', evidence['snapshot']))}
+    economic_path = out/'economic_parameters.json'
+    write_json(economic_path, parameters)
     methods = ([('exact', args.seeds[0], args.exact_time)] if args.solver in ('both', 'exact') else [])
     if args.solver in ('both', 'alns'):
         methods += [('alns', seed, args.time) for seed in dict.fromkeys(args.seeds)]
@@ -109,6 +190,7 @@ def main(argv=None):
     for variant in variants:
         model = variant['model']
         case_path = out/f'case_M{model}.json'
+        variant['config']['economic_config'] = str(economic_path)
         write_json(case_path, variant['config'])
         config, model_fleet = load_routing_case(case_path)
         problems[model] = load_instance(config, model_fleet)
@@ -117,7 +199,8 @@ def main(argv=None):
                              seed=seed, budget=budget, case_path=str(case_path)))
     write_json(out/'manifest.json', dict(case=str(source), jobs=jobs, input_sha256=inputs,
         source_sha256=sources, economic_parameters=parameters, timeout_overhead=args.timeout_overhead,
-        parameter_sha256=hashlib.sha256((out/'economic_parameters.json').read_bytes()).hexdigest(),
+        incidental_cost_parameters=incidental,
+        parameter_sha256=hashlib.sha256(economic_path.read_bytes()).hexdigest(),
         evaluation_scope='per_solver_and_seed; no cross-run cherry picking',
         stage='implementation_validation_and_conditional_economics'))
     rows, results = [], {}
@@ -135,11 +218,15 @@ def main(argv=None):
             writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
             writer.writeheader()
             writer.writerows(rows)
-        print(f"{job['run']}: {row['status']}; valid={row['valid']}; distance={row['objective']}", flush=True)
+        print(f"{job['run']}: {row['status']}; valid={row['valid']}; cost={row['objective']}", flush=True)
     comparisons = {}
     for solver, seed, _ in methods:
         key = f'{solver}_seed{seed}'
         compared = compare_single_batch(problems, {m: results[m, solver, seed] for m in problems}, parameters)
+        compared['incidental_costs'] = {
+            name: incidental_cost_sensitivity(pair, packages=problems[pair['single_use_model']].total, **incidental)
+            for name, pair in compared['comparisons'].items() if pair['available']
+        }
         comparisons[key] = compared
         write_json(out/f'comparison_{key}.json', compared)
     report(comparisons, rows, out, parameters)

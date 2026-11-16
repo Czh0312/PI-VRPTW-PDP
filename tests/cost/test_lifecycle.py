@@ -3,11 +3,14 @@
 from pathlib import Path
 import sys
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from models.cost.lifecycle import EconomicParams, RouteMetrics, period_sweep, value_decomposition
+from models.cost.single_batch import incidental_cost_sensitivity
 
 
 PARAMS = EconomicParams(
@@ -70,3 +73,29 @@ def test_cleaning_cost_uses_returned_container_count():
     expected = (90 * (0.8 + 0.1) + 100 * 0.03 * 36.5) / 100
     assert result["returned_container_uses_per_period"] == 90
     assert abs(result["reusable_variable_cost_per_use"] - expected) < 1e-9
+
+
+def test_incidental_costs_change_period_and_horizon_break_even():
+    pair = dict(period_saving=50, period_single_use_purchase_price_threshold=2.5,
+                evaluation_cycles=4, horizon_saving=120)
+    study = incidental_cost_sensitivity(pair, packages=100, loss_rates=[0, .01, .025],
+                                        replacement_cost_per_box=20, other_cost_per_use=.1)
+    assert study['period_max_loss_rate'] == pytest.approx(.02)
+    assert study['horizon_max_loss_rate'] == pytest.approx(.01)
+    rows = study['scenarios']
+    assert [r['period_incidental_cost'] for r in rows] == pytest.approx([10, 30, 60])
+    assert [r['period_saving'] for r in rows] == pytest.approx([40, 20, -10])
+    assert [r['horizon_saving'] for r in rows] == pytest.approx([80, 0, -120])
+    assert [r['period_paper_price_threshold'] for r in rows] == pytest.approx([2.6, 2.8, 3.1])
+    assert pair['period_saving'] == 50 and pair['horizon_saving'] == 120
+
+
+@pytest.mark.parametrize(('saving', 'price', 'packages', 'limit'), [
+    (9, 20, 100, None), (10, 20, 100, 0), (10, 0, 100, 1),
+    (50, .2, 100, 1), (0, 20, 0, None),
+])
+def test_incidental_loss_limit_respects_cost_and_rate_boundaries(saving, price, packages, limit):
+    study = incidental_cost_sensitivity(dict(period_saving=saving), packages=packages,
+                                        loss_rates=[0], replacement_cost_per_box=price, other_cost_per_use=.1)
+    assert study['period_max_loss_rate'] == limit
+    assert study['horizon_max_loss_rate'] is None and study['scenarios'][0]['horizon_saving'] is None
