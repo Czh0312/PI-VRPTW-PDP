@@ -1,4 +1,4 @@
-"""Generate six-model cases from the frozen 27-case benchmark."""
+"""Rebuild the frozen v1 six-model inputs from the previous benchmark."""
 import argparse
 import csv
 import hashlib
@@ -6,8 +6,7 @@ import json
 from pathlib import Path
 import shutil
 
-from models.cost.joint_batch import DEFAULT_ECONOMIC_CONFIG
-from tools.configuration.loader import PROJECT_ROOT, resolve_project_path
+from tools.configuration.loader import FROZEN_BENCHMARK_ECONOMIC_REFERENCE, PROJECT_ROOT, resolve_project_path
 
 SOURCE = 'data/formal_benchmark27_uniform_7_20_50_v1'
 VERSION = 'benchmark27_models_1_6_v1'
@@ -21,8 +20,7 @@ def read(path):
 
 def write(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False)+'\n',
-                    encoding='utf-8', newline='\n')
+    path.write_bytes((json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False)+'\n').encode('utf-8'))
 
 
 def digest(path):
@@ -46,7 +44,7 @@ def build(target=TARGET):
         for name in ('network.csv', 'fleet.json', 'provenance.json',
                      'batch_count_certificate.json', 'design_metrics.json'):
             shutil.copyfile(old_shared/name, shared/name)
-        shutil.copyfile(resolve_project_path(DEFAULT_ECONOMIC_CONFIG), shared/'economic.json')
+        shutil.copyfile(resolve_project_path(FROZEN_BENCHMARK_ECONOMIC_REFERENCE), shared/'economic.json')
         for model, old_model in MODEL_MAP.items():
             reference = 8 if model == 6 else old_model
             row = lookup[case_id, reference]
@@ -119,6 +117,5 @@ def build(target=TARGET):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', default=str(TARGET))
-    args = parser.parse_args()
-    build(resolve_project_path(args.output))
+    parser.add_argument('--output', type=Path, required=True, help='New directory for a v1 reproduction')
+    build(parser.parse_args().output.resolve())

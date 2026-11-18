@@ -6,8 +6,9 @@ from pathlib import Path
 
 from cli.multibatch import run_case
 from cli.no_batch import run_case as run_no_batch
-from tools.configuration.loader import PROJECT_ROOT, load_routing_case, resolve_project_path
-from tools.data.build_current_benchmark import TARGET, read, write
+from tools.configuration.benchmark import case_info, case_paths
+from tools.configuration.loader import BENCHMARK_ROOT, PROJECT_ROOT, load_routing_case, resolve_project_path
+from tools.data.build_current_benchmark import write
 
 
 def main(argv=None):
@@ -25,13 +26,15 @@ def main(argv=None):
         parser.error('--seconds must be positive and finite')
     if not 0 <= args.seed <= 2_000_000_000:
         parser.error('--seed must be between 0 and 2000000000')
-    rows = read(TARGET/'manifest.json')['cases']
+    rows = [dict(case_info(path), case_path=path.relative_to(PROJECT_ROOT).as_posix())
+            for path in case_paths(BENCHMARK_ROOT)]
     known = {row['base_case_id'] for row in rows}
     if args.cases and set(args.cases) - known:
         parser.error(f'Unknown case IDs: {sorted(set(args.cases)-known)}')
-    jobs = [row for row in rows if row['model'] in args.models
-            and (not args.cases or row['base_case_id'] in args.cases)
-            and (not args.sizes or row['size'] in args.sizes)]
+    jobs = [{**row, 'model': model} for row in rows
+            if (not args.cases or row['base_case_id'] in args.cases)
+            and (not args.sizes or row['size'] in args.sizes)
+            for model in range(1, 7) if model in args.models]
     if not jobs:
         parser.error('No cases matched the selection')
     plan = dict(solver=args.solver, seconds_per_case=args.seconds, seed=args.seed, jobs=jobs)
@@ -51,7 +54,7 @@ def main(argv=None):
         run_dir = out/f'M{number}_{case_id}'
         row = dict(model=number, case=case_id, path=run_dir.name)
         try:
-            config, fleet = load_routing_case(path, use_pool_config=False)
+            config, fleet = load_routing_case(path, model=number, use_pool_config=False)
             config.update(solver=args.solver, seed=args.seed, alns_time=args.seconds,
                           exact_time=args.seconds)
             result = (run_no_batch if number == 6 else run_case)(

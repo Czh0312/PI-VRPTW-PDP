@@ -12,8 +12,8 @@ from models.common.cycle.single_batch_cost import SingleBatchCostInstance
 from models.common.domain.instance import ProblemInstance
 from models.common.domain.node import Customer, Depot, Satellite
 from models.common.no_batch import NoBatchInstance, audit_solution as audit_m10
+from models.common.period_cost import DEFAULT_ECONOMIC_CONFIG
 from models.routing.service import solve_routing
-from tools.configuration.loader import load_json
 
 
 def daily_problem(model, *, no_work_window=True, latest_pickup=1248):
@@ -44,8 +44,8 @@ def daily_problem(model, *, no_work_window=True, latest_pickup=1248):
     })
     if model == 4:
         return MultiBatchInstance(network, orders, policy, model=4, no_work_window=no_work_window)
-    profile = load_json('data/benchmark27_models_1_6_v1/shared/medium/M01/economic.json')
-    return SingleBatchCostInstance(network, orders, policy, profile, no_work_window=no_work_window)
+    return SingleBatchCostInstance(network, orders, policy, economic_config=DEFAULT_ECONOMIC_CONFIG,
+                                   no_work_window=no_work_window)
 
 
 def solve(problem, method):
@@ -166,17 +166,18 @@ def test_model5_first_batch_can_move_and_the_last_batch_ends_after_cleaning(meth
     assert not audit_m3(problem, changed)['valid']
 
 
-def test_model5_cli_defaults_to_no_window_and_can_load_the_old_policy(monkeypatch):
+def test_model5_cli_defaults_to_no_window_and_can_fix_the_operating_window(monkeypatch):
     from cli import multibatch, route
     from models.common.cycle import load_instance
 
     monkeypatch.setattr(multibatch, 'run_case', lambda config, fleet, **_: load_instance(config, fleet))
     current = route.main(['--model', '5'])
-    legacy = route.main(['--model', '5', '--fixed-work-window'])
+    fixed = route.main(['--model', '5', '--fixed-work-window'])
     assert current.no_work_window and not current.operating_policy.consolidated_handoff
     assert current.operating_policy.repeat_interval == 86400
-    assert not legacy.no_work_window
-    assert legacy.operating_policy.cycle_end == 1260 * 60
+    assert not fixed.no_work_window
+    assert fixed.operating_policy.cycle_end == 1260 * 60
+    assert current.batch_count_candidates == fixed.batch_count_candidates == tuple(range(1, 8))
 
 
 @pytest.mark.parametrize('method', ['exact', 'alns'])

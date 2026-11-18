@@ -1,11 +1,57 @@
 # models/common/data_loader.py
 # -*- coding: utf-8 -*-
 import csv
+import json
 from pathlib import Path
 from typing import Dict, Tuple
 
 from models.common.domain.node import Customer, Depot, Node, Satellite
 from tools.configuration.loader import resolve_project_path
+
+
+CUSTOMER_ORDER_COLUMNS = ('container_count', 'goods_weight', 'release_time', 'delivery_ready',
+                          'delivery_due', 'pickup_ready', 'pickup_due', 'service_time', 'min_use_time')
+
+
+def read_order_rows(path, *, network=None, batch_ids=()):
+    """Load orders and fill derived fields for a shared benchmark when requested."""
+    path = Path(path)
+    with path.open(encoding='utf-8-sig', newline='') as handle:
+        if path.suffix == '.json':
+            rows = json.load(handle)
+        else:
+            reader = csv.DictReader(handle)
+            fields = set(reader.fieldnames or ())
+            if {'node_id', 'node_type'} <= fields:
+                missing = set(CUSTOMER_ORDER_COLUMNS) - fields
+                if missing:
+                    raise ValueError(f'Missing order columns in {path.name}: {sorted(missing)}')
+                rows = [dict(order_id=r['node_id'].strip()+'_order', customer_id=r['node_id'].strip(),
+                             **{key: r[key] for key in CUSTOMER_ORDER_COLUMNS})
+                        for r in reader if r['node_type'].strip().lower() == 'c']
+                rows.sort(key=lambda r: r['order_id'])
+            else:
+                rows = list(reader)
+    if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+        raise ValueError('Orders must be a list of objects or a CSV table')
+    if network is not None:
+        sites = tuple(s.id for s in network.satellites)
+        nearest = {}
+        for row in rows:
+            if 'satellite_id' not in row:
+                customer = row.get('customer_id')
+                if (not isinstance(customer, str) or customer not in network.nodes
+                        or network.nodes[customer].type != 'c'):
+                    raise ValueError(f'Unknown order customer: {customer!r}')
+                if not sites:
+                    raise ValueError('Nearest assignment requires at least one satellite')
+                if customer not in nearest:
+                    nearest[customer] = min(sites, key=lambda s: (network.distance(s, customer), s))
+                row['satellite_id'] = nearest[customer]
+            if batch_ids:
+                row.setdefault('delivery_batch_id', batch_ids[0])
+                row.setdefault('allowed_batch_ids', list(batch_ids))
+    return rows
 
 
 def _float_field(row: Dict[str, str], key: str, default: float) -> float:

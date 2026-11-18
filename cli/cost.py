@@ -1,4 +1,4 @@
-"""Price an audited current cycle; use compare-single-batch for lifecycle pairs."""
+"""Price an audited current cycle; use compare-single-batch to compare period costs."""
 import argparse
 from tools.configuration.loader import load_routing_case
 from .route import DEFAULT_CASE
@@ -14,7 +14,7 @@ def main(argv=None):
     work_window.add_argument('--fixed-work-window', dest='no_work_window', action='store_false', default=None)
     parser.add_argument("--output")
     args = parser.parse_args(argv)
-    config, fleet = load_routing_case(args.case)
+    config, fleet = load_routing_case(args.case, model=args.model)
     if args.model is not None:
         config['model'] = args.model
     if config['model'] not in range(1, 6):

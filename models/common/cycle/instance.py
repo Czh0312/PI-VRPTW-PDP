@@ -4,10 +4,9 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 import csv
 import json
-from pathlib import Path
 
 from tools.configuration.loader import resolve_project_path
-from models.common.data_loader import parse_dataset
+from models.common.data_loader import parse_dataset, read_order_rows
 from models.common.domain.instance import ProblemInstance
 from models.common.matrix_loader import load_square_matrix
 from models.common.cycle.policy import MultiBatchPolicy, integer, nonnegative
@@ -35,7 +34,7 @@ class MultiBatchInstance:
                 not isinstance(_physical_source,MultiBatchInstance) or _physical_source.network is not network):
             raise ValueError('Physical cache source must be a validated instance of the same network')
         self.network = network
-        policy = MultiBatchPolicy.from_config(policy, no_work_window=no_work_window)
+        policy = MultiBatchPolicy.from_config(policy, no_work_window=no_work_window, model=model)
         if model is None:
             model = 3 if len(policy.batches) == 1 else 5
         # Direct Python callers can supply an integral float, just as JSON/CSV
@@ -43,7 +42,7 @@ class MultiBatchInstance:
         # and MILP extraction, which require actual integer container counts.
         self.orders = tuple(o if isinstance(o.count, int) else
                             replace(o, count=integer(o.count, 'container_count', 1)) for o in orders)
-        if no_work_window or policy.consolidated_handoff:
+        if no_work_window or (policy.consolidated_handoff and policy.repeat_interval is not None):
             policy = policy.for_consolidated_handoff(self.orders)
         policy.require_model(model)
         self.operating_policy = policy
@@ -164,21 +163,12 @@ class MultiBatchInstance:
         return o, weight, o.count*self.fleet.container_volume
 
 
-def load_orders(path, policy, *, joint=False):
-    path = Path(path)
-    if path.suffix == '.json':
-        rows = json.loads(path.read_text(encoding='utf-8'))
-    else:
-        with path.open(encoding='utf-8-sig', newline='') as f:
-            rows = list(csv.DictReader(f))
-    if not isinstance(rows, list):
-        raise ValueError('Orders must be a JSON list or CSV table')
+def load_orders(path, policy, *, joint=False, unassigned_network=None):
+    rows = read_order_rows(path, network=unassigned_network, batch_ids=tuple(b.id for b in policy.batches))
     result = []
     required = {'order_id', 'customer_id', 'satellite_id', 'delivery_batch_id', 'container_count',
                 'goods_weight', 'delivery_ready', 'delivery_due', 'pickup_ready', 'pickup_due', 'service_time'}
     for row in rows:
-        if not isinstance(row, dict):
-            raise ValueError('Each order must be an object')
         if required-row.keys():
             raise ValueError(f'Missing order fields: {sorted(required-set(row))}')
         extras = set(row)-required-{'pickup_container_count', 'min_use_time', 'release_time', 'allowed_batch_ids'}
@@ -217,11 +207,11 @@ def load_orders(path, policy, *, joint=False):
 
 def load_instance(config, fleet_config, *, replay_distance=False):
     if config.get('schema_version') != 2 or 'orders' not in config:
-        raise ValueError('Multibatch requires schema_version=2 and a separate orders file')
+        raise ValueError('Multibatch requires schema_version=2 and order data')
     model = config['model']
     no_work_window = model in (3, 4, 5) and config.get('no_work_window', False)
     policy = MultiBatchPolicy.from_config(fleet_config.get('operating_policy'),
-                                        no_work_window=no_work_window, flexible_calendar=model == 5)
+                                        no_work_window=no_work_window, flexible_calendar=model == 5, model=model)
     policy.require_model(config['model'])
     # Validate raw vehicle counts before the legacy FleetConfig casts to int.
     for name in ('E1_vehicle_count', 'vehicles_per_satellite'):
@@ -250,7 +240,8 @@ def load_instance(config, fleet_config, *, replay_distance=False):
         raise ValueError('duration_matrix requires distance_matrix')
     network = ProblemInstance(nodes, {k: v for k, v in fleet_config.items() if k != 'operating_policy'},
                               speed=speed, distance_matrix=distance, travel_time_matrix=duration)
-    orders = load_orders(resolve_project_path(config['orders']), policy, joint=config['model'] == 5)
+    orders = load_orders(resolve_project_path(config['orders']), policy, joint=model == 5,
+                         unassigned_network=network if config.get('order_assignment') == 'nearest' else None)
     if config['model'] == 5:
         if not config.get('economic_config'):
             raise ValueError('M5 requires economic_config')
@@ -264,7 +255,7 @@ def load_instance(config, fleet_config, *, replay_distance=False):
     if config.get('objective_mode', 'cost') != 'cost':
         raise ValueError('Current M1–M4 objective_mode must be cost')
     from models.common.cycle.single_batch_cost import SingleBatchCostInstance
-    from models.cost.joint_batch import DEFAULT_ECONOMIC_CONFIG
+    from models.common.period_cost import DEFAULT_ECONOMIC_CONFIG
 
     return SingleBatchCostInstance(network, orders, policy, config.get('economic_config') or DEFAULT_ECONOMIC_CONFIG,
                                    model=model, no_work_window=no_work_window)

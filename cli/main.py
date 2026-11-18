@@ -1,7 +1,7 @@
 """Unified command dispatcher.
 
 With no subcommand, run the current B=1 example. Compare runs pool studies;
-compare-single-batch runs M1-M4 and conditional lifecycle economics.
+compare-single-batch runs M1-M4 and per-period cost comparisons.
 """
 
 from __future__ import annotations

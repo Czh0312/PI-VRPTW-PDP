@@ -33,7 +33,7 @@ def worker(job_path):
     from models.common.cycle import load_instance
     from models.common.cycle.audit import audit_solution
     from models.routing.service import solve_routing
-    from models.cost.joint_batch import JointCostProfile
+    from models.common.period_cost import JointCostProfile
     job = read(job_path)
     out = Path(job['output'])
     stream = io.StringIO()

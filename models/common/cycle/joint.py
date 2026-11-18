@@ -87,7 +87,7 @@ class JointBatchInstance(MultiBatchInstance):
         self.pool_max = integer(options.get('pool_max', self.total), 'pool_max', 1)
         if not self.pool_min <= self.pool_max <= self.total:
             raise ValueError('Require 1 <= pool_min <= pool_max <= total container uses')
-        from models.cost.joint_batch import JointCostProfile
+        from models.common.period_cost import JointCostProfile
         self.cost_profile = JointCostProfile(load_json(economic_config) if isinstance(economic_config, str) else economic_config)
         self.economic_config_path = economic_config if isinstance(economic_config, str) else None
         for o in self.orders:

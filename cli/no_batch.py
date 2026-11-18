@@ -9,13 +9,12 @@ import shutil
 import sys
 from importlib.metadata import version, PackageNotFoundError
 
-from tools.configuration.loader import PROJECT_ROOT, load_json, load_routing_case, resolve_project_path, config_sources
+from tools.configuration.benchmark import DEFAULT_CASE_ID as DEFAULT_CASE
+from tools.configuration.loader import (PROJECT_ROOT, load_json, load_routing_case, resolve_project_path,
+                                        routing_case_source, config_sources)
 from models.common.no_batch.instance import load_instance
-from models.cost.joint_batch import DEFAULT_ECONOMIC_CONFIG
+from models.common.period_cost import DEFAULT_ECONOMIC_CONFIG
 from models.routing.service import solve_routing
-
-DEFAULT_CASE = PROJECT_ROOT/'config/experiments/examples/model6_demo.json'
-
 
 def write_json(path,value):
     path.write_text(json.dumps(value,ensure_ascii=False,indent=2,allow_nan=False),encoding='utf-8')
@@ -52,16 +51,16 @@ def run_case(config,fleet,*,output=None,case_path=None,pool_caps=None,initial_re
     out=resolve_project_path(output) if output else PROJECT_ROOT/'output/current/model_6'/datetime.now().strftime('%Y%m%dT%H%M%S_%f')
     if out.exists() and any(out.iterdir()):raise ValueError(f'Refusing to overwrite nonempty output directory: {out}')
     out.mkdir(parents=True,exist_ok=True)
-    source_roots=('models/common','models/cost','models/routing/model_6','models/routing/alns','tools/configuration','cli')
+    source_roots=('models/common','models/routing/model_6','models/routing/alns','tools/configuration','cli')
     sources=sorted({p for folder in source_roots for p in (PROJECT_ROOT/folder).rglob('*.py')}|
                    {PROJECT_ROOT/'models/routing/catalog.py',PROJECT_ROOT/'models/routing/service.py',PROJECT_ROOT/'main.py'})
     inputs=[]
     for key in ('data','orders','routing_config','operating_policy','distance_matrix','duration_matrix','algorithm_config',
-                'economic_config'):
+                'dataset_metadata','benchmark_config','economic_config'):
         if isinstance(config.get(key),str):inputs.extend(config_sources(config[key]))
     if problem.cost_profile.config.get('evidence_file'):
         inputs.extend(config_sources(problem.cost_profile.config['evidence_file']))
-    if case_path:inputs.extend(config_sources(case_path))
+    if case_path:inputs.extend(config_sources(routing_case_source(case_path, config)))
     for source in sources:
         target=out/'source_snapshot'/source.relative_to(PROJECT_ROOT)
         target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(source,target)
@@ -73,6 +72,7 @@ def run_case(config,fleet,*,output=None,case_path=None,pool_caps=None,initial_re
         except PackageNotFoundError:versions[package]=None
     write_json(out/'manifest.json',dict(model=6,config=config,fleet=fleet,python=sys.version,
                policy=problem.operating_policy.as_dict(),options=problem.options,package_versions=versions,
+               order_satellites={o.id: o.satellite for o in problem.orders},
                economic_profile=problem.cost_profile.config,economic_profile_hash=problem.cost_profile.hash,
                source_sha256={str(p.relative_to(PROJECT_ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sources},
                input_sha256={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(set(inputs))},
@@ -114,7 +114,7 @@ def run_case(config,fleet,*,output=None,case_path=None,pool_caps=None,initial_re
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--model',type=int,choices=(6,),default=6)
-    parser.add_argument('--case',default=str(DEFAULT_CASE))
+    parser.add_argument('--case')
     parser.add_argument('--solver',choices=('exact','alns'))
     parser.add_argument('--exact-backend',choices=('highs','gurobi'))
     parser.add_argument('--exact-strategy',choices=('milp','auto'))
@@ -139,7 +139,10 @@ def main(argv=None):
     parser.add_argument('--pool-caps',type=int,nargs='+',help='Explicit transport frontier caps; budget is per point')
     parser.add_argument('--output')
     args=parser.parse_args(argv)
-    config,fleet=load_routing_case(args.case,use_pool_config=False)
+    case_path = DEFAULT_CASE if args.case is None else args.case
+    config, fleet = load_routing_case(case_path, model=args.model, use_pool_config=False)
+    if args.case is None:
+        config.update(alns_time=10, alns_iter=5000, exact_time=60)
     if config['model'] == 6 and (fleet.get('operating_policy') or {}).get('policy_version') != 'no_batch_container_cycle_v1':
         raise ValueError('Use the archived solver for old uniform Model 6 cases')
     config={**config,'model':6}
@@ -167,4 +170,4 @@ def main(argv=None):
         raise ValueError('A transport frontier requires objective-mode transport')
     caps=args.pool_caps
     if args.frontier:caps=list(range(load_instance(config,fleet).total,0,-1))
-    return run_case(config,fleet,case_path=args.case,output=args.output,pool_caps=caps,initial_result=initial)
+    return run_case(config,fleet,case_path=case_path,output=args.output,pool_caps=caps,initial_result=initial)

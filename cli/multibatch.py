@@ -11,7 +11,7 @@ import shutil
 import sys
 import time
 
-from tools.configuration.loader import PROJECT_ROOT, config_sources, resolve_project_path, load_json
+from tools.configuration.loader import PROJECT_ROOT, config_sources, resolve_project_path, routing_case_source, load_json
 from models.routing.service import solve_routing
 from models.common.cycle import load_instance
 from models.common.cycle.audit import audit_solution
@@ -100,7 +100,7 @@ def plot_result(problem, result, path):
 
 
 def run_case(config, fleet, *, case_path=None, output=None):
-    from models.cost.joint_batch import DEFAULT_ECONOMIC_CONFIG
+    from models.common.period_cost import DEFAULT_ECONOMIC_CONFIG
 
     config = {**config, 'economic_config': config.get('economic_config') or DEFAULT_ECONOMIC_CONFIG}
     instance = load_instance(config, fleet)
@@ -112,16 +112,16 @@ def run_case(config, fleet, *, case_path=None, output=None):
     input_paths = [resolve_project_path(config[key]) for key in (
         'data', 'orders', 'routing_config', 'operating_policy', 'legacy_operating_policy', 'algorithm_config',
         'distance_matrix', 'duration_matrix', 'dataset_metadata', 'pool_config', 'economic_config',
-        'batch_count_certificate', 'initial_joint_result')
+        'batch_count_certificate', 'benchmark_config', 'initial_joint_result')
                    if isinstance(config.get(key), str)]
     if case_path:
-        input_paths.append(resolve_project_path(case_path))
+        input_paths.append(routing_case_source(case_path, config))
     if getattr(instance, 'joint_batch', False) and instance.cost_profile.config.get('evidence_file'):
         input_paths.append(resolve_project_path(instance.cost_profile.config['evidence_file']))
     if getattr(instance, 'cost_objective', False) and instance.cost_profile.config.get('evidence_file'):
         input_paths.append(resolve_project_path(instance.cost_profile.config['evidence_file']))
     input_paths = sorted({dependency for path in input_paths for dependency in config_sources(path)})
-    sources = [path for name in ('models/routing', 'models/common', 'models/cost', 'tools/configuration', 'cli')
+    sources = [path for name in ('models/routing', 'models/common', 'tools/configuration', 'cli')
                for path in (PROJECT_ROOT/name).rglob('*.py')]
     sources += [PROJECT_ROOT/'main.py', PROJECT_ROOT/'models/__init__.py', PROJECT_ROOT/'tools/__init__.py']
     for source in sources:
@@ -137,7 +137,7 @@ def run_case(config, fleet, *, case_path=None, output=None):
                     input_sha256={str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in input_paths},
                     source_sha256={str(path.relative_to(PROJECT_ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
                                    for path in sources},
-                    converted_orders=[dict(id=o.id, batch=o.batch, delivery_window=o.delivery_window,
+                    converted_orders=[dict(id=o.id, satellite=o.satellite, batch=o.batch, delivery_window=o.delivery_window,
                                            pickup_window=o.pickup_window, service_time=o.service_time,
                                            min_use_time=o.min_use_time) for o in instance.orders],
                     converted_travel_ticks={a: {b: instance.travel(a, b) for b in instance.network.nodes}
@@ -161,7 +161,8 @@ def run_case(config, fleet, *, case_path=None, output=None):
                         objective_mode='cost',
                         container_pool_size=instance.operating_policy.container_pool_size if instance.reusable else 0)
     _json(out/'manifest.json', manifest)
-    print(f'M{instance.model_number} {"single_batch" if len(instance.operating_policy.batches) == 1 else "multi_batch"} {config["solver"]}: {out}')
+    mode = getattr(instance, 'schedule_mode', 'single_batch')
+    print(f'M{instance.model_number} {mode} {config["solver"]}: {out}')
     log, begun = io.StringIO(), time.perf_counter()
     try:
         with redirect_stdout(log):
@@ -183,8 +184,9 @@ def run_case(config, fleet, *, case_path=None, output=None):
         audit = result.get('audit', {})
         joint = getattr(instance, 'joint_batch', False)
         pool = result.get('container_pool_size', instance.operating_policy.container_pool_size)
+        batch_count = result.get('cycle_batch_count', '未确定') if joint else len(instance.operating_policy.batches)
         lines = [f'M{instance.model_number} {"联合分批成本" if joint else "固定批次"}运行结果', '',
-                 f"包装：{'循环' if instance.reusable else '一次性'}；批次数：{result.get('cycle_batch_count',len(instance.operating_policy.batches))}。",
+                 f"包装：{'循环' if instance.reusable else '一次性'}；批次数：{batch_count}。",
                  f"状态：{result['info']['status']}。",
                  f"独立审计：{audit.get('valid', False)}；已证明最优：{result['info']['proven_optimal']}。",
                  f"每期总成本：{result['info']['objective']}；循环箱池：{pool if instance.reusable else '不适用'}。",

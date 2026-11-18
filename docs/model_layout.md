@@ -9,7 +9,7 @@
 | 5 | 8 | 固定分仓，可变批次和逐批独立截点 |
 | 6 | 10 | 固定分仓，无批次，按实际回收、清洗和领用排程 |
 
-公共入口由 `models/routing/catalog.py` 和 `models/routing/service.py` 管理。各模型在 `models/routing/model_N/` 提供 `exact/` 和 `alns/` 入口，ALNS 共用 `models/routing/alns/` 的搜索框架。业务规则与审计在 `models/common/`，成本在 `models/cost/`。[求解器目录](../models/routing/README.md)
+公共入口由 `models/routing/catalog.py` 和 `models/routing/service.py` 管理。各模型在 `models/routing/model_N/` 提供 `exact/` 和 `alns/` 入口，ALNS 共用 `models/routing/alns/` 的搜索框架。业务规则、每期计费和审计在 `models/common/`。单批成本对照在 `experiments/analysis/`。[求解器目录](../models/routing/README.md) · [每期计费](../models/common/period_cost.py) · [单批成本对照](../experiments/analysis/single_batch_cost.py)
 
 模型 4 在模型 3 的集中交接规则上增加自由分仓，同一顾客的所有订单由同一前置仓配送和回收。一级车在所服务订单已释放后装货，在对应仓的最后一次二级卸箱完成后取回全部空箱。各仓交接时间独立。箱子回总仓清洗，车辆完成周转，最迟在次日首单释放时恢复初始状态。
 

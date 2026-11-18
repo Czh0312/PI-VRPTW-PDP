@@ -23,7 +23,7 @@ from models.routing.model_3.exact.constraints import (
     add_task_and_return_coverage_constraints,
     add_inventory_constraints,
 )
-from models.cost.fixed_calendar_milp import set_fixed_calendar_cost_objective
+from models.routing.fixed_calendar_milp import set_fixed_calendar_cost_objective
 
 
 def build_model(

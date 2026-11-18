@@ -7,7 +7,7 @@ import pytest
 
 from models.common.cycle.calendar import CalendarCycleInstance
 from models.common.cycle.audit import audit_solution
-from models.cost.comparison import evaluate_comparison_cost
+from models.common.cycle.cost_replay import evaluate_comparison_cost
 from models.routing.service import solve_routing
 from tests.routing.calendar_fixtures import joint_fixture, exact_available
 

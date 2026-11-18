@@ -17,7 +17,8 @@ import time
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-from tools.configuration.loader import config_sources, load_routing_case, resolve_project_path
+from tools.configuration.benchmark import DEFAULT_CASE_ID
+from tools.configuration.loader import config_sources, load_routing_case, resolve_project_path, routing_case_source
 from tools.configuration.snapshots import freeze_input
 from tools.configuration.container_pools import apply_pool_config
 from experiments.analysis.summarize_multibatch_cycle import summarize
@@ -27,17 +28,17 @@ from tools.data.static_batch_dataset import load_manifest, check_pairing, sugges
 
 INPUT_KEYS = ('data', 'orders', 'routing_config', 'operating_policy', 'algorithm_config',
               'distance_matrix', 'duration_matrix', 'dataset_metadata', 'pool_config', 'economic_config',
-              'legacy_operating_policy', 'batch_count_certificate')
+              'legacy_operating_policy', 'batch_count_certificate', 'benchmark_config')
 
 
 def write_json(path, value):
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False)+'\n', encoding='utf-8')
 
 
-def prepare_variants(args, records):
+def prepare_variants(args, records, *, model=None):
     variants = []
     for index, source in enumerate(args.case):
-        cfg, fleet = load_routing_case(source, use_pool_config=False)
+        cfg, fleet = load_routing_case(source, model=model, use_pool_config=False)
         if cfg['model'] not in (1, 2, 3, 4):
             if records:
                 continue
@@ -47,7 +48,7 @@ def prepare_variants(args, records):
         if not args.pool_sizes and not args.suggested_pools:
             cfg, fleet = apply_pool_config(cfg, fleet, args.pool_config)
         problem = load_instance(cfg, fleet)  # schema validation is separate from feasibility
-        source_paths = {resolve_project_path(source).resolve()}
+        source_paths = {routing_case_source(source, cfg).resolve()}
         source_paths.update(resolve_project_path(cfg[key]).resolve() for key in INPUT_KEYS
                             if isinstance(cfg.get(key), str))
         source_paths = {dependency for path in source_paths for dependency in config_sources(path)}
@@ -68,7 +69,8 @@ def prepare_variants(args, records):
                                               'container_pool_size': pool, 'cleaning_duration': cleaning}
                 copied['container_pool_size'] = pool
                 parsed = MultiBatchPolicy.from_config(copied['operating_policy'],
-                                                     no_work_window=problem.operating_policy.consolidated_handoff)
+                                                     no_work_window=problem.operating_policy.repeat_interval is not None,
+                                                     model=problem.model_number)
                 if args.iterations is not None:
                     copied['alns_iter'] = args.iterations
                 variants.append(dict(case_variant=f'{scenario}_N{pool}', scenario_id=scenario, model=problem.model_number,
@@ -84,7 +86,7 @@ def prepare_variants(args, records):
 
 def freeze_inputs(variants, out, dataset_manifest=None):
     """Copy every input before the first worker; all jobs read these copies."""
-    from models.cost.joint_batch import DEFAULT_ECONOMIC_CONFIG
+    from models.common.period_cost import DEFAULT_ECONOMIC_CONFIG
 
     expected = {}
     for variant in variants:
@@ -197,6 +199,7 @@ def run_worker(job, out, overhead):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--case', nargs='+')
+    parser.add_argument('--model', type=int, choices=range(1, 5), help='Model for shared benchmark cases')
     parser.add_argument('--dataset-manifest')
     parser.add_argument('--groups', nargs='+', choices=['single_batch', 'multi_batch'])
     parser.add_argument('--source-kinds', nargs='+', choices=['synthetic_mechanism', 'zhou_derived_scenario', 'lade_derived_scenario'])
@@ -209,7 +212,7 @@ def main(argv=None):
     parser.add_argument('--seeds', nargs='+', type=int, default=[42])
     pools = parser.add_mutually_exclusive_group()
     pools.add_argument('--pool-sizes', nargs='+', type=int)
-    pools.add_argument('--pool-config', help='Override the shared demand-ratio config (used by default)')
+    pools.add_argument('--pool-config', help='Use the demand ratio from a fixed-pool configuration file')
     pools.add_argument('--suggested-pools', action='store_true', help='Use each dataset case\'s declared pool grid')
     parser.add_argument('--cleaning-durations', nargs='+', type=float, help='Separate scenarios, in input minutes')
     parser.add_argument('--time', type=float, default=2)
@@ -240,8 +243,8 @@ def main(argv=None):
     elif any((args.groups, args.sizes, args.batch_counts, args.families, args.suggested_pools, args.source_kinds)):
         parser.error('Dataset filters and suggested pools require --dataset-manifest')
     else:
-        args.case = args.case or ['config/experiments/examples/single_batch_demo.json']
-    variants = prepare_variants(args, selected)
+        args.case = args.case or [DEFAULT_CASE_ID]
+    variants = prepare_variants(args, selected, model=args.model)
     if args.list_only:
         for item in selected or [dict(case_path=p) for p in args.case]:
             print(json.dumps(item, ensure_ascii=False))

@@ -100,7 +100,7 @@ class MultiBatchPolicy:
         return ticks * self.time_tick_seconds / (60.0 * self.time_tick_subdivision)
 
     @classmethod
-    def from_config(cls, config, *, no_work_window=False, flexible_calendar=False):
+    def from_config(cls, config, *, no_work_window=False, flexible_calendar=False, model=None):
         if isinstance(config, cls):
             return config
         if not isinstance(config, dict) or config.get('policy_version') != VERSION:
@@ -161,10 +161,26 @@ class MultiBatchPolicy:
         end = converter.ticks(config['cycle_end'], 'exact')
         if end <= start:
             raise ValueError('cycle_end must be after cycle_start')
-        batches, cursor, ids = [], start, set()
-        if not isinstance(config['batches'], list) or not config['batches']:
+        rows = config['batches']
+        if not isinstance(rows, list) or not rows:
             raise ValueError('batches must be a nonempty list')
-        for row in config['batches']:
+        if len(rows) == 1 and isinstance(rows[0], dict) and set(rows[0]) == {'id'}:
+            bid = rows[0]['id']
+            if not isinstance(bid, str) or not bid:
+                raise ValueError('Batch id must be a nonempty string')
+            # A bare batch ID gives the model the full operating period.
+            # Delivery models use its end, consolidated pickup waits for the
+            # unloads, and M5 needs an interior starting point for its search.
+            cutoff = None
+            if flexible_calendar or model == 5:
+                if end - start < 2:
+                    raise ValueError('Cycle must allow both batch phases')
+                cutoff = (start + end) // 2
+            elif model in (1, 2):
+                cutoff = end
+            return cls(start, end, (Batch(bid, start, cutoff, end),), **physical)
+        batches, cursor, ids = [], start, set()
+        for row in rows:
             if not isinstance(row, dict) or set(row) != {'id', 'delivery_duration', 'return_duration'}:
                 raise ValueError('Each batch requires exactly id, delivery_duration, return_duration')
             bid = row['id']

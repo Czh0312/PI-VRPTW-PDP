@@ -25,7 +25,7 @@ from models.common.cycle.calendar import attach_calendar_decisions
 from models.common.solver_config import read_milp_info, accept_milp_audit
 from models.routing.model_5.exact.formulation import build_model
 from models.routing.model_5.exact.solution import extract_solution
-from tools.configuration.loader import load_routing_case
+from tools.configuration.loader import load_routing_case, resolve_project_path
 
 
 def save(path, data):
@@ -146,13 +146,14 @@ def main():
     args = parser.parse_args()
     out = args.output.resolve()
     out.mkdir(parents=True, exist_ok=False)
-    case = ROOT/'data/benchmark27_models_1_6_v1/model_5/small/S04/case.json'
+    case = resolve_project_path('data/benchmark27_models_1_6_v1/model_5/small/S04/case.json')
     cfg, fleet = load_routing_case(case, use_pool_config=False)
     p = load_instance(cfg, fleet)
     witness_path = args.witness.resolve()
     witness = json.loads(witness_path.read_text(encoding='utf-8-sig'))
     files = [case, witness_path, Path(__file__), ROOT/'experiments/runs/research_model5_shared_relaxation.py']
-    files += [ROOT/cfg[k] for k in ('data', 'orders', 'routing_config', 'operating_policy', 'economic_config')]
+    files += [resolve_project_path(cfg[k]) for k in (
+        'data', 'orders', 'routing_config', 'operating_policy', 'economic_config')]
     hashes = {str(path):hashlib.sha256(path.read_bytes()).hexdigest() for path in files}
     source = source_hashes()
     save(out/'manifest.json', dict(case='S04', customers=len(p.orders), K=list(p.batch_count_candidates),

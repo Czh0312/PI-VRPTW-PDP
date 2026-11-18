@@ -1,4 +1,4 @@
-"""Select generated dataset cases and check pairing without running a solver."""
+"""Select and check older static batch study cases from an explicit manifest."""
 from __future__ import annotations
 
 import hashlib
@@ -90,7 +90,7 @@ def suggested_pool_sizes(record):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--manifest', default='data/manifest.json')
+    parser.add_argument('--manifest', required=True)
     parser.add_argument('--groups', nargs='+', choices=['single_batch', 'multi_batch'])
     parser.add_argument('--source-kinds', nargs='+', choices=['synthetic_mechanism', 'zhou_derived_scenario', 'lade_derived_scenario'])
     parser.add_argument('--sizes', nargs='+', choices=['small', 'medium', 'large'])

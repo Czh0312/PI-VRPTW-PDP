@@ -1,14 +1,11 @@
 """Solve a current two-echelon routing case."""
 import argparse
 import sys
-from tools.configuration.loader import PROJECT_ROOT, apply_container_pool_size, load_json, load_routing_case
+from tools.configuration.benchmark import DEFAULT_CASE_ID as DEFAULT_CASE
+from tools.configuration.loader import (
+    apply_container_pool_size, load_case_settings, load_json, load_routing_case,
+)
 from tools.configuration.container_pools import apply_pool_config
-
-DEFAULT_CASE = PROJECT_ROOT / "config/experiments/examples/single_batch_demo.json"
-DEMO_CASES = {1: PROJECT_ROOT / 'data/benchmark27_models_1_6_v1/model_1/small/S01/case.json',
-              2: PROJECT_ROOT / 'data/benchmark27_models_1_6_v1/model_2/small/S01/case.json',
-              4: DEFAULT_CASE.with_name('model4_demo.json'),
-              5: DEFAULT_CASE.with_name('model5_demo.json')}
 
 
 def load_config(case_path=DEFAULT_CASE, **kwargs):
@@ -22,8 +19,8 @@ def main(argv=None):
     probe.add_argument('--model', type=int)
     probe.add_argument('--case')
     selected, _ = probe.parse_known_args(arguments)
-    case_path = selected.case or DEMO_CASES.get(selected.model, DEFAULT_CASE)
-    number = selected.model if selected.model is not None else load_json(case_path).get('model')
+    case_path = selected.case or DEFAULT_CASE
+    number = selected.model if selected.model is not None else load_case_settings(case_path).get('model')
     if number == 6:
         from .no_batch import main as no_batch_main
         return no_batch_main(arguments)
@@ -31,7 +28,7 @@ def main(argv=None):
         from .baseline_route import main as baseline_main
         return baseline_main([arg for arg in arguments if arg != "--baseline"])
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--case", default=str(case_path))
+    parser.add_argument("--case", default=str(case_path), help="算例编号、CSV 表格或历史 JSON 配置")
     parser.add_argument("--model", type=int, choices=range(1, 7), help="M1–M4 单批次，M5 可变批次，M6 无批次")
     parser.add_argument("--economic-config", help="每期成本参数")
     parser.add_argument('--objective-mode', choices=('cost',), help=argparse.SUPPRESS)
@@ -63,13 +60,15 @@ def main(argv=None):
     parser.add_argument("--orders")
     parser.add_argument("--fleet-config")
     parser.add_argument("--container-pool-size", type=int, help="覆盖周期开始时的清洁容器总池量 N（正整数）")
-    parser.add_argument("--pool-config", help="替换默认的统一容器池配置")
+    parser.add_argument("--pool-config", help="指定固定箱池的需求比例配置")
     parser.add_argument("--exact-backend", choices=("multibatch_indexed", "joint_batch_indexed"))
     parser.add_argument("--day-end", type=float, help=argparse.SUPPRESS)
     parser.add_argument("--output", help="New or empty result directory")
     parser.add_argument("--baseline", action="store_true", help="显式运行隔离的历史 M1–M4 基线")
     args = parser.parse_args(arguments)
-    config, fleet = load_config(args.case, use_pool_config=False)
+    config, fleet = load_config(args.case, model=args.model, use_pool_config=False)
+    if selected.case is None and config['model'] in (3, 4, 5):
+        config['alns_time'] = 2
     if args.day_end is not None:
         raise ValueError("--day-end is single-day only; edit the current calendar/cycle_end explicitly")
     if (fleet.get("operating_policy") or {}).get("policy_version") != "multi_batch_cutoff_v1":

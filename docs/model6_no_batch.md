@@ -63,7 +63,7 @@ N_min = max(0, max_t [累计截至t已开始装车领用的箱数 - 累计截至
 .venv/bin/python main.py route --model 6 --objective-mode transport --pool-caps 7 6 5 4 --time 10
 .venv/bin/python main.py route --model 6 --objective-mode min_pool --transport-budget 30 --time 10
 # 沿用同一算例的固定分仓和物理输入
-.venv/bin/python main.py route --model 6 --case config/experiments/examples/model5_demo.json --solver alns --time 10
+.venv/bin/python main.py route --model 6 --case S01 --solver alns --time 10
 .venv/bin/python -m pytest -q tests/routing/test_model6_no_batch.py
 ```
 

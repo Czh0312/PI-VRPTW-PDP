@@ -6,15 +6,14 @@ may be read as source metadata, but never constrain M6 order assignments.
 from dataclasses import dataclass, asdict, replace
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
 import csv
-import json
 import math
 
 from models.common.cycle.instance import Order
 from models.common.cycle.policy import daily_cycle_bounds, integer, nonnegative
-from models.common.data_loader import parse_dataset
+from models.common.data_loader import parse_dataset, read_order_rows
 from models.common.domain.instance import ProblemInstance
 from models.common.matrix_loader import load_square_matrix
-from models.cost.joint_batch import DEFAULT_ECONOMIC_CONFIG, JointCostProfile
+from models.common.period_cost import DEFAULT_ECONOMIC_CONFIG, JointCostProfile
 from tools.configuration.loader import load_json, resolve_project_path
 
 VERSION = 'no_batch_container_cycle_v1'
@@ -203,9 +202,8 @@ def load_instance(config, fleet_config):
         raise ValueError('duration_matrix requires distance_matrix')
     network = ProblemInstance(nodes, {k:v for k,v in fleet_config.items() if k != 'operating_policy'},
                               speed=speed, distance_matrix=distance, travel_time_matrix=duration)
-    opath = resolve_project_path(config['orders'])
-    with opath.open(encoding='utf-8-sig', newline='') as f:
-        rows = json.load(f) if opath.suffix == '.json' else list(csv.DictReader(f))
+    rows = read_order_rows(resolve_project_path(config['orders']),
+                           network=network if config.get('order_assignment') == 'nearest' else None)
     orders = []
     for r in rows:
         def number(k, default=0):

@@ -30,7 +30,7 @@ def calendar_fixture(number=5, counts=(1, 2), late_release=False, **options):
 
 @pytest.mark.parametrize('number', [5])
 def test_public_entry_identity_dispatch_and_cost(number, exact_available):
-    from models.cost.comparison import evaluate_comparison_cost
+    from models.common.cycle.cost_replay import evaluate_comparison_cost
     p = calendar_fixture(number)
     for method in ('exact', 'alns'):
         entry = import_module(f'models.routing.model_{number}.{method}')

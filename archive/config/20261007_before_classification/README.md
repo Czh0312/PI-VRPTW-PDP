@@ -3,9 +3,8 @@
 保存分类前的 102 份 JSON 原文，供已有数据来源哈希与历史配置复现使用。
 路径布局相对于原 `config/`，原始文件字节保持不变。
 
-[新位置与原文件哈希](migration.json) · [当前参数分类](../../../config/README.md)
+[迁移位置与原文件哈希](migration.json) · [当前数据集参数](../../../data/README.md)
 
-当前维护入口使用新的七类参数目录。`tools.configuration.loader.resolve_project_path` 对已迁走的旧
-`config/` 文件路径回退到此处；归档值不随当前参数调整而变化。
+`tools.configuration.loader.resolve_project_path` 支持这里的旧 `config/` 路径。归档值用于对应的历史运行。
 不修改已有 `output/`、`outputs/` 或数据集的原始内容。历史脚本直接使用 `Path` 读取旧配置时，
 应改用这里的对应归档路径；该回退只适用于当前配置加载器。

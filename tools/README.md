@@ -2,7 +2,7 @@
 
 | 目录 | 职责 |
 | --- | --- |
-| `configuration/` | 公用参数读取、合并、路径解析、容器池设置与输入冻结；参数文件放在根目录 `config/` |
+| `configuration/` | 公用参数读取、合并、路径解析、容器池设置与输入冻结 |
 | `data/` | 数据生成、清单选择、冻结源码和大文件恢复 |
 | `audit/` | 物理审计、求解器诊断、配对性能检查与报告 |
 | `reporting/` | 公用路线绘图；`route_plot.py` 生成图片到 `output/` 对应实验目录 |
@@ -16,10 +16,8 @@
 
 ## 数据构造与算法诊断
 
-`data/build_static_batch_suite.py` 生成固定批次配对，`data/static_batch_dataset.py` 选择并验证输入。
-`audit/audit_static_batch_suite.py` 验证构造时间表和连续周期。
-`data/build_lade_real_case.py`、`data/generate_zhou_later_pickup_dataset.py` 与 `audit/audit_r3pack_dataset.py` 保留数据来源重建和参数审计能力。
-旧模型专属绘图和过时场景生成工具已归档。
+用 `python -m tools.audit.audit_current_benchmark` 校验当前 27 张算例表及 162 个模型组合。`data/build_shared_benchmark.py` 用于从冻结的 v1 输入重建归档的 v2 格式。
+旧数据导入、候选案例构造和旧批量实验工具见[历史脚本](../archive/experiments/pre_renumbering_20261113/README.md)。
 
 定制精确算法的专用测评与证书复核脚本已移入[研究归档](../archive/exact_research_20261019/README.md)。
 当前精确求解统一使用直接 Gurobi；保留的数据审计、模型对比、ALNS 诊断与结果汇总工具照常使用。

@@ -11,7 +11,7 @@ import pytest
 from models.common.cycle.audit import audit_solution
 from models.common.cycle.instance import load_instance
 from models.common.cycle.single_batch_cost import SingleBatchCostInstance
-from models.cost.comparison import evaluate_comparison_cost
+from models.common.cycle.cost_replay import evaluate_comparison_cost
 from models.routing.model_3.alns.evaluator import evaluate, initial_state
 from models.routing.model_3.alns.performance.single_batch_cache import SingleBatchCache
 from models.routing.service import solve_routing
@@ -163,8 +163,8 @@ def test_current_single_batch_cases_and_cli_default_to_one_cost_objective(monkey
     monkeypatch.setattr(multibatch, 'run_case', lambda cfg, fleet, **kw: load_instance(cfg, fleet))
     base = ['--case', 'config/experiments/examples/single_batch_demo.json']
     for model in range(1, 5):
-        current_case = f'data/benchmark27_models_1_6_v1/model_{model}/small/S01/case.json'
-        current_config, current_fleet = load_routing_case(current_case)
+        current_case = 'S01'
+        current_config, current_fleet = load_routing_case(current_case, model=model)
         current_config.pop('objective_mode', None)
         assert load_instance(current_config, current_fleet).cost_objective
         assert main(['--model', str(model)]).cost_objective

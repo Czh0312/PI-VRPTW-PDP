@@ -1,1 +1,1 @@
-"""Archived reference implementations; only routing_baselines is installed."""
+"""Archived reference implementations and compatibility code."""

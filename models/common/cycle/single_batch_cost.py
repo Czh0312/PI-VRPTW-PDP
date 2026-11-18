@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 
 from models.common.cycle.instance import MultiBatchInstance
-from models.cost.joint_batch import JointCostProfile
+from models.common.period_cost import JointCostProfile
 from tools.configuration.loader import load_json
 
 

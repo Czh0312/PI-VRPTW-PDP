@@ -8,18 +8,24 @@ from typing import Any
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+BENCHMARK_ROOT = PROJECT_ROOT / 'data' / 'basetest'
+DATASET_ECONOMIC_FILENAME = 'economic.json'
+ROOT_CONFIG_ARCHIVE = PROJECT_ROOT / 'archive/config/20261118_root_config'
 LEGACY_CONFIG_ROOT = PROJECT_ROOT / 'archive/config/20261007_before_classification'
 LEGACY_DATA_ROOT = PROJECT_ROOT / 'archive/datasets/legacy_20261015/data'
 RETIRED_CASE_ROOT = PROJECT_ROOT / 'archive/datasets/retired_20261024'
 PRE_RENUMBERING_ROOT = PROJECT_ROOT / 'archive/datasets/pre_renumbering_20261113'
 RUN_HISTORY = PROJECT_ROOT / 'output/history/pre_renumbering_20261113'
+FROZEN_BENCHMARK_ROOT = PROJECT_ROOT / 'archive/datasets/benchmark27_models_1_6_v1'
+FROZEN_SHARED_BENCHMARK_ROOT = PROJECT_ROOT / 'archive/datasets/benchmark27_shared_v2'
+FROZEN_BENCHMARK_ECONOMIC_REFERENCE = 'config/cost/synthetic/daily_routing.json'
+ARCHIVED_COST_REFERENCES = PROJECT_ROOT / 'archive/reference/cost'
 
 
 def resolve_project_path(path: str | Path) -> Path:
-    """Resolve current inputs first, then archived config/data references.
+    """Resolve current inputs first, then moved and archived references.
 
-    Historical JSON and provenance keep their original names and hashes. Only
-    existing archived inputs are redirected; new output paths stay untouched.
+    Historical JSON and provenance keep their original names and hashes.
     """
     candidate = Path(path)
     candidate = candidate if candidate.is_absolute() else PROJECT_ROOT / candidate
@@ -29,6 +35,14 @@ def resolve_project_path(path: str | Path) -> Path:
         except ValueError:
             pass
         else:
+            if relative.parts[:2] in (('data', 'small'), ('data', 'medium'), ('data', 'large')):
+                relocated = BENCHMARK_ROOT.joinpath(*relative.parts[1:])
+                if relocated.exists():
+                    return relocated
+            if relative.parts[:1] == ('config',):
+                archived = ROOT_CONFIG_ARCHIVE.joinpath(*relative.parts[1:])
+                if archived.exists():
+                    return archived
             if relative.parts and relative.parts[0] in ('data', 'config'):
                 archived = PRE_RENUMBERING_ROOT / relative
                 if archived.exists():
@@ -36,6 +50,22 @@ def resolve_project_path(path: str | Path) -> Path:
                 retired = RETIRED_CASE_ROOT / relative
                 if retired.exists():
                     return retired
+            if relative.parts[:2] == ('data', 'benchmark27_models_1_6_v1'):
+                archived = FROZEN_BENCHMARK_ROOT.joinpath(*relative.parts[2:])
+                if archived.exists():
+                    return archived
+            if relative.parts[:2] == ('data', 'benchmark27_shared_v2'):
+                archived = FROZEN_SHARED_BENCHMARK_ROOT.joinpath(*relative.parts[2:])
+                if archived.exists():
+                    return archived
+            if relative.as_posix() == FROZEN_BENCHMARK_ECONOMIC_REFERENCE:
+                archived = FROZEN_SHARED_BENCHMARK_ROOT / 'economic.json'
+                if archived.is_file():
+                    return archived
+            if relative.parts[:2] == ('reference', 'cost'):
+                archived = ARCHIVED_COST_REFERENCES.joinpath(*relative.parts[2:])
+                if archived.exists():
+                    return archived
             if relative.parts[:3] == ('output', 'single_runs', 'model10'):
                 archived_run = RUN_HISTORY.joinpath(*relative.parts[2:])
                 if archived_run.exists():
@@ -62,6 +92,12 @@ def resolve_project_path(path: str | Path) -> Path:
             if archived.exists():
                 return archived
     return candidate
+
+
+def resolve_dataset_root(path: str | Path) -> Path:
+    """Resolve an explicit dataset directory, including the former benchmark root."""
+    root = resolve_project_path(path)
+    return BENCHMARK_ROOT if root.resolve() == BENCHMARK_ROOT.parent else root
 
 
 def config_sources(path: str | Path) -> list[Path]:
@@ -121,9 +157,61 @@ def apply_container_pool_size(run_config, fleet_config, value):
             {**fleet_config, 'operating_policy': {**policy, 'container_pool_size': value}})
 
 
-def load_routing_case(path: str | Path, *, use_pool_config=True) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Return merged run settings and routing/fleet parameters for one case."""
-    case = load_json(path)
+def _select_benchmark_model(case, model):
+    reference_policy = case.pop('reference_batch_policy', case.get('operating_policy'))
+    no_batch_policy = case.pop('no_batch_policy')
+    model = case.get('model') if model is None else model
+    if type(model) is not int or model not in range(1, 7):
+        raise ValueError('Shared benchmark cases require a model number (1–6); use --model N')
+    case['model'] = model
+    case.setdefault('case_name', f"{case['dataset_version']}_{case['base_case_id']}_M{model}")
+    case['no_work_window'] = model >= 3 and case.get('no_work_window', True)
+    if model == 5:
+        total = case['total_container_uses']
+        case['operating_policy'] = reference_policy
+        case.setdefault('exact_backend', 'joint_batch_indexed')
+        case['joint_batch_options'] = {
+            'schedule_mode': 'flexible_cycle', 'batch_count_candidates': list(range(1, total + 1)),
+            'min_phase_minutes': 1, 'pool_min': 1, 'pool_max': total,
+            **case.get('joint_batch_options', {}),
+        }
+    elif model == 6:
+        case['operating_policy'] = no_batch_policy
+        case.pop('container_pool_size', None)
+        case.setdefault('exact_backend', 'gurobi')
+        case['no_batch_options'] = {'objective': 'total_cost', **case.get('no_batch_options', {})}
+    else:
+        case.setdefault('exact_backend', 'multibatch_indexed')
+    return case
+
+
+def load_case_settings(case: str | Path) -> dict[str, Any]:
+    from .benchmark import is_case_id
+
+    if is_case_id(case) or Path(case).suffix.lower() == '.csv':
+        return {'benchmark_case': str(case), 'model': 3}
+    return load_json(case)
+
+
+def routing_case_source(case: str | Path, config: dict[str, Any]) -> Path:
+    from .benchmark import is_case_id
+
+    return resolve_project_path(config['data'] if is_case_id(case) else case)
+
+
+def load_routing_case(path: str | Path, *, model=None, use_pool_config=True) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Load run and fleet settings, selecting a model for a shared benchmark case."""
+    case = load_case_settings(path)
+    if 'benchmark_case' in case:
+        from .benchmark import case_path, is_case_id, load_case
+
+        reference = case.pop('benchmark_case')
+        table = case_path(BENCHMARK_ROOT, reference) if is_case_id(reference) else resolve_project_path(reference)
+        case = _merge_config(load_case(table), case)
+        case.setdefault('model', 3)
+        case = _select_benchmark_model(case, model)
+    elif 'reference_batch_policy' in case:
+        case = _select_benchmark_model(case, model)
     required = {"model", "solver", "data", "routing_config"}
     missing = sorted(required - case.keys())
     if missing:
@@ -131,7 +219,8 @@ def load_routing_case(path: str | Path, *, use_pool_config=True) -> tuple[dict[s
 
     algorithm = load_json(case["algorithm_config"]) if case.get("algorithm_config") else {}
     run_config = {**algorithm, **case}
-    fleet_config = load_json(case["routing_config"])
+    fleet = case['routing_config']
+    fleet_config = load_json(fleet) if isinstance(fleet, (str, Path)) else dict(fleet)
     if "operating_policy" in case:
         policy = case["operating_policy"]
         fleet_config = {**fleet_config, "operating_policy": (

@@ -24,7 +24,7 @@ from models.common.cycle import load_instance
 from models.common.cycle.audit import audit_solution
 from models.routing.model_5.exact.parameters import necessary_time_bounds
 from models.routing.model_5.exact.preprocessing import temporal_assignment_bounds
-from tools.configuration.loader import load_routing_case
+from tools.configuration.loader import load_routing_case, resolve_project_path
 
 
 def enumerate_trip_library(problem, *, deadline=None, on_progress=None, stats=None):
@@ -269,9 +269,10 @@ def build_relaxation(problem, library, *, max_orders=9, aggregate_route_links=Tr
 
 
 def run_case(case, seconds, out, witness_paths=()):
-    case_path = ROOT / f'data/benchmark27_models_1_6_v1/model_5/small/{case}/case.json'
+    case_path = resolve_project_path(f'data/benchmark27_models_1_6_v1/model_5/small/{case}/case.json')
     cfg, fleet = load_routing_case(case_path, use_pool_config=False)
-    physical_paths = [case_path] + [ROOT / cfg[k] for k in ('data', 'orders', 'routing_config', 'operating_policy', 'economic_config') if isinstance(cfg.get(k), str)]
+    physical_paths = [case_path] + [resolve_project_path(cfg[k]) for k in (
+        'data', 'orders', 'routing_config', 'operating_policy', 'economic_config') if isinstance(cfg.get(k), str)]
     input_hashes = {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in physical_paths}
     source_hash = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     problem = load_instance(cfg, fleet)

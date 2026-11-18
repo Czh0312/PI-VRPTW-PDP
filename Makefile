@@ -9,7 +9,7 @@ TESTS ?= tests/routing/test_numbered_model_entries.py \
 	tests/routing/test_unrestricted_work_window.py \
 	tests/routing/test_batch_count_domain.py \
 	tests/routing/test_model5_calendar.py::test_public_entry_identity_dispatch_and_cost \
-	tests/cost/test_lifecycle.py \
+	tests/cost/test_period_sensitivity.py \
 	tests/data/test_real_case.py
 
 .PHONY: test test-full

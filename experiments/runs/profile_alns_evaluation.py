@@ -40,8 +40,15 @@ def worker(args):
     if number == 6:
         from models.common.no_batch import load_instance, audit_solution
     size = dict(S='small', M='medium', L='large')[name[0]]
-    case = args.dataset / f'model_{number}' / size / name / 'case.json'
-    problem = load_instance(*load_routing_case(case))
+    case = args.dataset / size / f'{name}.csv'
+    if not case.is_file():
+        case = args.dataset / size / name / 'case.json'
+    if case.is_file():
+        config, fleet = load_routing_case(case, model=number)
+    else:
+        case = args.dataset / f'model_{number}' / size / name / 'case.json'
+        config, fleet = load_routing_case(case)
+    problem = load_instance(config, fleet)
     profiler = cProfile.Profile() if args.profile else None
     begun = time.perf_counter()
     if profiler:
@@ -88,7 +95,7 @@ def worker(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--cases', nargs='+', required=True, help='MODEL:CASE, e.g. 5:S01 6:L01')
-    parser.add_argument('--dataset', type=Path, default=ROOT / 'data/benchmark27_models_1_6_v1')
+    parser.add_argument('--dataset', type=Path)
     parser.add_argument('--source', type=Path, default=ROOT)
     parser.add_argument('--baseline-source', type=Path,
                         help='Alternate serial baseline/candidate pairs using these frozen sources')
@@ -99,15 +106,25 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--worker', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
-    for field in ('source', 'dataset', 'output'):
-        setattr(args, field, getattr(args, field).resolve())
-    if args.baseline_source is not None:
-        args.baseline_source = args.baseline_source.resolve()
     if args.seconds <= 0 or args.iterations < 0:
         parser.error('Require positive seconds and nonnegative iterations')
     if args.worker:
         worker(args)
         return
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from tools.configuration.loader import BENCHMARK_ROOT, FROZEN_BENCHMARK_ROOT, resolve_dataset_root
+
+    for field in ('source', 'output'):
+        setattr(args, field, getattr(args, field).resolve())
+    if args.baseline_source is not None:
+        args.baseline_source = args.baseline_source.resolve()
+    if args.dataset is not None:
+        args.dataset = resolve_dataset_root(args.dataset.resolve())
+    elif args.baseline_source is not None or args.source != ROOT:
+        args.dataset = FROZEN_BENCHMARK_ROOT
+    else:
+        args.dataset = BENCHMARK_ROOT
     if args.output.exists() and any(args.output.iterdir()):
         parser.error('Output must be new or empty')
     args.output.mkdir(parents=True, exist_ok=True)

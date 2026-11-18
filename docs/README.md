@@ -9,5 +9,7 @@
 | 模型 5 可变批次 | [求解器说明](../models/routing/model_5/exact/README.md) |
 | 模型 6 无批次 | [运行与证明范围](model6_no_batch.md) |
 | 四模型包装经济性 | [单批次对照](single_batch_comparison.md) |
-| 数据与案例研究 | [正式数据](../data/README.md) · [雅加达案例计划](jakarta_case_study_experiment_plan_20261109.md) |
-| 历史材料 | [旧设计文档](../archive/docs/pre_renumbering_20261113/) · [历史结果](../output/history/pre_renumbering_20261113/README.md) |
+| 当前数据与参数 | [基准算例](../data/basetest/README.md) · [每期费用](model3_cost_comparison.md) |
+| 历史材料 | [旧设计文档](../archive/docs/pre_renumbering_20261113/) · [历史结果](../output/history/pre_renumbering_20261113/README.md) · [实际案例候选档案](../archive/docs/real_case_candidates_20261118/README.md) |
+
+实际案例数据集待定。

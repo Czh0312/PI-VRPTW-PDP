@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from tools.configuration.container_pools import configured_pool, load_container_pools
+from tools.configuration.container_pools import apply_pool_config, configured_pool, load_container_pools
 from tools.configuration.loader import load_json, load_routing_case, resolve_project_path
 from experiments.runs.run_multibatch_cycle import main as run_study
 from tools.data.static_batch_dataset import load_manifest
@@ -43,7 +43,7 @@ def test_frozen_composed_inputs_do_not_depend_on_live_parameters(tmp_path):
     for key in ('container_weight', 'container_volume'):
         fleet.pop(key)
     vehicle = write_config(tmp_path/'vehicle.json', {'$include': [properties], **fleet})
-    case = load_json('config/experiments/examples/single_batch_demo.json')
+    case, _ = load_routing_case('config/experiments/examples/single_batch_demo.json')
     case['routing_config'] = vehicle
     source = write_config(tmp_path/'case.json', case)
     out = tmp_path/'frozen'
@@ -61,20 +61,28 @@ def test_frozen_composed_inputs_do_not_depend_on_live_parameters(tmp_path):
     assert hashlib.sha256((out/item['snapshot']).read_bytes()).hexdigest() == item['sha256']
 
 
-def test_case_override_preserves_source_policy(tmp_path, monkeypatch):
-    from tools.configuration import container_pools
-    monkeypatch.setattr(container_pools, 'DEFAULT_POOL_CONFIG', pool_file(tmp_path, 1.0))
-    case = load_json('config/experiments/examples/single_batch_demo.json')
-    policy_path = resolve_project_path(case['operating_policy'])
-    original = policy_path.read_bytes()
+def test_case_override_preserves_source_policy(tmp_path):
+    demo = 'config/experiments/examples/single_batch_demo.json'
+    settings, default_fleet = load_routing_case(demo)
+    source = resolve_project_path(settings['benchmark_config'])
+    original = source.read_bytes()
+    case = load_json(demo)
     case['container_pool_size'] = 2
     cfg, fleet = load_routing_case(write_config(tmp_path/'case.json', case))
     assert cfg['container_pool_size'] == fleet['operating_policy']['container_pool_size'] == 2
-    assert policy_path.read_bytes() == original
+    assert source.read_bytes() == original
     del case['container_pool_size']
     _, fleet = load_routing_case(write_config(tmp_path/'case.json', case))
-    # Current M5 does not inherit the demand-ratio pool; the policy is reference.
-    assert fleet['operating_policy']['container_pool_size'] == load_json(policy_path)['container_pool_size']
+    assert fleet['operating_policy']['container_pool_size'] == default_fleet['operating_policy']['container_pool_size']
+
+
+def test_fixed_pool_defaults_to_total_demand_without_a_ratio_file():
+    config, fleet = load_routing_case('S01')
+    config.pop('container_pool_size')
+    config, fleet = apply_pool_config(config, fleet)
+    assert config['container_pool_size'] == config['total_container_uses']
+    assert fleet['operating_policy']['container_pool_size'] == config['container_pool_size']
+    assert 'pool_config' not in config
 
 
 @pytest.mark.parametrize('value', [0, -1, True, 3.5, 3.0, '3', None])
@@ -176,9 +184,9 @@ def test_small_single_batch_is_rejected_without_silent_pool_increase(tmp_path):
     assert result['info']['proven_infeasible']
 
 
-def test_dataset_pairing_uses_original_inputs_when_shared_setting_changes(tmp_path, monkeypatch):
+def test_dataset_pairing_uses_original_inputs_when_shared_setting_changes(monkeypatch):
     from tools.configuration import container_pools
     from tools.data.static_batch_dataset import check_pairing
-    monkeypatch.setattr(container_pools, 'DEFAULT_POOL_CONFIG', pool_file(tmp_path, .5))
+    monkeypatch.setattr(container_pools, 'load_container_pools', lambda path: {'demand_ratio': .5})
     _, records = load_manifest(MANIFEST, family_ids=['mechanism_forced_late'])
     assert check_pairing(records) == 1

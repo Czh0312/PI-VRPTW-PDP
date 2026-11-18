@@ -25,8 +25,7 @@ python3 -m venv .venv
 模型 6 也支持通过 SciPy 调用 HiGHS。业务层位于 `models/common/no_batch/`，CLI 位于 `cli/no_batch.py`，两种算法位于 `models/routing/model_6/`。[模型 6 说明](model6_no_batch.md)
 
 根目录保留项目入口 `main.py`、说明 `README.md`、统一工程配置 `pyproject.toml` 和 `Makefile`，
-供安装、运行和测试使用。`.gitignore`、`.gitattributes`、`.gitmodules` 是仓库级 Git 配置；
-`.ignore` 只控制源码搜索范围。它们按项目根目录生效，不混入业务参数 `config/`。
+供安装、运行和测试使用。`.gitignore`、`.gitattributes`、`.gitmodules` 是仓库级 Git 配置。`.ignore` 在项目根目录控制源码搜索范围。
 `.DS_Store` 和根目录临时 `gurobi.log` 可清理并已忽略；正式求解日志随对应实验保存在 `output/`。
 
 ## 从哪里修改
@@ -39,7 +38,7 @@ python3 -m venv .venv
 | 修改 ALNS 主迭代、退火或算子权重 | `models/routing/alns/` |
 | 修改模型 5 的日历搜索 | 精确模型位于 `model_5/exact/`，ALNS 批次数搜索位于 `model_5/alns/k_search/` |
 | 修改业务约束或独立审计 | `models/common/cycle/` |
-| 调整场景参数 / 配置加载逻辑 | `config/` / `tools/configuration/` |
+| 调整数据集参数 / 配置加载逻辑 | `data/<数据集>/` / `tools/configuration/` |
 | 增加批量实验 / 分析 | `experiments/runs/` / `experiments/analysis/` |
 | 构造数据、审计或恢复已有材料 | `tools/data/`、`tools/audit/` |
 
@@ -108,8 +107,7 @@ make test-full
 .venv/bin/python -m tools.data.restore_large_artifacts --verify
 ```
 
-`config/` 已按车辆、容器、运行规则、成本、求解器、数据生成和实验组合分类，
-参数入口与覆盖顺序见[配置说明](../config/README.md)。`tools/configuration/` 目前保存读取和冻结配置的代码。
+各数据集维护自己的费率和车队参数。读取和冻结配置的代码位于 `tools/configuration/`，也支持历史实验使用的原 `config/...` 路径。[当前数据集](../data/README.md) · [历史配置](../archive/config/20261118_root_config/README.md)
 成果统一写入 `output/` 对应实验，公用路线绘图位于 `tools/reporting/route_plot.py`。
 聊天总结由现有 skill 保存到 `project/`，参考资料继续使用 `reference/`。
 

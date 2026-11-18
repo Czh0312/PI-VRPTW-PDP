@@ -27,12 +27,12 @@ make test-full
 | 模型 5 的日历、K 域与独立参考枚举 | `routing/test_batch_count_domain.py`、`routing/test_model5_calendar.py`、`routing/test_model5_independent_oracle.py` |
 | 模型 3、4、6 的每日调度 | `routing/test_unrestricted_work_window.py`、`routing/test_model6_no_batch.py` |
 | 单批求解与证明边界 | `routing/test_single_batch_*.py` |
-| 费用与生命周期 | `cost/` |
+| 每期费用敏感性 | `cost/` |
 | 数据生成、清单与冻结源码恢复 | `data/` |
 
 全量算例输入可通过 `python -m tools.audit.audit_current_benchmark` 验证。历史实验测试和源码按旧编号保存。[归档](../archive/experiments/pre_renumbering_20261113/README.md)
 
-`routing/test_single_batch_comparison.py` 覆盖四模型任务差异、自由分仓修复不可行、未闭合枚举的证明边界、时间规范化、寿命补购、价格敏感性及冻结执行。
+`routing/test_single_batch_comparison.py` 覆盖四模型任务差异、自由分仓修复不可行、证明边界、时间规范化、每期节省及冻结执行。
 
 ## 已归档实验测试
 

@@ -42,13 +42,12 @@ def test_current_cost_cli_prices_saved_cycle(tmp_path):
     source.write_text(json.dumps(saved), encoding='utf-8')
     result = price([
         "--case", str(DEFAULT_CASE), "--route-result", str(source),
-        "--economic-config", "config/cost/synthetic/multibatch_synthetic.json",
         "--output", str(tmp_path / "cost"),
     ])
     assert result["container_pool_size"] == problem.operating_policy.container_pool_size
-    assert result["container_uses"] == problem.total
     assert result["currency"] == "synthetic_units"
-    assert not result["cost_is_optimized"]
+    assert result["total"] == pytest.approx(saved["info"]["objective"])
+    assert result["cost_is_optimized"]
 
 
 @pytest.mark.parametrize("model", [1, 4])
